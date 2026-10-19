@@ -61,6 +61,18 @@ Provisioning does not modify other schemas, reset existing passwords, or restart
 
 ## Migration acceptance gates
 
+Before domain import, run `DocumentationSite/scripts/check-platform-migration.mjs` with verified decrypted database
+and schema JSON strings plus their trusted digests through standard input. It performs no database writes and emits
+counts only. The current export passes 61 foreign-key checks, 50 primary/unique-key checks, and ten application-specific
+conditional uniqueness checks. These include ownership, personal/organization entitlements, case-insensitive names,
+and the single-active-offer/upload/submission rules. Missing references, duplicate keys, unsupported foreign-key
+syntax, and unsafe numeric keys fail preflight. This does not validate all check constraints, RLS, or destination DDL.
+
+The initial schema export must be supplemented with indexes, enum labels, and triggers before translating the schema.
+The live application schema has 109 indexes, 57 enum labels, and nine triggers. In particular, a plain table copy would
+lose partial unique indexes and transition protection. Preserve their behavior using reviewed destination constraints
+and service authorization, with concurrency tests. Never execute source SQL definitions blindly against MySQL.
+
 The isolated `platform-local-auth.mjs` service verifies imported bcrypt passwords and requires the existing verified
 TOTP factor before issuing an authenticated session. Opaque challenge/session tokens are stored only as hashes;
 challenges expire after five minutes and sessions after eight hours. Failed login limits are persisted in MySQL.

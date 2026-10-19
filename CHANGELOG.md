@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Added read-only migration preflight checks for marketplace ownership relationships, duplicate keys, and active-record
+  uniqueness. These are import prerequisites; the live website backend has not switched.
+
 - Added isolated MySQL password/MFA authentication with replay protection, bounded login attempts, and revocable
   sessions. Website routing, account recovery, and live backend cutover remain pending acceptance.
 
