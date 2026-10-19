@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHmac, randomUUID } from "node:crypto";
-import { beginLocalAuthenticator, confirmLocalAuthenticator } from "../Source/lib/platform-mfa-management.mjs";
+import { beginLocalAuthenticator, confirmLocalAuthenticator, removeLocalAuthenticator } from "../Source/lib/platform-mfa-management.mjs";
 import { openAccountRecord, sealAccountRecord } from "../Source/lib/platform-account-import.mjs";
 import { platformTransaction } from "../Source/lib/platform-mysql.mjs";
 
@@ -68,6 +68,25 @@ export async function verifyAuthenticatorEnrollment(pool, authentication, userId
         const [counters] = await connection.execute("SELECT accepted_counter FROM platform_mfa_counters WHERE factor_id=?", [first.factorId]);
         assert.equal(Number(counters[0].accepted_counter), Math.floor(auth.now() / 30000));
         checks += 12;
+        assert.equal((await removeLocalAuthenticator(auth, "fixture", randomUUID())).state, "factor_missing");
+        const otherAccount = {
+            withSessionTransaction: async (_token, action) => action(connection, { userId: randomUUID(), assurance: 2 }),
+        };
+        assert.equal((await removeLocalAuthenticator(otherAccount, "fixture", first.factorId)).state, "factor_missing");
+        assurance = 1;
+        assert.equal((await removeLocalAuthenticator(auth, "fixture", first.factorId)).state, "mfa_required");
+        assert.deepEqual(await removeLocalAuthenticator(auth, "fixture", second.factorId), { state: "removed", signedOut: false });
+        const [preservedSessions] = await connection.execute("SELECT factor_id FROM platform_auth_sessions WHERE user_id=?", [userId]);
+        assert.deepEqual(preservedSessions, sessions);
+        assurance = 2;
+        assert.deepEqual(await removeLocalAuthenticator(auth, "fixture", first.factorId), { state: "removed", signedOut: true });
+        const [removedFactors] = await connection.execute("SELECT id FROM platform_mfa_factors WHERE id IN (?,?)", [first.factorId, second.factorId]);
+        assert.equal(removedFactors.length, 0);
+        const [removedSessions] = await connection.execute("SELECT factor_id FROM platform_auth_sessions WHERE user_id=?", [userId]);
+        assert.equal(removedSessions.length, 0);
+        const [removedCounters] = await connection.execute("SELECT factor_id FROM platform_mfa_counters WHERE factor_id=?", [first.factorId]);
+        assert.equal(removedCounters.length, 0);
+        checks += 9;
         throw rollback;
     }), (error) => error === rollback);
     return checks;
