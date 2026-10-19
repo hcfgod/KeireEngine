@@ -10,6 +10,8 @@ import { createLocalAuthenticationHttp } from "../Source/lib/platform-auth-http.
 import { PlatformBackend } from "../Source/lib/platform-backend.mjs";
 import { verifyAccountVisibility } from "./platform-account-view-acceptance.mjs";
 import { verifyLocalClaims } from "./platform-claims-acceptance.mjs";
+import { createRecoverySchema } from "../Source/lib/platform-recovery-store.mjs";
+import { verifyRecoveryStore } from "./platform-recovery-store-acceptance.mjs";
 import { verifyLocalCatalog } from "./platform-catalog-acceptance.mjs";
 import { createPlatformPool } from "../Source/lib/platform-mysql.mjs";
 import { sealAccountRecord } from "../Source/lib/platform-account-import.mjs";
@@ -44,6 +46,9 @@ try {
     }
     if (process.argv.includes("--create-email-schema")) {
         await createEmailChallengeSchema(migration);
+    }
+    if (process.argv.includes("--create-recovery-schema")) {
+        await createRecoverySchema(migration);
     }
     stage = "fixture";
     const passwordHash = await bcrypt.hash(password, 4);
@@ -234,6 +239,8 @@ try {
     checks += await verifyAccountVisibility(migration, userId, encryptionKey);
     stage = "marketplace-claims";
     checks += await verifyLocalClaims(migration, userId, auth, factorId, now);
+    stage = "password-recovery-store";
+    checks += await verifyRecoveryStore(runtime, userId, now);
     stage = "public-catalog";
     checks += await verifyLocalCatalog(migration);
 
