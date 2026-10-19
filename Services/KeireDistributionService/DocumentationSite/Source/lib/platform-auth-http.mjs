@@ -1,5 +1,7 @@
 const sessionCookie = "__Host-keire-session";
 const challengeCookie = "__Host-keire-challenge";
+const emailCookie = "__Host-keire-email-challenge";
+const enrollmentCookie = "__Host-keire-email-enrollment";
 const tokenPattern = /^[A-Za-z0-9_-]{43}$/;
 
 function cookieToken(request, name) {
@@ -61,7 +63,7 @@ async function readObject(request) {
 }
 
 /** Application-owned adapter. clientIdentity must be supplied by trusted server/proxy code. */
-export function createLocalAuthenticationHttp(authentication, siteOrigin) {
+export function createLocalAuthenticationHttp(authentication, siteOrigin, emailAuthentication = null) {
     const configured = new URL(siteOrigin);
     if (configured.protocol !== "https:" || configured.origin !== siteOrigin) {
         throw new Error("Authentication requires a canonical HTTPS origin.");
@@ -80,7 +82,12 @@ export function createLocalAuthenticationHttp(authentication, siteOrigin) {
         const verifyPath = location === "/account/mfa/challenge/verify";
         const deletePath = location === "/account/session/delete";
         const challengeStatusPath = location === "/account/mfa/challenge/status";
-        if (!sessionPath && !verifyPath && !deletePath && !challengeStatusPath) {
+        const emailEnroll = location === "/account/email/enroll";
+        const emailEnrollVerify = location === "/account/email/enroll/verify";
+        const emailBegin = location === "/account/email/challenge";
+        const emailVerify = location === "/account/email/challenge/verify";
+        const emailPath = emailEnroll || emailEnrollVerify || emailBegin || emailVerify;
+        if (!sessionPath && !verifyPath && !deletePath && !challengeStatusPath && !emailPath) {
             return null;
         }
         const mutation = request.method === "POST";
@@ -120,6 +127,8 @@ export function createLocalAuthenticationHttp(authentication, siteOrigin) {
                 }
                 headers.append("set-cookie", cookie(sessionCookie, "", 0));
                 headers.append("set-cookie", cookie(challengeCookie, "", 0));
+                headers.append("set-cookie", cookie(emailCookie, "", 0));
+                headers.append("set-cookie", cookie(enrollmentCookie, "", 0));
                 headers.set("location", "/");
                 return new Response(null, { status: 303, headers });
             }
@@ -129,15 +138,44 @@ export function createLocalAuthenticationHttp(authentication, siteOrigin) {
             } catch {
                 return fail("request.invalid_body", "Send a valid JSON object of at most 8 KiB.", 400);
             }
-            const result = sessionPath
-                ? await authentication.signIn(input.email, input.password, clientIdentity)
-                : await authentication.completeTotp(cookieToken(request, challengeCookie), input.factorId, input.code);
+            if (emailPath && !emailAuthentication) {
+                return fail("account.email_unavailable", "Email verification is not available yet. Use your authenticator app.", 503);
+            }
+            let result;
+            if (emailEnroll) {
+                result = await emailAuthentication.beginEnrollment(token, input.password, clientIdentity);
+            } else if (emailEnrollVerify) {
+                result = await emailAuthentication.completeEnrollment(token, cookieToken(request, enrollmentCookie), input.code);
+            } else if (emailBegin) {
+                result = await emailAuthentication.beginSignIn(cookieToken(request, challengeCookie), input.factorId, clientIdentity);
+            } else if (emailVerify) {
+                result = await emailAuthentication.completeSignIn(cookieToken(request, challengeCookie), input.factorId,
+                    cookieToken(request, emailCookie), input.code);
+            } else if (sessionPath) {
+                result = await authentication.signIn(input.email, input.password, clientIdentity);
+            } else {
+                result = await authentication.completeTotp(cookieToken(request, challengeCookie), input.factorId, input.code);
+            }
+            if (result.state === "code_sent") {
+                headers.append("set-cookie", cookie(emailEnroll ? enrollmentCookie : emailCookie, result.token, 5 * 60));
+                return respond({ data: { codeSent: true, expiresAt: result.expiresAt } });
+            }
+            if (["enrolled", "already_enrolled"].includes(result.state)) {
+                headers.append("set-cookie", cookie(enrollmentCookie, "", 0));
+                return respond({ data: { emailEnabled: true } });
+            }
+            if (result.state === "delivery_failed") {
+                headers.append("set-cookie", cookie(emailEnroll ? enrollmentCookie : emailCookie, "", 0));
+                return fail("account.email_delivery_failed", "The email could not be sent. Wait a minute before trying again, or use your authenticator app.", 503);
+            }
             if (result.state === "authenticated") {
                 if (token) {
                     await authentication.signOut(token);
                 }
                 headers.append("set-cookie", cookie(sessionCookie, result.token, 8 * 60 * 60));
                 headers.append("set-cookie", cookie(challengeCookie, "", 0));
+                headers.append("set-cookie", cookie(emailCookie, "", 0));
+                headers.append("set-cookie", cookie(enrollmentCookie, "", 0));
                 return respond({ data: { userId: result.userId, mfaRequired: false } });
             }
             if (result.state === "mfa_required") {
@@ -145,13 +183,17 @@ export function createLocalAuthenticationHttp(authentication, siteOrigin) {
                     await authentication.signOut(token);
                 }
                 headers.append("set-cookie", cookie(sessionCookie, "", 0));
+                headers.append("set-cookie", cookie(emailCookie, "", 0));
+                headers.append("set-cookie", cookie(enrollmentCookie, "", 0));
                 // The challenge is not a signed-in session and is never exposed to JavaScript.
                 headers.append("set-cookie", cookie(challengeCookie, result.challengeToken, 5 * 60));
                 return respond({ data: { mfaRequired: true, factors: result.factors } });
             }
             if (result.state === "rate_limited") {
-                headers.set("retry-after", "900");
-                return fail("account.rate_limited", "Too many sign-in attempts. Try again in 15 minutes.", 429);
+                const retryAfter = Number.isSafeInteger(result.retryAfterSeconds) && result.retryAfterSeconds > 0
+                    ? result.retryAfterSeconds : 900;
+                headers.set("retry-after", String(retryAfter));
+                return fail("account.rate_limited", `Too many attempts. Try again in ${retryAfter} seconds.`, 429);
             }
             if (result.state === "unsupported_mfa") {
                 return fail("account.mfa_unavailable", "This account’s verification method is not available yet.", 503);

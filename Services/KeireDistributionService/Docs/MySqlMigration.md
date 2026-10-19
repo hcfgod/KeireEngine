@@ -401,3 +401,10 @@ the parent attempt budget; successful email verification consumes both challenge
 one transaction. Local mail-capture acceptance covers enrollment through sign-in, replay, password-challenge
 invalidation and mixed-method attempt exhaustion. HTTP routes, browser controls, and real inbox delivery acceptance
 remain pending; these services are not enabled on the live site.
+
+The browser HTTP adapter accepts an optional email service and handles enrollment/request/verification endpoints
+under `/account/email/`. It preserves canonical-origin checks, cookie-only credentials, bounded JSON input and
+private/no-store responses. Enrollment and sign-in use separate Secure HttpOnly host cookies; code tokens never
+appear in JSON. New login, completed login and logout clear stale email cookies. Delivery failure creates no session,
+and rate-limit responses include the actual Retry-After interval. These adapter paths still require host ownership,
+Astro route registration, browser controls and rendered-site acceptance before activation.
