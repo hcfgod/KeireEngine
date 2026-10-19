@@ -5,6 +5,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import send from "send";
 import { PlatformBackend } from "../Source/lib/platform-backend.mjs";
 import { loadWindowsPlatformSecrets } from "../Source/lib/platform-secrets.mjs";
+import { createVerificationMailer, loadWindowsMailSecrets } from "../Source/lib/platform-mail.mjs";
 
 // Isolated loopback acceptance host. Production reverse-proxy trust and deployment remain separate gates.
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -23,7 +24,33 @@ const entry = await import(pathToFileURL(path.join(root, "dist/server/entry.mjs"
 if (entry.options.mode !== "middleware") {
     throw new Error("Build with KEIRE_NODE_ADAPTER_MODE=middleware before starting isolated QA.");
 }
-const backend = new PlatformBackend({ provider: "mysql", loadLocalSecrets: () => loadWindowsPlatformSecrets({
+const mailMode = process.env.KEIRE_QA_MAIL_MODE ?? "disabled";
+if (!["disabled", "capture", "gmail"].includes(mailMode) || (mailMode === "capture" && !process.send)) {
+    throw new Error("QA email mode must be disabled, gmail, or capture with a private parent IPC channel.");
+}
+const createMailer = mailMode === "disabled" ? null : async () => {
+    if (mailMode === "capture") {
+        return {
+            sendVerification: async (message) => {
+                await new Promise((resolve, reject) => {
+                    process.send({ type: "qa-verification-email", message }, (error) => error ? reject(error) : resolve());
+                });
+            },
+            close() {},
+        };
+    }
+    const settings = await loadWindowsMailSecrets({
+        powerShellExecutable: process.env.KEIRE_QA_POWERSHELL,
+        decryptScriptPath: path.resolve(root, "../scripts/read-local-platform-mail.ps1"),
+        settingsDirectory: path.join(process.env.LOCALAPPDATA, "Keire", "PlatformMail"),
+    });
+    try {
+        return createVerificationMailer(settings);
+    } finally {
+        settings.password = null;
+    }
+};
+const backend = new PlatformBackend({ provider: "mysql", createMailer, loadLocalSecrets: () => loadWindowsPlatformSecrets({
     powerShellExecutable: process.env.KEIRE_QA_POWERSHELL,
     decryptScriptPath: path.resolve(root, "../scripts/read-local-platform-runtime.ps1"),
     settingsDirectory: process.env.KEIRE_QA_SETTINGS_DIRECTORY,

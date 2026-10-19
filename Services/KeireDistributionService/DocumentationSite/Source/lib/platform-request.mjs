@@ -15,7 +15,7 @@ export async function handleLocalPlatformRequest({ backend, request, siteOrigin,
     }
     try {
         return await backend.withBackend(async (service) => {
-            const handleAuthentication = createLocalAuthenticationHttp(service.authentication, siteOrigin);
+            const handleAuthentication = createLocalAuthenticationHttp(service.authentication, siteOrigin, service.emailAuthentication);
             const response = await handleAuthentication(request, clientIdentity, correlationId);
             if (response) {
                 return response;

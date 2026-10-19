@@ -408,3 +408,10 @@ private/no-store responses. Enrollment and sign-in use separate Secure HttpOnly 
 appear in JSON. New login, completed login and logout clear stale email cookies. Delivery failure creates no session,
 and rate-limit responses include the actual Retry-After interval. These adapter paths still require host ownership,
 Astro route registration, browser controls and rendered-site acceptance before activation.
+
+The application backend now owns an optional mailer, drains requests before closing it, and disposes authentication
+and database resources after partial initialization failures. Astro email routes are registered. The isolated QA
+host accepts `KEIRE_QA_MAIL_MODE=disabled` (default), `capture` (requires private parent IPC), or explicit `gmail`
+(protected local credentials). Capture mode never contacts SMTP. Real rendered-site HTTP acceptance now covers
+enrollment, resend cooldown, password login, email verification, AAL1 session and logout using a synthetic account.
+Browser controls and HTTPS browser/inbox delivery acceptance remain separate gates before live activation.

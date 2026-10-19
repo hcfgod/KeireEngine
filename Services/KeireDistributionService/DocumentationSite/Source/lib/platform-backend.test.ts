@@ -19,6 +19,44 @@ function fixture() {
 }
 
 describe("application-owned backend lifecycle", () => {
+    it("owns one optional mailer and drains requests before closing it", async () => {
+        const data = fixture();
+        const mailer = { sendVerification: vi.fn(), close: vi.fn() };
+        const createMailer = vi.fn().mockResolvedValue(mailer);
+        const backend = new PlatformBackend({ provider: "mysql", loadLocalSecrets: data.loadLocalSecrets,
+            createPool: data.createPool, createAuthentication: data.createAuthentication, createMailer });
+        const gate = deferred();
+        const started = deferred();
+        const request = backend.withBackend(async (services) => {
+            expect(services.emailAuthentication).not.toBeNull();
+            started.resolve();
+            await gate.promise;
+        });
+        await started.promise;
+        const closing = backend.close();
+        expect(mailer.close).not.toHaveBeenCalled();
+        gate.resolve();
+        await request;
+        await closing;
+        await backend.close();
+        expect(createMailer).toHaveBeenCalledTimes(1);
+        expect(mailer.close).toHaveBeenCalledTimes(1);
+        expect(data.authentication.close).toHaveBeenCalledTimes(1);
+        expect(data.pool.end).toHaveBeenCalledTimes(1);
+    });
+
+    it("cleans up authentication and database after mailer initialization fails", async () => {
+        const data = fixture();
+        const backend = new PlatformBackend({ provider: "mysql", loadLocalSecrets: data.loadLocalSecrets,
+            createPool: data.createPool, createAuthentication: data.createAuthentication,
+            createMailer: async () => { throw new Error("unavailable"); } });
+        await expect(backend.withBackend(() => undefined)).rejects.toThrow("unavailable");
+        await backend.close();
+        expect(data.key.equals(Buffer.alloc(32))).toBe(true);
+        expect(data.authentication.close).toHaveBeenCalledTimes(1);
+        expect(data.pool.end).toHaveBeenCalledTimes(1);
+    });
+
     it("defaults to Supabase and rejects invalid explicit selectors", () => {
         expect(selectPlatformBackend(undefined)).toBe("supabase");
         expect(selectPlatformBackend("mysql")).toBe("mysql");

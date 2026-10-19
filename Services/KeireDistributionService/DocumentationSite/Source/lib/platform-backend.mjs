@@ -1,5 +1,6 @@
 import { createPlatformPool } from "./platform-mysql.mjs";
 import { LocalPasswordAuthentication } from "./platform-local-auth.mjs";
+import { LocalEmailAuthentication } from "./platform-email-auth.mjs";
 
 export function selectPlatformBackend(value) {
     if (value === undefined || value === "supabase") {
@@ -14,7 +15,7 @@ export function selectPlatformBackend(value) {
 /** Owned by the server application, not a process-global singleton or a request. */
 export class PlatformBackend {
     constructor({ provider, loadLocalSecrets, createPool = createPlatformPool,
-        createAuthentication = LocalPasswordAuthentication.create }) {
+        createAuthentication = LocalPasswordAuthentication.create, createMailer = null }) {
         this.provider = selectPlatformBackend(provider);
         if (this.provider === "mysql" && typeof loadLocalSecrets !== "function") {
             throw new Error("MySQL requires a protected local secrets loader.");
@@ -22,6 +23,10 @@ export class PlatformBackend {
         this.loadLocalSecrets = loadLocalSecrets;
         this.createPool = createPool;
         this.createAuthentication = createAuthentication;
+        if (createMailer !== null && typeof createMailer !== "function") {
+            throw new Error("Email delivery requires an application-owned factory.");
+        }
+        this.createMailer = createMailer;
         this.activeRequests = 0;
         this.closing = false;
         this.initialization = null;
@@ -35,6 +40,7 @@ export class PlatformBackend {
         }
         let pool;
         let authentication;
+        let mailer;
         let secrets;
         try {
             // Loader transfers ownership of its fresh key buffer to this initialization operation.
@@ -45,8 +51,20 @@ export class PlatformBackend {
             pool = await this.createPool(secrets.settings, "runtime");
             await pool.query("SELECT 1");
             authentication = await this.createAuthentication(pool, secrets.accountEncryptionKey);
-            return Object.freeze({ provider: "mysql", pool, authentication });
+            if (this.createMailer) {
+                mailer = await this.createMailer();
+                if (!mailer || typeof mailer.sendVerification !== "function" || typeof mailer.close !== "function") {
+                    throw new Error("Email delivery factory returned an invalid transport.");
+                }
+            }
+            const emailAuthentication = mailer ? new LocalEmailAuthentication(authentication, mailer) : null;
+            return Object.freeze({ provider: "mysql", pool, authentication, mailer, emailAuthentication });
         } catch (error) {
+            try {
+                await mailer?.close?.();
+            } catch {
+                // Continue disposing other services after partial mailer initialization.
+            }
             try {
                 authentication?.close();
             } catch {
@@ -106,9 +124,13 @@ export class PlatformBackend {
             return;
         }
         try {
-            backend?.authentication?.close();
+            await backend?.mailer?.close();
         } finally {
-            await backend?.pool?.end();
+            try {
+                backend?.authentication?.close();
+            } finally {
+                await backend?.pool?.end();
+            }
         }
     }
 }

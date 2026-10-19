@@ -6,6 +6,7 @@ import bcrypt from "bcryptjs";
 import { createPlatformPool } from "../Source/lib/platform-mysql.mjs";
 import { sealAccountRecord } from "../Source/lib/platform-account-import.mjs";
 import { loadWindowsPlatformSecrets } from "../Source/lib/platform-secrets.mjs";
+import { emailSendLimits } from "../Source/lib/platform-email-limits.mjs";
 
 const userId = randomUUID();
 const factorId = randomUUID();
@@ -20,6 +21,7 @@ let childExited;
 let fixtureCreated = false;
 let stage = "settings";
 let checks = 0;
+const capturedMail = [];
 try {
     secrets = await loadWindowsPlatformSecrets({
         powerShellExecutable: process.env.KEIRE_QA_POWERSHELL,
@@ -42,10 +44,15 @@ try {
 
     stage = "host-startup";
     child = fork(fileURLToPath(new URL("./start-local-platform-qa.mjs", import.meta.url)), [], {
-        env: { ...process.env, KEIRE_QA_CLIENT_NAMESPACE: userId }, silent: true, windowsHide: true,
+        env: { ...process.env, KEIRE_QA_CLIENT_NAMESPACE: userId, KEIRE_QA_MAIL_MODE: "capture" }, silent: true, windowsHide: true,
     });
     child.stdout.resume();
     child.stderr.resume();
+    child.on("message", (message) => {
+        if (message?.type === "qa-verification-email" && message.message?.recipient === email) {
+            capturedMail.push(message.message);
+        }
+    });
     childExited = new Promise((resolve) => child.once("close", resolve));
     await new Promise((resolve, reject) => {
         const timer = setTimeout(() => reject(new Error("QA host startup timed out")), 30000);
@@ -131,6 +138,42 @@ try {
     assert.match(accountHtml, /No claimed assets yet/);
     checks += 4;
 
+    stage = "email-enrollment";
+    const enrollment = await request("/account/email/enroll/", { password });
+    assert.equal(enrollment.status, 200);
+    assert.equal((await enrollment.json()).data.codeSent, true);
+    assert.equal(capturedMail.at(-1)?.purpose, "enroll");
+    const enrollmentVerification = await request("/account/email/enroll/verify/", { code: capturedMail.at(-1).code });
+    assert.equal(enrollmentVerification.status, 200);
+    assert.equal((await enrollmentVerification.json()).data.emailEnabled, true);
+    checks += 5;
+    await (await request("/account/session/delete/", {})).arrayBuffer();
+    const emailLogin = await request("/account/session/", { email, password });
+    const emailLoginBody = await emailLogin.json();
+    assert.equal(emailLogin.status, 200);
+    const emailFactor = emailLoginBody.data.factors.find((factor) => factor.factor_type === "email");
+    assert.ok(emailFactor);
+    const cooldown = await request("/account/email/challenge/", { factorId: emailFactor.id });
+    assert.equal(cooldown.status, 429);
+    await cooldown.arrayBuffer();
+    // Age only this synthetic account's send windows instead of waiting a minute in HTTP acceptance.
+    for (const limit of emailSendLimits(userId, clientIdentity)) {
+        if (limit.windowMs === 60000) {
+            await pool.execute("UPDATE platform_auth_limits SET window_start = ? WHERE subject_hash = ?", [Date.now() - 60000, limit.hash]);
+        }
+    }
+    const sendCode = await request("/account/email/challenge/", { factorId: emailFactor.id });
+    assert.equal(sendCode.status, 200);
+    await sendCode.arrayBuffer();
+    assert.equal(capturedMail.at(-1)?.purpose, "sign_in");
+    const emailVerification = await request("/account/email/challenge/verify/",
+        { factorId: emailFactor.id, code: capturedMail.at(-1).code });
+    assert.equal(emailVerification.status, 200);
+    await emailVerification.arrayBuffer();
+    assert.deepEqual((await (await request("/account/session/")).json()).data,
+        { signedIn: true, assuranceLevel: "aal1" });
+    checks += 7;
+
     stage = "logout";
     const savedCookies = new Map(cookies);
     const logout = await request("/account/session/delete/", {});
@@ -172,12 +215,17 @@ try {
         if (fixtureCreated) {
             await pool.execute("DELETE FROM platform_auth_sessions WHERE user_id=?", [userId]);
             await pool.execute("DELETE FROM platform_auth_challenges WHERE user_id=?", [userId]);
+            await pool.execute("DELETE FROM platform_email_challenges WHERE user_id=?", [userId]);
             await pool.execute("DELETE FROM platform_mfa_counters WHERE factor_id=?", [factorId]);
             await pool.execute("DELETE FROM platform_mfa_factors WHERE user_id=?", [userId]);
             await pool.execute("DELETE FROM platform_accounts WHERE id=?", [userId]);
-            for (const subject of [`email:${email}`, `client:${clientIdentity}`, `pair:${clientIdentity}\0${email}`]) {
+            for (const subject of [`email:${email}`, `client:${clientIdentity}`, `pair:${clientIdentity}\0${email}`,
+                `client:enroll:${clientIdentity}`, `pair:enroll:${clientIdentity}\0${email}`]) {
                 await pool.execute("DELETE FROM platform_auth_limits WHERE subject_hash=?",
                     [createHash("sha256").update(subject).digest("hex")]);
+            }
+            for (const limit of emailSendLimits(userId, clientIdentity)) {
+                await pool.execute("DELETE FROM platform_auth_limits WHERE subject_hash=?", [limit.hash]);
             }
         }
     } catch {
@@ -185,6 +233,7 @@ try {
         process.exitCode = 1;
     }
     secrets?.accountEncryptionKey.fill(0);
+    capturedMail.length = 0;
     await pool?.end();
 }
 if (!process.exitCode) {
