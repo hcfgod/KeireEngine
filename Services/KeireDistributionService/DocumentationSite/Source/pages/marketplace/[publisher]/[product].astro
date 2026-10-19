@@ -56,6 +56,8 @@ const acceptedLicense = listing ? JSON.stringify({
     acceptedLicenseSnapshot: listing.license_acceptance_snapshot,
 }) : "";
 const openActionLabel = currentVersion?.install_kind === "complete_project" ? "Create in Hub" : "Open in Editor";
+const licenseUrl = typeof listing?.license_canonical_url === "string" &&
+    listing.license_canonical_url.startsWith("https://") ? listing.license_canonical_url : null;
 ---
 
 <PlatformLayout title={listing?.display_name ?? "Product not found"} description={listing?.short_description ?? "The requested Kéire Marketplace product is unavailable."} active="marketplace" robots={listing ? "index,follow" : "noindex"} structuredData={structuredData}>
@@ -65,7 +67,11 @@ const openActionLabel = currentVersion?.install_kind === "complete_project" ? "C
             <aside class="product-buybox" aria-label="Get this asset">
                 <span class="product-buybox__price">{offerPrice(offer)}</span>
                 {acquisition.canClaim && <>
-                    <details><summary>Review asset license</summary><pre class="asset-license">{listing.license_acceptance_snapshot}</pre></details>
+                    <details><summary>Review asset license</summary>
+                        {licenseUrl && <p><a href={licenseUrl} target="_blank" rel="noopener noreferrer">Read full {listing.license_spdx} license terms</a></p>}
+                        <p>License acceptance record:</p>
+                        <pre class="asset-license">{listing.license_acceptance_snapshot}</pre>
+                    </details>
                     <label><input type="checkbox" data-accept-license /> I accept this asset's license.</label>
                 </>}
                 <button class="button" type="button" data-claim-product={listing.id} data-claim-license={acceptedLicense}
@@ -75,7 +81,9 @@ const openActionLabel = currentVersion?.install_kind === "complete_project" ? "C
                 <p class="form-message" aria-live="polite" data-claim-message>
                     {offerLoadFailed && !ownsPersonalCopy
                         ? "We couldn't load pricing. Refresh this page to try again. You have not been charged."
-                        : acquisition.message}
+                        : localView && acquisition.canClaim
+                            ? "Add this free asset to your personal library. Downloads will be available after migration."
+                            : acquisition.message}
                 </p>
                 <a class="button button--secondary" href="/account/#library" data-library-link hidden={!ownsPersonalCopy}>
                     View My Assets

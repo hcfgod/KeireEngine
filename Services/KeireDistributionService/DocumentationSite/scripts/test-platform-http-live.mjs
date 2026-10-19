@@ -232,7 +232,11 @@ try {
         assert.match(accountHtml, /data-session-server-signed-in="true"/);
         const signedInProduct = await request(`/marketplace/${detail.publisher_slug}/${detail.slug}/`);
         assert.equal(signedInProduct.status, 200);
-        assert.match(await signedInProduct.text(), /data-session-server-signed-in="true"/);
+        const signedInProductHtml = await signedInProduct.text();
+        assert.match(signedInProductHtml, /data-session-server-signed-in="true"/);
+        assert.match(signedInProductHtml, /Read full .* license terms/);
+        assert.ok(signedInProductHtml.includes(detail.license_canonical_url));
+        checks += 2;
         stage = "browser-acquisition";
         const claimBody = { productId: detail.id, ownership: "personal", licenseSpdx: detail.license_spdx,
             licenseRevision: detail.license_revision, acceptedLicenseSnapshot: detail.license_acceptance_snapshot };
@@ -246,6 +250,9 @@ try {
         const acquiredLibrary = (await (await request("/marketplace/v1/library/")).json()).data;
         assert.equal(acquiredLibrary.length, 1);
         assert.equal(acquiredLibrary[0].id, claimData.entitlementId);
+        const ownedAccountHtml = await (await request("/account/")).text();
+        assert.ok(ownedAccountHtml.includes(`href="/marketplace/${detail.publisher_slug}/${detail.slug}/"`));
+        checks++;
         checks += 5;
         checks += 3;
         checks++;

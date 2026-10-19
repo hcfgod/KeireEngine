@@ -12,8 +12,9 @@ export async function localAccountOverview(pool, session) {
     }
     const [[profiles], [entitlements], [organizations], [sessions], [identities], [staff], [factors]] = await Promise.all([
         pool.execute("SELECT display_name,handle,avatar_url,biography,locale FROM profiles WHERE user_id=?", [userId]),
-        pool.execute(`SELECT e.id,e.product_id,e.organization_id,e.granted_at,p.display_name
+        pool.execute(`SELECT e.id,e.product_id,e.organization_id,e.granted_at,p.display_name,p.slug,publisher.slug AS publisher_slug
             FROM marketplace_entitlements e JOIN marketplace_products p ON p.id=e.product_id
+            JOIN publishers publisher ON publisher.id=p.publisher_id
             WHERE e.revoked_at IS NULL AND (e.user_id=? OR EXISTS (
                 SELECT 1 FROM organization_memberships m JOIN organizations o ON o.id=m.organization_id
                 WHERE m.organization_id=e.organization_id AND m.user_id=? AND o.deleted_at IS NULL))
@@ -35,7 +36,8 @@ export async function localAccountOverview(pool, session) {
         })) },
         profile: profiles[0] ?? null,
         entitlements: entitlements.map((item) => ({ ...item, granted_at: utc(item.granted_at),
-            marketplace_products: { display_name: item.display_name } })),
+            marketplace_products: { display_name: item.display_name, slug: item.slug,
+                publishers: { slug: item.publisher_slug } } })),
         organizations: organizations.map((item) => ({ role: item.role,
             organizations: { id: item.id, slug: item.slug, display_name: item.display_name } })),
         sessions: sessions.map((item) => ({ ...item, created_at: utc(item.created_at),

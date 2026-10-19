@@ -67,6 +67,7 @@ export async function localCatalogPage(pool, {
     }
     const [values] = await pool.execute(`SELECT p.id,p.slug,p.display_name,p.short_description,p.description_markdown,
         p.license_spdx,p.license_revision,license.acceptance_snapshot AS license_acceptance_snapshot,
+        license.canonical_url AS license_canonical_url,
         p.featured,p.published_at,publisher.id AS publisher_id,publisher.slug AS publisher_slug,
         publisher.display_name AS publisher_name,publisher.verified AS publisher_verified,
         category.slug AS category_slug,category.display_name AS category_name,
