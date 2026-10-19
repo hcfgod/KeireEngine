@@ -12,6 +12,7 @@ import { verifyAccountVisibility } from "./platform-account-view-acceptance.mjs"
 import { verifyLocalClaims } from "./platform-claims-acceptance.mjs";
 import { createRecoverySchema } from "../Source/lib/platform-recovery-store.mjs";
 import { verifyRecoveryStore } from "./platform-recovery-store-acceptance.mjs";
+import { verifyPasswordReplacement } from "./platform-password-recovery-acceptance.mjs";
 import { verifyLocalCatalog } from "./platform-catalog-acceptance.mjs";
 import { createPlatformPool } from "../Source/lib/platform-mysql.mjs";
 import { sealAccountRecord } from "../Source/lib/platform-account-import.mjs";
@@ -241,6 +242,8 @@ try {
     checks += await verifyLocalClaims(migration, userId, auth, factorId, now);
     stage = "password-recovery-store";
     checks += await verifyRecoveryStore(runtime, userId, now);
+    stage = "password-recovery-replacement";
+    checks += await verifyPasswordReplacement(runtime, auth, userId, factorId, now);
     stage = "public-catalog";
     checks += await verifyLocalCatalog(migration);
 
