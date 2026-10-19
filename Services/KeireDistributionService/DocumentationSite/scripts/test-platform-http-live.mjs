@@ -220,6 +220,16 @@ try {
         checks += 3;
 
         stage = "account-overview";
+        assert.equal((await request("/account/mfa/enroll/", { password: "incorrect", friendlyName: "QA setup" })).status, 400);
+        const setupResponse = await request("/account/mfa/enroll/", { password, friendlyName: "QA setup" });
+        assert.equal(setupResponse.status, 200);
+        const setup = (await setupResponse.json()).data;
+        assert.match(setup.secret, /^[A-Z2-7]{32}$/);
+        assert.equal((await request("/account/mfa/verify/", { factorId: setup.factorId, code: "bad" })).status, 400);
+        const cancellation = await request("/account/mfa/remove/", { factorId: setup.factorId });
+        assert.equal(cancellation.status, 200);
+        assert.deepEqual((await cancellation.json()).data, { removed: true, signedOut: false });
+        checks += 6;
         const accountPage = await request("/account/");
         assert.equal(accountPage.status, 200);
         assert.equal(accountPage.headers.get("cache-control"), "private, no-store");
@@ -435,6 +445,11 @@ try {
     }
     try {
         if (fixtureCreated) {
+            await pool.execute("DELETE FROM platform_audit_events WHERE actor_user_id=? AND action IN ('account.authenticator_added','account.authenticator_removed','account.authenticator_setup_cancelled')", [userId]);
+            for (const subject of [`email:mfa-enroll:${userId}`, `client:mfa-enroll:${clientIdentity}`,
+                `pair:mfa-enroll:${clientIdentity}\0mfa-enroll:${userId}`]) {
+                await pool.execute("DELETE FROM platform_auth_limits WHERE subject_hash=?", [createHash("sha256").update(subject).digest("hex")]);
+            }
             await pool.execute("DELETE FROM platform_audit_events WHERE actor_user_id=? AND action IN ('account.export_requested','account.deletion_requested')", [userId]);
             await pool.execute("DELETE FROM profiles WHERE user_id=?", [userId]);
             await pool.execute("DELETE FROM platform_audit_events WHERE actor_user_id=? AND action='organization.created'", [userId]);

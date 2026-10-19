@@ -5,6 +5,7 @@ import { handleLocalClaimRequest } from "./platform-claims-http.mjs";
 import { handleLocalRecoveryRequest } from "./platform-recovery-http.mjs";
 import { handleLocalOrganizationRequest } from "./platform-organizations-http.mjs";
 import { handleLocalDataRequest } from "./platform-data-http.mjs";
+import { handleLocalMfaRequest } from "./platform-mfa-http.mjs";
 
 /** A staged provider adapter. Unported routes fail closed instead of using Supabase identities or data. */
 export async function handleLocalPlatformRequest({ backend, request, siteOrigin, clientIdentity, correlationId, render }) {
@@ -20,6 +21,10 @@ export async function handleLocalPlatformRequest({ backend, request, siteOrigin,
     }
     try {
         return await backend.withBackend(async (service) => {
+            const mfaResponse = await handleLocalMfaRequest(service.authentication, request, siteOrigin, clientIdentity, correlationId);
+            if (mfaResponse) {
+                return mfaResponse;
+            }
             const recoveryResponse = await handleLocalRecoveryRequest(service, request, siteOrigin, clientIdentity, correlationId);
             if (recoveryResponse) {
                 return recoveryResponse;
