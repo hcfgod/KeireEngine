@@ -24,6 +24,21 @@ let checks = 0;
 const capturedMail = [];
 const capturedRecovery = [];
 const interactive = process.argv.includes("--interactive");
+
+function syntheticAuthenticatorCode(secret, offset = 0) {
+    const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+    const bits = [...secret].map((character) => alphabet.indexOf(character).toString(2).padStart(5, "0")).join("");
+    const bytes = [];
+    for (let index = 0; index + 8 <= bits.length; index += 8) {
+        bytes.push(parseInt(bits.slice(index, index + 8), 2));
+    }
+    const counter = Buffer.alloc(8);
+    counter.writeBigUInt64BE(BigInt(Math.floor(Date.now() / 30000) + offset));
+    const digest = createHmac("sha1", Buffer.from(bytes)).update(counter).digest();
+    const position = digest[digest.length - 1] & 15;
+    return String((digest.readUInt32BE(position) & 0x7fffffff) % 1000000).padStart(6, "0");
+}
+
 try {
     secrets = await loadWindowsPlatformSecrets({
         powerShellExecutable: process.env.KEIRE_QA_POWERSHELL,
@@ -230,6 +245,19 @@ try {
         assert.equal(cancellation.status, 200);
         assert.deepEqual((await cancellation.json()).data, { removed: true, signedOut: false });
         checks += 6;
+        stage = "authenticator-confirmation-http";
+        const secondSetup = await request("/account/mfa/enroll/", { password, friendlyName: "QA confirmed" });
+        assert.equal(secondSetup.status, 200);
+        const confirmedSetup = (await secondSetup.json()).data;
+        const previousSessionCookie = `__Host-keire-session=${cookies.get("__Host-keire-session")}`;
+        const confirmSetup = await request("/account/mfa/verify/", {
+            factorId: confirmedSetup.factorId, code: syntheticAuthenticatorCode(confirmedSetup.secret),
+        });
+        assert.equal(confirmSetup.status, 200);
+        assert.equal((await confirmSetup.json()).data.currentLevel, "aal2");
+        assert.equal((await (await request("/account/session/", undefined, { cookie: previousSessionCookie })).json()).data.signedIn, false);
+        assert.equal((await (await request("/account/session/")).json()).data.assuranceLevel, "aal2");
+        checks += 5;
         const accountPage = await request("/account/");
         assert.equal(accountPage.status, 200);
         assert.equal(accountPage.headers.get("cache-control"), "private, no-store");
@@ -398,7 +426,7 @@ try {
         stage = `password-recovery-exchange-status-${exchange.status}`;
         assert.equal(exchange.status, 200);
         stage = "password-recovery-exchange-factor";
-        assert.equal((await exchange.json()).data.factors[0].id, factorId);
+        assert.ok((await exchange.json()).data.factors.some((factor) => factor.id === factorId));
         stage = "password-recovery-exchange-session";
         assert.equal((await (await request("/account/session/")).json()).data.signedIn, false);
         const nextPassword = `Recovered-${randomUUID()}`;
@@ -419,6 +447,18 @@ try {
         assert.equal(newLogin.status, 200);
         assert.equal((await newLogin.json()).data.mfaRequired, true);
         checks += 15;
+        stage = "authenticator-removal-http";
+        const finalVerification = await request("/account/mfa/challenge/verify/", {
+            factorId: confirmedSetup.factorId, code: syntheticAuthenticatorCode(confirmedSetup.secret, 1),
+        });
+        assert.equal(finalVerification.status, 200);
+        const removedSessionCookie = `__Host-keire-session=${cookies.get("__Host-keire-session")}`;
+        const removal = await request("/account/mfa/remove/", { factorId: confirmedSetup.factorId });
+        assert.equal(removal.status, 200);
+        assert.deepEqual((await removal.json()).data, { removed: true, signedOut: true });
+        assert.equal((await (await request("/account/session/", undefined, { cookie: removedSessionCookie })).json()).data.signedIn, false);
+        assert.equal((await request("/account/mfa/enroll/", { password: nextPassword, friendlyName: "Cannot enroll" })).status, 401);
+        checks += 5;
     }
 } catch {
     console.error(JSON.stringify({ status: "failed", stage, checks }));
@@ -477,7 +517,8 @@ try {
             await pool.execute("DELETE FROM platform_auth_sessions WHERE user_id=?", [userId]);
             await pool.execute("DELETE FROM platform_auth_challenges WHERE user_id=?", [userId]);
             await pool.execute("DELETE FROM platform_email_challenges WHERE user_id=?", [userId]);
-            await pool.execute("DELETE FROM platform_mfa_counters WHERE factor_id=?", [factorId]);
+            await pool.execute(`DELETE counter FROM platform_mfa_counters counter
+                JOIN platform_mfa_factors factor ON factor.id=counter.factor_id WHERE factor.user_id=?`, [userId]);
             await pool.execute("DELETE FROM platform_mfa_factors WHERE user_id=?", [userId]);
             await pool.execute("DELETE FROM platform_accounts WHERE id=?", [userId]);
             for (const subject of [`email:${email}`, `client:${clientIdentity}`, `pair:${clientIdentity}\0${email}`,
