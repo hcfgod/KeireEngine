@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { createEmailChallengeSchema } from "../Source/lib/platform-email-store.mjs";
+import { verifyEmailChallengeStore } from "./platform-email-store-acceptance.mjs";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import bcrypt from "bcryptjs";
 import { createLocalAuthenticationHttp } from "../Source/lib/platform-auth-http.mjs";
@@ -35,6 +37,9 @@ let checks = 0;
 try {
     if (process.argv.includes("--create-schema")) {
         await createAuthenticationSchema(migration);
+    }
+    if (process.argv.includes("--create-email-schema")) {
+        await createEmailChallengeSchema(migration);
     }
     stage = "fixture";
     const passwordHash = await bcrypt.hash(password, 4);
@@ -201,6 +206,7 @@ try {
     assert.equal((await afterLogout.json()).data.signedIn, false);
     checks += 4;
     stage = "account-visibility";
+    checks += await verifyEmailChallengeStore(runtime, userId, encryptionKey);
     checks += await verifyAccountVisibility(migration, userId, encryptionKey);
     stage = "public-catalog";
     checks += await verifyLocalCatalog(migration);

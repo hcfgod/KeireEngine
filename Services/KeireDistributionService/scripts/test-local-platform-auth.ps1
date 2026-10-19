@@ -2,7 +2,8 @@
 param
 (
     [Parameter(Mandatory)] [string] $SettingsDirectory,
-    [Parameter(Mandatory)] [string] $ResultPath
+    [Parameter(Mandatory)] [string] $ResultPath,
+    [switch] $CreateEmailSchema
 )
 
 $ErrorActionPreference = 'Stop'
@@ -28,6 +29,10 @@ try
     $start = [Diagnostics.ProcessStartInfo]::new((Get-Command node.exe).Source)
     $start.WorkingDirectory = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../DocumentationSite'))
     $start.ArgumentList.Add('scripts/test-platform-auth-live.mjs')
+    if ($CreateEmailSchema)
+    {
+        $start.ArgumentList.Add('--create-email-schema')
+    }
     $start.UseShellExecute = $false
     $start.CreateNoWindow = $true
     $start.RedirectStandardInput = $true

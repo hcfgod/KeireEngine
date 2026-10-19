@@ -368,3 +368,11 @@ validity window. Only the token hash and keyed proof are persisted; plaintext co
 The proof helper is deliberately not an authentication endpoint: its caller still must lock/consume challenge rows,
 share the five-attempt budget across methods, and issue a session atomically. Those database and HTTP integrations
 remain pending; a successful proof comparison alone does not establish a session or prevent replay.
+
+The email challenge store now has explicit schema creation, pending/sent/failed delivery states, persistent
+five-attempt exhaustion and row-locked consumption. The authorization callback runs on the same transaction;
+rejected callback writes roll back to a savepoint while the failed attempt persists. Exceptions roll back the
+transaction. Live synthetic MySQL acceptance covers concurrent consumption, replay, pending/failed delivery,
+attempt exhaustion, expiry and callback rejection/rollback. Account/client send throttling and shared password
+challenge budgets still must be integrated before exposing an endpoint. `-CreateEmailSchema` on the protected
+authentication acceptance launcher is a one-time migration switch; never repeat it after successful creation.
