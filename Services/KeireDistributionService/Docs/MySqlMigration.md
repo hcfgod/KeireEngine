@@ -376,3 +376,9 @@ transaction. Live synthetic MySQL acceptance covers concurrent consumption, repl
 attempt exhaustion, expiry and callback rejection/rollback. Account/client send throttling and shared password
 challenge budgets still must be integrated before exposing an endpoint. `-CreateEmailSchema` on the protected
 authentication acceptance launcher is a one-time migration switch; never repeat it after successful creation.
+
+Email-send reservations reuse the persistent authentication limit table: one send per account per minute, five per
+account per fifteen minutes, and twenty per trusted client identity per fifteen minutes. Sorted row locks make
+concurrent reservations atomic. Denied requests do not consume other budgets, and SMTP failures must retain a
+successful reservation. MySQL acceptance covers simultaneous sends, cooldown boundaries, account/client isolation
+and expiry. The enrollment/sign-in service still must reserve these limits in its challenge-creation transaction.

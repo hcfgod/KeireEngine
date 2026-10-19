@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { createEmailChallengeSchema } from "../Source/lib/platform-email-store.mjs";
 import { verifyEmailChallengeStore } from "./platform-email-store-acceptance.mjs";
+import { verifyEmailSendLimits } from "./platform-email-limits-acceptance.mjs";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import bcrypt from "bcryptjs";
 import { createLocalAuthenticationHttp } from "../Source/lib/platform-auth-http.mjs";
@@ -205,8 +206,11 @@ try {
     }), clientIdentity, "qa");
     assert.equal((await afterLogout.json()).data.signedIn, false);
     checks += 4;
-    stage = "account-visibility";
+    stage = "email-send-limits";
+    checks += await verifyEmailSendLimits(runtime);
+    stage = "email-challenge-store";
     checks += await verifyEmailChallengeStore(runtime, userId, encryptionKey);
+    stage = "account-visibility";
     checks += await verifyAccountVisibility(migration, userId, encryptionKey);
     stage = "public-catalog";
     checks += await verifyLocalCatalog(migration);
