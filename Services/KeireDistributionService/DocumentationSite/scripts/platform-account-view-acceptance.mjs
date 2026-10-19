@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { platformTransaction } from "../Source/lib/platform-mysql.mjs";
 import { localAccountOverview } from "../Source/lib/platform-account-view.mjs";
 import { sealAccountRecord } from "../Source/lib/platform-account-import.mjs";
+import { localLibraryPage } from "../Source/lib/platform-library.mjs";
 
 /** All fixtures and mutations roll back. Existing products/orders are read only. */
 export async function verifyAccountVisibility(pool, userId, encryptionKey) {
@@ -29,6 +30,12 @@ export async function verifyAccountVisibility(pool, userId, encryptionKey) {
             const overview = await localAccountOverview(connection, { userId: accountId, assurance: 2 });
             assert.deepEqual(overview.entitlements.map((row) => row.id).sort(), [...expected].sort());
             checks++;
+            const personal = await localLibraryPage(connection, { userId: accountId, assurance: 2 });
+            const shared = await localLibraryPage(connection, { userId: accountId, assurance: 2 }, { organizationId });
+            assert.deepEqual([...personal, ...shared].map((row) => row.id).sort(), [...expected].sort());
+            assert.ok(personal.every((row) => row.user_id === accountId && row.organization_id === null));
+            assert.ok(shared.every((row) => row.organization_id === organizationId));
+            checks += 3;
             return overview;
         };
         await visible(userId, []);

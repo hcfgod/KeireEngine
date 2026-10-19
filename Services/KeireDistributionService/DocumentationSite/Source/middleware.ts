@@ -80,7 +80,8 @@ export const onRequest = defineMiddleware(async (context, next) => {
             siteOrigin: runtimeEnvironment("PUBLIC_SITE_URL"),
             clientIdentity: context.locals.platformClientIdentity,
             correlationId: context.locals.correlationId,
-            render: async ({ session, pendingChallenge, accountView, catalogPool, emailAvailable, productView }) => {
+            render: async ({ session, pendingChallenge, accountView, catalogPool, emailAvailable, productView, marketplaceContext }) => {
+                context.locals.localMarketplaceContext = marketplaceContext;
                 context.locals.localProductView = productView;
                 context.locals.localEmailAvailable = emailAvailable === true;
                 // No Supabase user is synthesized from a local challenge or session.

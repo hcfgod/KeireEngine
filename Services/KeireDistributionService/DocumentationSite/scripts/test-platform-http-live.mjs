@@ -180,6 +180,8 @@ try {
             checks += 2;
         }
         stage = "login";
+        assert.equal((await request("/marketplace/v1/library/")).status, 401);
+        checks++;
         const login = await request("/account/session/", { email, password });
         assert.equal(login.status, 200);
         assert.equal((await login.json()).data.mfaRequired, true);
@@ -212,6 +214,14 @@ try {
         assert.ok(accountHtml.includes(email));
         assert.match(accountHtml, /No claimed assets yet/);
         assert.match(accountHtml, /Send verification email/);
+        const library = await request("/marketplace/v1/library/");
+        assert.equal(library.status, 200);
+        assert.deepEqual((await library.json()).data, []);
+        assert.match(library.headers.get("cache-control"), /private, no-store/);
+        const organizationLibrary = await request(`/marketplace/v1/library/?organizationId=${randomUUID()}`);
+        assert.equal(organizationLibrary.status, 200);
+        assert.deepEqual((await organizationLibrary.json()).data, []);
+        checks += 5;
         assert.match(accountHtml, /data-session-server-signed-in="true"/);
         const signedInProduct = await request(`/marketplace/${detail.publisher_slug}/${detail.slug}/`);
         assert.equal(signedInProduct.status, 200);

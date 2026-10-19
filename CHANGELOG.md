@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Added staged MySQL browser library reads with personal and organization access checks, revocation filtering, and precise pagination.
+
 - Added staged MySQL publisher pages with bounded catalog pagination and corrected initial signed-in navigation on private local-backend pages.
 
 - Added staged MySQL asset-detail pages with private ownership rendering and clear acquisition-maintenance feedback.

@@ -51,7 +51,7 @@ describe("staged local platform request routing", () => {
     });
 
     it("fails closed on unported routes without calling the previous backend", async () => {
-        const { options } = fixture("/marketplace/v1/library/");
+        const { options } = fixture("/marketplace/v1/downloads/");
         expect((await handleLocalPlatformRequest(options)).status).toBe(503);
         expect(options.render).not.toHaveBeenCalled();
     });

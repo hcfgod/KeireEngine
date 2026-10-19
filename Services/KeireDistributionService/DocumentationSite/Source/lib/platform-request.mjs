@@ -22,6 +22,14 @@ export async function handleLocalPlatformRequest({ backend, request, siteOrigin,
                 return response;
             }
             const pathname = new URL(request.url).pathname.replace(/\/+$/, "");
+            if (pathname === "/marketplace/v1/library" && request.method === "GET") {
+                const state = await localBrowserRequestState(service.authentication, request);
+                const rendered = await render({ ...state, accountView: null,
+                    marketplaceContext: { pool: service.pool, session: state.session } });
+                rendered.headers.set("cache-control", "private, no-store");
+                rendered.headers.set("vary", "Cookie, Authorization");
+                return rendered;
+            }
             const publicMarketplaceRoute = ["/marketplace", "/marketplace/v1/catalog"].includes(pathname) ||
                 /^\/marketplace\/v1\/products\/[^/]+$/.test(pathname) ||
                 /^\/marketplace\/publishers\/[^/]+$/.test(pathname);

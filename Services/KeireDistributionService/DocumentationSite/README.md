@@ -96,3 +96,9 @@ Publisher pages also use the MySQL catalog visibility rules, exclude suspended
 publishers, and provide a cursor-based More assets link after each 30-product page.
 Private local-backend account and product pages render their verified signed-in
 navigation immediately; public catalog pages keep the existing session-status lookup.
+
+The staged browser library API uses the verified local session and explicitly scopes
+personal ownership or membership in the requested active organization. Revoked
+entitlements and deleted organizations are excluded. Pages retain the existing
+24-item response and microsecond cursor ordering. Bearer credentials remain rejected
+until the separate native-client OAuth migration is complete.

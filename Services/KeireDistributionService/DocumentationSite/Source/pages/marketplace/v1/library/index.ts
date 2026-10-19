@@ -2,26 +2,42 @@ import type { APIRoute } from "astro";
 import {
     apiError, apiResponse, decodeLibraryCursor, encodeLibraryCursor, MarketplaceApiError, requireSupabase, requireUser,
 } from "../../../../lib/api";
+import { localLibraryPage } from "../../../../lib/platform-library.mjs";
 
 export const prerender = false;
 export const GET: APIRoute = async (context) => {
     try {
-        const supabase = requireSupabase(context);
-        requireUser(context);
+        const local = context.locals.localMarketplaceContext;
+        const supabase = local ? null : requireSupabase(context);
+        if (local) {
+            if (!local.session) {
+                throw new MarketplaceApiError(401, "account.authentication_required", "Sign in to continue.");
+            }
+        } else {
+            requireUser(context);
+        }
         const cursor = decodeLibraryCursor(context.url.searchParams.get("cursor"));
         const organizationId = context.url.searchParams.get("organizationId");
         if (organizationId && !/^[0-9a-f-]{36}$/i.test(organizationId)) throw new MarketplaceApiError(400, "marketplace.invalid_organization_id", "Organization ID is invalid.");
-        let query = supabase.from("marketplace_entitlements")
-            .select("id,product_id,user_id,organization_id,granted_at,marketplace_products(id,slug,display_name,short_description,state,license_spdx,publishers(slug,display_name))")
-            .is("revoked_at", null).order("granted_at", { ascending: false }).order("id", { ascending: true });
-        query = organizationId ? query.eq("organization_id", organizationId) : query.is("organization_id", null);
-        if (cursor) {
-            query = query.or(`granted_at.lt.${cursor.grantedAt},and(granted_at.eq.${cursor.grantedAt},id.gt.${cursor.id})`);
+        let values;
+        if (local) {
+            if (organizationId && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(organizationId)) {
+                throw new MarketplaceApiError(400, "marketplace.invalid_organization_id", "Organization ID is invalid.");
+            }
+            values = await localLibraryPage(local.pool, local.session, { organizationId: organizationId || null, cursor });
+        } else {
+            let query = supabase!.from("marketplace_entitlements")
+                .select("id,product_id,user_id,organization_id,granted_at,marketplace_products(id,slug,display_name,short_description,state,license_spdx,publishers(slug,display_name))")
+                .is("revoked_at", null).order("granted_at", { ascending: false }).order("id", { ascending: true });
+            query = organizationId ? query.eq("organization_id", organizationId) : query.is("organization_id", null);
+            if (cursor) {
+                query = query.or(`granted_at.lt.${cursor.grantedAt},and(granted_at.eq.${cursor.grantedAt},id.gt.${cursor.id})`);
+            }
+            query = query.limit(25);
+            const { data, error } = await query;
+            if (error) throw error;
+            values = data ?? [];
         }
-        query = query.limit(25);
-        const { data, error } = await query;
-        if (error) throw error;
-        const values = data ?? [];
         const pageValues = values.slice(0, 24);
         const last = pageValues.at(-1);
         return apiResponse(context, {
