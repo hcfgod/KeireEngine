@@ -305,3 +305,11 @@ Production proxy trust, deployment packaging and other route migrations remain p
 
 The --smoke mode closes the host after checks. Do not deploy its middleware build through the current
 standalone production launcher; rebuild with the default adapter mode before standard publication.
+
+`node scripts/test-platform-http-live.mjs` uses the same QA environment settings and current middleware
+build. It creates one synthetic account/TOTP factor with the runtime role, launches the isolated host over
+private IPC, exercises real HTTP login, rendered MFA, verification, session and logout, then drains the host
+and removes its exact fixture IDs/rate keys. Credentials and codes are never logged. An isolated client
+namespace avoids modifying another QA session's rate-limit records. Eleven assertions passed, followed by
+verification that the imported account records remained unchanged. This test manually sends cookies;
+browser HTTPS cookie policy and production reverse-proxy acceptance are still required.

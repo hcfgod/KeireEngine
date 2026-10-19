@@ -9,6 +9,10 @@ import { loadWindowsPlatformSecrets } from "../Source/lib/platform-secrets.mjs";
 // Isolated loopback acceptance host. Production reverse-proxy trust and deployment remain separate gates.
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const port = Number(process.env.KEIRE_QA_PORT);
+const clientNamespace = process.env.KEIRE_QA_CLIENT_NAMESPACE ?? "manual";
+if (!/^[a-zA-Z0-9-]{1,64}$/.test(clientNamespace)) {
+    throw new Error("Invalid isolated QA client namespace.");
+}
 if (!Number.isInteger(port) || port < 1024 || port > 65535) {
     throw new Error("Set an explicit KEIRE_QA_PORT between 1024 and 65535.");
 }
@@ -40,7 +44,7 @@ const server = http.createServer((request, response) => {
                 }, {
                     platformBackend: backend,
                     // The QA listener accepts no forwarded client identity.
-                    platformClientIdentity: request.socket.remoteAddress ?? "loopback-unknown",
+                    platformClientIdentity: `qa:${clientNamespace}:${request.socket.remoteAddress ?? "loopback-unknown"}`,
                 });
                 await completed;
             });
@@ -85,6 +89,14 @@ function close() {
 }
 process.once("SIGINT", () => { void close(); });
 process.once("SIGTERM", () => { void close(); });
+if (process.send) {
+    process.on("message", async (message) => {
+        if (message?.type === "close-qa-host") {
+            await close();
+            process.disconnect();
+        }
+    });
+}
 server.once("error", async () => {
     await backend.close();
     console.error("Isolated QA listener failed; diagnostics suppressed.");
@@ -92,6 +104,7 @@ server.once("error", async () => {
 });
 server.listen(port, "127.0.0.1", async () => {
     console.log(JSON.stringify({ status: "local-platform-qa-listening", host: "127.0.0.1", port }));
+    process.send?.({ type: "qa-host-ready" });
     if (process.argv.includes("--smoke")) {
         let stage = "sign-in";
         try {
