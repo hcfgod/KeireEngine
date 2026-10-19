@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { createEmailChallengeSchema } from "../Source/lib/platform-email-store.mjs";
 import { verifyEmailChallengeStore } from "./platform-email-store-acceptance.mjs";
 import { verifyEmailSendLimits } from "./platform-email-limits-acceptance.mjs";
+import { verifyEmailSessionAssurance } from "./platform-email-session-acceptance.mjs";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import bcrypt from "bcryptjs";
 import { createLocalAuthenticationHttp } from "../Source/lib/platform-auth-http.mjs";
@@ -207,6 +208,7 @@ try {
     assert.equal((await afterLogout.json()).data.signedIn, false);
     checks += 4;
     stage = "email-send-limits";
+    checks += await verifyEmailSessionAssurance(runtime, auth, userId, encryptionKey, now);
     checks += await verifyEmailSendLimits(runtime);
     stage = "email-challenge-store";
     checks += await verifyEmailChallengeStore(runtime, userId, encryptionKey);

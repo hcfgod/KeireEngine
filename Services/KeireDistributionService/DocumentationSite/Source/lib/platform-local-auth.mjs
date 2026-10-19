@@ -170,7 +170,7 @@ export class LocalPasswordAuthentication {
             if (factors.length === 0) {
                 return this.issueSession(connection, account, now);
             }
-            if (factors.some((factor) => factor.factor_type !== "totp")) {
+            if (factors.some((factor) => !["totp", "email"].includes(factor.factor_type))) {
                 return { state: "unsupported_mfa" };
             }
             const challengeToken = newOpaqueToken();
@@ -201,7 +201,7 @@ export class LocalPasswordAuthentication {
         }
         const [factors] = await this.pool.execute(`SELECT id,factor_type,friendly_name FROM platform_mfa_factors
             WHERE user_id = ? AND status = 'verified' ORDER BY id`, [account.id]);
-        if (factors.length === 0 || factors.some((factor) => factor.factor_type !== "totp")) {
+        if (factors.length === 0 || factors.some((factor) => !["totp", "email"].includes(factor.factor_type))) {
             return null;
         }
         // Display metadata only. Completion rechecks all mutable state under transaction locks.
@@ -262,9 +262,19 @@ export class LocalPasswordAuthentication {
         if (!accountAvailable(account, now) || digest(account.password_hash ?? "") !== session.password_digest) {
             return null;
         }
-        const [factors] = await this.pool.execute("SELECT id FROM platform_mfa_factors WHERE user_id = ? AND status = 'verified'", [account.id]);
+        const [factors] = await this.pool.execute("SELECT * FROM platform_mfa_factors WHERE user_id = ? AND status = 'verified'", [account.id]);
+        const matchedFactor = factors.find((factor) => factor.id === session.factor_id);
+        if (matchedFactor?.factor_type === "email") {
+            const enrollment = openAccountRecord(matchedFactor.source_sealed, this.encryptionKey, `mfa:${matchedFactor.id}`);
+            if (session.assurance_level !== 1 || enrollment.email !== account.email) {
+                return null;
+            }
+            // Email verification is a normal sign-in method, not an upgrade for privileged AAL2 operations.
+            return { userId: account.id, assurance: 1, expiresAt: Number(session.expires_ms), method: "email" };
+        }
         if ((factors.length > 0 && session.assurance_level < 2) ||
-            (session.assurance_level === 2 && !factors.some((factor) => factor.id === session.factor_id))) {
+            (session.assurance_level === 2 && matchedFactor?.factor_type !== "totp") ||
+            (session.factor_id && !matchedFactor)) {
             return null;
         }
         return { userId: account.id, assurance: session.assurance_level, expiresAt: Number(session.expires_ms) };

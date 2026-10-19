@@ -382,3 +382,8 @@ account per fifteen minutes, and twenty per trusted client identity per fifteen 
 concurrent reservations atomic. Denied requests do not consume other budgets, and SMTP failures must retain a
 successful reservation. MySQL acceptance covers simultaneous sends, cooldown boundaries, account/client isolation
 and expiry. The enrollment/sign-in service still must reserve these limits in its challenge-creation transaction.
+
+Local session lookup now distinguishes verified email factors from authenticator factors. An email session remains
+AAL1, is bound to the enrolled email matching the current account email, and is rejected after factor revocation or
+an attempted AAL2 upgrade. Existing authenticator sessions retain AAL2. Five live MySQL fixture checks cover these
+boundaries. No enrollment or email-session issuance endpoint is exposed yet.
