@@ -220,3 +220,17 @@ integrity references. It rejects conflicting hashes/sizes, duplicate identities,
 storage. Every object starts missing; metadata alone never counts as recovered bytes. Missing referenced
 objects and unreviewed media references remain explicit acceptance work. Plans contain private metadata
 and must not be logged; only the aggregate summary is suitable for validation reports.
+
+### Isolated storage metadata import
+
+Use `scripts/import-local-platform-storage.ps1` with the same protected backup/settings directories and a
+new result path. `-CreateSchema` is only for first creation; do not repeat it on the migrated database.
+`-VerifyOnly` uses the runtime account to compare every preserved source record and normalized field,
+including null recovery hash/time. This initial-state verifier is intentionally strict; after real recovery,
+acceptance must additionally verify actual blobs rather than weakening it to accept metadata claims.
+
+The import is transactional and refuses nonempty destinations. Original metadata is retained in JSON,
+with indexed bucket/object identity and expected hash/size. Name digests enforce uniqueness without
+truncating source keys; future lookup must compare the full object name. No local path comes from the
+source key. Recovery timestamps require a matching expected hash. Permissions and live routes are still
+separate work; this import does not implement storage policies or authorize downloads.

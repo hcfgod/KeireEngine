@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Preserved private storage bucket/object metadata in isolated MySQL, with unavailable-file state and import verification.
+
 - Added private-storage recovery planning with integrity-reference reconciliation and explicit missing-file tracking.
 
 - Added bounded private-blob reads that verify complete content before yielding bytes and close handles on cancellation.
