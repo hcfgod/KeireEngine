@@ -9,6 +9,7 @@ import bcrypt from "bcryptjs";
 import { createLocalAuthenticationHttp } from "../Source/lib/platform-auth-http.mjs";
 import { PlatformBackend } from "../Source/lib/platform-backend.mjs";
 import { verifyAccountVisibility } from "./platform-account-view-acceptance.mjs";
+import { verifyLocalClaims } from "./platform-claims-acceptance.mjs";
 import { verifyLocalCatalog } from "./platform-catalog-acceptance.mjs";
 import { createPlatformPool } from "../Source/lib/platform-mysql.mjs";
 import { sealAccountRecord } from "../Source/lib/platform-account-import.mjs";
@@ -231,6 +232,8 @@ try {
     checks += await verifyEmailChallengeStore(runtime, userId, encryptionKey);
     stage = "account-visibility";
     checks += await verifyAccountVisibility(migration, userId, encryptionKey);
+    stage = "marketplace-claims";
+    checks += await verifyLocalClaims(migration, userId);
     stage = "public-catalog";
     checks += await verifyLocalCatalog(migration);
 
