@@ -1,0 +1,33 @@
+import { createLocalAuthenticationHttp, localBrowserRequestState } from "./platform-auth-http.mjs";
+
+/** A staged provider adapter. Unported routes fail closed instead of using Supabase identities or data. */
+export async function handleLocalPlatformRequest({ backend, request, siteOrigin, clientIdentity, correlationId, render }) {
+    const unavailable = (message) => new Response(JSON.stringify({ error: {
+        code: "platform.backend_unavailable", message, correlationId,
+    } }), { status: 503, headers: {
+        "content-type": "application/json; charset=utf-8",
+        "cache-control": "private, no-store",
+        "x-content-type-options": "nosniff",
+    } });
+    if (!backend || backend.provider !== "mysql") {
+        return unavailable("The selected platform backend is not initialized.");
+    }
+    try {
+        return await backend.withBackend(async (service) => {
+            const handleAuthentication = createLocalAuthenticationHttp(service.authentication, siteOrigin);
+            const response = await handleAuthentication(request, clientIdentity, correlationId);
+            if (response) {
+                return response;
+            }
+            const pathname = new URL(request.url).pathname.replace(/\/+$/, "");
+            if (!["/account/sign-in", "/account/mfa/challenge"].includes(pathname) ||
+                !["GET", "HEAD"].includes(request.method)) {
+                return unavailable("This platform route is awaiting local-backend migration. Please try again later.");
+            }
+            const state = await localBrowserRequestState(service.authentication, request);
+            return render(state);
+        });
+    } catch {
+        return unavailable("The platform service is temporarily unavailable. Please try again.");
+    }
+}

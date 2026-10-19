@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Added staged MySQL request routing for browser authentication, with explicit unavailable responses for unported routes.
+
 - Added verified pending-MFA challenge lookup and challenge-page support without treating incomplete MFA as signed-in.
 
 - Added a protected Windows backend-settings loader that excludes migration credentials and suppresses secret-bearing child errors.

@@ -10,6 +10,8 @@ declare namespace App {
         assurance: AssuranceState;
         supabase: SupabaseClient | null;
         user: User | null;
+        platformBackend?: import("./lib/platform-backend.mjs").PlatformBackend;
+        platformClientIdentity?: string;
         pendingMfaChallenge: {
             factors: Array<{ id: string; friendly_name: string | null }>;
             expiresAt: number;

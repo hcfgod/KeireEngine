@@ -3,6 +3,8 @@ import { createClient } from "@supabase/supabase-js";
 import { defineMiddleware } from "astro:middleware";
 import { getAssuranceState, isPasswordRecoveryRequestAllowed, isPasswordRecoverySession, passwordRecoveryPath } from "./lib/auth";
 import { runtimeEnvironment } from "./lib/runtime-env";
+import { selectPlatformBackend } from "./lib/platform-backend.mjs";
+import { handleLocalPlatformRequest } from "./lib/platform-request.mjs";
 
 const mutationMethods = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 
@@ -62,6 +64,35 @@ export const onRequest = defineMiddleware(async (context, next) => {
     };
     context.locals.user = null;
     context.locals.pendingMfaChallenge = null;
+    let provider;
+    try {
+        provider = selectPlatformBackend(runtimeEnvironment("KEIRE_PLATFORM_BACKEND"));
+    } catch {
+        return new Response("The platform backend configuration is invalid.", {
+            status: 503, headers: { "cache-control": "no-store" },
+        });
+    }
+    if (provider === "mysql" && !context.isPrerendered) {
+        context.locals.supabase = null;
+        return handleLocalPlatformRequest({
+            backend: context.locals.platformBackend,
+            request: context.request,
+            siteOrigin: runtimeEnvironment("PUBLIC_SITE_URL"),
+            clientIdentity: context.locals.platformClientIdentity,
+            correlationId: context.locals.correlationId,
+            render: async ({ session, pendingChallenge }) => {
+                // No Supabase user is synthesized from a local challenge or session.
+                context.locals.pendingMfaChallenge = pendingChallenge;
+                context.locals.assurance = {
+                    available: true,
+                    currentLevel: session ? `aal${session.assurance}` : null,
+                    nextLevel: session ? `aal${session.assurance}` : pendingChallenge ? "aal2" : null,
+                    currentAuthenticationMethods: session ? ["password", ...(session.assurance === 2 ? ["totp"] : [])] : [],
+                };
+                return next();
+            },
+        });
+    }
     if (context.request.method === "HEAD" && context.url.pathname.replace(/\/+$/, "") === "/health") {
         return new Response(null, {
             status: 204,

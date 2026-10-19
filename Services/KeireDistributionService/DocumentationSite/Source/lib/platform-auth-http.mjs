@@ -12,6 +12,17 @@ function cookieToken(request, name) {
     return tokenPattern.test(value) ? value : null;
 }
 
+export async function localBrowserRequestState(authentication, request) {
+    if (request.headers.has("authorization")) {
+        throw new Error("Browser authentication does not accept bearer credentials.");
+    }
+    const token = cookieToken(request, sessionCookie);
+    const challenge = cookieToken(request, challengeCookie);
+    const session = token ? await authentication.session(token) : null;
+    const pendingChallenge = !session && challenge ? await authentication.pendingChallenge(challenge) : null;
+    return { session, pendingChallenge };
+}
+
 function cookie(name, value, seconds) {
     return `${name}=${value}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${seconds}`;
 }

@@ -283,3 +283,12 @@ password changes and account availability before returning authenticator labels/
 authenticated user or factor secrets. Verification rechecks mutable state under locks. The MFA page accepts
 this explicit challenge data; middleware currently initializes it to null until MySQL request wiring is ready.
 Fifty real-MySQL synthetic checks now pass, including challenge lookup and status responses.
+
+### Staged request routing (not ready for production selection)
+
+Middleware now recognizes `KEIRE_PLATFORM_BACKEND=mysql`. Its host must inject the application-owned
+`platformBackend` and trusted `platformClientIdentity` through request locals. The current standalone host
+cannot do this yet; selecting MySQL without that owner returns 503. Supabase remains the default and live
+provider. The staged adapter handles browser authentication and sign-in/challenge rendering only. All other
+routes fail closed with a clear unavailable response; they never borrow Supabase identities or data. Complete
+all remaining route implementations and host acceptance before switching the public provider.
