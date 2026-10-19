@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Added staged MySQL asset-claim transactions with license verification, organization permissions, safe retries, and browser request validation.
+
 - Added staged MySQL browser library reads with personal and organization access checks, revocation filtering, and precise pagination.
 
 - Added staged MySQL publisher pages with bounded catalog pagination and corrected initial signed-in navigation on private local-backend pages.

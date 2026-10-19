@@ -4,7 +4,7 @@ const emailCookie = "__Host-keire-email-challenge";
 const enrollmentCookie = "__Host-keire-email-enrollment";
 const tokenPattern = /^[A-Za-z0-9_-]{43}$/;
 
-function cookieToken(request, name) {
+export function cookieToken(request, name) {
     const values = (request.headers.get("cookie") ?? "").split(";")
         .map((part) => part.trim()).filter((part) => part.startsWith(`${name}=`));
     if (values.length !== 1) {
@@ -29,7 +29,7 @@ function cookie(name, value, seconds) {
     return `${name}=${value}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${seconds}`;
 }
 
-async function readObject(request) {
+export async function readObject(request, maximumBytes = 8192) {
     if (request.headers.get("content-type")?.split(";")[0].trim().toLowerCase() !== "application/json") {
         throw new Error("invalid body");
     }
@@ -46,7 +46,7 @@ async function readObject(request) {
                 break;
             }
             length += result.value.byteLength;
-            if (length > 8192) {
+            if (length > maximumBytes) {
                 await reader.cancel();
                 throw new Error("invalid body");
             }

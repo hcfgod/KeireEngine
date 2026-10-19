@@ -1,6 +1,7 @@
 import { createLocalAuthenticationHttp, localBrowserRequestState } from "./platform-auth-http.mjs";
 import { localAccountOverview } from "./platform-account-view.mjs";
 import { localProductPage } from "./platform-product.mjs";
+import { handleLocalClaimRequest } from "./platform-claims-http.mjs";
 
 /** A staged provider adapter. Unported routes fail closed instead of using Supabase identities or data. */
 export async function handleLocalPlatformRequest({ backend, request, siteOrigin, clientIdentity, correlationId, render }) {
@@ -22,6 +23,9 @@ export async function handleLocalPlatformRequest({ backend, request, siteOrigin,
                 return response;
             }
             const pathname = new URL(request.url).pathname.replace(/\/+$/, "");
+            if (pathname === "/marketplace/v1/claims") {
+                return handleLocalClaimRequest(service.authentication, request, siteOrigin, clientIdentity, correlationId);
+            }
             if (pathname === "/marketplace/v1/library" && request.method === "GET") {
                 const state = await localBrowserRequestState(service.authentication, request);
                 const rendered = await render({ ...state, accountView: null,

@@ -180,6 +180,9 @@ try {
             checks += 2;
         }
         stage = "login";
+        assert.equal((await request("/marketplace/v1/claims/")).status, 405);
+        assert.equal((await request("/marketplace/v1/claims/", {})).status, 401);
+        checks += 2;
         assert.equal((await request("/marketplace/v1/library/")).status, 401);
         checks++;
         const login = await request("/account/session/", { email, password });
@@ -215,6 +218,10 @@ try {
         assert.match(accountHtml, /No claimed assets yet/);
         assert.match(accountHtml, /Send verification email/);
         const library = await request("/marketplace/v1/library/");
+        const invalidClaim = await request("/marketplace/v1/claims/", { ownership: "organization" });
+        assert.equal(invalidClaim.status, 400);
+        assert.match(invalidClaim.headers.get("cache-control"), /private, no-store/);
+        checks += 2;
         assert.equal(library.status, 200);
         assert.deepEqual((await library.json()).data, []);
         assert.match(library.headers.get("cache-control"), /private, no-store/);
