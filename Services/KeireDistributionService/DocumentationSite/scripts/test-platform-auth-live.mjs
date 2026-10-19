@@ -74,6 +74,17 @@ try {
     checks++;
     checks += 7;
 
+    stage = "transactional-session-authorization";
+    assert.equal(await auth.withSessionTransaction(authenticated.token, async (connection, session) => {
+        assert.equal(session.userId, userId);
+        const [rows] = await connection.execute("SELECT id FROM platform_accounts WHERE id = ?", [session.userId]);
+        return rows[0].id;
+    }), userId);
+    assert.equal(await auth.withSessionTransaction("invalid", () => {
+        throw new Error("An invalid session reached a protected mutation.");
+    }), null);
+    checks += 2;
+
     stage = "replay-protection";
     assert.equal((await auth.completeTotp(challenge.challengeToken, factorId, "005924")).state, "invalid_credentials");
     const replay = await auth.signIn(email, password, clientIdentity);
@@ -101,6 +112,10 @@ try {
     checks++;
     await auth.signOut(authenticated.token);
     assert.equal(await auth.session(authenticated.token), null);
+    assert.equal(await auth.withSessionTransaction(authenticated.token, () => {
+        throw new Error("A revoked session reached a protected mutation.");
+    }), null);
+    checks++;
     checks += 2;
 
     stage = "ban-enforcement";

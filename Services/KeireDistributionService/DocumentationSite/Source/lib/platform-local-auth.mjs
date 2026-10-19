@@ -247,22 +247,45 @@ export class LocalPasswordAuthentication {
     }
 
     async session(token) {
+        return this.#readSession(this.pool, token, false);
+    }
+
+    /** Mutations must use this connection so session revocation cannot race their commit. */
+    async withSessionTransaction(token, action) {
+        return platformTransaction(this.pool, async (connection) => {
+            const session = await this.#readSession(connection, token, true);
+            if (!session) {
+                return null;
+            }
+            return action(connection, session);
+        });
+    }
+
+    async #readSession(connection, token, lock) {
         const now = this.now();
         const hash = tokenDigest(token);
         if (!hash) {
             return null;
         }
-        const [sessions] = await this.pool.execute("SELECT * FROM platform_auth_sessions WHERE token_hash = ? AND expires_ms > ?", [hash, now]);
+        const lockingClause = lock ? " FOR UPDATE" : "";
+        const [sessions] = await connection.execute(
+            "SELECT * FROM platform_auth_sessions WHERE token_hash = ? AND expires_ms > ?" + lockingClause, [hash, now]);
         const session = sessions[0];
         if (!session) {
             return null;
         }
-        const [accounts] = await this.pool.execute("SELECT * FROM platform_accounts WHERE id = ?", [session.user_id]);
+        const [accounts] = await connection.execute(
+            "SELECT * FROM platform_accounts WHERE id = ?" + lockingClause, [session.user_id]);
         const account = accounts[0];
         if (!accountAvailable(account, now) || digest(account.password_hash ?? "") !== session.password_digest) {
             return null;
         }
-        const [factors] = await this.pool.execute("SELECT * FROM platform_mfa_factors WHERE user_id = ? AND status = 'verified'", [account.id]);
+        const [factors] = await connection.execute(
+            "SELECT * FROM platform_mfa_factors WHERE user_id = ? AND status = 'verified'" + lockingClause, [account.id]);
+        // A contended row lock may outlive the session; check time again before authorizing a mutation.
+        if (Number(session.expires_ms) <= this.now()) {
+            return null;
+        }
         const matchedFactor = factors.find((factor) => factor.id === session.factor_id);
         if (matchedFactor?.factor_type === "email") {
             const enrollment = openAccountRecord(matchedFactor.source_sealed, this.encryptionKey, `mfa:${matchedFactor.id}`);
