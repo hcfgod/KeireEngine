@@ -58,7 +58,7 @@ export async function createAuthenticationSchema(pool) {
     }
 }
 
-function accountAvailable(account, now) {
+export function accountAvailable(account, now) {
     if (!account || account.deleted_at || !account.email_confirmed_at) {
         return false;
     }

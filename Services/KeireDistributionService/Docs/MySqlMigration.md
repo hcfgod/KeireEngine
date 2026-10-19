@@ -387,3 +387,10 @@ Local session lookup now distinguishes verified email factors from authenticator
 AAL1, is bound to the enrolled email matching the current account email, and is rejected after factor revocation or
 an attempted AAL2 upgrade. Existing authenticator sessions retain AAL2. Five live MySQL fixture checks cover these
 boundaries. No enrollment or email-session issuance endpoint is exposed yet.
+
+The staged `LocalEmailAuthentication` enrollment service now verifies the current password and an authenticated
+session. Accounts with existing verified factors require an authenticator-backed AAL2 session. Issuance reserves
+send limits and persists the pending challenge atomically; delivery occurs after commit and only successful delivery
+enables consumption. Completion rechecks session/account/factors under locks and creates one encrypted email factor
+in the consumption transaction. It does not remove the authenticator. Live acceptance uses synthetic accounts and a
+local mail capture; no enrollment HTTP/UI route is enabled yet. Email sign-in issuance remains the next integration.
