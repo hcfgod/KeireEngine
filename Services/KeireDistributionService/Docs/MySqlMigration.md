@@ -277,3 +277,9 @@ trusted helper/config paths and private directory ACLs before wiring this into h
 
 The actual protected runtime load and TLS database connection passed without printing secret values.
 Supabase remains live; no host configuration or service identity has changed.
+
+Pending MFA display data is separate from `locals.user`: `pendingChallenge` checks expiry, attempts,
+password changes and account availability before returning authenticator labels/IDs. It never returns an
+authenticated user or factor secrets. Verification rechecks mutable state under locks. The MFA page accepts
+this explicit challenge data; middleware currently initializes it to null until MySQL request wiring is ready.
+Fifty real-MySQL synthetic checks now pass, including challenge lookup and status responses.

@@ -61,6 +61,7 @@ export const onRequest = defineMiddleware(async (context, next) => {
         currentAuthenticationMethods: [],
     };
     context.locals.user = null;
+    context.locals.pendingMfaChallenge = null;
     if (context.request.method === "HEAD" && context.url.pathname.replace(/\/+$/, "") === "/health") {
         return new Response(null, {
             status: 204,

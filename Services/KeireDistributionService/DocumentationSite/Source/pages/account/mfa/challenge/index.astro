@@ -2,11 +2,12 @@
 import PlatformLayout from "../../../../layouts/PlatformLayout.astro";
 import { safeLocalPath } from "../../../../lib/auth";
 export const prerender = false;
-if (!Astro.locals.user) return Astro.redirect(`/account/sign-in/?next=${encodeURIComponent(Astro.url.pathname + Astro.url.search)}`, 303);
+const pendingChallenge = Astro.locals.pendingMfaChallenge;
+if (!Astro.locals.user && !pendingChallenge) return Astro.redirect(`/account/sign-in/?next=${encodeURIComponent(Astro.url.pathname + Astro.url.search)}`, 303);
 const next = safeLocalPath(Astro.url.searchParams.get("next"));
 if (Astro.locals.assurance.currentLevel === "aal2") return Astro.redirect(next, 303);
-const result = await Astro.locals.supabase!.auth.mfa.listFactors();
-const factors = (result.data?.totp ?? []).filter((factor) => factor.status === "verified");
+const result = pendingChallenge ? null : await Astro.locals.supabase!.auth.mfa.listFactors();
+const factors = pendingChallenge?.factors ?? (result?.data?.totp ?? []).filter((factor) => factor.status === "verified");
 if (!factors.length) return Astro.redirect("/account/mfa/", 303);
 ---
 <PlatformLayout title="Verify your identity" description="Complete multi-factor verification for this protected Kéire session." robots="noindex,nofollow">

@@ -68,12 +68,14 @@ export function createLocalAuthenticationHttp(authentication, siteOrigin) {
         const sessionPath = location === "/account/session";
         const verifyPath = location === "/account/mfa/challenge/verify";
         const deletePath = location === "/account/session/delete";
-        if (!sessionPath && !verifyPath && !deletePath) {
+        const challengeStatusPath = location === "/account/mfa/challenge/status";
+        if (!sessionPath && !verifyPath && !deletePath && !challengeStatusPath) {
             return null;
         }
         const mutation = request.method === "POST";
-        if ((!mutation && !(sessionPath && request.method === "GET"))) {
-            headers.set("allow", sessionPath ? "GET, POST" : "POST");
+        if ((challengeStatusPath && request.method !== "GET") ||
+            (!mutation && !((sessionPath || challengeStatusPath) && request.method === "GET"))) {
+            headers.set("allow", challengeStatusPath ? "GET" : sessionPath ? "GET, POST" : "POST");
             return fail("request.method_not_allowed", "This method is not supported.", 405);
         }
         // Browser authentication is cookie-only; Hub bearer/OAuth uses a separate adapter.
@@ -87,6 +89,14 @@ export function createLocalAuthenticationHttp(authentication, siteOrigin) {
             return fail("account.service_unavailable", "Sign-in is temporarily unavailable. Try again.", 503);
         }
         try {
+            if (challengeStatusPath) {
+                const challenge = await authentication.pendingChallenge(cookieToken(request, challengeCookie));
+                if (!challenge) {
+                    headers.append("set-cookie", cookie(challengeCookie, "", 0));
+                    return fail("account.challenge_expired", "Sign in again to start a new verification challenge.", 401);
+                }
+                return respond({ data: challenge });
+            }
             const token = cookieToken(request, sessionCookie);
             if (!mutation) {
                 const session = token ? await authentication.session(token) : null;

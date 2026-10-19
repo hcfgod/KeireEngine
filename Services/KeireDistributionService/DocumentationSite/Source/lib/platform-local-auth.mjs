@@ -181,6 +181,33 @@ export class LocalPasswordAuthentication {
         });
     }
 
+    async pendingChallenge(challengeToken) {
+        const now = this.now();
+        const hash = tokenDigest(challengeToken);
+        if (!hash) {
+            return null;
+        }
+        const [challenges] = await this.pool.execute(`SELECT user_id,password_digest,expires_ms
+            FROM platform_auth_challenges WHERE token_hash = ? AND used = FALSE AND expires_ms > ? AND attempts < ?`,
+        [hash, now, maximumChallengeAttempts]);
+        const challenge = challenges[0];
+        if (!challenge) {
+            return null;
+        }
+        const [accounts] = await this.pool.execute("SELECT * FROM platform_accounts WHERE id = ?", [challenge.user_id]);
+        const account = accounts[0];
+        if (!accountAvailable(account, now) || digest(account.password_hash ?? "") !== challenge.password_digest) {
+            return null;
+        }
+        const [factors] = await this.pool.execute(`SELECT id,factor_type,friendly_name FROM platform_mfa_factors
+            WHERE user_id = ? AND status = 'verified' ORDER BY id`, [account.id]);
+        if (factors.length === 0 || factors.some((factor) => factor.factor_type !== "totp")) {
+            return null;
+        }
+        // Display metadata only. Completion rechecks all mutable state under transaction locks.
+        return { factors, expiresAt: Number(challenge.expires_ms) };
+    }
+
     async completeTotp(challengeToken, factorId, code) {
         const now = this.now();
         const challengeHash = tokenDigest(challengeToken);

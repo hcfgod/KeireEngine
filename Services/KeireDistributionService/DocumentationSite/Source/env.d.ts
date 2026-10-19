@@ -10,6 +10,10 @@ declare namespace App {
         assurance: AssuranceState;
         supabase: SupabaseClient | null;
         user: User | null;
+        pendingMfaChallenge: {
+            factors: Array<{ id: string; friendly_name: string | null }>;
+            expiresAt: number;
+        } | null;
     }
 }
 

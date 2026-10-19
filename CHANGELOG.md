@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Added verified pending-MFA challenge lookup and challenge-page support without treating incomplete MFA as signed-in.
+
 - Added a protected Windows backend-settings loader that excludes migration credentials and suppresses secret-bearing child errors.
 
 - Added application-owned backend selection and lifecycle with shared initialization, request draining, and no authentication fallback.

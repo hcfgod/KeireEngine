@@ -51,11 +51,17 @@ try {
     const challenge = await auth.signIn(email, password, clientIdentity);
     assert.equal(challenge.state, "mfa_required");
     assert.equal(await auth.session(challenge.challengeToken), null);
+    const pending = await auth.pendingChallenge(challenge.challengeToken);
+    assert.equal(pending.factors[0].id, factorId);
+    assert.equal(Object.hasOwn(pending, "userId"), false);
+    checks += 2;
     assert.equal((await auth.completeTotp(challenge.challengeToken, randomUUID(), "005924")).state, "invalid_credentials");
     const authenticated = await auth.completeTotp(challenge.challengeToken, factorId, "005924");
     assert.equal(authenticated.state, "authenticated");
     assert.equal(authenticated.assurance, 2);
     assert.equal((await auth.session(authenticated.token)).userId, userId);
+    assert.equal(await auth.pendingChallenge(challenge.challengeToken), null);
+    checks++;
     checks += 7;
 
     stage = "replay-protection";
@@ -73,12 +79,16 @@ try {
         [createHash("sha256").update(exhausted.challengeToken).digest("hex")]);
     assert.equal(attemptRows[0].attempts, 5);
     assert.equal((await auth.completeTotp(exhausted.challengeToken, factorId, "005924")).state, "invalid_credentials");
+    assert.equal(await auth.pendingChallenge(exhausted.challengeToken), null);
+    checks++;
     checks += 7;
 
     stage = "expiration-and-revocation";
     const expiring = await auth.signIn(email, password, clientIdentity);
     now += 5 * 60 * 1000;
     assert.equal((await auth.completeTotp(expiring.challengeToken, factorId, "005924")).state, "invalid_credentials");
+    assert.equal(await auth.pendingChallenge(expiring.challengeToken), null);
+    checks++;
     await auth.signOut(authenticated.token);
     assert.equal(await auth.session(authenticated.token), null);
     checks += 2;
@@ -147,6 +157,12 @@ try {
     assert.equal(loginBody.data.mfaRequired, true);
     assert.equal(loginBody.data.factors[0].id, factorId);
     const challengeCookie = cookieValue(login, "__Host-keire-challenge");
+    const statusResponse = await handle(new Request(origin + "/account/mfa/challenge/status", {
+        headers: { cookie: challengeCookie },
+    }), clientIdentity, "qa");
+    assert.equal(statusResponse.status, 200);
+    assert.equal((await statusResponse.json()).data.factors[0].id, factorId);
+    checks += 2;
     const beforeMfa = await handle(new Request(origin + "/account/session", {
         headers: { cookie: challengeCookie },
     }), clientIdentity, "qa");

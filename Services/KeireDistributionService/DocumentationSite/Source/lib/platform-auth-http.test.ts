@@ -9,6 +9,7 @@ function fixture() {
         session: vi.fn().mockResolvedValue({ userId: "user", assurance: 2 }),
         completeTotp: vi.fn().mockResolvedValue({ state: "invalid_credentials" }),
         signOut: vi.fn().mockResolvedValue(undefined),
+        pendingChallenge: vi.fn().mockResolvedValue(null),
     };
     return { service, handle: createLocalAuthenticationHttp(service, origin) };
 }
@@ -18,6 +19,25 @@ function post(path = "/account/session", body = '{}', extra = {}) {
 }
 
 describe("local authentication HTTP boundary", () => {
+    it("expires an unavailable challenge without producing an account session", async () => {
+        const { handle, service } = fixture();
+        const response = await handle(new Request(origin + "/account/mfa/challenge/status", {
+            headers: { cookie: `__Host-keire-challenge=${token}` },
+        }), "client", "id");
+        expect(response.status).toBe(401);
+        expect(service.pendingChallenge).toHaveBeenCalledWith(token);
+        expect(service.session).not.toHaveBeenCalled();
+        expect(response.headers.get("set-cookie")).toContain("Max-Age=0");
+    });
+
+    it("does not accept mutations on the challenge status endpoint", async () => {
+        const { handle, service } = fixture();
+        const response = await handle(post("/account/mfa/challenge/status"), "client", "id");
+        expect(response.status).toBe(405);
+        expect(response.headers.get("allow")).toBe("GET");
+        expect(service.pendingChallenge).not.toHaveBeenCalled();
+        expect(service.signIn).not.toHaveBeenCalled();
+    });
     it("sets secure cookies without exposing session tokens in JSON", async () => {
         const { handle } = fixture();
         const response = await handle(post(), "trusted-client", "correlation");
