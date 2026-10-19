@@ -3,6 +3,8 @@ import { fork } from "node:child_process";
 import { createHash, createHmac, randomBytes, randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import bcrypt from "bcryptjs";
+import jsQR from "jsqr";
+import sharp from "sharp";
 import { createPlatformPool } from "../Source/lib/platform-mysql.mjs";
 import { sealAccountRecord } from "../Source/lib/platform-account-import.mjs";
 import { loadWindowsPlatformSecrets } from "../Source/lib/platform-secrets.mjs";
@@ -251,6 +253,22 @@ try {
         assert.match(setup.qrCode, /^data:image\/png;base64,/);
         assert.equal(Buffer.from(setup.qrCode.split(",")[1], "base64").subarray(0, 8).toString("hex"), "89504e470d0a1a0a");
         checks += 2;
+        const qrPixels = await sharp(Buffer.from(setup.qrCode.split(",")[1], "base64"))
+            .ensureAlpha()
+            .raw()
+            .toBuffer({ resolveWithObject: true });
+        const decodedQr = jsQR(new Uint8ClampedArray(qrPixels.data), qrPixels.info.width, qrPixels.info.height);
+        assert.ok(decodedQr, "The authenticator QR image must be readable");
+        const authenticatorUri = new URL(decodedQr.data);
+        assert.equal(authenticatorUri.protocol, "otpauth:");
+        assert.equal(authenticatorUri.hostname, "totp");
+        assert.equal(decodeURIComponent(authenticatorUri.pathname.slice(1)), `Kéire Engine:${email}`);
+        assert.equal(authenticatorUri.searchParams.get("secret"), setup.secret);
+        assert.equal(authenticatorUri.searchParams.get("issuer"), "Kéire Engine");
+        assert.equal(authenticatorUri.searchParams.get("algorithm"), "SHA1");
+        assert.equal(authenticatorUri.searchParams.get("digits"), "6");
+        assert.equal(authenticatorUri.searchParams.get("period"), "30");
+        checks += 9;
         assert.equal((await request("/account/mfa/verify/", { factorId: setup.factorId, code: "bad" })).status, 400);
         const cancellation = await request("/account/mfa/remove/", { factorId: setup.factorId });
         assert.equal(cancellation.status, 200);
