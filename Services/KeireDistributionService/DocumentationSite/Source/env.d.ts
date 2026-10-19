@@ -20,6 +20,7 @@ declare namespace App {
         localProductView?: Awaited<ReturnType<typeof import("./lib/platform-product.mjs").localProductPage>>;
         localCatalogPool?: Awaited<ReturnType<typeof import("./lib/platform-mysql.mjs").createPlatformPool>>;
         localAccountView?: Awaited<ReturnType<typeof import("./lib/platform-account-view.mjs").localAccountOverview>> | null;
+        localRecovery?: boolean;
         pendingMfaChallenge: {
             factors: Array<{ id: string; friendly_name: string | null; factor_type?: string }>;
             expiresAt: number;

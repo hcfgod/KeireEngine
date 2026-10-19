@@ -22,6 +22,7 @@ let fixtureCreated = false;
 let stage = "settings";
 let checks = 0;
 const capturedMail = [];
+const capturedRecovery = [];
 const interactive = process.argv.includes("--interactive");
 try {
     secrets = await loadWindowsPlatformSecrets({
@@ -50,6 +51,12 @@ try {
     child.stdout.resume();
     child.stderr.resume();
     child.on("message", (message) => {
+        if (message?.type === "qa-recovery-email" && message.message?.recipient === email) {
+            capturedRecovery.push(message.message);
+            if (interactive) {
+                console.log(JSON.stringify({ syntheticRecoveryToken: message.message.token }));
+            }
+        }
         if (message?.type === "qa-verification-email" && message.message?.recipient === email) {
             capturedMail.push(message.message);
             if (interactive) {
@@ -74,9 +81,9 @@ try {
     });
     const base = process.env.KEIRE_QA_TLS_THUMBPRINT ? origin : `http://127.0.0.1:${process.env.KEIRE_QA_PORT}`;
     let cookies = new Map();
-    async function request(route, body, extraHeaders = {}) {
+    async function request(route, body, extraHeaders = {}, method = body === undefined ? "GET" : "POST") {
         const response = await fetch(base + route, {
-            method: body === undefined ? "GET" : "POST", redirect: "manual", signal: AbortSignal.timeout(10000),
+            method, redirect: "manual", signal: AbortSignal.timeout(10000),
             headers: { origin, "content-type": "application/json", cookie: [...cookies].map(([key, value]) => `${key}=${value}`).join("; "), ...extraHeaders },
             body: body === undefined ? undefined : JSON.stringify(body),
         });
@@ -314,6 +321,59 @@ try {
         cookies = savedCookies;
         assert.equal((await (await request("/account/session/")).json()).data.signedIn, false);
         checks += 3;
+
+        stage = "password-recovery-http";
+        const recoveryPage = await request("/account/recover/");
+        assert.equal(recoveryPage.status, 200);
+        assert.equal(recoveryPage.headers.get("referrer-policy"), "no-referrer");
+        const passwordPage = await request("/account/update-password/");
+        assert.equal(passwordPage.status, 200);
+        assert.match(await passwordPage.text(), /Confirm new password/);
+        stage = "password-recovery-enqueue";
+        for (const limit of emailSendLimits(userId, clientIdentity)) {
+            if (limit.windowMs === 60000) {
+                await pool.execute("UPDATE platform_auth_limits SET window_start=? WHERE subject_hash=?", [Date.now() - 60000, limit.hash]);
+            }
+        }
+        assert.equal((await request("/account/recovery/", { email })).status, 202);
+        const deliveryDeadline = Date.now() + 10000;
+        let recovery;
+        while (Date.now() < deliveryDeadline) {
+            recovery = capturedRecovery.at(-1);
+            if (recovery) {
+                const [rows] = await pool.execute("SELECT delivery_state FROM platform_recovery_challenges WHERE token_hash=?",
+                    [createHash("sha256").update(recovery.token).digest("hex")]);
+                if (rows[0]?.delivery_state === "sent") break;
+            }
+            await new Promise((resolve) => setTimeout(resolve, 100));
+        }
+        assert.ok(recovery);
+        stage = "password-recovery-exchange";
+        const exchange = await request("/account/recovery/session/", { token: recovery.token });
+        stage = `password-recovery-exchange-status-${exchange.status}`;
+        assert.equal(exchange.status, 200);
+        stage = "password-recovery-exchange-factor";
+        assert.equal((await exchange.json()).data.factors[0].id, factorId);
+        stage = "password-recovery-exchange-session";
+        assert.equal((await (await request("/account/session/")).json()).data.signedIn, false);
+        const nextPassword = `Recovered-${randomUUID()}`;
+        stage = "password-recovery-replace";
+        assert.equal((await request("/account/password/", { password: nextPassword }, {}, "PATCH")).status, 400);
+        const resetCounter = Buffer.alloc(8);
+        resetCounter.writeBigUInt64BE(BigInt(Math.floor(Date.now() / 30000) + 1));
+        const resetDigest = createHmac("sha1", Buffer.from("12345678901234567890")).update(resetCounter).digest();
+        const resetOffset = resetDigest[resetDigest.length - 1] & 15;
+        const resetCode = String((resetDigest.readUInt32BE(resetOffset) & 0x7fffffff) % 1000000).padStart(6, "0");
+        const reset = await request("/account/password/", { password: nextPassword, factorId, code: resetCode }, {}, "PATCH");
+        assert.equal(reset.status, 200);
+        assert.deepEqual((await reset.json()).data, { updated: true, signedOut: true });
+        stage = "password-recovery-new-login";
+        assert.equal((await request("/account/recovery/session/", { token: recovery.token })).status, 400);
+        assert.equal((await request("/account/session/", { email, password })).status, 401);
+        const newLogin = await request("/account/session/", { email, password: nextPassword });
+        assert.equal(newLogin.status, 200);
+        assert.equal((await newLogin.json()).data.mfaRequired, true);
+        checks += 15;
     }
 } catch {
     console.error(JSON.stringify({ status: "failed", stage, checks }));
@@ -340,6 +400,19 @@ try {
     }
     try {
         if (fixtureCreated) {
+            await pool.execute("DELETE FROM platform_audit_events WHERE actor_user_id=? AND action='account.password_recovered'", [userId]);
+            await pool.execute("DELETE FROM platform_recovery_challenges WHERE user_id=?", [userId]);
+            for (const recovery of capturedRecovery) {
+                await pool.execute("DELETE FROM platform_recovery_delivery WHERE id=?", [recovery.deliveryId]);
+                const hash = createHash("sha256").update(recovery.token).digest("hex");
+                for (const subject of [`email:recovery:${hash}`, `pair:recovery-complete:${clientIdentity}\0recovery:${hash}`]) {
+                    await pool.execute("DELETE FROM platform_auth_limits WHERE subject_hash=?", [createHash("sha256").update(subject).digest("hex")]);
+                }
+            }
+            for (const subject of [`email:recovery-request:${email}`, `client:recovery-request:${clientIdentity}`,
+                `pair:recovery-request:${clientIdentity}\0recovery-request:${email}`, `client:recovery-complete:${clientIdentity}`]) {
+                await pool.execute("DELETE FROM platform_auth_limits WHERE subject_hash=?", [createHash("sha256").update(subject).digest("hex")]);
+            }
             await pool.execute("DELETE FROM platform_audit_events WHERE actor_user_id=? AND action='marketplace.product_claimed'", [userId]);
             await pool.execute("DELETE FROM marketplace_entitlements WHERE user_id=?", [userId]);
             await pool.execute(`DELETE item FROM marketplace_order_items item

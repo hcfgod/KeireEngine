@@ -81,7 +81,7 @@ export async function processRecoveryDelivery(auth, mailer, jobId = null) {
                 return null;
             }
             const token = await insertRecoveryChallenge(connection, account, factors, issuedAt);
-            return { token, recipient: account.email };
+            return { token, recipient: account.email, deliveryId: job.id };
         });
         if (delivery) {
             await mailer.sendRecovery(delivery);

@@ -28,6 +28,14 @@ export async function handleLocalPlatformRequest({ backend, request, siteOrigin,
                 return response;
             }
             const pathname = new URL(request.url).pathname.replace(/\/+$/, "");
+            if (["/account/recover", "/account/update-password"].includes(pathname) && ["GET", "HEAD"].includes(request.method)) {
+                const rendered = await render({ session: null, pendingChallenge: null, accountView: null,
+                    localRecovery: true });
+                rendered.headers.set("cache-control", "private, no-store");
+                rendered.headers.set("referrer-policy", "no-referrer");
+                rendered.headers.set("vary", "Cookie, Authorization");
+                return rendered;
+            }
             if (pathname === "/marketplace/v1/claims") {
                 return handleLocalClaimRequest(service.authentication, request, siteOrigin, clientIdentity, correlationId);
             }
