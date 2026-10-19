@@ -10,7 +10,7 @@ export async function localAccountOverview(pool, session) {
     if (accounts.length !== 1) {
         throw new Error("The local account is unavailable.");
     }
-    const [[profiles], [entitlements], [organizations], [sessions], [identities], [staff]] = await Promise.all([
+    const [[profiles], [entitlements], [organizations], [sessions], [identities], [staff], [factors]] = await Promise.all([
         pool.execute("SELECT display_name,handle,avatar_url,biography,locale FROM profiles WHERE user_id=?", [userId]),
         pool.execute(`SELECT e.id,e.product_id,e.organization_id,e.granted_at,p.display_name
             FROM marketplace_entitlements e JOIN marketplace_products p ON p.id=e.product_id
@@ -26,6 +26,7 @@ export async function localAccountOverview(pool, session) {
         pool.execute(`SELECT provider,JSON_UNQUOTE(JSON_EXTRACT(identity_data,'$.email')) AS email
             FROM platform_identities WHERE user_id=? ORDER BY provider,id`, [userId]),
         pool.execute("SELECT role FROM platform_staff_members WHERE user_id=? AND active=TRUE AND revoked_at IS NULL", [userId]),
+        pool.execute("SELECT factor_type FROM platform_mfa_factors WHERE user_id=? AND status='verified'", [userId]),
     ]);
     const utc = (value) => value === null ? null : value.replace(" ", "T") + "Z";
     return {
@@ -40,6 +41,8 @@ export async function localAccountOverview(pool, session) {
         sessions: sessions.map((item) => ({ ...item, created_at: utc(item.created_at),
             last_used_at: utc(item.last_used_at), revoked_at: utc(item.revoked_at) })),
         staffRole: staff[0]?.role ?? null,
+        hasVerifiedFactors: factors.length > 0,
+        emailVerificationEnabled: factors.some((factor) => factor.factor_type === "email"),
         // Organization mutations are not ported yet; do not show a form that cannot succeed.
         organizationCreationEnabled: false,
     };

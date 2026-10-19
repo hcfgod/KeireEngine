@@ -16,7 +16,7 @@ describe("staged local platform request routing", () => {
     it("renders sign-in anonymously without inventing an authenticated user", async () => {
         const { options } = fixture();
         expect(await (await handleLocalPlatformRequest(options)).text()).toBe("rendered");
-        expect(options.render).toHaveBeenCalledWith({ session: null, pendingChallenge: null, accountView: null });
+        expect(options.render).toHaveBeenCalledWith({ session: null, pendingChallenge: null, accountView: null, emailAvailable: false });
     });
 
     it("passes pending challenge metadata separately from authentication", async () => {
@@ -24,7 +24,7 @@ describe("staged local platform request routing", () => {
         options.request = new Request(options.request.url, { headers: { cookie: `__Host-keire-challenge=${"a".repeat(43)}` } });
         expect((await handleLocalPlatformRequest(options)).status).toBe(200);
         expect(options.render).toHaveBeenCalledWith({ session: null,
-            pendingChallenge: { factors: [{ id: "factor", friendly_name: "Phone" }], expiresAt: 1000 }, accountView: null });
+            pendingChallenge: { factors: [{ id: "factor", friendly_name: "Phone" }], expiresAt: 1000 }, accountView: null, emailAvailable: false });
     });
 
     it("handles authentication API responses without rendering a page", async () => {

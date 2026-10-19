@@ -1,0 +1,81 @@
+---
+const { enabled, requiresAuthenticator } = Astro.props;
+---
+<section class="notice-panel" aria-labelledby="email-verification-heading">
+    <h3 id="email-verification-heading">Email sign-in codes</h3>
+    {enabled ? <p>Email verification is enabled. You can choose email instead of your authenticator when signing in.</p> :
+        requiresAuthenticator ? <p>Sign out and sign in using your authenticator app before adding email verification.</p> :
+        <form class="form-stack" data-email-enrollment>
+            <p>Add codes sent to your account email as another way to sign in. Your authenticator stays available.</p>
+            <label class="field"><span>Current password</span><input type="password" name="password" autocomplete="current-password" required /></label>
+            <button class="button button--secondary" type="button" data-email-send>Send verification email</button>
+            <div data-email-confirm hidden>
+                <label class="field"><span>Eight-digit email code</span><input name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{8}" maxlength="8" /></label>
+                <button class="button" type="submit" data-email-verify>Enable email verification</button>
+                <p class="fine-print">Codes expire after five minutes. Check your spam folder if the email has not arrived.</p>
+            </div>
+            <p class="form-message" role="status" aria-live="polite" data-email-message></p>
+        </form>}
+    <p class="fine-print">Sensitive publishing and administration actions may still require your authenticator.</p>
+</section>
+<script>
+    const form = document.querySelector<HTMLFormElement>("[data-email-enrollment]");
+    if (form) {
+        const send = form.querySelector<HTMLButtonElement>("[data-email-send]")!;
+        const verify = form.querySelector<HTMLButtonElement>("[data-email-verify]")!;
+        const password = form.querySelector<HTMLInputElement>("[name=password]")!;
+        const code = form.querySelector<HTMLInputElement>("[name=code]")!;
+        const confirm = form.querySelector<HTMLElement>("[data-email-confirm]")!;
+        const message = form.querySelector<HTMLElement>("[data-email-message]")!;
+        let busy = false;
+        let nextSend = 0;
+        async function submit(verification: boolean) {
+            if (busy || (!verification && Date.now() < nextSend)) return;
+            if (!verification && !password.reportValidity()) return;
+            if (verification && !/^[0-9]{8}$/.test(code.value)) {
+                message.textContent = "Enter the eight-digit code from your email.";
+                return;
+            }
+            busy = true;
+            send.disabled = true;
+            verify.disabled = true;
+            message.textContent = verification ? "Verifying…" : "Sending verification email…";
+            message.dataset.kind = "";
+            try {
+                const response = await fetch(`/account/email/enroll/${verification ? "verify/" : ""}`, {
+                    method: "POST", headers: { "content-type": "application/json" },
+                    body: JSON.stringify(verification ? { code: code.value } : { password: password.value }),
+                });
+                const result = await response.json();
+                if (response.status === 429) nextSend = Date.now() + Math.min(900, Number(response.headers.get("retry-after")) || 60) * 1000;
+                if (!response.ok) throw new Error(result.error?.message ?? "Email verification failed. Please try again.");
+                message.dataset.kind = "success";
+                if (verification) {
+                    password.value = "";
+                    code.value = "";
+                    message.textContent = "Email verification enabled. Refreshing…";
+                    location.reload();
+                } else {
+                    nextSend = Date.now() + 60000;
+                    confirm.hidden = false;
+                    code.focus();
+                    message.textContent = "Email sent. Enter the eight-digit code to finish enabling email verification.";
+                }
+            } catch (error) {
+                message.dataset.kind = "error";
+                message.textContent = error instanceof Error ? error.message : "The request failed. Please try again.";
+            } finally {
+                busy = false;
+                verify.disabled = false;
+                send.disabled = Date.now() < nextSend;
+            }
+        }
+        form.addEventListener("submit", (event) => { event.preventDefault(); void submit(!confirm.hidden); });
+        send.addEventListener("click", () => void submit(false));
+        window.setInterval(() => {
+            const seconds = Math.max(0, Math.ceil((nextSend - Date.now()) / 1000));
+            send.disabled = busy || seconds > 0;
+            send.textContent = seconds ? `Resend in ${seconds}s` : "Send verification email";
+        }, 1000);
+    }
+</script>

@@ -415,3 +415,9 @@ host accepts `KEIRE_QA_MAIL_MODE=disabled` (default), `capture` (requires privat
 (protected local credentials). Capture mode never contacts SMTP. Real rendered-site HTTP acceptance now covers
 enrollment, resend cooldown, password login, email verification, AAL1 session and logout using a synthetic account.
 Browser controls and HTTPS browser/inbox delivery acceptance remain separate gates before live activation.
+
+The staged account page now exposes email enrollment when the local mailer is available, shows an enabled state,
+and explains when authenticator sign-in is needed before enrollment. The challenge page offers enrolled methods,
+uses six digits for authenticator codes and eight for email, and provides explicit Send/Resend controls, countdowns,
+delivery feedback and network-error handling. Real HTTP acceptance verifies these rendered controls and completes
+the backend workflow. Interactive browser behavior and real inbox delivery are not yet accepted.

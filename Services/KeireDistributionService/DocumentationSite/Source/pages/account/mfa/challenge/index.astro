@@ -11,14 +11,89 @@ const factors = pendingChallenge?.factors ?? (result?.data?.totp ?? []).filter((
 if (!factors.length) return Astro.redirect("/account/mfa/", 303);
 ---
 <PlatformLayout title="Verify your identity" description="Complete multi-factor verification for this protected Kéire session." robots="noindex,nofollow">
-    <section class="platform-shell account-shell"><div><p class="eyebrow">Protected operation</p><h1 class="display-title">Verify it is <span>really you.</span></h1><p class="lead">Enter the current code from one of your enrolled authenticator apps. This upgrades only the active browser session to AAL2.</p></div><div class="auth-card"><h2>Authenticator challenge</h2><form class="form-stack" data-challenge data-next={next}><label class="field"><span>Authenticator</span><select name="factorId" required>{factors.map((factor) => <option value={factor.id}>{factor.friendly_name ?? "Authenticator app"}</option>)}</select></label><label class="field"><span>Six-digit code</span><input name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" autofocus required /></label><button class="button" type="submit">Verify session</button><p class="form-message" aria-live="polite" data-challenge-message></p></form><p><a href="/account/mfa/">Manage authenticators</a></p></div></section>
+    <section class="platform-shell account-shell">
+        <div><p class="eyebrow">Account verification</p><h1 class="display-title">Verify it is <span>really you.</span></h1>
+            <p class="lead">Choose an enrolled method to finish signing in. Sensitive publishing and administration actions may require your authenticator app.</p>
+        </div>
+        <div class="auth-card"><h2>Verify your sign-in</h2>
+            <form class="form-stack" data-challenge data-next={next}>
+                <label class="field"><span>Verification method</span><select name="factorId" required>
+                    {factors.map((factor) => <option value={factor.id} data-method={factor.factor_type ?? "totp"}
+                        disabled={factor.factor_type === "email" && !Astro.locals.localEmailAvailable}>
+                        {factor.friendly_name ?? (factor.factor_type === "email" ? "Email verification" : "Authenticator app")}
+                    </option>)}
+                </select></label>
+                <button class="button button--secondary" type="button" data-send-email hidden>Send email code</button>
+                <label class="field"><span data-code-label>Six-digit authenticator code</span>
+                    <input name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" autofocus required />
+                </label>
+                <button class="button" type="submit" data-verify>Verify and continue</button>
+                <p class="form-message" role="status" aria-live="polite" data-challenge-message></p>
+                <p class="fine-print" data-email-help hidden>Email codes expire after five minutes. Check your spam folder if needed.</p>
+            </form>
+            <p><a href="/account/sign-in/">Start sign-in again</a></p>
+        </div>
+    </section>
 </PlatformLayout>
 <script>
-    document.querySelector("[data-challenge]")?.addEventListener("submit", async (event) => {
-        event.preventDefault(); const form = event.currentTarget; if (!(form instanceof HTMLFormElement)) return;
-        const message = form.querySelector("[data-challenge-message]"); const values = new FormData(form);
-        const response = await fetch("/account/mfa/challenge/verify/", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ factorId: values.get("factorId"), code: values.get("code") }) });
-        const result = await response.json(); if (message instanceof HTMLElement) { message.dataset.kind = response.ok ? "success" : "error"; message.textContent = response.ok ? "Verified. Continuing…" : result.error?.message ?? "Verification failed."; }
-        if (response.ok) location.href = form.dataset.next || "/account/";
-    });
+    const form = document.querySelector<HTMLFormElement>("[data-challenge]");
+    if (form) {
+        const method = form.querySelector<HTMLSelectElement>("[name=factorId]")!;
+        const code = form.querySelector<HTMLInputElement>("[name=code]")!;
+        const send = form.querySelector<HTMLButtonElement>("[data-send-email]")!;
+        const verify = form.querySelector<HTMLButtonElement>("[data-verify]")!;
+        const message = form.querySelector<HTMLElement>("[data-challenge-message]")!;
+        let busy = false;
+        let nextSend = 0;
+        const isEmail = () => method.selectedOptions[0]?.dataset.method === "email";
+        function refresh() {
+            const seconds = Math.max(0, Math.ceil((nextSend - Date.now()) / 1000));
+            send.hidden = !isEmail();
+            send.disabled = busy || seconds > 0;
+            send.textContent = seconds ? `Resend in ${seconds}s` : "Send email code";
+            verify.disabled = busy || !method.value;
+            method.disabled = busy;
+            code.maxLength = isEmail() ? 8 : 6;
+            code.pattern = isEmail() ? "[0-9]{8}" : "[0-9]{6}";
+            form!.querySelector<HTMLElement>("[data-code-label]")!.textContent = isEmail()
+                ? "Eight-digit email code" : "Six-digit authenticator code";
+            form!.querySelector<HTMLElement>("[data-email-help]")!.hidden = !isEmail();
+        }
+        async function submit(sendCode: boolean) {
+            if (busy || (sendCode && Date.now() < nextSend)) return;
+            busy = true;
+            refresh();
+            message.dataset.kind = "";
+            message.textContent = sendCode ? "Sending email…" : "Verifying…";
+            try {
+                const route = sendCode ? "/account/email/challenge/" : isEmail()
+                    ? "/account/email/challenge/verify/" : "/account/mfa/challenge/verify/";
+                const response = await fetch(route, { method: "POST", headers: { "content-type": "application/json" },
+                    body: JSON.stringify({ factorId: method.value, ...(sendCode ? {} : { code: code.value }) }) });
+                const result = await response.json();
+                if (response.status === 429) nextSend = Date.now() + Math.min(900, Number(response.headers.get("retry-after")) || 60) * 1000;
+                if (!response.ok) throw new Error(result.error?.message ?? "Verification failed. Please try again.");
+                message.dataset.kind = "success";
+                if (sendCode) {
+                    nextSend = Date.now() + 60000;
+                    message.textContent = "Email sent. Enter the eight-digit code to continue.";
+                    code.focus();
+                } else {
+                    message.textContent = "Verified. Continuing…";
+                    location.href = form!.dataset.next || "/account/";
+                }
+            } catch (error) {
+                message.dataset.kind = "error";
+                message.textContent = error instanceof Error ? error.message : "The request failed. Please try again.";
+            } finally {
+                busy = false;
+                refresh();
+            }
+        }
+        method.addEventListener("change", () => { code.value = ""; message.textContent = ""; refresh(); });
+        send.addEventListener("click", () => void submit(true));
+        form.addEventListener("submit", (event) => { event.preventDefault(); void submit(false); });
+        window.setInterval(refresh, 1000);
+        refresh();
+    }
 </script>

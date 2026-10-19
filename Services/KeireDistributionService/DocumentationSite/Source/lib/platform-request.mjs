@@ -31,7 +31,7 @@ export async function handleLocalPlatformRequest({ backend, request, siteOrigin,
             const state = await localBrowserRequestState(service.authentication, request);
             const accountView = pathname === "/account" && state.session
                 ? await localAccountOverview(service.pool, state.session) : null;
-            const rendered = await render({ ...state, accountView });
+            const rendered = await render({ ...state, accountView, emailAvailable: Boolean(service.emailAuthentication) });
             rendered.headers.set("cache-control", "private, no-store");
             rendered.headers.set("vary", "Cookie, Authorization");
             rendered.headers.set("x-content-type-options", "nosniff");

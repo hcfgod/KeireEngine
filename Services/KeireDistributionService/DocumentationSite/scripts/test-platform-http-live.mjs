@@ -136,6 +136,8 @@ try {
     const accountHtml = await accountPage.text();
     assert.ok(accountHtml.includes(email));
     assert.match(accountHtml, /No claimed assets yet/);
+    assert.match(accountHtml, /Send verification email/);
+    checks++;
     checks += 4;
 
     stage = "email-enrollment";
@@ -153,6 +155,12 @@ try {
     assert.equal(emailLogin.status, 200);
     const emailFactor = emailLoginBody.data.factors.find((factor) => factor.factor_type === "email");
     assert.ok(emailFactor);
+    const emailChallengePage = await request("/account/mfa/challenge/");
+    assert.equal(emailChallengePage.status, 200);
+    const emailChallengeHtml = await emailChallengePage.text();
+    assert.match(emailChallengeHtml, /Send email code/);
+    assert.match(emailChallengeHtml, /data-method="email"/);
+    checks += 3;
     const cooldown = await request("/account/email/challenge/", { factorId: emailFactor.id });
     assert.equal(cooldown.status, 429);
     await cooldown.arrayBuffer();
