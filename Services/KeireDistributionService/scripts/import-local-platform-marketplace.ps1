@@ -4,6 +4,7 @@ param
     [Parameter(Mandatory)] [string] $BackupDirectory,
     [Parameter(Mandatory)] [string] $SettingsDirectory,
     [Parameter(Mandatory)] [string] $ResultPath,
+    [ValidateSet('marketplace-core', 'marketplace-access')] [string] $Section = 'marketplace-core',
     [switch] $CreateSchema,
     [switch] $VerifyOnly,
     [switch] $AcceptanceOnly
@@ -41,6 +42,7 @@ try
         [Text.Encoding]::UTF8.GetBytes('Keire.Platform.MySql.v1'),
         [Security.Cryptography.DataProtectionScope]::CurrentUser)
     $request = @{
+        section = $Section
         settings = ([Text.Encoding]::UTF8.GetString($settingsBytes) | ConvertFrom-Json)
         rawSnapshot = $rawSnapshot
         rawSchema = $rawSchema

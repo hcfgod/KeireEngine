@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Preserved marketplace orders, license snapshots, entitlements, and device/download records in the isolated MySQL
+  migration, with ownership, idempotency, grant-lifetime, cascade, and rollback acceptance checks.
+
 - Added isolated MySQL marketplace core tables and transactional import verification for organizations, publishers,
   categories, licenses, products, versions, and offers. Full marketplace integration and publication remain pending.
 

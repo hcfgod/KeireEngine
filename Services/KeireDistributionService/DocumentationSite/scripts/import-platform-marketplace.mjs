@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
 import { createPlatformPool, platformTransaction } from "../Source/lib/platform-mysql.mjs";
-import { createMarketplaceCoreSchema } from "../Source/lib/platform-marketplace-schema.mjs";
-import { importMarketplaceCore, marketplaceCoreRecords, verifyMarketplaceCore } from "../Source/lib/platform-marketplace-import.mjs";
+import { createMarketplaceSchema } from "../Source/lib/platform-marketplace-schema.mjs";
+import { importMarketplaceSnapshot, marketplaceRecords, verifyMarketplaceRecords } from "../Source/lib/platform-marketplace-import.mjs";
 import { verifyMigrationRelationships, verifyMarketplaceConditionalKeys } from "../Source/lib/platform-migration-preflight.mjs";
+import { verifyAccessConstraints } from "./platform-marketplace-access-acceptance.mjs";
 
 let pool;
 let stage = "input";
@@ -18,13 +19,14 @@ try {
         }
     }
     const request = JSON.parse(input);
+    const section = request.section ?? "marketplace-core";
     stage = "source-preflight";
     assert.equal(createHash("sha256").update(request.rawSnapshot).digest("hex"), request.expectedDigest);
     assert.equal(createHash("sha256").update(request.rawSchema).digest("hex"), request.schemaDigest);
     const snapshot = JSON.parse(request.rawSnapshot);
     verifyMigrationRelationships(snapshot, JSON.parse(request.rawSchema));
     verifyMarketplaceConditionalKeys(snapshot);
-    const records = marketplaceCoreRecords(snapshot);
+    const records = marketplaceRecords(snapshot, section);
     pool = await createPlatformPool(request.settings, "migration");
     const verifyOnly = process.argv.includes("--verify-only");
     const acceptanceOnly = process.argv.includes("--acceptance-only");
@@ -32,21 +34,21 @@ try {
     if (process.argv.includes("--create-schema")) {
         assert.equal(verifyOnly, false);
         assert.equal(acceptanceOnly, false);
-        stage = "create-core-schema";
-        await createMarketplaceCoreSchema(pool);
+        stage = `create-${section}`;
+        await createMarketplaceSchema(pool, section);
     }
-    stage = "import-core";
+    stage = `import-${section}`;
     if (!verifyOnly && !acceptanceOnly) {
-        await importMarketplaceCore(pool, request.rawSnapshot, request.expectedDigest);
+        await importMarketplaceSnapshot(pool, request.rawSnapshot, request.expectedDigest, section);
     }
-    stage = "verify-core";
-    const counts = await verifyMarketplaceCore(pool, records);
+    stage = `verify-${section}`;
+    const counts = await verifyMarketplaceRecords(pool, records);
     const [batches] = await pool.execute(`SELECT row_counts FROM platform_import_batches
-        WHERE source_digest = ? AND section = 'marketplace-core'`, [request.expectedDigest]);
+        WHERE source_digest = ? AND section = ?`, [request.expectedDigest, section]);
     assert.equal(batches.length, 1);
     assert.deepEqual(batches[0].row_counts, counts);
     let constraintChecks = 0;
-    if (!verifyOnly) {
+    if (!verifyOnly && section === "marketplace-core") {
         stage = "constraint-acceptance";
         const rollback = new Error("intentional constraint-test rollback");
         await assert.rejects(platformTransaction(pool, async (connection) => {
@@ -84,10 +86,14 @@ try {
             await connection.query("UPDATE marketplace_categories SET sort_order = sort_order + 1 LIMIT 1");
             throw rollback;
         }), (error) => error === rollback);
-        await verifyMarketplaceCore(pool, records);
+        await verifyMarketplaceRecords(pool, records);
         constraintChecks++;
     }
-    console.log(JSON.stringify({ status: "marketplace-core-import-verified", counts, constraintChecks,
+    if (!verifyOnly && section === "marketplace-access") {
+        stage = "access-constraint-acceptance";
+        constraintChecks = await verifyAccessConstraints(pool, records);
+    }
+    console.log(JSON.stringify({ status: "marketplace-import-verified", section, counts, constraintChecks,
         verificationOnly: verifyOnly, liveBackendChanged: false, fullMarketplaceAcceptance: "pending" }));
 } catch (error) {
     console.error(JSON.stringify({ status: "failed", stage,

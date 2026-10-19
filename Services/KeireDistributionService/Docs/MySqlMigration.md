@@ -61,6 +61,17 @@ Provisioning does not modify other schemas, reset existing passwords, or restart
 
 ## Migration acceptance gates
 
+The marketplace launcher also accepts `-Section marketplace-access` for orders, order items, entitlements, legacy
+device sessions, and download grants. This section requires the core and account tables and has its own import-ledger
+entry. The initial import preserved five orders, five order items (including accepted license text), five entitlements,
+three device records, and eight grants. Eight live checks passed for exclusive ownership, duplicate entitlement/order
+rejection, zero-price enforcement, grant lifetime, device/grant cascade, and valid-write rollback. Both sections were
+verified after duplicate-import refusal, and the core constraint tests were rerun with the access tables present.
+
+Imported device-session IDs and grants are historical data, not credentials for the new authentication service.
+Do not accept them as local login sessions or serve private files until the new authorization and download routes
+have passed their own tests. Database ownership constraints alone do not provide row-level access control.
+
 `scripts/import-local-platform-marketplace.ps1` imports the first nine domain tables from the pinned protected export.
 It preserves source identifiers and microsecond timestamps, stores text arrays as JSON arrays, and rejects unsafe
 integers, missing/extra columns, unsupported values, and truncation. It compares every field inside the import

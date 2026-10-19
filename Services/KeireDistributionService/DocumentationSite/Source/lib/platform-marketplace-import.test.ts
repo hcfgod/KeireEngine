@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { marketplaceCoreTables, marketplaceTableSql } from "./platform-marketplace-schema.mjs";
-import { marketplaceCoreRecords } from "./platform-marketplace-import.mjs";
+import { marketplaceRecords } from "./platform-marketplace-import.mjs";
 
 function snapshot() {
     return { project: "khjduyjamzwumhducmou", tables: Object.fromEntries(
@@ -16,33 +16,33 @@ describe("marketplace core import", () => {
     it("normalizes exact timestamp, bigint and boolean values", () => {
         const source = snapshot();
         source.tables["public.marketplace_offers"].push(offer());
-        expect(marketplaceCoreRecords(source).at(-1)?.values[0].slice(2))
+        expect(marketplaceRecords(source).at(-1)?.values[0].slice(2))
             .toEqual(["USD", "0", 1, "2026-10-19 12:00:00.123456"]);
     });
 
     it("refuses unexpected projects and missing source tables", () => {
-        expect(() => marketplaceCoreRecords({ ...snapshot(), project: "other" })).toThrow("Unexpected");
-        expect(() => marketplaceCoreRecords({ project: snapshot().project, tables: {} })).toThrow("Missing source");
+        expect(() => marketplaceRecords({ ...snapshot(), project: "other" })).toThrow("Unexpected");
+        expect(() => marketplaceRecords({ project: snapshot().project, tables: {} })).toThrow("Missing source");
     });
 
     it("refuses dropped or additional columns", () => {
         const source = snapshot();
         source.tables["public.marketplace_offers"].push({ ...offer(), new_column: true });
-        expect(() => marketplaceCoreRecords(source)).toThrow("Source columns changed");
+        expect(() => marketplaceRecords(source)).toThrow("Source columns changed");
     });
 
     it.each([Number.MAX_SAFE_INTEGER + 1, "9223372036854775808", "01", 0.5])("rejects unsafe integer %s", (amount) => {
         const source = snapshot();
         source.tables["public.marketplace_offers"].push({ ...offer(), amount_minor: amount });
-        expect(() => marketplaceCoreRecords(source)).toThrow();
+        expect(() => marketplaceRecords(source)).toThrow();
     });
 
     it("refuses silent text truncation and boolean coercion", () => {
         const source = snapshot();
         source.tables["public.marketplace_offers"].push({ ...offer(), currency: "USDD" });
-        expect(() => marketplaceCoreRecords(source)).toThrow("destination bound");
+        expect(() => marketplaceRecords(source)).toThrow("destination bound");
         source.tables["public.marketplace_offers"] = [{ ...offer(), active: "false" }];
-        expect(() => marketplaceCoreRecords(source)).toThrow("boolean");
+        expect(() => marketplaceRecords(source)).toThrow("boolean");
     });
 
     it("does not generate SQL from caller-supplied table definitions", () => {

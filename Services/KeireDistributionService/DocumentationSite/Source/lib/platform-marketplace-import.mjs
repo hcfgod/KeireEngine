@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { mysqlUtcTimestamp } from "./platform-account-import.mjs";
-import { marketplaceCoreTables } from "./platform-marketplace-schema.mjs";
+import { marketplaceTables } from "./platform-marketplace-schema.mjs";
 import { platformTransaction } from "./platform-mysql.mjs";
 
 function normalizeValue(value, definition) {
@@ -53,11 +53,11 @@ function normalizeValue(value, definition) {
     return value;
 }
 
-export function marketplaceCoreRecords(snapshot) {
+export function marketplaceRecords(snapshot, section = "marketplace-core") {
     if (snapshot?.project !== "khjduyjamzwumhducmou" || !snapshot.tables) {
         throw new Error("Unexpected marketplace source project.");
     }
-    return marketplaceCoreTables.map((table) => {
+    return marketplaceTables(section).map((table) => {
         const rows = snapshot.tables[`public.${table.name}`];
         const names = Object.keys(table.columns);
         if (!Array.isArray(rows)) {
@@ -73,7 +73,7 @@ export function marketplaceCoreRecords(snapshot) {
     });
 }
 
-export async function verifyMarketplaceCore(connection, records) {
+export async function verifyMarketplaceRecords(connection, records) {
     const counts = {};
     for (const { table, names, values } of records) {
         const [rows] = await connection.query(`SELECT ${names.map((name) => `\`${name}\``).join(",")} FROM \`${table.name}\``);
@@ -90,13 +90,13 @@ export async function verifyMarketplaceCore(connection, records) {
     return counts;
 }
 
-export async function importMarketplaceCore(pool, rawSnapshot, expectedDigest) {
+export async function importMarketplaceSnapshot(pool, rawSnapshot, expectedDigest, section = "marketplace-core") {
     if (!/^[a-f0-9]{64}$/.test(expectedDigest) ||
         createHash("sha256").update(rawSnapshot).digest("hex") !== expectedDigest) {
         throw new Error("Marketplace snapshot digest mismatch.");
     }
     const snapshot = JSON.parse(rawSnapshot);
-    const records = marketplaceCoreRecords(snapshot);
+    const records = marketplaceRecords(snapshot, section);
     return platformTransaction(pool, async (connection) => {
         for (const { table, names, values } of records) {
             const [existing] = await connection.query(`SELECT COUNT(*) AS count FROM \`${table.name}\``);
@@ -109,10 +109,10 @@ export async function importMarketplaceCore(pool, rawSnapshot, expectedDigest) {
                 await connection.execute(insert, row);
             }
         }
-        const counts = await verifyMarketplaceCore(connection, records);
+        const counts = await verifyMarketplaceRecords(connection, records);
         await connection.execute(`INSERT INTO platform_import_batches
-            (source_digest, source_project, section, row_counts) VALUES (?, ?, 'marketplace-core', ?)`,
-        [expectedDigest, snapshot.project, JSON.stringify(counts)]);
+            (source_digest, source_project, section, row_counts) VALUES (?, ?, ?, ?)`,
+        [expectedDigest, snapshot.project, section, JSON.stringify(counts)]);
         return counts;
     });
 }

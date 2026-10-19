@@ -1,0 +1,118 @@
+const uuid = "CHAR(36) CHARACTER SET ascii COLLATE ascii_bin";
+const time = "DATETIME(6)";
+
+// Legacy device-session records are preserved for audit relationships, not accepted as local login sessions.
+export const marketplaceAccessTables = [
+    {
+        name: "marketplace_orders",
+        columns: {
+            id: `${uuid} NOT NULL`,
+            user_id: `${uuid} NOT NULL`,
+            organization_id: `${uuid} NULL`,
+            currency: "CHAR(3) NOT NULL",
+            total_minor: "BIGINT NOT NULL",
+            status: "VARCHAR(16) NOT NULL",
+            idempotency_key: "VARCHAR(128) NOT NULL",
+            created_at: `${time} NOT NULL`,
+        },
+        extra: [
+            "PRIMARY KEY (id)",
+            "UNIQUE KEY order_user_idempotency (user_id, idempotency_key)",
+            "FOREIGN KEY (user_id) REFERENCES platform_accounts(id)",
+            "FOREIGN KEY (organization_id) REFERENCES organizations(id)",
+            "CHECK (REGEXP_LIKE(currency, '^[A-Z]{3}$', 'c'))",
+            "CHECK (total_minor = 0)",
+            "CHECK (status IN ('completed','cancelled'))",
+            "CHECK (CHAR_LENGTH(idempotency_key) BETWEEN 16 AND 128)",
+        ],
+    },
+    {
+        name: "marketplace_order_items",
+        columns: {
+            id: `${uuid} NOT NULL`,
+            order_id: `${uuid} NOT NULL`,
+            product_id: `${uuid} NOT NULL`,
+            offer_id: `${uuid} NOT NULL`,
+            amount_minor: "BIGINT NOT NULL",
+            license_spdx: "VARCHAR(64) NOT NULL",
+            license_revision: "VARCHAR(64) NOT NULL",
+            accepted_license_snapshot: "LONGTEXT NOT NULL",
+        },
+        extra: [
+            "PRIMARY KEY (id)",
+            "UNIQUE KEY order_item_product (order_id, product_id)",
+            "FOREIGN KEY (order_id) REFERENCES marketplace_orders(id)",
+            "FOREIGN KEY (product_id) REFERENCES marketplace_products(id)",
+            "FOREIGN KEY (offer_id) REFERENCES marketplace_offers(id)",
+            "CHECK (amount_minor = 0)",
+            "CHECK (CHAR_LENGTH(license_spdx) BETWEEN 2 AND 64)",
+            "CHECK (CHAR_LENGTH(license_revision) BETWEEN 1 AND 64)",
+            "CHECK (CHAR_LENGTH(accepted_license_snapshot) BETWEEN 1 AND 100000)",
+        ],
+    },
+    {
+        name: "marketplace_entitlements",
+        columns: {
+            id: `${uuid} NOT NULL`,
+            product_id: `${uuid} NOT NULL`,
+            user_id: `${uuid} NULL`,
+            organization_id: `${uuid} NULL`,
+            order_item_id: `${uuid} NOT NULL`,
+            granted_at: `${time} NOT NULL`,
+            revoked_at: `${time} NULL`,
+            revocation_reason: "TEXT NULL",
+        },
+        extra: [
+            "PRIMARY KEY (id)",
+            // MySQL unique indexes allow multiple NULLs, matching the source's partial unique indexes.
+            "UNIQUE KEY entitlement_personal (product_id, user_id)",
+            "UNIQUE KEY entitlement_organization (product_id, organization_id)",
+            "FOREIGN KEY (product_id) REFERENCES marketplace_products(id)",
+            "FOREIGN KEY (user_id) REFERENCES platform_accounts(id)",
+            "FOREIGN KEY (organization_id) REFERENCES organizations(id)",
+            "FOREIGN KEY (order_item_id) REFERENCES marketplace_order_items(id)",
+            "CHECK ((user_id IS NOT NULL) + (organization_id IS NOT NULL) = 1)",
+            "CHECK (revocation_reason IS NULL OR CHAR_LENGTH(revocation_reason) <= 1000)",
+        ],
+    },
+    {
+        name: "oauth_device_sessions",
+        columns: {
+            id: `${uuid} NOT NULL`,
+            user_id: `${uuid} NOT NULL`,
+            oauth_session_id: "VARCHAR(256) NOT NULL",
+            client_type: "VARCHAR(16) NOT NULL",
+            device_name: "VARCHAR(128) NOT NULL",
+            created_at: `${time} NOT NULL`,
+            last_used_at: `${time} NOT NULL`,
+            revoked_at: `${time} NULL`,
+        },
+        extra: [
+            "PRIMARY KEY (id)",
+            "UNIQUE KEY device_oauth_session (oauth_session_id)",
+            "FOREIGN KEY (user_id) REFERENCES platform_accounts(id) ON DELETE CASCADE",
+            "CHECK (CHAR_LENGTH(oauth_session_id) BETWEEN 16 AND 256)",
+            "CHECK (CHAR_LENGTH(device_name) BETWEEN 1 AND 128)",
+            "CHECK (client_type IN ('website','hub','editor_broker'))",
+        ],
+    },
+    {
+        name: "marketplace_download_grants",
+        columns: {
+            id: `${uuid} NOT NULL`,
+            entitlement_id: `${uuid} NOT NULL`,
+            version_id: `${uuid} NOT NULL`,
+            session_id: `${uuid} NOT NULL`,
+            created_at: `${time} NOT NULL`,
+            expires_at: `${time} NOT NULL`,
+            used_at: `${time} NULL`,
+        },
+        extra: [
+            "PRIMARY KEY (id)",
+            "FOREIGN KEY (entitlement_id) REFERENCES marketplace_entitlements(id) ON DELETE CASCADE",
+            "FOREIGN KEY (version_id) REFERENCES marketplace_product_versions(id)",
+            "FOREIGN KEY (session_id) REFERENCES oauth_device_sessions(id) ON DELETE CASCADE",
+            "CHECK (expires_at > created_at AND expires_at <= TIMESTAMPADD(MINUTE, 15, created_at))",
+        ],
+    },
+];

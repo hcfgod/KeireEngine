@@ -1,3 +1,5 @@
+import { marketplaceAccessTables } from "./platform-marketplace-access-schema.mjs";
+
 const uuid = "CHAR(36) CHARACTER SET ascii COLLATE ascii_bin";
 const time = "DATETIME(6)";
 const semver = "^(0|[1-9][0-9]*)[.](0|[1-9][0-9]*)[.](0|[1-9][0-9]*)([-+][0-9A-Za-z.-]+)?$";
@@ -165,7 +167,7 @@ export const marketplaceCoreTables = [
 ];
 
 export function marketplaceTableSql(table) {
-    if (!marketplaceCoreTables.includes(table)) {
+    if (!marketplaceCoreTables.includes(table) && !marketplaceAccessTables.includes(table)) {
         throw new Error("Only reviewed marketplace table definitions may be created.");
     }
     const fields = Object.entries(table.columns).map(([name, definition]) => `\`${name}\` ${definition}`);
@@ -173,14 +175,25 @@ export function marketplaceTableSql(table) {
         " ENGINE=InnoDB DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin";
 }
 
-export async function createMarketplaceCoreSchema(pool) {
-    const names = marketplaceCoreTables.map((table) => table.name);
+export function marketplaceTables(section = "marketplace-core") {
+    if (section === "marketplace-core") {
+        return marketplaceCoreTables;
+    }
+    if (section === "marketplace-access") {
+        return marketplaceAccessTables;
+    }
+    throw new Error("Unknown marketplace migration section.");
+}
+
+export async function createMarketplaceSchema(pool, section = "marketplace-core") {
+    const tables = marketplaceTables(section);
+    const names = tables.map((table) => table.name);
     const [existing] = await pool.execute(`SELECT table_name FROM information_schema.tables
         WHERE table_schema = DATABASE() AND table_name IN (${names.map(() => "?").join(",")})`, names);
     if (existing.length) {
         throw new Error("Marketplace tables already exist; inspect schema state before retrying.");
     }
-    for (const table of marketplaceCoreTables) {
+    for (const table of tables) {
         await pool.query(marketplaceTableSql(table));
     }
 }
