@@ -1,4 +1,5 @@
 import { createLocalAuthenticationHttp, localBrowserRequestState } from "./platform-auth-http.mjs";
+import { localAccountOverview } from "./platform-account-view.mjs";
 
 /** A staged provider adapter. Unported routes fail closed instead of using Supabase identities or data. */
 export async function handleLocalPlatformRequest({ backend, request, siteOrigin, clientIdentity, correlationId, render }) {
@@ -20,12 +21,20 @@ export async function handleLocalPlatformRequest({ backend, request, siteOrigin,
                 return response;
             }
             const pathname = new URL(request.url).pathname.replace(/\/+$/, "");
-            if (!["/account/sign-in", "/account/mfa/challenge"].includes(pathname) ||
+            if (!["/account", "/account/sign-in", "/account/mfa/challenge"].includes(pathname) ||
                 !["GET", "HEAD"].includes(request.method)) {
                 return unavailable("This platform route is awaiting local-backend migration. Please try again later.");
             }
             const state = await localBrowserRequestState(service.authentication, request);
-            return render(state);
+            const accountView = pathname === "/account" && state.session
+                ? await localAccountOverview(service.pool, state.session) : null;
+            const rendered = await render({ ...state, accountView });
+            rendered.headers.set("cache-control", "private, no-store");
+            rendered.headers.set("vary", "Cookie, Authorization");
+            rendered.headers.set("x-content-type-options", "nosniff");
+            rendered.headers.set("x-correlation-id", correlationId);
+            rendered.headers.set("referrer-policy", "strict-origin-when-cross-origin");
+            return rendered;
         });
     } catch {
         return unavailable("The platform service is temporarily unavailable. Please try again.");

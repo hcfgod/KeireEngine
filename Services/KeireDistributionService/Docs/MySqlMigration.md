@@ -313,3 +313,12 @@ and removes its exact fixture IDs/rate keys. Credentials and codes are never log
 namespace avoids modifying another QA session's rate-limit records. Eleven assertions passed, followed by
 verification that the imported account records remained unchanged. This test manually sends cookies;
 browser HTTPS cookie policy and production reverse-proxy acceptance are still required.
+
+### Account overview migration
+
+The staged MySQL `/account/` page uses `localAccountOverview` with the server-verified session. Queries
+scope profiles, identities and devices to that account; library rows require personal ownership or membership
+in a non-deleted organization. Staff status does not broaden the personal "My assets" view. Only identity
+provider/email display fields are returned, never password hashes or MFA secrets. Rendered local pages use
+private/no-store caching. Organization creation remains hidden until its mutation route is ported; security,
+OAuth and other linked workflows still need migration before public cutover.

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Added the local account overview with scoped library/organization reads and private, non-cacheable rendering.
+
 - Added an isolated loopback MySQL website host and registered the pending-MFA status route for real HTTP testing.
 
 - Added staged MySQL request routing for browser authentication, with explicit unavailable responses for unported routes.

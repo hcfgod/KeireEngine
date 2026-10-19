@@ -12,6 +12,7 @@ declare namespace App {
         user: User | null;
         platformBackend?: import("./lib/platform-backend.mjs").PlatformBackend;
         platformClientIdentity?: string;
+        localAccountView?: Awaited<ReturnType<typeof import("./lib/platform-account-view.mjs").localAccountOverview>> | null;
         pendingMfaChallenge: {
             factors: Array<{ id: string; friendly_name: string | null }>;
             expiresAt: number;

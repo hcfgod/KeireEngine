@@ -2,11 +2,15 @@
 import PlatformLayout from "../../layouts/PlatformLayout.astro";
 import { mfaChallengePath, requiresMfaChallenge } from "../../lib/auth";
 export const prerender = false;
-if (!Astro.locals.user) return Astro.redirect(`/account/sign-in/?next=${encodeURIComponent(Astro.url.pathname)}`, 303);
+const localView = Astro.locals.localAccountView;
+if (!Astro.locals.user && !localView) return Astro.redirect(`/account/sign-in/?next=${encodeURIComponent(Astro.url.pathname)}`, 303);
 if (requiresMfaChallenge(Astro.locals.assurance)) return Astro.redirect(mfaChallengePath(Astro.url.pathname), 303);
-const user = Astro.locals.user;
+const user = localView?.user ?? Astro.locals.user!;
 const supabase = Astro.locals.supabase!;
-const [profileResult, entitlementsResult, organizationsResult, sessionsResult, featureResult] = await Promise.all([
+const [profileResult, entitlementsResult, organizationsResult, sessionsResult, featureResult] = localView ? [
+    { data: localView.profile }, { data: localView.entitlements }, { data: localView.organizations },
+    { data: localView.sessions }, { data: [] },
+] : await Promise.all([
     supabase.from("profiles").select("display_name,handle,avatar_url,biography,locale").eq("user_id", user.id).maybeSingle(),
     supabase.from("marketplace_entitlements").select("id,product_id,organization_id,granted_at,marketplace_products(display_name,slug,publishers(slug))").is("revoked_at", null).order("granted_at", { ascending: false }).limit(12),
     supabase.from("organization_memberships").select("role,organizations(id,slug,display_name)").eq("user_id", user.id),

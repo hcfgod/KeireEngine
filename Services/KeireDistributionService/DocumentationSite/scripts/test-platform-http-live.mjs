@@ -99,12 +99,26 @@ try {
         { signedIn: true, assuranceLevel: "aal2" });
     checks += 3;
 
+    stage = "account-overview";
+    const accountPage = await request("/account/");
+    assert.equal(accountPage.status, 200);
+    assert.equal(accountPage.headers.get("cache-control"), "private, no-store");
+    const accountHtml = await accountPage.text();
+    assert.ok(accountHtml.includes(email));
+    assert.match(accountHtml, /No claimed assets yet/);
+    checks += 4;
+
     stage = "logout";
     const savedCookies = new Map(cookies);
     const logout = await request("/account/session/delete/", {});
     assert.equal(logout.status, 303);
     await logout.arrayBuffer();
     assert.equal((await (await request("/account/session/")).json()).data.signedIn, false);
+    const anonymousAccount = await request("/account/");
+    assert.equal(anonymousAccount.status, 303);
+    assert.ok(anonymousAccount.headers.get("location").startsWith("/account/sign-in/"));
+    await anonymousAccount.arrayBuffer();
+    checks += 2;
     cookies = savedCookies;
     assert.equal((await (await request("/account/session/")).json()).data.signedIn, false);
     checks += 3;

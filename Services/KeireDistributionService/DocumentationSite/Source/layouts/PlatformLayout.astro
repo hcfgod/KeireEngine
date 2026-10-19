@@ -24,7 +24,7 @@ const {
 } = Astro.props;
 const canonical = new URL(Astro.url.pathname, Astro.site);
 const fullTitle = title === "Kéire Engine" ? title : `${title} — Kéire Engine`;
-let staffRole: "moderator" | "administrator" | null = null;
+let staffRole: "moderator" | "administrator" | null = Astro.locals.localAccountView?.staffRole ?? null;
 if (Astro.locals.user && Astro.locals.supabase) {
     const staffResult = await Astro.locals.supabase.from("platform_staff_members")
         .select("role").eq("user_id", Astro.locals.user.id).eq("active", true).maybeSingle();
