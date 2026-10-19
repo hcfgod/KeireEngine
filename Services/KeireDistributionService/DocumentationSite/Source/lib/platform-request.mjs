@@ -4,6 +4,7 @@ import { localProductPage } from "./platform-product.mjs";
 import { handleLocalClaimRequest } from "./platform-claims-http.mjs";
 import { handleLocalRecoveryRequest } from "./platform-recovery-http.mjs";
 import { handleLocalOrganizationRequest } from "./platform-organizations-http.mjs";
+import { handleLocalDataRequest } from "./platform-data-http.mjs";
 
 /** A staged provider adapter. Unported routes fail closed instead of using Supabase identities or data. */
 export async function handleLocalPlatformRequest({ backend, request, siteOrigin, clientIdentity, correlationId, render }) {
@@ -29,6 +30,9 @@ export async function handleLocalPlatformRequest({ backend, request, siteOrigin,
                 return response;
             }
             const pathname = new URL(request.url).pathname.replace(/\/+$/, "");
+            if (pathname === "/account/data/request") {
+                return handleLocalDataRequest(service.authentication, request, siteOrigin, correlationId);
+            }
             if (["/account/recover", "/account/update-password"].includes(pathname) && ["GET", "HEAD"].includes(request.method)) {
                 const rendered = await render({ session: null, pendingChallenge: null, accountView: null,
                     localRecovery: true });
@@ -67,12 +71,12 @@ export async function handleLocalPlatformRequest({ backend, request, siteOrigin,
                 rendered.headers.set("vary", "Cookie, Authorization");
                 return rendered;
             }
-            if (!["/account", "/account/sign-in", "/account/mfa/challenge"].includes(pathname) ||
+            if (!["/account", "/account/data", "/account/sign-in", "/account/mfa/challenge"].includes(pathname) ||
                 !["GET", "HEAD"].includes(request.method)) {
                 return unavailable("This platform route is awaiting local-backend migration. Please try again later.");
             }
             const state = await localBrowserRequestState(service.authentication, request);
-            const accountView = pathname === "/account" && state.session
+            const accountView = ["/account", "/account/data"].includes(pathname) && state.session
                 ? await localAccountOverview(service.pool, state.session) : null;
             const rendered = await render({ ...state, accountView, emailAvailable: Boolean(service.emailAuthentication) });
             rendered.headers.set("cache-control", "private, no-store");

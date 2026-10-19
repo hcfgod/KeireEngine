@@ -38,6 +38,8 @@ try {
     [userId, email, email, await bcrypt.hash(password, 4),
         sealAccountRecord({ fixture: true }, secrets.accountEncryptionKey, `account:${userId}`)]);
     fixtureCreated = true;
+    await pool.execute(`INSERT INTO profiles (user_id,created_at,updated_at,locale,notification_preferences)
+        VALUES (?,UTC_TIMESTAMP(6),UTC_TIMESTAMP(6),'en','{}')`, [userId]);
     await pool.execute(`INSERT INTO platform_mfa_factors
         (id,user_id,factor_type,status,friendly_name,source_sealed) VALUES (?,?,'totp','verified','HTTP QA authenticator',?)`,
     [factorId, userId, sealAccountRecord({ secret: "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ" },
@@ -226,6 +228,13 @@ try {
         assert.match(accountHtml, /Send verification email/);
         assert.match(accountHtml, /Create an organization/);
         stage = "organization-creation";
+        assert.equal((await request("/account/data/")).status, 200);
+        assert.equal((await request("/account/data/request/", { kind: "invalid" })).status, 400);
+        for (const kind of ["export", "deletion"]) {
+            assert.equal((await request("/account/data/request/", { kind })).status, 202);
+            assert.equal((await request("/account/data/request/", { kind })).status, 202);
+        }
+        checks += 6;
         const organizationInput = { slug: `http-${userId}`, displayName: "HTTP QA organization" };
         const organizationResponse = await request("/marketplace/v1/organizations/", organizationInput);
         assert.equal(organizationResponse.status, 201);
@@ -419,6 +428,8 @@ try {
     }
     try {
         if (fixtureCreated) {
+            await pool.execute("DELETE FROM platform_audit_events WHERE actor_user_id=? AND action IN ('account.export_requested','account.deletion_requested')", [userId]);
+            await pool.execute("DELETE FROM profiles WHERE user_id=?", [userId]);
             await pool.execute("DELETE FROM platform_audit_events WHERE actor_user_id=? AND action='organization.created'", [userId]);
             await pool.execute(`DELETE membership FROM organization_memberships membership
                 JOIN organizations organization ON organization.id=membership.organization_id WHERE organization.created_by=?`, [userId]);

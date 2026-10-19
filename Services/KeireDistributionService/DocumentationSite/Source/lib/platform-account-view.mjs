@@ -11,7 +11,7 @@ export async function localAccountOverview(pool, session) {
         throw new Error("The local account is unavailable.");
     }
     const [[profiles], [entitlements], [organizations], [sessions], [identities], [staff], [factors], [flags]] = await Promise.all([
-        pool.execute("SELECT display_name,handle,avatar_url,biography,locale FROM profiles WHERE user_id=?", [userId]),
+        pool.execute("SELECT display_name,handle,avatar_url,biography,locale,export_requested_at,deletion_requested_at FROM profiles WHERE user_id=?", [userId]),
         pool.execute(`SELECT e.id,e.product_id,e.organization_id,e.granted_at,p.display_name,p.slug,publisher.slug AS publisher_slug
             FROM marketplace_entitlements e JOIN marketplace_products p ON p.id=e.product_id
             JOIN publishers publisher ON publisher.id=p.publisher_id
