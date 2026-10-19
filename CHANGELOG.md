@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Added isolated local MySQL provisioning for the upcoming optional website backend, with TLS verification,
+  separate runtime/migration accounts, encrypted credentials, and refusal to overwrite existing databases.
+  Application migration and live backend switching remain pending.
+
 - Hub distinguishes catalog loading failures from empty filter results and wraps its recovery guidance.
   Catalog signature validation remains required.
 - The C# runtime reference now documents Scene equality operators and the SceneAsset stable asset type identifier.

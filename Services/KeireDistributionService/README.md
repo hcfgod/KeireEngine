@@ -1,5 +1,9 @@
 # Kéire Distribution Service
 
+Local MySQL backend migration is in preparation. See [the migration and acceptance plan](Docs/MySqlMigration.md).
+The provisioning utility creates an isolated empty database; the production website remains on Supabase until the
+account, marketplace, Storage, and client acceptance gates pass.
+
 `KeireDistributionService` is the stateless, read-only origin for Kéire Hub catalogs, learning/resource catalogs, and
 content-addressed Editor packages. It targets the repository's pinned .NET 10 toolchain, binds to `127.0.0.1:5088` by
 default, and runs behind Caddy on public HTTPS port 443. The unified Astro application serves marketing, documentation,
