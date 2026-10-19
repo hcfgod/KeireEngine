@@ -61,6 +61,24 @@ Provisioning does not modify other schemas, reset existing passwords, or restart
 
 ## Migration acceptance gates
 
+`scripts/import-local-platform-marketplace.ps1` imports the first nine domain tables from the pinned protected export.
+It preserves source identifiers and microsecond timestamps, stores text arrays as JSON arrays, and rejects unsafe
+integers, missing/extra columns, unsupported values, and truncation. It compares every field inside the import
+transaction before recording the `marketplace-core` batch. Existing rows are never overwritten. The version key
+allows 255 characters; the current publisher API limits submitted version strings to 128 characters.
+
+`-CreateSchema` is only for the initial empty destination. MySQL DDL is not transactional: inspect a failed creation
+and complete only the missing reviewed tables rather than rerunning or dropping data. `-VerifyOnly` compares current
+rows with the source and ledger without writes. `-AcceptanceOnly` additionally runs rollback-contained constraint
+tests, including orphan rejection, invalid category slugs, nonzero prices, duplicate active offers, cascade deletion
+of an isolated product/offer fixture, and rollback of a valid update. The active-offer key is a virtual generated
+column so its unique index remains compatible with the source product-deletion cascade.
+
+The first import contains one organization, one membership, one publisher, five categories, no tags, five license
+revisions, seven products, nine versions, and six offers. All fields and six live constraint/rollback checks passed.
+These are isolated domain records, not a working marketplace: entitlements, orders, moderation/publication queues,
+private storage bodies, transition authorization, and route integration remain separate acceptance gates.
+
 Before domain import, run `DocumentationSite/scripts/check-platform-migration.mjs` with verified decrypted database
 and schema JSON strings plus their trusted digests through standard input. It performs no database writes and emits
 counts only. The current export passes 61 foreign-key checks, 50 primary/unique-key checks, and ten application-specific

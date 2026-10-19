@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Added isolated MySQL marketplace core tables and transactional import verification for organizations, publishers,
+  categories, licenses, products, versions, and offers. Full marketplace integration and publication remain pending.
+
 - Added read-only migration preflight checks for marketplace ownership relationships, duplicate keys, and active-record
   uniqueness. These are import prerequisites; the live website backend has not switched.
 
