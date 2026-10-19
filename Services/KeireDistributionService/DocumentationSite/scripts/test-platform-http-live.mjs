@@ -224,6 +224,18 @@ try {
         assert.ok(accountHtml.includes(email));
         assert.match(accountHtml, /No claimed assets yet/);
         assert.match(accountHtml, /Send verification email/);
+        assert.match(accountHtml, /Create an organization/);
+        stage = "organization-creation";
+        const organizationInput = { slug: `http-${userId}`, displayName: "HTTP QA organization" };
+        const organizationResponse = await request("/marketplace/v1/organizations/", organizationInput);
+        assert.equal(organizationResponse.status, 201);
+        const organization = (await organizationResponse.json()).data;
+        assert.equal(organization.slug, organizationInput.slug);
+        assert.equal((await request("/marketplace/v1/organizations/", organizationInput)).status, 409);
+        assert.equal((await request("/marketplace/v1/organizations/", organizationInput,
+            { origin: "https://other.invalid" })).status, 403);
+        assert.match(await (await request("/account/")).text(), /HTTP QA organization/);
+        checks += 6;
         const library = await request("/marketplace/v1/library/");
         const invalidClaim = await request("/marketplace/v1/claims/", { ownership: "organization" });
         assert.equal(invalidClaim.status, 400);
@@ -306,6 +318,13 @@ try {
         assert.deepEqual((await (await request("/account/session/")).json()).data,
             { signedIn: true, assuranceLevel: "aal1" });
         checks += 7;
+
+        stage = "organization-email-assurance";
+        assert.equal((await request("/marketplace/v1/organizations/", {
+            slug: `email-${userId}`, displayName: "Must not be created",
+        })).status, 403);
+        assert.doesNotMatch(await (await request("/account/")).text(), /data-organization-form/);
+        checks += 2;
 
         stage = "logout";
         const savedCookies = new Map(cookies);
@@ -400,6 +419,10 @@ try {
     }
     try {
         if (fixtureCreated) {
+            await pool.execute("DELETE FROM platform_audit_events WHERE actor_user_id=? AND action='organization.created'", [userId]);
+            await pool.execute(`DELETE membership FROM organization_memberships membership
+                JOIN organizations organization ON organization.id=membership.organization_id WHERE organization.created_by=?`, [userId]);
+            await pool.execute("DELETE FROM organizations WHERE created_by=?", [userId]);
             await pool.execute("DELETE FROM platform_audit_events WHERE actor_user_id=? AND action='account.password_recovered'", [userId]);
             await pool.execute("DELETE FROM platform_recovery_challenges WHERE user_id=?", [userId]);
             for (const recovery of capturedRecovery) {

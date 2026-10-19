@@ -22,7 +22,9 @@ const profile = profileResult.data;
 const entitlements = entitlementsResult.data ?? [];
 const organizations = organizationsResult.data ?? [];
 const sessions = sessionsResult.data ?? [];
-const organizationCreationEnabled = (featureResult.data ?? []).some((flag) => flag.enabled === true);
+const organizationCreationEnabled = localView
+    ? localView.organizationCreationEnabled
+    : (featureResult.data ?? []).some((flag) => flag.enabled === true);
 const identities = user.identities ?? [];
 const hasGitHub = identities.some((identity) => identity.provider === "github");
 ---

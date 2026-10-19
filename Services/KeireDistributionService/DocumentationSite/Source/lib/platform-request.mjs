@@ -3,6 +3,7 @@ import { localAccountOverview } from "./platform-account-view.mjs";
 import { localProductPage } from "./platform-product.mjs";
 import { handleLocalClaimRequest } from "./platform-claims-http.mjs";
 import { handleLocalRecoveryRequest } from "./platform-recovery-http.mjs";
+import { handleLocalOrganizationRequest } from "./platform-organizations-http.mjs";
 
 /** A staged provider adapter. Unported routes fail closed instead of using Supabase identities or data. */
 export async function handleLocalPlatformRequest({ backend, request, siteOrigin, clientIdentity, correlationId, render }) {
@@ -38,6 +39,9 @@ export async function handleLocalPlatformRequest({ backend, request, siteOrigin,
             }
             if (pathname === "/marketplace/v1/claims") {
                 return handleLocalClaimRequest(service.authentication, request, siteOrigin, clientIdentity, correlationId);
+            }
+            if (pathname === "/marketplace/v1/organizations") {
+                return handleLocalOrganizationRequest(service.authentication, request, siteOrigin, correlationId);
             }
             if (pathname === "/marketplace/v1/library" && request.method === "GET") {
                 const state = await localBrowserRequestState(service.authentication, request);
