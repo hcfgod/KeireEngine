@@ -61,6 +61,20 @@ Provisioning does not modify other schemas, reset existing passwords, or restart
 
 ## Migration acceptance gates
 
+The isolated `platform-local-auth.mjs` service verifies imported bcrypt passwords and requires the existing verified
+TOTP factor before issuing an authenticated session. Opaque challenge/session tokens are stored only as hashes;
+challenges expire after five minutes and sessions after eight hours. Failed login limits are persisted in MySQL.
+The HTTP adapter must supply a trusted client identity, never an arbitrary client-submitted identity. MFA counters
+are consumed transactionally, so concurrent reuse of the same code cannot authenticate twice. Logout, password
+changes, account bans, and newly required MFA invalidate the relevant session access.
+
+`scripts/test-platform-auth-live.mjs` accepts protected database settings through standard input. It creates and
+removes an isolated synthetic account; it never logs in as the imported account. Its 28 checks cover password and
+MFA failures, concurrent replay, attempt limits, expiry, logout, password changes, and assurance transitions. Schema
+creation is a one-time explicit option and refuses existing authentication tables. The service is not yet connected
+to HTTP cookies, CSRF protection, OAuth, registration, recovery, or MFA enrollment. Passing these checks does not
+authorize switching the website backend or imply those workflows have passed.
+
 `scripts/PlatformMigrationBackup.psm1` reads the encrypted migration exports in memory. Callers must supply the
 trusted SHA-256 and exact part count, and must not print the returned JSON. The reader rejects incomplete, reordered,
 corrupted, redirected, or oversized parts and preserves the original timestamp and numeric text. Regression coverage

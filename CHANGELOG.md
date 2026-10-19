@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Added isolated MySQL password/MFA authentication with replay protection, bounded login attempts, and revocable
+  sessions. Website routing, account recovery, and live backend cutover remain pending acceptance.
+
 - Added isolated account-data migration with source identity/password preservation, encrypted MFA/source records,
   microsecond timestamps, duplicate-import refusal, and read-only verification. Live authentication cutover is pending.
 
