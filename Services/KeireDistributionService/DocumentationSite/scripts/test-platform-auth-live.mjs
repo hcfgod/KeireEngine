@@ -233,7 +233,7 @@ try {
     stage = "account-visibility";
     checks += await verifyAccountVisibility(migration, userId, encryptionKey);
     stage = "marketplace-claims";
-    checks += await verifyLocalClaims(migration, userId);
+    checks += await verifyLocalClaims(migration, userId, auth, factorId, now);
     stage = "public-catalog";
     checks += await verifyLocalCatalog(migration);
 

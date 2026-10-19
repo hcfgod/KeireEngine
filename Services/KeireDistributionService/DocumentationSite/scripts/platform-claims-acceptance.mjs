@@ -5,7 +5,7 @@ import { platformTransaction } from "../Source/lib/platform-mysql.mjs";
 import { localCatalogPage } from "../Source/lib/platform-catalog.mjs";
 
 /** Exercise actual claim writes inside a transaction deliberately rolled back with the synthetic account. */
-export async function verifyLocalClaims(pool, userId) {
+export async function verifyLocalClaims(pool, userId, authentication, factorId, now) {
     const rollback = new Error("rollback claim fixtures");
     let checks = 0;
     await assert.rejects(platformTransaction(pool, async (connection) => {
@@ -52,5 +52,59 @@ export async function verifyLocalClaims(pool, userId) {
     }), (error) => error === rollback);
     const [remaining] = await pool.execute("SELECT id FROM marketplace_orders WHERE user_id=?", [userId]);
     assert.equal(remaining.length, 0);
-    return checks + 1;
+    checks++;
+
+    const session = await platformTransaction(pool, async (connection) => {
+        const [accounts] = await connection.execute("SELECT * FROM platform_accounts WHERE id=?", [userId]);
+        return authentication.issueSession(connection, accounts[0], now, factorId);
+    });
+    try {
+        const product = (await localCatalogPage(pool, { limit: 1 })).values[0];
+        const input = {
+            productId: product.id,
+            idempotencyKey: randomUUID(),
+            licenseSpdx: product.license_spdx,
+            licenseRevision: product.license_revision,
+            acceptedLicenseSnapshot: product.license_acceptance_snapshot,
+        };
+        const failure = new Error("synthetic audit failure");
+        const failingAuthentication = {
+            withSessionTransaction: (token, action) => authentication.withSessionTransaction(token, (connection, state) => {
+                const injectedConnection = {
+                    execute: (sql, parameters) => {
+                        if (sql.startsWith("INSERT INTO platform_audit_events")) {
+                            throw failure;
+                        }
+                        return connection.execute(sql, parameters);
+                    },
+                };
+                return action(injectedConnection, state);
+            }),
+        };
+        await assert.rejects(claimLocalProduct(failingAuthentication, session.token, input), (error) => error === failure);
+        for (const table of ["marketplace_orders", "marketplace_entitlements"]) {
+            const [rows] = await pool.execute(`SELECT id FROM ${table} WHERE user_id=?`, [userId]);
+            assert.equal(rows.length, 0);
+            checks++;
+        }
+        const results = await Promise.all(Array.from({ length: 5 }, () =>
+            claimLocalProduct(authentication, session.token, input)));
+        assert.equal(new Set(results.map((result) => result.entitlementId)).size, 1);
+        const [orders] = await pool.execute("SELECT id FROM marketplace_orders WHERE user_id=?", [userId]);
+        const [events] = await pool.execute(
+            "SELECT id FROM platform_audit_events WHERE actor_user_id=? AND action='marketplace.product_claimed'", [userId]);
+        assert.equal(orders.length, 1);
+        assert.equal(events.length, 1);
+        checks += 3;
+    } finally {
+        await authentication.signOut(session.token);
+        await platformTransaction(pool, async (connection) => {
+            await connection.execute("DELETE FROM platform_audit_events WHERE actor_user_id=? AND action='marketplace.product_claimed'", [userId]);
+            await connection.execute("DELETE FROM marketplace_entitlements WHERE user_id=?", [userId]);
+            await connection.execute(`DELETE item FROM marketplace_order_items item
+                JOIN marketplace_orders orders ON orders.id=item.order_id WHERE orders.user_id=?`, [userId]);
+            await connection.execute("DELETE FROM marketplace_orders WHERE user_id=?", [userId]);
+        });
+    }
+    return checks;
 }
