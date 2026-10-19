@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Added an isolated loopback MySQL website host and registered the pending-MFA status route for real HTTP testing.
+
 - Added staged MySQL request routing for browser authentication, with explicit unavailable responses for unported routes.
 
 - Added verified pending-MFA challenge lookup and challenge-page support without treating incomplete MFA as signed-in.

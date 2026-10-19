@@ -5,6 +5,11 @@ import starlight from "@astrojs/starlight";
 
 import { docGroups, sourcePathToSlug } from "./doc-library.mjs";
 
+const adapterMode = process.env.KEIRE_NODE_ADAPTER_MODE ?? "standalone";
+if (!["standalone", "middleware"].includes(adapterMode)) {
+    throw new Error("KEIRE_NODE_ADAPTER_MODE must be standalone or middleware.");
+}
+
 const documentationSidebar = docGroups.map(({ label, files }) => ({
     label,
     collapsed: label !== "Start here",
@@ -15,7 +20,7 @@ export default defineConfig({
     site: "https://keireengine.duckdns.org",
     srcDir: "./Source",
     output: "server",
-    adapter: node({ mode: "standalone" }),
+    adapter: node({ mode: adapterMode }),
     trailingSlash: "always",
     security: {
         // Astro compares Origin with the loopback request URL before middleware can

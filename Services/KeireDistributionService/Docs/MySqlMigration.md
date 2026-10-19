@@ -292,3 +292,16 @@ cannot do this yet; selecting MySQL without that owner returns 503. Supabase rem
 provider. The staged adapter handles browser authentication and sign-in/challenge rendering only. All other
 routes fail closed with a clear unavailable response; they never borrow Supabase identities or data. Complete
 all remaining route implementations and host acceptance before switching the public provider.
+
+### Isolated rendered-site QA
+
+Build with `KEIRE_NODE_ADAPTER_MODE=middleware` for the loopback QA host (default builds remain standalone).
+Run `scripts/start-local-platform-qa.mjs --smoke` with explicit `KEIRE_QA_PORT`, `KEIRE_QA_POWERSHELL`, and
+`KEIRE_QA_SETTINGS_DIRECTORY`. The host serves public build assets with pinned send 1.2.1, injects the
+application-owned backend into Astro locals, derives client identity from the socket only, and drains
+responses before disposing services. It binds only 127.0.0.1 and never replaces the public listener.
+This HTTP host is for scripted acceptance; browser Secure-cookie testing still requires an HTTPS QA proxy.
+Production proxy trust, deployment packaging and other route migrations remain pending.
+
+The --smoke mode closes the host after checks. Do not deploy its middleware build through the current
+standalone production launcher; rebuild with the default adapter mode before standard publication.
