@@ -74,10 +74,10 @@ try {
     });
     const base = process.env.KEIRE_QA_TLS_THUMBPRINT ? origin : `http://127.0.0.1:${process.env.KEIRE_QA_PORT}`;
     let cookies = new Map();
-    async function request(route, body) {
+    async function request(route, body, extraHeaders = {}) {
         const response = await fetch(base + route, {
             method: body === undefined ? "GET" : "POST", redirect: "manual", signal: AbortSignal.timeout(10000),
-            headers: { origin, "content-type": "application/json", cookie: [...cookies].map(([key, value]) => `${key}=${value}`).join("; ") },
+            headers: { origin, "content-type": "application/json", cookie: [...cookies].map(([key, value]) => `${key}=${value}`).join("; "), ...extraHeaders },
             body: body === undefined ? undefined : JSON.stringify(body),
         });
         for (const value of response.headers.getSetCookie()) {
@@ -233,6 +233,20 @@ try {
         const signedInProduct = await request(`/marketplace/${detail.publisher_slug}/${detail.slug}/`);
         assert.equal(signedInProduct.status, 200);
         assert.match(await signedInProduct.text(), /data-session-server-signed-in="true"/);
+        stage = "browser-acquisition";
+        const claimBody = { productId: detail.id, ownership: "personal", licenseSpdx: detail.license_spdx,
+            licenseRevision: detail.license_revision, acceptedLicenseSnapshot: detail.license_acceptance_snapshot };
+        const claimHeaders = { "idempotency-key": randomUUID() };
+        const claimResponse = await request("/marketplace/v1/claims/", claimBody, claimHeaders);
+        assert.equal(claimResponse.status, 201);
+        const claimData = (await claimResponse.json()).data;
+        const retryResponse = await request("/marketplace/v1/claims/", claimBody, claimHeaders);
+        assert.equal(retryResponse.status, 201);
+        assert.equal((await retryResponse.json()).data.entitlementId, claimData.entitlementId);
+        const acquiredLibrary = (await (await request("/marketplace/v1/library/")).json()).data;
+        assert.equal(acquiredLibrary.length, 1);
+        assert.equal(acquiredLibrary[0].id, claimData.entitlementId);
+        checks += 5;
         checks += 3;
         checks++;
         checks += 4;
@@ -319,6 +333,11 @@ try {
     }
     try {
         if (fixtureCreated) {
+            await pool.execute("DELETE FROM platform_audit_events WHERE actor_user_id=? AND action='marketplace.product_claimed'", [userId]);
+            await pool.execute("DELETE FROM marketplace_entitlements WHERE user_id=?", [userId]);
+            await pool.execute(`DELETE item FROM marketplace_order_items item
+                JOIN marketplace_orders orders ON orders.id=item.order_id WHERE orders.user_id=?`, [userId]);
+            await pool.execute("DELETE FROM marketplace_orders WHERE user_id=?", [userId]);
             await pool.execute("DELETE FROM platform_auth_sessions WHERE user_id=?", [userId]);
             await pool.execute("DELETE FROM platform_auth_challenges WHERE user_id=?", [userId]);
             await pool.execute("DELETE FROM platform_email_challenges WHERE user_id=?", [userId]);

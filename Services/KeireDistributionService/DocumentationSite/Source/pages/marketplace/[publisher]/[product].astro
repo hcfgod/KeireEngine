@@ -50,7 +50,11 @@ const structuredData = listing ? {
 } : undefined;
 const currentVersion = versions.find((version) => version.state === "published");
 const acquisition = purchaseState(offer, ownsPersonalCopy, Boolean(currentVersion));
-const acquisitionMigrating = Boolean(localView && acquisition.canClaim);
+const acceptedLicense = listing ? JSON.stringify({
+    licenseSpdx: listing.license_spdx,
+    licenseRevision: listing.license_revision,
+    acceptedLicenseSnapshot: listing.license_acceptance_snapshot,
+}) : "";
 const openActionLabel = currentVersion?.install_kind === "complete_project" ? "Create in Hub" : "Open in Editor";
 ---
 
@@ -60,21 +64,28 @@ const openActionLabel = currentVersion?.install_kind === "complete_project" ? "C
             <div><p class="eyebrow">{listing.category_name} · {listing.license_spdx}</p><h1>{listing.display_name}</h1><p class="lead">{listing.short_description}</p><p>By <a href={`/marketplace/publishers/${listing.publisher_slug}/`}>{listing.publisher_name}</a>{listing.publisher_verified ? " · Verified publisher" : ""}</p></div>
             <aside class="product-buybox" aria-label="Get this asset">
                 <span class="product-buybox__price">{offerPrice(offer)}</span>
-                <button class="button" type="button" data-claim-product={listing.id} disabled={!acquisition.canClaim || acquisitionMigrating}>
-                    {acquisitionMigrating ? "Acquisition temporarily unavailable" : offerLoadFailed ? "Pricing unavailable" : acquisition.label}
+                {acquisition.canClaim && <>
+                    <details><summary>Review asset license</summary><pre class="asset-license">{listing.license_acceptance_snapshot}</pre></details>
+                    <label><input type="checkbox" data-accept-license /> I accept this asset's license.</label>
+                </>}
+                <button class="button" type="button" data-claim-product={listing.id} data-claim-license={acceptedLicense}
+                    data-local-acquisition={Boolean(localView)} disabled>
+                    {offerLoadFailed ? "Pricing unavailable" : acquisition.label}
                 </button>
                 <p class="form-message" aria-live="polite" data-claim-message>
-                    {acquisitionMigrating ? "Asset acquisition is undergoing maintenance. Your existing ownership is preserved. Please try again later." : offerLoadFailed && !ownsPersonalCopy
+                    {offerLoadFailed && !ownsPersonalCopy
                         ? "We couldn't load pricing. Refresh this page to try again. You have not been charged."
                         : acquisition.message}
                 </p>
                 <a class="button button--secondary" href="/account/#library" data-library-link hidden={!ownsPersonalCopy}>
                     View My Assets
                 </a>
-                {currentVersion
+                {currentVersion && !localView
                     ? <a class="button button--secondary" href={`keirehub://marketplace/product/${listing.id}`} data-open-product hidden={!ownsPersonalCopy}>{openActionLabel}</a>
-                    : <span class="button button--secondary" aria-disabled="true">No published download</span>}
-                {currentVersion && <p class="form-message">Kéire Hub securely prepares the signed package; project installation and import happen in the Editor Package Manager.</p>}
+                    : <span class="button button--secondary" aria-disabled="true">{currentVersion ? "Downloads temporarily unavailable" : "No published download"}</span>}
+                {currentVersion && <p class="form-message">{localView
+                    ? "Ownership is preserved while download delivery is migrated."
+                    : "Kéire Hub securely prepares the signed package; project installation and import happen in the Editor Package Manager."}</p>}
             </aside>
         </section>
         <section class="platform-shell product-details">
@@ -94,11 +105,18 @@ const openActionLabel = currentVersion?.install_kind === "complete_project" ? "C
     const message = document.querySelector("[data-claim-message]");
     const libraryLink = document.querySelector("[data-library-link]");
     const openProduct = document.querySelector("[data-open-product]");
+    const acceptLicense = document.querySelector("[data-accept-license]");
     const claimAttemptKey = crypto.randomUUID();
     const claimTimeoutMilliseconds = 18_000;
+    acceptLicense?.addEventListener("change", () => {
+        if (button instanceof HTMLButtonElement && acceptLicense instanceof HTMLInputElement && !button.hasAttribute("aria-busy")) {
+            button.disabled = !acceptLicense.checked;
+        }
+    });
 
     button?.addEventListener("click", async () => {
-        if (!(button instanceof HTMLButtonElement) || !(message instanceof HTMLElement) || button.disabled) return;
+        if (!(button instanceof HTMLButtonElement) || !(message instanceof HTMLElement) || button.disabled ||
+            !(acceptLicense instanceof HTMLInputElement) || !acceptLicense.checked) return;
 
         const controller = new AbortController();
         const timeout = window.setTimeout(() => controller.abort(), claimTimeoutMilliseconds);
@@ -112,7 +130,8 @@ const openActionLabel = currentVersion?.install_kind === "complete_project" ? "C
             const response = await fetch("/marketplace/v1/claims/", {
                 method: "POST",
                 headers: { "content-type": "application/json", "idempotency-key": claimAttemptKey },
-                body: JSON.stringify({ productId: button.dataset.claimProduct, ownership: "personal" }),
+                body: JSON.stringify({ productId: button.dataset.claimProduct, ownership: "personal",
+                    ...JSON.parse(button.dataset.claimLicense ?? "{}") }),
                 cache: "no-store",
                 credentials: "same-origin",
                 signal: controller.signal,
@@ -147,11 +166,14 @@ const openActionLabel = currentVersion?.install_kind === "complete_project" ? "C
             }
 
             completed = true;
+            acceptLicense.disabled = true;
             button.textContent = "In My Assets";
             message.dataset.kind = "success";
-            message.textContent = "Added to your personal library. Open it in the Editor when you are ready.";
+            message.textContent = button.dataset.localAcquisition === "true"
+                ? "Added to your personal library. Downloads are temporarily unavailable during the backend migration."
+                : "Added to your personal library. Open it in the Editor when you are ready.";
             if (libraryLink instanceof HTMLAnchorElement) libraryLink.hidden = false;
-            if (openProduct instanceof HTMLAnchorElement) openProduct.hidden = false;
+            if (openProduct instanceof HTMLAnchorElement && button.dataset.localAcquisition !== "true") openProduct.hidden = false;
         } catch (error) {
             message.dataset.kind = "error";
             message.textContent = error instanceof DOMException && error.name === "AbortError"
@@ -161,11 +183,12 @@ const openActionLabel = currentVersion?.install_kind === "complete_project" ? "C
         } finally {
             window.clearTimeout(timeout);
             button.removeAttribute("aria-busy");
-            if (!completed && !redirecting) button.disabled = false;
+            if (!completed && !redirecting) button.disabled = !acceptLicense.checked;
         }
     });
 </script>
 
 <style>
     .product-buybox [hidden] { display: none !important; }
+    .asset-license { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 18rem; overflow: auto; }
 </style>
