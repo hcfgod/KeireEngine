@@ -13,13 +13,18 @@ export function verifyMarketplaceSourceColumns(schema, section = "marketplace-co
         bpchar: /^CHAR\(/,
         timestamptz: /^DATETIME\(6\)/,
         int4: /^INT\b/,
+        int2: /^SMALLINT\b/,
         int8: /^BIGINT\b/,
         bool: /^BOOLEAN\b/,
         _text: /^JSON\b/,
+        jsonb: /^JSON\b/,
         organization_role: /^VARCHAR\(/,
         marketplace_product_state: /^VARCHAR\(/,
         marketplace_version_state: /^VARCHAR\(/,
         marketplace_install_kind: /^VARCHAR\(/,
+        marketplace_upload_state: /^VARCHAR\(/,
+        marketplace_submission_state: /^VARCHAR\(/,
+        marketplace_publication_job_state: /^VARCHAR\(/,
     };
     for (const table of marketplaceTables(section)) {
         const columns = schema.columns.filter((column) => column.table_schema === "public" && column.table_name === table.name);
@@ -37,7 +42,29 @@ export function verifyMarketplaceSourceColumns(schema, section = "marketplace-co
     }
 }
 
-function normalizeValue(value, definition) {
+export function canonicalJson(value) {
+    function normalize(item) {
+        if (item === null || typeof item === "string" || typeof item === "boolean") {
+            return item;
+        }
+        if (typeof item === "number") {
+            if (!Number.isFinite(item) || (Number.isInteger(item) && !Number.isSafeInteger(item))) {
+                throw new Error("Unsafe numeric JSON value in marketplace data.");
+            }
+            return item;
+        }
+        if (Array.isArray(item)) {
+            return item.map(normalize);
+        }
+        if (typeof item === "object" && Object.getPrototypeOf(item) === Object.prototype) {
+            return Object.fromEntries(Object.keys(item).sort().map((key) => [key, normalize(item[key])]));
+        }
+        throw new Error("Unsupported JSON value in marketplace data.");
+    }
+    return JSON.stringify(normalize(value));
+}
+
+function normalizeValue(value, definition, textArray = false) {
     if (value === null) {
         if (definition.endsWith("NOT NULL")) {
             throw new Error("A required marketplace value is null.");
@@ -51,10 +78,10 @@ function normalizeValue(value, definition) {
         return mysqlUtcTimestamp(value);
     }
     if (definition.startsWith("JSON")) {
-        if (!Array.isArray(value) || value.some((item) => item !== null && typeof item !== "string")) {
+        if (!Array.isArray(value) || (textArray && value.some((item) => item !== null && typeof item !== "string"))) {
             throw new Error("A marketplace text array cannot be converted without data loss.");
         }
-        return JSON.stringify(value);
+        return canonicalJson(value);
     }
     if (definition.startsWith("BOOLEAN")) {
         if (typeof value !== "boolean") {
@@ -62,13 +89,13 @@ function normalizeValue(value, definition) {
         }
         return Number(value);
     }
-    if (/^(BIGINT|INT)\b/.test(definition)) {
+    if (/^(BIGINT|INT|SMALLINT)\b/.test(definition)) {
         if ((typeof value === "number" && !Number.isSafeInteger(value)) ||
             !["number", "string"].includes(typeof value) || !/^-?(0|[1-9][0-9]*)$/.test(String(value))) {
             throw new Error("Unsafe marketplace integer; use a lossless source value.");
         }
         const integer = BigInt(value);
-        const bits = definition.startsWith("BIGINT") ? 64n : 32n;
+        const bits = definition.startsWith("BIGINT") ? 64n : definition.startsWith("SMALLINT") ? 16n : 32n;
         if (integer < -(2n ** (bits - 1n)) || integer >= 2n ** (bits - 1n)) {
             throw new Error("Marketplace integer is out of range.");
         }
@@ -101,7 +128,7 @@ export function marketplaceRecords(snapshot, section = "marketplace-core") {
             if (!row || Object.keys(row).length !== names.length || !names.every((name) => Object.hasOwn(row, name))) {
                 throw new Error(`Source columns changed for ${table.name}; review the mapping before import.`);
             }
-            return names.map((name) => normalizeValue(row[name], table.columns[name]));
+            return names.map((name) => normalizeValue(row[name], table.columns[name], table.name === "marketplace_product_versions"));
         });
         return { table, names, values };
     });
@@ -113,7 +140,7 @@ export async function verifyMarketplaceRecords(connection, records) {
         const [rows] = await connection.query(`SELECT ${names.map((name) => `\`${name}\``).join(",")} FROM \`${table.name}\``);
         const actual = rows.map((row) => JSON.stringify(names.map((name) => {
             const value = row[name];
-            return table.columns[name].startsWith("JSON") && value !== null ? JSON.stringify(value) : value;
+            return table.columns[name].startsWith("JSON") && value !== null ? canonicalJson(value) : value;
         }))).sort();
         const expected = values.map((row) => JSON.stringify(row)).sort();
         if (JSON.stringify(actual) !== JSON.stringify(expected)) {

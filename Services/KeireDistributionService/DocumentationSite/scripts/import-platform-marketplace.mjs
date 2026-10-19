@@ -6,6 +6,7 @@ import { importMarketplaceSnapshot, marketplaceRecords, verifyMarketplaceRecords
 import { verifyMigrationRelationships, verifyMarketplaceConditionalKeys } from "../Source/lib/platform-migration-preflight.mjs";
 import { verifyAccessConstraints } from "./platform-marketplace-access-acceptance.mjs";
 import { verifyContentConstraints } from "./platform-marketplace-content-acceptance.mjs";
+import { verifyPublicationConstraints } from "./platform-marketplace-publication-acceptance.mjs";
 
 let pool;
 let stage = "input";
@@ -99,6 +100,10 @@ try {
     if (!verifyOnly && section === "marketplace-content") {
         stage = "content-constraint-acceptance";
         constraintChecks = await verifyContentConstraints(pool, records);
+    }
+    if (!verifyOnly && section === "marketplace-publication") {
+        stage = "publication-constraint-acceptance";
+        constraintChecks = await verifyPublicationConstraints(pool, records);
     }
     console.log(JSON.stringify({ status: "marketplace-import-verified", section, counts, constraintChecks,
         verificationOnly: verifyOnly, liveBackendChanged: false, fullMarketplaceAcceptance: "pending" }));

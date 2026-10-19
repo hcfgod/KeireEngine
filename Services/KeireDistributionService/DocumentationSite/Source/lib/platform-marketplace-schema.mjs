@@ -1,5 +1,6 @@
 import { marketplaceAccessTables } from "./platform-marketplace-access-schema.mjs";
 import { marketplaceContentTables } from "./platform-marketplace-content-schema.mjs";
+import { marketplacePublicationTables } from "./platform-marketplace-publication-schema.mjs";
 
 const uuid = "CHAR(36) CHARACTER SET ascii COLLATE ascii_bin";
 const time = "DATETIME(6)";
@@ -169,7 +170,7 @@ export const marketplaceCoreTables = [
 
 export function marketplaceTableSql(table) {
     if (!marketplaceCoreTables.includes(table) && !marketplaceAccessTables.includes(table) &&
-        !marketplaceContentTables.includes(table)) {
+        !marketplaceContentTables.includes(table) && !marketplacePublicationTables.includes(table)) {
         throw new Error("Only reviewed marketplace table definitions may be created.");
     }
     const fields = Object.entries(table.columns).map(([name, definition]) => `\`${name}\` ${definition}`);
@@ -186,6 +187,9 @@ export function marketplaceTables(section = "marketplace-core") {
     }
     if (section === "marketplace-content") {
         return marketplaceContentTables;
+    }
+    if (section === "marketplace-publication") {
+        return marketplacePublicationTables;
     }
     throw new Error("Unknown marketplace migration section.");
 }

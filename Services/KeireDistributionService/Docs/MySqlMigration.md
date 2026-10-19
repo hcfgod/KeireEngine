@@ -61,6 +61,22 @@ Provisioning does not modify other schemas, reset existing passwords, or restart
 
 ## Migration acceptance gates
 
+`-Section marketplace-publication` imports the two public-key tables, uploads, validation reports, submissions,
+signed-publication records, and publication jobs. The initial import preserved one publication key, one validator key,
+12 uploads, 12 reports, nine submissions, eight publications, and two jobs. All fields matched the source. Sixteen live
+checks cover public-key byte/fingerprint agreement, Unicode upload paths, duplicate paths and active work, malformed
+diagnostics, retry limits, lease consistency, and rollback. Existing signed documents are preserved byte-for-byte;
+signature verification against recovered package bytes remains a separate publication gate.
+
+Upload paths retain their original Unicode text. A unique SHA-256 generated key avoids MySQL's index-byte limit for
+1024-character paths; a digest collision fails closed as a duplicate rather than overwriting an object. Application
+lookups must still compare the full path. Active upload/submission uniqueness uses virtual generated columns. JSON
+diagnostics are compared recursively with stable object-key ordering while preserving array order, and unsafe integer
+values are rejected. Source SMALLINT bounds are checked before inserting attempt counts.
+
+No validator or publication worker is connected to the migrated jobs. Database checks enforce valid record shapes;
+authorization, legal state transitions, leasing concurrency, and signing must pass service-level tests before cutover.
+
 `-Section marketplace-content` handles product media metadata, product tags, version dependencies, and wishlists.
 All four source tables are currently empty; their existence is still required and verified. Thirteen live checks use
 temporary rollback-contained records to verify invalid media paths/hashes/types/dimensions, missing product references,

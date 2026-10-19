@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Preserved marketplace upload, validation, submission, signed-publication, job, and public-key records in the isolated
+  MySQL migration. Added lease/uniqueness checks and nested diagnostic JSON verification; workers remain disconnected.
+
 - Added isolated MySQL media/tag/dependency/wishlist schemas and rollback-contained acceptance tests. Migration
   preflight now checks source column types and nullability even for empty tables.
 
