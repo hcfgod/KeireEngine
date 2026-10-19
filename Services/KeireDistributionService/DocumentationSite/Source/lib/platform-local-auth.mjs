@@ -5,9 +5,9 @@ import { openAccountRecord } from "./platform-account-import.mjs";
 import { matchingTotpCounter, newOpaqueToken, tokenDigest, verifyImportedPassword } from "./platform-auth-crypto.mjs";
 
 const challengeLifetimeMs = 5 * 60 * 1000;
-const sessionLifetimeMs = 8 * 60 * 60 * 1000;
+export const sessionLifetimeMs = 8 * 60 * 60 * 1000;
 const attemptWindowMs = 15 * 60 * 1000;
-const maximumChallengeAttempts = 5;
+export const maximumChallengeAttempts = 5;
 const failed = Object.freeze({ state: "invalid_credentials" });
 const digest = (value) => createHash("sha256").update(value).digest("hex");
 

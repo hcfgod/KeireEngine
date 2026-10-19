@@ -44,31 +44,35 @@ export async function finishEmailDelivery(pool, token, sent) {
  * This row budget supplements (does not replace) shared account/client and password-challenge limits.
  */
 export async function consumeEmailChallenge(pool, key, context, token, code, now, authorizeAndApply) {
+    return platformTransaction(pool, (connection) =>
+        consumeEmailChallengeInTransaction(connection, key, context, token, code, now, authorizeAndApply));
+}
+
+/** The caller owns the transaction, including shared password-challenge attempt accounting. */
+export async function consumeEmailChallengeInTransaction(connection, key, context, token, code, now, authorizeAndApply) {
     const hash = tokenDigest(token);
     if (!hash || typeof authorizeAndApply !== "function") {
         return null;
     }
-    return platformTransaction(pool, async (connection) => {
-        const [rows] = await connection.execute(
-            "SELECT * FROM platform_email_challenges WHERE token_hash = ? FOR UPDATE", [hash]);
-        const row = rows[0];
-        if (!row || row.used || row.delivery_state !== "sent" || row.user_id !== context.userId ||
-            Number(row.expires_ms) <= now || row.attempts >= emailCodeMaximumAttempts) {
-            return null;
-        }
-        await connection.execute("UPDATE platform_email_challenges SET attempts = attempts + 1 WHERE token_hash = ?", [hash]);
-        const record = { tokenHash: row.token_hash, proof: row.proof,
-            issuedAt: Number(row.issued_ms), expiresAt: Number(row.expires_ms) };
-        if (!matchesEmailCode(key, context, record, token, code, now)) {
-            return null;
-        }
-        await connection.query("SAVEPOINT email_authorization");
-        const result = await authorizeAndApply(connection);
-        if (result === null || result === undefined) {
-            await connection.query("ROLLBACK TO SAVEPOINT email_authorization");
-            return null;
-        }
-        await connection.execute("UPDATE platform_email_challenges SET used = TRUE WHERE token_hash = ?", [hash]);
-        return result;
-    });
+    const [rows] = await connection.execute(
+        "SELECT * FROM platform_email_challenges WHERE token_hash = ? FOR UPDATE", [hash]);
+    const row = rows[0];
+    if (!row || row.used || row.delivery_state !== "sent" || row.user_id !== context.userId ||
+        Number(row.expires_ms) <= now || row.attempts >= emailCodeMaximumAttempts) {
+        return null;
+    }
+    await connection.execute("UPDATE platform_email_challenges SET attempts = attempts + 1 WHERE token_hash = ?", [hash]);
+    const record = { tokenHash: row.token_hash, proof: row.proof,
+        issuedAt: Number(row.issued_ms), expiresAt: Number(row.expires_ms) };
+    if (!matchesEmailCode(key, context, record, token, code, now)) {
+        return null;
+    }
+    await connection.query("SAVEPOINT email_authorization");
+    const result = await authorizeAndApply(connection);
+    if (result === null || result === undefined) {
+        await connection.query("ROLLBACK TO SAVEPOINT email_authorization");
+        return null;
+    }
+    await connection.execute("UPDATE platform_email_challenges SET used = TRUE WHERE token_hash = ?", [hash]);
+    return result;
 }

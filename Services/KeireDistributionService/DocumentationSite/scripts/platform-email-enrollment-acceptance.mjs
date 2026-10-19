@@ -4,6 +4,7 @@ import { LocalEmailAuthentication } from "../Source/lib/platform-email-auth.mjs"
 import { tokenDigest } from "../Source/lib/platform-auth-crypto.mjs";
 import { emailSendLimits } from "../Source/lib/platform-email-limits.mjs";
 import { platformTransaction } from "../Source/lib/platform-mysql.mjs";
+import { verifyEmailSignIn } from "./platform-email-signin-acceptance.mjs";
 
 export async function verifyEmailEnrollment(pool, auth, userId, password, totpFactorId, now) {
     const client = `email-enrollment-qa:${randomUUID()}`;
@@ -40,7 +41,7 @@ export async function verifyEmailEnrollment(pool, auth, userId, password, totpFa
         const [factors] = await pool.execute("SELECT id,factor_type FROM platform_mfa_factors WHERE user_id = ? AND status = 'verified'", [userId]);
         assert.equal(factors.filter((factor) => factor.factor_type === "email").length, 1);
         assert.ok(factors.some((factor) => factor.id === totpFactorId));
-        return 17;
+        return 17 + await verifyEmailSignIn(pool, auth, accounts[0], password, enrolledFactor, totpFactorId);
     } finally {
         for (const token of sessions) {
             await pool.execute("DELETE FROM platform_auth_sessions WHERE token_hash = ?", [tokenDigest(token)]);

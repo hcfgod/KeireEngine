@@ -1,9 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
-import { accountAvailable } from "./platform-local-auth.mjs";
-import { tokenDigest, verifyImportedPassword } from "./platform-auth-crypto.mjs";
-import { sealAccountRecord } from "./platform-account-import.mjs";
+import { accountAvailable, maximumChallengeAttempts, sessionLifetimeMs } from "./platform-local-auth.mjs";
+import { newOpaqueToken, tokenDigest, verifyImportedPassword } from "./platform-auth-crypto.mjs";
+import { openAccountRecord, sealAccountRecord } from "./platform-account-import.mjs";
 import { createEmailCode } from "./platform-email-code.mjs";
-import { consumeEmailChallenge, finishEmailDelivery, insertEmailChallenge } from "./platform-email-store.mjs";
+import { consumeEmailChallenge, consumeEmailChallengeInTransaction, finishEmailDelivery, insertEmailChallenge } from "./platform-email-store.mjs";
 import { reserveEmailSend } from "./platform-email-limits.mjs";
 import { platformTransaction } from "./platform-mysql.mjs";
 
@@ -15,6 +15,79 @@ export class LocalEmailAuthentication {
     constructor(authentication, mailer) {
         this.authentication = authentication;
         this.mailer = mailer;
+    }
+
+    async signInAuthorization(connection, passwordToken, factorId, now) {
+        const hash = tokenDigest(passwordToken);
+        if (!hash || typeof factorId !== "string" || !/^[a-f0-9-]{36}$/i.test(factorId)) {
+            return null;
+        }
+        const [challenges] = await connection.execute(
+            "SELECT * FROM platform_auth_challenges WHERE token_hash = ? FOR UPDATE", [hash]);
+        const challenge = challenges[0];
+        if (!challenge || challenge.used || Number(challenge.expires_ms) <= now || challenge.attempts >= maximumChallengeAttempts) {
+            return null;
+        }
+        const [accounts] = await connection.execute("SELECT * FROM platform_accounts WHERE id = ? FOR UPDATE", [challenge.user_id]);
+        const account = accounts[0];
+        if (!accountAvailable(account, now) || digest(account.password_hash ?? "") !== challenge.password_digest) {
+            return null;
+        }
+        const [factors] = await connection.execute(`SELECT source_sealed FROM platform_mfa_factors
+            WHERE id = ? AND user_id = ? AND factor_type = 'email' AND status = 'verified' FOR UPDATE`, [factorId, account.id]);
+        if (factors.length !== 1 || openAccountRecord(factors[0].source_sealed,
+            this.authentication.encryptionKey, `mfa:${factorId}`).email !== account.email) {
+            return null;
+        }
+        return { account, passwordHash: hash, context: {
+            purpose: "sign_in", userId: account.id, email: account.email,
+            passwordDigest: challenge.password_digest, authorizationDigest: digest(`${hash}:${factorId}`),
+        } };
+    }
+
+    async beginSignIn(passwordToken, factorId, clientIdentity) {
+        const auth = this.authentication;
+        const now = auth.now();
+        const issued = await platformTransaction(auth.pool, async (connection) => {
+            const authorization = await this.signInAuthorization(connection, passwordToken, factorId, now);
+            if (!authorization) {
+                return invalid;
+            }
+            const limits = await reserveEmailSend(connection, authorization.account.id, clientIdentity, now);
+            if (!limits.allowed) {
+                return { state: "rate_limited", retryAfterSeconds: limits.retryAfterSeconds };
+            }
+            const challenge = createEmailCode(auth.encryptionKey, authorization.context, now);
+            await insertEmailChallenge(connection, authorization.account.id, challenge.record);
+            return { state: "pending_delivery", challenge, context: authorization.context };
+        });
+        return this.deliver(issued);
+    }
+
+    async completeSignIn(passwordToken, factorId, emailToken, code) {
+        const auth = this.authentication;
+        const now = auth.now();
+        return platformTransaction(auth.pool, async (connection) => {
+            const authorization = await this.signInAuthorization(connection, passwordToken, factorId, now);
+            if (!authorization) {
+                return invalid;
+            }
+            // All email challenges and TOTP attempts share the original password challenge's five tries.
+            await connection.execute("UPDATE platform_auth_challenges SET attempts = attempts + 1 WHERE token_hash = ?",
+                [authorization.passwordHash]);
+            const result = await consumeEmailChallengeInTransaction(connection, auth.encryptionKey,
+                authorization.context, emailToken, code, now, async () => {
+                    const token = newOpaqueToken();
+                    const expiresAt = now + sessionLifetimeMs;
+                    await connection.execute(`INSERT INTO platform_auth_sessions
+                        (token_hash,user_id,password_digest,assurance_level,factor_id,expires_ms) VALUES (?,?,?,1,?,?)`,
+                    [tokenDigest(token), authorization.account.id, authorization.context.passwordDigest, factorId, expiresAt]);
+                    await connection.execute("UPDATE platform_auth_challenges SET used = TRUE WHERE token_hash = ?",
+                        [authorization.passwordHash]);
+                    return { state: "authenticated", token, userId: authorization.account.id, assurance: 1, expiresAt };
+                });
+            return result ?? invalid;
+        });
     }
 
     async enrollmentAuthorization(connection, sessionToken, now) {

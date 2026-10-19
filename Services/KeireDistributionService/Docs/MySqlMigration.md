@@ -394,3 +394,10 @@ send limits and persists the pending challenge atomically; delivery occurs after
 enables consumption. Completion rechecks session/account/factors under locks and creates one encrypted email factor
 in the consumption transaction. It does not remove the authenticator. Live acceptance uses synthetic accounts and a
 local mail capture; no enrollment HTTP/UI route is enabled yet. Email sign-in issuance remains the next integration.
+
+The staged email service now also issues and consumes sign-in codes after password verification. The parent login
+challenge, current account and enrolled email factor are locked and revalidated. Email and TOTP verification share
+the parent attempt budget; successful email verification consumes both challenges and creates an AAL1 session in
+one transaction. Local mail-capture acceptance covers enrollment through sign-in, replay, password-challenge
+invalidation and mixed-method attempt exhaustion. HTTP routes, browser controls, and real inbox delivery acceptance
+remain pending; these services are not enabled on the live site.
