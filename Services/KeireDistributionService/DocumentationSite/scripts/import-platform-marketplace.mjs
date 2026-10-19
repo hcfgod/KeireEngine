@@ -2,9 +2,10 @@ import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
 import { createPlatformPool, platformTransaction } from "../Source/lib/platform-mysql.mjs";
 import { createMarketplaceSchema } from "../Source/lib/platform-marketplace-schema.mjs";
-import { importMarketplaceSnapshot, marketplaceRecords, verifyMarketplaceRecords } from "../Source/lib/platform-marketplace-import.mjs";
+import { importMarketplaceSnapshot, marketplaceRecords, verifyMarketplaceRecords, verifyMarketplaceSourceColumns } from "../Source/lib/platform-marketplace-import.mjs";
 import { verifyMigrationRelationships, verifyMarketplaceConditionalKeys } from "../Source/lib/platform-migration-preflight.mjs";
 import { verifyAccessConstraints } from "./platform-marketplace-access-acceptance.mjs";
+import { verifyContentConstraints } from "./platform-marketplace-content-acceptance.mjs";
 
 let pool;
 let stage = "input";
@@ -24,7 +25,9 @@ try {
     assert.equal(createHash("sha256").update(request.rawSnapshot).digest("hex"), request.expectedDigest);
     assert.equal(createHash("sha256").update(request.rawSchema).digest("hex"), request.schemaDigest);
     const snapshot = JSON.parse(request.rawSnapshot);
-    verifyMigrationRelationships(snapshot, JSON.parse(request.rawSchema));
+    const schema = JSON.parse(request.rawSchema);
+    verifyMigrationRelationships(snapshot, schema);
+    verifyMarketplaceSourceColumns(schema, section);
     verifyMarketplaceConditionalKeys(snapshot);
     const records = marketplaceRecords(snapshot, section);
     pool = await createPlatformPool(request.settings, "migration");
@@ -92,6 +95,10 @@ try {
     if (!verifyOnly && section === "marketplace-access") {
         stage = "access-constraint-acceptance";
         constraintChecks = await verifyAccessConstraints(pool, records);
+    }
+    if (!verifyOnly && section === "marketplace-content") {
+        stage = "content-constraint-acceptance";
+        constraintChecks = await verifyContentConstraints(pool, records);
     }
     console.log(JSON.stringify({ status: "marketplace-import-verified", section, counts, constraintChecks,
         verificationOnly: verifyOnly, liveBackendChanged: false, fullMarketplaceAcceptance: "pending" }));

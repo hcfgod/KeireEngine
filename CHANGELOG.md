@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Added isolated MySQL media/tag/dependency/wishlist schemas and rollback-contained acceptance tests. Migration
+  preflight now checks source column types and nullability even for empty tables.
+
 - Preserved marketplace orders, license snapshots, entitlements, and device/download records in the isolated MySQL
   migration, with ownership, idempotency, grant-lifetime, cascade, and rollback acceptance checks.
 

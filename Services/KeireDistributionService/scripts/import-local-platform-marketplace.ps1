@@ -4,7 +4,7 @@ param
     [Parameter(Mandatory)] [string] $BackupDirectory,
     [Parameter(Mandatory)] [string] $SettingsDirectory,
     [Parameter(Mandatory)] [string] $ResultPath,
-    [ValidateSet('marketplace-core', 'marketplace-access')] [string] $Section = 'marketplace-core',
+    [ValidateSet('marketplace-core', 'marketplace-access', 'marketplace-content')] [string] $Section = 'marketplace-core',
     [switch] $CreateSchema,
     [switch] $VerifyOnly,
     [switch] $AcceptanceOnly

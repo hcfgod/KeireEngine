@@ -3,6 +3,40 @@ import { mysqlUtcTimestamp } from "./platform-account-import.mjs";
 import { marketplaceTables } from "./platform-marketplace-schema.mjs";
 import { platformTransaction } from "./platform-mysql.mjs";
 
+export function verifyMarketplaceSourceColumns(schema, section = "marketplace-core") {
+    if (!Array.isArray(schema?.columns)) {
+        throw new Error("Marketplace source columns are missing.");
+    }
+    const typeMappings = {
+        uuid: /^CHAR\(36\)/,
+        text: /^(?:VAR)?CHAR\(|^(?:LONG)?TEXT\b/,
+        bpchar: /^CHAR\(/,
+        timestamptz: /^DATETIME\(6\)/,
+        int4: /^INT\b/,
+        int8: /^BIGINT\b/,
+        bool: /^BOOLEAN\b/,
+        _text: /^JSON\b/,
+        organization_role: /^VARCHAR\(/,
+        marketplace_product_state: /^VARCHAR\(/,
+        marketplace_version_state: /^VARCHAR\(/,
+        marketplace_install_kind: /^VARCHAR\(/,
+    };
+    for (const table of marketplaceTables(section)) {
+        const columns = schema.columns.filter((column) => column.table_schema === "public" && column.table_name === table.name);
+        if (columns.length !== Object.keys(table.columns).length || new Set(columns.map((column) => column.column_name)).size !== columns.length) {
+            throw new Error(`Source schema changed for ${table.name}; review the mapping.`);
+        }
+        for (const column of columns) {
+            const definition = table.columns[column.column_name];
+            if (!definition || !typeMappings[column.udt_name]?.test(definition) ||
+                !["YES", "NO"].includes(column.is_nullable) ||
+                (column.is_nullable === "NO") !== definition.endsWith("NOT NULL")) {
+                throw new Error(`Source column mapping changed for ${table.name}.`);
+            }
+        }
+    }
+}
+
 function normalizeValue(value, definition) {
     if (value === null) {
         if (definition.endsWith("NOT NULL")) {

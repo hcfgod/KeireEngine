@@ -61,6 +61,16 @@ Provisioning does not modify other schemas, reset existing passwords, or restart
 
 ## Migration acceptance gates
 
+`-Section marketplace-content` handles product media metadata, product tags, version dependencies, and wishlists.
+All four source tables are currently empty; their existence is still required and verified. Thirteen live checks use
+temporary rollback-contained records to verify invalid media paths/hashes/types/dimensions, missing product references,
+tag/product deletion cascades, dependency/conflict uniqueness, and wishlist duplicates. No media files are created or
+served by this test. Repeat import is refused by the section ledger even when every table is empty.
+
+All sections now compare source column names, types, and nullability before opening the destination database. This
+detects schema changes that row-only validation would miss for an empty table. It supplements, rather than replaces,
+the constraint/policy review and field-by-field post-import comparison.
+
 The marketplace launcher also accepts `-Section marketplace-access` for orders, order items, entitlements, legacy
 device sessions, and download grants. This section requires the core and account tables and has its own import-ledger
 entry. The initial import preserved five orders, five order items (including accepted license text), five entitlements,
