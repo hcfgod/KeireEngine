@@ -2,10 +2,32 @@ import type { APIRoute } from "astro";
 import { apiError, apiResponse, MarketplaceApiError, requireSupabase } from "../../../../lib/api";
 import { marketplaceEnabled } from "../../../../lib/marketplace";
 import { loadOffer, purchaseState } from "../../../../lib/marketplace-purchase";
+import { localProductDetail } from "../../../../lib/platform-product.mjs";
 
 export const prerender = false;
 export const GET: APIRoute = async (context) => {
     try {
+        const localPool = context.locals.localCatalogPool;
+        if (localPool) {
+            const id = context.params.id;
+            if (!id || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
+                throw new MarketplaceApiError(400, "marketplace.invalid_product_id", "Product ID is invalid.");
+            }
+            const detail = await localProductDetail(localPool, id);
+            if (!detail.enabled) {
+                throw new MarketplaceApiError(503, "marketplace.disabled", "The marketplace is disabled.");
+            }
+            if (!detail.product) {
+                throw new MarketplaceApiError(404, "marketplace.product_not_found", "Product was not found.");
+            }
+            const product = detail.product;
+            const acquisition = purchaseState(product.offer, false,
+                product.versions.some((version) => version.state === "published"));
+            return apiResponse(context, {
+                data: { ...product, acquisition },
+                meta: { apiVersion: "marketplace/v1", correlationId: context.locals.correlationId },
+            }, 200, "public, max-age=60, stale-while-revalidate=300");
+        }
         const supabase = requireSupabase(context);
         if (!await marketplaceEnabled(supabase)) throw new MarketplaceApiError(503, "marketplace.disabled", "The marketplace is disabled.");
         const id = context.params.id;

@@ -15,10 +15,14 @@ export async function localMarketplaceListing(pool, search = "", category = "") 
     }
 }
 
-export async function localCatalogPage(pool, { limit = 24, search = "", category = "", cursor = null } = {}) {
+export async function localCatalogPage(pool, { limit = 24, search = "", category = "", cursor = null, productId = null } = {}) {
     if (!Number.isInteger(limit) || limit < 1 || limit > 50 || typeof search !== "string" || search.length > 100 ||
         typeof category !== "string" || category.length > 64) {
         throw new Error("Invalid catalog query.");
+    }
+    if (productId !== null && (typeof productId !== "string" ||
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(productId))) {
+        throw new Error("Invalid catalog product ID.");
     }
     const [flags] = await pool.execute("SELECT enabled FROM platform_feature_flags WHERE `key`='marketplace_enabled'");
     if (flags.length !== 1 || !flags[0].enabled) {
@@ -26,6 +30,10 @@ export async function localCatalogPage(pool, { limit = 24, search = "", category
     }
     const conditions = ["p.state='published'", "publisher.suspended_at IS NULL", "category.active=TRUE"];
     const parameters = [];
+    if (productId !== null) {
+        conditions.push("p.id=?");
+        parameters.push(productId);
+    }
     if (search) {
         conditions.push("LOWER(p.display_name) LIKE LOWER(?) ESCAPE '!'");
         parameters.push(`%${search.replaceAll("!", "!!").replaceAll("%", "!%").replaceAll("_", "!_")}%`);

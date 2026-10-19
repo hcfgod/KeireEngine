@@ -131,6 +131,25 @@ try {
         assert.equal(catalog.data.length, 1);
         assert.equal(typeof catalog.data[0].publisher_slug, "string");
         checks += 4;
+        stage = "public-product-detail";
+        const detailResponse = await request(`/marketplace/v1/products/${catalog.data[0].id}/`);
+        assert.equal(detailResponse.status, 200);
+        const detail = (await detailResponse.json()).data;
+        assert.equal(detail.id, catalog.data[0].id);
+        assert.ok(Array.isArray(detail.versions) && Array.isArray(detail.media) && Array.isArray(detail.reviews));
+        assert.ok(detail.versions.every((version) => !Object.hasOwn(version, "archive_storage_path") &&
+            ["published", "withdrawn", "security_revoked"].includes(version.state)));
+        assert.equal((await request(`/marketplace/v1/products/${randomUUID()}/`)).status, 404);
+        assert.equal((await request("/marketplace/v1/products/not-a-uuid/")).status, 400);
+        checks += 6;
+        const [nonPublicProducts] = await pool.execute(`SELECT p.id FROM marketplace_products p
+            JOIN publishers publisher ON publisher.id=p.publisher_id
+            JOIN marketplace_categories category ON category.id=p.category_id
+            WHERE p.state<>'published' OR publisher.suspended_at IS NOT NULL OR category.active=FALSE`);
+        for (const product of nonPublicProducts) {
+            assert.equal((await request(`/marketplace/v1/products/${product.id}/`)).status, 404);
+            checks += 1;
+        }
         stage = "rendered-marketplace";
         const marketplace = await request("/marketplace/");
         assert.equal(marketplace.status, 200);

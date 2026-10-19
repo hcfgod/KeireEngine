@@ -80,3 +80,10 @@ harness runs its automated HTTP assertions and cleans up immediately.
 
 The middleware build is for this custom host. Rebuild with the default adapter mode
 before using the existing standalone production launcher.
+
+The staged MySQL public API also serves `GET /marketplace/v1/products/{id}/`.
+It reads the visible catalog product and its public version history, approved media,
+visible reviews, and active offer in one database transaction. Private archive locations
+are excluded. Missing or non-public products return 404; disabled marketplace access
+returns 503. This API does not grant ownership or download access. Product HTML pages
+and acquisition routes still require migration before a production backend switch.

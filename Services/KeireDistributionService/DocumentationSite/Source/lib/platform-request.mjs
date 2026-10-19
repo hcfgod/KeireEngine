@@ -21,7 +21,9 @@ export async function handleLocalPlatformRequest({ backend, request, siteOrigin,
                 return response;
             }
             const pathname = new URL(request.url).pathname.replace(/\/+$/, "");
-            if (["/marketplace", "/marketplace/v1/catalog"].includes(pathname) && request.method === "GET") {
+            const publicMarketplaceRoute = ["/marketplace", "/marketplace/v1/catalog"].includes(pathname) ||
+                /^\/marketplace\/v1\/products\/[^/]+$/.test(pathname);
+            if (publicMarketplaceRoute && request.method === "GET") {
                 return render({ session: null, pendingChallenge: null, accountView: null, catalogPool: service.pool });
             }
             if (!["/account", "/account/sign-in", "/account/mfa/challenge"].includes(pathname) ||

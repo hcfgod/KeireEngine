@@ -13,6 +13,22 @@ function fixture(pathname = "/account/sign-in/") {
 }
 
 describe("staged local platform request routing", () => {
+    it("routes public product reads without treating browser cookies as ownership", async () => {
+        const { options, authentication } = fixture("/marketplace/v1/products/00000000-0000-4000-8000-000000000001/");
+        expect((await handleLocalPlatformRequest(options)).status).toBe(200);
+        expect(options.render).toHaveBeenCalledWith({
+            session: null, pendingChallenge: null, accountView: null, catalogPool: undefined,
+        });
+        expect(authentication.session).not.toHaveBeenCalled();
+    });
+
+    it("does not admit product mutations through the public read route", async () => {
+        const { options } = fixture("/marketplace/v1/products/00000000-0000-4000-8000-000000000001/");
+        options.request = new Request(options.request.url, { method: "POST" });
+        expect((await handleLocalPlatformRequest(options)).status).toBe(503);
+        expect(options.render).not.toHaveBeenCalled();
+    });
+
     it("renders sign-in anonymously without inventing an authenticated user", async () => {
         const { options } = fixture();
         expect(await (await handleLocalPlatformRequest(options)).text()).toBe("rendered");
