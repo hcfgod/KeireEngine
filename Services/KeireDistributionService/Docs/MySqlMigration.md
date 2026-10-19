@@ -28,6 +28,16 @@ The bootstrap credential is read, not modified. Generated credentials are saved 
 and restricted Windows ACLs before executing MySQL DDL. Only the provisioning user can decrypt those settings.
 Runtime service identity and credential loading must be configured explicitly before deployment.
 
+The initial `Source/lib/platform-mysql.mjs` connection layer uses pinned mysql2, dedicated local accounts, verified
+TLS, bounded pooling, prepared-statement support, and lossless integer/decimal/date settings. Its transaction helper
+does not retry callbacks after an uncertain commit and discards connections when rollback fails. Callers own pool
+shutdown and must never log connection settings. It is not yet selected by the website middleware.
+
+`DocumentationSite/scripts/test-platform-mysql-live.mjs` accepts protected settings via standard input and checks both
+roles, transport, large integers, prepared values, cross-database denial, and transaction reuse without modifying data.
+It does not prove transactional writes, account behavior, or a completed migration; those require the later schema
+and service acceptance tests.
+
 The script rejects an existing output directory, database, or matching account. MySQL provisioning DDL is not atomic:
 on failure, inspect `provisioning.json` and retain the encrypted settings. Do not delete the journal or blindly retry.
 Provisioning does not modify other schemas, reset existing passwords, or restart MySQL.
@@ -71,6 +81,11 @@ The October 19, 2026 inventory of the live KeireHub project found one account, o
 versions, five entitlements, six Storage buckets, and 21 Storage objects. Vault contained no secret rows. All existing
 file bodies are in private buckets. A consistent data export captured 71 tables and 603 rows; these counts are a
 baseline, not a guarantee that the source will remain unchanged until cutover.
+
+The account export also contains one verified TOTP factor, two identity records, nine sessions, and 132 refresh-token
+records. Password hashing uses bcrypt (`$2a$`). Preserve the existing MFA requirement; do not silently disable it during
+cutover. The encrypted backup contains the factor material, which must never be printed in diagnostics. Session/token
+signing compatibility and OAuth provider configuration need their own migration review.
 
 No MySQL cutover or full migration acceptance has occurred. The pending Windows release must not be reported as
 published while the website dependency and migration gates remain incomplete.

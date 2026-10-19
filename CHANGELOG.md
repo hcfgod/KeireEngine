@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Added an isolated MySQL connection foundation for the pending website migration, with verified TLS, precise
+  database values, scoped accounts, and transaction cleanup tests. The production backend remains Supabase.
+
 - Added verified encrypted migration-backup reading and an initial private local asset-byte store, with size/hash
   validation and exclusive publication. Website backend integration and migration remain in progress.
 
