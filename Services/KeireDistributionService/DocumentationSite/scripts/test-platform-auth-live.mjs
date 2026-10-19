@@ -12,6 +12,7 @@ import { verifyAccountVisibility } from "./platform-account-view-acceptance.mjs"
 import { verifyLocalClaims } from "./platform-claims-acceptance.mjs";
 import { verifyLocalOrganizations } from "./platform-organizations-acceptance.mjs";
 import { verifyLocalDataRequests } from "./platform-data-requests-acceptance.mjs";
+import { verifyAuthenticatorEnrollment } from "./platform-mfa-management-acceptance.mjs";
 import { createRecoverySchema } from "../Source/lib/platform-recovery-store.mjs";
 import { verifyRecoveryStore } from "./platform-recovery-store-acceptance.mjs";
 import { verifyPasswordReplacement } from "./platform-password-recovery-acceptance.mjs";
@@ -250,6 +251,8 @@ try {
     checks += await verifyLocalOrganizations(migration, userId);
     stage = "account-data-requests";
     checks += await verifyLocalDataRequests(migration, userId);
+    stage = "authenticator-enrollment";
+    checks += await verifyAuthenticatorEnrollment(migration, auth, userId, password);
     stage = "password-recovery-store";
     checks += await verifyRecoveryStore(runtime, userId, now);
     stage = "password-recovery-replacement";
