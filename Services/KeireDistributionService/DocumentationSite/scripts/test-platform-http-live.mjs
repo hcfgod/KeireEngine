@@ -158,6 +158,12 @@ try {
             assert.equal((await request(`/marketplace/v1/products/${product.id}/`)).status, 404);
             checks += 1;
         }
+        stage = "rendered-publisher";
+        const publisherPage = await request(`/marketplace/publishers/${detail.publisher_slug}/`);
+        assert.equal(publisherPage.status, 200);
+        assert.ok((await publisherPage.text()).includes(detail.publisher_name));
+        assert.equal((await request(`/marketplace/publishers/missing-${randomUUID()}/`)).status, 404);
+        checks += 3;
         stage = "rendered-marketplace";
         const marketplace = await request("/marketplace/");
         assert.equal(marketplace.status, 200);
@@ -206,6 +212,11 @@ try {
         assert.ok(accountHtml.includes(email));
         assert.match(accountHtml, /No claimed assets yet/);
         assert.match(accountHtml, /Send verification email/);
+        assert.match(accountHtml, /data-session-server-signed-in="true"/);
+        const signedInProduct = await request(`/marketplace/${detail.publisher_slug}/${detail.slug}/`);
+        assert.equal(signedInProduct.status, 200);
+        assert.match(await signedInProduct.text(), /data-session-server-signed-in="true"/);
+        checks += 3;
         checks++;
         checks += 4;
 

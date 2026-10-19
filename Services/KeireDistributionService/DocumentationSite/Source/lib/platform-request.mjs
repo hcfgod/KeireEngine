@@ -23,7 +23,8 @@ export async function handleLocalPlatformRequest({ backend, request, siteOrigin,
             }
             const pathname = new URL(request.url).pathname.replace(/\/+$/, "");
             const publicMarketplaceRoute = ["/marketplace", "/marketplace/v1/catalog"].includes(pathname) ||
-                /^\/marketplace\/v1\/products\/[^/]+$/.test(pathname);
+                /^\/marketplace\/v1\/products\/[^/]+$/.test(pathname) ||
+                /^\/marketplace\/publishers\/[^/]+$/.test(pathname);
             if (publicMarketplaceRoute && request.method === "GET") {
                 return render({ session: null, pendingChallenge: null, accountView: null, catalogPool: service.pool });
             }

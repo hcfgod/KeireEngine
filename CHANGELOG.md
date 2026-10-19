@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Added staged MySQL publisher pages with bounded catalog pagination and corrected initial signed-in navigation on private local-backend pages.
+
 - Added staged MySQL asset-detail pages with private ownership rendering and clear acquisition-maintenance feedback.
 
 - Added staged MySQL product-detail API reads with catalog visibility checks and public-only version, media, and review fields.

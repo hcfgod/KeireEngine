@@ -91,3 +91,8 @@ Product HTML pages resolve publisher/product slugs through the same public-detai
 service. They use private, non-cacheable responses when rendering personal ownership.
 Acquisition remains explicitly unavailable in this staged backend until its mutation
 and download routes have been migrated and validated. The Supabase path is retained.
+
+Publisher pages also use the MySQL catalog visibility rules, exclude suspended
+publishers, and provide a cursor-based More assets link after each 30-product page.
+Private local-backend account and product pages render their verified signed-in
+navigation immediately; public catalog pages keep the existing session-status lookup.
