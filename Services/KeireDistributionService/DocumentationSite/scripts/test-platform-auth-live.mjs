@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import bcrypt from "bcryptjs";
+import { createLocalAuthenticationHttp } from "../Source/lib/platform-auth-http.mjs";
 import { createPlatformPool } from "../Source/lib/platform-mysql.mjs";
 import { sealAccountRecord } from "../Source/lib/platform-account-import.mjs";
 import { createAuthenticationSchema, LocalPasswordAuthentication } from "../Source/lib/platform-local-auth.mjs";
@@ -124,6 +125,62 @@ try {
     await migration.execute("UPDATE platform_mfa_factors SET status = 'verified' WHERE id = ?", [factorId]);
     assert.equal(await auth.session(passwordOnly.token), null);
     checks += 2;
+    stage = "http-browser-authentication";
+    now = 20000000000000;
+    const origin = "https://qa.invalid.example";
+    const handle = createLocalAuthenticationHttp(auth, origin);
+    const post = (route, body, cookies = "", requestOrigin = origin) => new Request(origin + route, {
+        method: "POST",
+        headers: { origin: requestOrigin, "content-type": "application/json", cookie: cookies },
+        body: JSON.stringify(body),
+    });
+    const cookieValue = (response, name) => {
+        const values = response.headers.getSetCookie().filter((value) => value.startsWith(`${name}=`));
+        assert.equal(values.length, 1);
+        assert.ok(values[0].includes("HttpOnly; Secure; SameSite=Lax"));
+        return values[0].split(";")[0];
+    };
+    const login = await handle(post("/account/session", { email, password }), clientIdentity, "qa");
+    assert.equal(login.status, 200);
+    const loginBody = await login.json();
+    assert.equal(loginBody.data.mfaRequired, true);
+    assert.equal(loginBody.data.factors[0].id, factorId);
+    const challengeCookie = cookieValue(login, "__Host-keire-challenge");
+    const beforeMfa = await handle(new Request(origin + "/account/session", {
+        headers: { cookie: challengeCookie },
+    }), clientIdentity, "qa");
+    assert.equal((await beforeMfa.json()).data.signedIn, false);
+    checks += 4;
+
+    stage = "http-mfa-and-session";
+    const verified = await handle(post("/account/mfa/challenge/verify",
+        { factorId, code: "353130" }, challengeCookie), clientIdentity, "qa");
+    assert.equal(verified.status, 200);
+    assert.equal((await verified.json()).data.userId, userId);
+    const sessionCookie = cookieValue(verified, "__Host-keire-session");
+    const sessionResponse = await handle(new Request(origin + "/account/session", {
+        headers: { cookie: sessionCookie },
+    }), clientIdentity, "qa");
+    assert.deepEqual((await sessionResponse.json()).data, { signedIn: true, assuranceLevel: "aal2" });
+    const replayResponse = await handle(post("/account/mfa/challenge/verify",
+        { factorId, code: "353130" }, challengeCookie), clientIdentity, "qa");
+    assert.equal(replayResponse.status, 401);
+    checks += 4;
+
+    stage = "http-csrf-and-logout";
+    const rejected = await handle(post("/account/session/delete", {}, sessionCookie, "https://other.invalid"), clientIdentity, "qa");
+    assert.equal(rejected.status, 403);
+    const stillValid = await handle(new Request(origin + "/account/session", {
+        headers: { cookie: sessionCookie },
+    }), clientIdentity, "qa");
+    assert.equal((await stillValid.json()).data.signedIn, true);
+    const logout = await handle(post("/account/session/delete", {}, sessionCookie), clientIdentity, "qa");
+    assert.equal(logout.status, 303);
+    const afterLogout = await handle(new Request(origin + "/account/session", {
+        headers: { cookie: sessionCookie },
+    }), clientIdentity, "qa");
+    assert.equal((await afterLogout.json()).data.signedIn, false);
+    checks += 4;
     console.log(JSON.stringify({ status: "local-authentication-acceptance-passed", checks,
         realAccountUsed: false, liveWebsiteChanged: false }));
 } catch {

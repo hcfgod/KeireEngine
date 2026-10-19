@@ -246,3 +246,8 @@ OAuth must use its separate protocol adapter. Service failures return generic re
 The adapter remains disconnected from live Astro middleware. It needs real-database HTTP acceptance and
 frontend MFA challenge-page integration, plus registration/recovery/OAuth and service lifecycle ownership,
 before provider cutover. Existing Supabase routes remain active. Unit HTTP tests do not prove those workflows.
+
+The protected `scripts/test-local-platform-auth.ps1` launcher runs synthetic authentication acceptance
+against isolated MySQL using credentials over stdin. Forty checks cover password/MFA concurrency and
+HTTP adapter Requests/Responses, cookie handling, session lookup, CSRF and logout. This is not yet
+a deployed Astro/browser test. Fixture cleanup and a separate real-account comparison passed.
