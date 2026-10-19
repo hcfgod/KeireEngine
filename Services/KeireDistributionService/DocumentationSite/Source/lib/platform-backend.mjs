@@ -1,6 +1,8 @@
 import { createPlatformPool } from "./platform-mysql.mjs";
 import { LocalPasswordAuthentication } from "./platform-local-auth.mjs";
 import { LocalEmailAuthentication } from "./platform-email-auth.mjs";
+import { RecoveryDeliveryWorker } from "./platform-recovery-worker.mjs";
+import { processRecoveryDelivery } from "./platform-recovery-delivery.mjs";
 
 export function selectPlatformBackend(value) {
     if (value === undefined || value === "supabase") {
@@ -15,7 +17,8 @@ export function selectPlatformBackend(value) {
 /** Owned by the server application, not a process-global singleton or a request. */
 export class PlatformBackend {
     constructor({ provider, loadLocalSecrets, createPool = createPlatformPool,
-        createAuthentication = LocalPasswordAuthentication.create, createMailer = null }) {
+        createAuthentication = LocalPasswordAuthentication.create, createMailer = null,
+        createRecoveryWorker = (processNext) => new RecoveryDeliveryWorker(processNext) }) {
         this.provider = selectPlatformBackend(provider);
         if (this.provider === "mysql" && typeof loadLocalSecrets !== "function") {
             throw new Error("MySQL requires a protected local secrets loader.");
@@ -27,6 +30,7 @@ export class PlatformBackend {
             throw new Error("Email delivery requires an application-owned factory.");
         }
         this.createMailer = createMailer;
+        this.createRecoveryWorker = createRecoveryWorker;
         this.activeRequests = 0;
         this.closing = false;
         this.initialization = null;
@@ -41,6 +45,7 @@ export class PlatformBackend {
         let pool;
         let authentication;
         let mailer;
+        let recoveryWorker;
         let secrets;
         try {
             // Loader transfers ownership of its fresh key buffer to this initialization operation.
@@ -58,8 +63,21 @@ export class PlatformBackend {
                 }
             }
             const emailAuthentication = mailer ? new LocalEmailAuthentication(authentication, mailer) : null;
-            return Object.freeze({ provider: "mysql", pool, authentication, mailer, emailAuthentication });
+            if (mailer?.recoveryEnabled === true) {
+                if (typeof mailer.sendRecovery !== "function") {
+                    throw new Error("Recovery delivery requires a configured recovery mail transport.");
+                }
+                recoveryWorker = this.createRecoveryWorker(() => processRecoveryDelivery(authentication, mailer));
+                recoveryWorker.start();
+            }
+            return Object.freeze({ provider: "mysql", pool, authentication, mailer, emailAuthentication,
+                recoveryWorker: recoveryWorker ?? null });
         } catch (error) {
+            try {
+                await recoveryWorker?.close();
+            } catch {
+                // Continue disposing borrowed services after partial worker initialization.
+            }
             try {
                 await mailer?.close?.();
             } catch {
@@ -124,12 +142,16 @@ export class PlatformBackend {
             return;
         }
         try {
-            await backend?.mailer?.close();
+            await backend?.recoveryWorker?.close();
         } finally {
             try {
-                backend?.authentication?.close();
+                await backend?.mailer?.close();
             } finally {
-                await backend?.pool?.end();
+                try {
+                    backend?.authentication?.close();
+                } finally {
+                    await backend?.pool?.end();
+                }
             }
         }
     }

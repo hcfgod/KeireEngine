@@ -19,6 +19,54 @@ function fixture() {
 }
 
 describe("application-owned backend lifecycle", () => {
+    it("drains enabled recovery delivery before disposing borrowed resources", async () => {
+        const data = fixture();
+        const drain = deferred();
+        const worker = { start: vi.fn(), close: vi.fn(() => drain.promise) };
+        const mailer = { recoveryEnabled: true, sendRecovery: vi.fn(), sendVerification: vi.fn(), close: vi.fn() };
+        const backend = new PlatformBackend({ provider: "mysql", loadLocalSecrets: data.loadLocalSecrets,
+            createPool: data.createPool, createAuthentication: data.createAuthentication,
+            createMailer: async () => mailer, createRecoveryWorker: () => worker });
+        expect(await backend.withBackend((services) => services.recoveryWorker)).toBe(worker);
+        expect(worker.start).toHaveBeenCalledTimes(1);
+        const closing = backend.close();
+        await Promise.resolve();
+        expect(mailer.close).not.toHaveBeenCalled();
+        expect(data.authentication.close).not.toHaveBeenCalled();
+        expect(data.pool.end).not.toHaveBeenCalled();
+        drain.resolve();
+        await closing;
+        expect(worker.close).toHaveBeenCalledTimes(1);
+        expect(mailer.close).toHaveBeenCalledTimes(1);
+        expect(data.pool.end).toHaveBeenCalledTimes(1);
+    });
+
+    it("does not consume recovery jobs when mail is not explicitly configured", async () => {
+        const data = fixture();
+        const factory = vi.fn();
+        const backend = new PlatformBackend({ provider: "mysql", loadLocalSecrets: data.loadLocalSecrets,
+            createPool: data.createPool, createAuthentication: data.createAuthentication,
+            createMailer: async () => ({ sendVerification() {}, sendRecovery() {}, close() {} }),
+            createRecoveryWorker: factory });
+        expect(await backend.withBackend((services) => services.recoveryWorker)).toBeNull();
+        expect(factory).not.toHaveBeenCalled();
+        await backend.close();
+    });
+
+    it("cleans up a worker that fails to start without losing the original error", async () => {
+        const data = fixture();
+        const worker = { start: () => { throw new Error("worker startup failed"); }, close: vi.fn() };
+        const mailer = { recoveryEnabled: true, sendVerification() {}, sendRecovery() {}, close: vi.fn() };
+        const backend = new PlatformBackend({ provider: "mysql", loadLocalSecrets: data.loadLocalSecrets,
+            createPool: data.createPool, createAuthentication: data.createAuthentication,
+            createMailer: async () => mailer, createRecoveryWorker: () => worker });
+        await expect(backend.withBackend(() => undefined)).rejects.toThrow("worker startup failed");
+        expect(worker.close).toHaveBeenCalledTimes(1);
+        expect(mailer.close).toHaveBeenCalledTimes(1);
+        expect(data.pool.end).toHaveBeenCalledTimes(1);
+        await backend.close();
+    });
+
     it("owns one optional mailer and drains requests before closing it", async () => {
         const data = fixture();
         const mailer = { sendVerification: vi.fn(), close: vi.fn() };

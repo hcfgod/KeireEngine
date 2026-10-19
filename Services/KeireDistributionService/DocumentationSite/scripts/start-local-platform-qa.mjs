@@ -53,6 +53,12 @@ if (!["disabled", "capture", "gmail"].includes(mailMode) || (mailMode === "captu
 const createMailer = mailMode === "disabled" ? null : async () => {
     if (mailMode === "capture") {
         return {
+            recoveryEnabled: true,
+            sendRecovery: async (message) => {
+                await new Promise((resolve, reject) => {
+                    process.send({ type: "qa-recovery-email", message }, (error) => error ? reject(error) : resolve());
+                });
+            },
             sendVerification: async (message) => {
                 await new Promise((resolve, reject) => {
                     process.send({ type: "qa-verification-email", message }, (error) => error ? reject(error) : resolve());
@@ -67,7 +73,7 @@ const createMailer = mailMode === "disabled" ? null : async () => {
         settingsDirectory: path.join(process.env.LOCALAPPDATA, "Keire", "PlatformMail"),
     });
     try {
-        return createVerificationMailer(settings);
+        return createVerificationMailer(settings, undefined, process.env.PUBLIC_SITE_URL);
     } finally {
         settings.password = null;
     }
