@@ -1,5 +1,6 @@
 import { createLocalAuthenticationHttp, localBrowserRequestState } from "./platform-auth-http.mjs";
 import { localAccountOverview } from "./platform-account-view.mjs";
+import { localProductPage } from "./platform-product.mjs";
 
 /** A staged provider adapter. Unported routes fail closed instead of using Supabase identities or data. */
 export async function handleLocalPlatformRequest({ backend, request, siteOrigin, clientIdentity, correlationId, render }) {
@@ -25,6 +26,16 @@ export async function handleLocalPlatformRequest({ backend, request, siteOrigin,
                 /^\/marketplace\/v1\/products\/[^/]+$/.test(pathname);
             if (publicMarketplaceRoute && request.method === "GET") {
                 return render({ session: null, pendingChallenge: null, accountView: null, catalogPool: service.pool });
+            }
+            const productPage = /^\/marketplace\/([^/]+)\/([^/]+)$/.exec(pathname);
+            if (productPage && !["v1", "publishers"].includes(productPage[1]) &&
+                ["GET", "HEAD"].includes(request.method)) {
+                const state = await localBrowserRequestState(service.authentication, request);
+                const productView = await localProductPage(service.pool, productPage[1], productPage[2], state.session);
+                const rendered = await render({ ...state, accountView: null, productView });
+                rendered.headers.set("cache-control", "private, no-store");
+                rendered.headers.set("vary", "Cookie, Authorization");
+                return rendered;
             }
             if (!["/account", "/account/sign-in", "/account/mfa/challenge"].includes(pathname) ||
                 !["GET", "HEAD"].includes(request.method)) {

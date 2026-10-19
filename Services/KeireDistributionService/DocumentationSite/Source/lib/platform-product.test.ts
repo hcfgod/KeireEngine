@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { localProductDetail } from "./platform-product.mjs";
+import { localProductDetail, localProductPage } from "./platform-product.mjs";
 
 const productId = "00000000-0000-4000-8000-000000000001";
 
@@ -16,6 +16,37 @@ function fixture(rows) {
 }
 
 describe("public MySQL product details", () => {
+    it("rejects malformed page slugs without querying the database", async () => {
+        const pool = { execute: vi.fn() };
+        expect(await localProductPage(pool, "../admin", "asset", null)).toEqual({
+            enabled: true, product: null, ownsPersonalCopy: false,
+        });
+        expect(pool.execute).not.toHaveBeenCalled();
+    });
+
+    it("checks only the verified user's unrevoked personal entitlement", async () => {
+        const { pool } = fixture([
+            [{ enabled: 1 }], [{ id: productId, published_at: null }], [], [], [], [],
+        ]);
+        const pagePool = { ...pool, execute: vi.fn()
+            .mockResolvedValueOnce([[{ id: productId }]])
+            .mockResolvedValueOnce([[{ id: "entitlement" }]]) };
+        const result = await localProductPage(pagePool, "publisher", "asset", { userId: "verified-user" });
+        expect(result.ownsPersonalCopy).toBe(true);
+        const [query, parameters] = pagePool.execute.mock.calls[1];
+        expect(query).toContain("organization_id IS NULL AND revoked_at IS NULL");
+        expect(parameters).toEqual([productId, "verified-user"]);
+    });
+
+    it("does not query private ownership for an anonymous product page", async () => {
+        const { pool } = fixture([
+            [{ enabled: 1 }], [{ id: productId, published_at: null }], [], [], [], [],
+        ]);
+        const pagePool = { ...pool, execute: vi.fn().mockResolvedValue([[{ id: productId }]]) };
+        expect((await localProductPage(pagePool, "publisher", "asset", null)).ownsPersonalCopy).toBe(false);
+        expect(pagePool.execute).toHaveBeenCalledTimes(1);
+    });
+
     it("never reads child records when the marketplace is disabled", async () => {
         const { connection, pool } = fixture([[{ enabled: 0 }]]);
         expect(await localProductDetail(pool, productId)).toEqual({ enabled: false, product: null });

@@ -5,6 +5,29 @@ function publicTimestamp(value) {
     return value === null ? null : value.replace(" ", "T") + "Z";
 }
 
+/** Resolve public URLs without trusting slugs as SQL or as ownership evidence. */
+export async function localProductPage(pool, publisherSlug, productSlug, session) {
+    const validSlug = (value) => typeof value === "string" && /^[a-z0-9][a-z0-9-]{1,95}$/.test(value);
+    if (!validSlug(publisherSlug) || !validSlug(productSlug)) {
+        return { enabled: true, product: null, ownsPersonalCopy: false };
+    }
+    const [matches] = await pool.execute(`SELECT p.id FROM marketplace_products p
+        JOIN publishers publisher ON publisher.id=p.publisher_id
+        WHERE publisher.slug=? AND p.slug=?`, [publisherSlug, productSlug]);
+    if (!matches.length) {
+        return { enabled: true, product: null, ownsPersonalCopy: false };
+    }
+    const detail = await localProductDetail(pool, matches[0].id);
+    let ownsPersonalCopy = false;
+    if (detail.product && session) {
+        const [entitlements] = await pool.execute(`SELECT id FROM marketplace_entitlements
+            WHERE product_id=? AND user_id=? AND organization_id IS NULL AND revoked_at IS NULL LIMIT 1`,
+        [detail.product.id, session.userId]);
+        ownsPersonalCopy = entitlements.length === 1;
+    }
+    return { ...detail, ownsPersonalCopy };
+}
+
 /** Read visibility and public child records from one consistent database snapshot. */
 export async function localProductDetail(pool, productId) {
     return platformTransaction(pool, async (connection) => {

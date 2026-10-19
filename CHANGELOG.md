@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Added staged MySQL asset-detail pages with private ownership rendering and clear acquisition-maintenance feedback.
+
 - Added staged MySQL product-detail API reads with catalog visibility checks and public-only version, media, and review fields.
 
 - Fixed hidden verification buttons remaining visible because shared button styling overrode their hidden state.

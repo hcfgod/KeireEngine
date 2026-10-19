@@ -8,12 +8,19 @@ export const prerender = false;
 
 const { publisher, product } = Astro.params;
 const supabase = Astro.locals.supabase;
+const localView = Astro.locals.localProductView;
 let listing: any = null;
 let versions: any[] = [];
 let ownsPersonalCopy = false;
 let offer = null;
 let offerLoadFailed = false;
-if (supabase && await marketplaceEnabled(supabase)) {
+if (localView) {
+    listing = localView.product;
+    versions = listing?.versions ?? [];
+    offer = listing?.offer ?? null;
+    ownsPersonalCopy = localView.ownsPersonalCopy;
+    if (!localView.enabled) Astro.response.status = 503;
+} else if (supabase && await marketplaceEnabled(supabase)) {
     const result = await supabase.from("marketplace_catalog").select("*")
         .eq("publisher_slug", publisher).eq("slug", product).maybeSingle();
     listing = result.data;
@@ -33,7 +40,7 @@ if (supabase && await marketplaceEnabled(supabase)) {
         }
     }
 }
-if (!listing) {
+if (!listing && (!localView || localView.enabled)) {
     Astro.response.status = 404;
 }
 const structuredData = listing ? {
@@ -43,6 +50,7 @@ const structuredData = listing ? {
 } : undefined;
 const currentVersion = versions.find((version) => version.state === "published");
 const acquisition = purchaseState(offer, ownsPersonalCopy, Boolean(currentVersion));
+const acquisitionMigrating = Boolean(localView && acquisition.canClaim);
 const openActionLabel = currentVersion?.install_kind === "complete_project" ? "Create in Hub" : "Open in Editor";
 ---
 
@@ -52,11 +60,11 @@ const openActionLabel = currentVersion?.install_kind === "complete_project" ? "C
             <div><p class="eyebrow">{listing.category_name} · {listing.license_spdx}</p><h1>{listing.display_name}</h1><p class="lead">{listing.short_description}</p><p>By <a href={`/marketplace/publishers/${listing.publisher_slug}/`}>{listing.publisher_name}</a>{listing.publisher_verified ? " · Verified publisher" : ""}</p></div>
             <aside class="product-buybox" aria-label="Get this asset">
                 <span class="product-buybox__price">{offerPrice(offer)}</span>
-                <button class="button" type="button" data-claim-product={listing.id} disabled={!acquisition.canClaim}>
-                    {offerLoadFailed ? "Pricing unavailable" : acquisition.label}
+                <button class="button" type="button" data-claim-product={listing.id} disabled={!acquisition.canClaim || acquisitionMigrating}>
+                    {acquisitionMigrating ? "Acquisition temporarily unavailable" : offerLoadFailed ? "Pricing unavailable" : acquisition.label}
                 </button>
                 <p class="form-message" aria-live="polite" data-claim-message>
-                    {offerLoadFailed && !ownsPersonalCopy
+                    {acquisitionMigrating ? "Asset acquisition is undergoing maintenance. Your existing ownership is preserved. Please try again later." : offerLoadFailed && !ownsPersonalCopy
                         ? "We couldn't load pricing. Refresh this page to try again. You have not been charged."
                         : acquisition.message}
                 </p>
@@ -73,7 +81,12 @@ const openActionLabel = currentVersion?.install_kind === "complete_project" ? "C
             <article class="prose"><h2>About this asset</h2><AssetDescription text={listing.description_markdown} /><h2>Release history</h2>{versions.length ? versions.map((version) => <section><h3>{version.version}</h3><p>{version.release_notes_markdown || "No release notes were supplied."}</p><span class={`status-badge ${version.state === "published" ? "status-badge--ready" : ""}`}>{version.state}</span></section>) : <p>No compatible published version is currently available.</p>}</article>
             <aside><dl class="fact-list"><div><dt>Publisher</dt><dd>{listing.publisher_name}</dd></div><div><dt>License</dt><dd>{listing.license_spdx} ({listing.license_revision})</dd></div><div><dt>Rating</dt><dd>{Number(listing.rating_average).toFixed(1)} / 5 ({listing.rating_count})</dd></div><div><dt>Ownership</dt><dd>Perpetual personal or organization entitlement</dd></div></dl></aside>
         </section>
-    </> : <section class="platform-section"><div class="platform-shell empty-state"><p class="eyebrow">404</p><h1>Product unavailable.</h1><p>The listing may not exist, may still be in review, or may have been delisted.</p><a class="button" href="/marketplace/">Return to Marketplace</a></div></section>}
+    </> : <section class="platform-section"><div class="platform-shell empty-state">
+        <p class="eyebrow">{localView && !localView.enabled ? "Marketplace maintenance" : "404"}</p>
+        <h1>Product unavailable.</h1>
+        <p>{localView && !localView.enabled ? "The marketplace is temporarily disabled. Please try again later." : "The listing may not exist, may still be in review, or may have been delisted."}</p>
+        <a class="button" href="/marketplace/">Return to Marketplace</a>
+    </div></section>}
 </PlatformLayout>
 
 <script>

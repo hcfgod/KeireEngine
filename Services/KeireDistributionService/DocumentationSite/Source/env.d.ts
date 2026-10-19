@@ -13,6 +13,7 @@ declare namespace App {
         platformBackend?: import("./lib/platform-backend.mjs").PlatformBackend;
         platformClientIdentity?: string;
         localEmailAvailable?: boolean;
+        localProductView?: Awaited<ReturnType<typeof import("./lib/platform-product.mjs").localProductPage>>;
         localCatalogPool?: Awaited<ReturnType<typeof import("./lib/platform-mysql.mjs").createPlatformPool>>;
         localAccountView?: Awaited<ReturnType<typeof import("./lib/platform-account-view.mjs").localAccountOverview>> | null;
         pendingMfaChallenge: {

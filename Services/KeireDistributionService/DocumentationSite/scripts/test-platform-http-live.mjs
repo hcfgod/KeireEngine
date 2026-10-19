@@ -142,6 +142,14 @@ try {
         assert.equal((await request(`/marketplace/v1/products/${randomUUID()}/`)).status, 404);
         assert.equal((await request("/marketplace/v1/products/not-a-uuid/")).status, 400);
         checks += 6;
+        stage = "rendered-product-detail";
+        const productPage = await request(`/marketplace/${detail.publisher_slug}/${detail.slug}/`);
+        assert.equal(productPage.status, 200);
+        const productHtml = await productPage.text();
+        assert.ok(productHtml.includes(detail.display_name));
+        assert.match(productPage.headers.get("cache-control"), /private, no-store/);
+        assert.equal((await request(`/marketplace/${detail.publisher_slug}/missing-${randomUUID()}/`)).status, 404);
+        checks += 4;
         const [nonPublicProducts] = await pool.execute(`SELECT p.id FROM marketplace_products p
             JOIN publishers publisher ON publisher.id=p.publisher_id
             JOIN marketplace_categories category ON category.id=p.category_id

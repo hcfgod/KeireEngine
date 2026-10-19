@@ -85,5 +85,9 @@ The staged MySQL public API also serves `GET /marketplace/v1/products/{id}/`.
 It reads the visible catalog product and its public version history, approved media,
 visible reviews, and active offer in one database transaction. Private archive locations
 are excluded. Missing or non-public products return 404; disabled marketplace access
-returns 503. This API does not grant ownership or download access. Product HTML pages
-and acquisition routes still require migration before a production backend switch.
+returns 503. This API does not grant ownership or download access.
+
+Product HTML pages resolve publisher/product slugs through the same public-detail
+service. They use private, non-cacheable responses when rendering personal ownership.
+Acquisition remains explicitly unavailable in this staged backend until its mutation
+and download routes have been migrated and validated. The Supabase path is retained.
