@@ -237,6 +237,11 @@ button:disabled,
     padding-inline: 1.25rem;
 }
 
+.button[hidden],
+.compact-button[hidden] {
+    display: none;
+}
+
 .button:hover,
 .compact-button:hover {
     transform: translateY(-2px);

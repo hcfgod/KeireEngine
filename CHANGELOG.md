@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Fixed hidden verification buttons remaining visible because shared button styling overrode their hidden state.
+
 - Added protected local Gmail setup and a TLS-only verification-email transport for the pending optional email sign-in flow.
 
 - Added staged MySQL marketplace browsing with search, categories, and clear disabled/unavailable states.

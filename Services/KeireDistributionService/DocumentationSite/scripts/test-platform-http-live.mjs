@@ -22,6 +22,7 @@ let fixtureCreated = false;
 let stage = "settings";
 let checks = 0;
 const capturedMail = [];
+const interactive = process.argv.includes("--interactive");
 try {
     secrets = await loadWindowsPlatformSecrets({
         powerShellExecutable: process.env.KEIRE_QA_POWERSHELL,
@@ -51,6 +52,12 @@ try {
     child.on("message", (message) => {
         if (message?.type === "qa-verification-email" && message.message?.recipient === email) {
             capturedMail.push(message.message);
+            if (interactive) {
+                console.log(JSON.stringify({
+                    syntheticEmailCode: message.message.code,
+                    purpose: message.message.purpose,
+                }));
+            }
         }
     });
     childExited = new Promise((resolve) => child.once("close", resolve));
@@ -81,121 +88,157 @@ try {
         }
         return response;
     }
-    stage = "public-catalog";
-    const catalogResponse = await request("/marketplace/v1/catalog/?limit=1");
-    assert.equal(catalogResponse.status, 200);
-    const catalog = await catalogResponse.json();
-    assert.equal(catalog.page.limit, 1);
-    assert.equal(catalog.data.length, 1);
-    assert.equal(typeof catalog.data[0].publisher_slug, "string");
-    checks += 4;
-    stage = "rendered-marketplace";
-    const marketplace = await request("/marketplace/");
-    assert.equal(marketplace.status, 200);
-    assert.ok((await marketplace.text()).includes(catalog.data[0].slug));
-    const filteredMarketplace = await request(`/marketplace/?q=${randomUUID()}`);
-    assert.equal(filteredMarketplace.status, 200);
-    assert.match(await filteredMarketplace.text(), /No products matched/);
-    checks += 4;
-    if (catalog.page.nextCursor) {
-        const nextPage = await request(`/marketplace/v1/catalog/?limit=1&cursor=${encodeURIComponent(catalog.page.nextCursor)}`);
-        assert.equal(nextPage.status, 200);
-        const nextCatalog = await nextPage.json();
-        assert.ok(nextCatalog.data.every((entry) => entry.id !== catalog.data[0].id));
-        checks += 2;
-    }
-    stage = "login";
-    const login = await request("/account/session/", { email, password });
-    assert.equal(login.status, 200);
-    assert.equal((await login.json()).data.mfaRequired, true);
-    assert.equal((await (await request("/account/session/")).json()).data.signedIn, false);
-    checks += 3;
+    if (interactive) {
+        stage = "interactive-browser";
+        console.log(JSON.stringify({ syntheticBrowserAccount: true, url: `${base}/account/sign-in/`, email, password,
+            commands: "totp prints the synthetic authenticator code; stop cleans up and exits" }));
+        await new Promise((resolve) => {
+            const interactiveLifetimeMs = 45 * 60 * 1000;
+            const timer = setTimeout(finish, interactiveLifetimeMs);
 
-    stage = "rendered-mfa";
-    const page = await request("/account/mfa/challenge/");
-    assert.equal(page.status, 200);
-    assert.match(await page.text(), /HTTP QA authenticator/);
-    checks += 2;
-    const counter = Buffer.alloc(8);
-    counter.writeBigUInt64BE(BigInt(Math.floor(Date.now() / 30000)));
-    const digest = createHmac("sha1", Buffer.from("12345678901234567890")).update(counter).digest();
-    const offset = digest[digest.length - 1] & 15;
-    const code = String((digest.readUInt32BE(offset) & 0x7fffffff) % 1000000).padStart(6, "0");
-    stage = "mfa-verification";
-    const verification = await request("/account/mfa/challenge/verify/", { factorId, code });
-    assert.equal(verification.status, 200);
-    assert.equal((await verification.json()).data.userId, userId);
-    assert.deepEqual((await (await request("/account/session/")).json()).data,
-        { signedIn: true, assuranceLevel: "aal2" });
-    checks += 3;
+            function finish() {
+                clearTimeout(timer);
+                process.stdin.off("data", handleCommand);
+                process.stdin.off("end", finish);
+                process.stdin.pause();
+                resolve();
+            }
 
-    stage = "account-overview";
-    const accountPage = await request("/account/");
-    assert.equal(accountPage.status, 200);
-    assert.equal(accountPage.headers.get("cache-control"), "private, no-store");
-    const accountHtml = await accountPage.text();
-    assert.ok(accountHtml.includes(email));
-    assert.match(accountHtml, /No claimed assets yet/);
-    assert.match(accountHtml, /Send verification email/);
-    checks++;
-    checks += 4;
+            function handleCommand(input) {
+                const command = input.trim();
+                if (command === "stop") {
+                    finish();
+                } else if (command === "totp") {
+                    const counter = Buffer.alloc(8);
+                    counter.writeBigUInt64BE(BigInt(Math.floor(Date.now() / 30000)));
+                    const digest = createHmac("sha1", Buffer.from("12345678901234567890")).update(counter).digest();
+                    const offset = digest[digest.length - 1] & 15;
+                    const code = String((digest.readUInt32BE(offset) & 0x7fffffff) % 1000000).padStart(6, "0");
+                    console.log(JSON.stringify({ syntheticTotp: code }));
+                }
+            }
 
-    stage = "email-enrollment";
-    const enrollment = await request("/account/email/enroll/", { password });
-    assert.equal(enrollment.status, 200);
-    assert.equal((await enrollment.json()).data.codeSent, true);
-    assert.equal(capturedMail.at(-1)?.purpose, "enroll");
-    const enrollmentVerification = await request("/account/email/enroll/verify/", { code: capturedMail.at(-1).code });
-    assert.equal(enrollmentVerification.status, 200);
-    assert.equal((await enrollmentVerification.json()).data.emailEnabled, true);
-    checks += 5;
-    await (await request("/account/session/delete/", {})).arrayBuffer();
-    const emailLogin = await request("/account/session/", { email, password });
-    const emailLoginBody = await emailLogin.json();
-    assert.equal(emailLogin.status, 200);
-    const emailFactor = emailLoginBody.data.factors.find((factor) => factor.factor_type === "email");
-    assert.ok(emailFactor);
-    const emailChallengePage = await request("/account/mfa/challenge/");
-    assert.equal(emailChallengePage.status, 200);
-    const emailChallengeHtml = await emailChallengePage.text();
-    assert.match(emailChallengeHtml, /Send email code/);
-    assert.match(emailChallengeHtml, /data-method="email"/);
-    checks += 3;
-    const cooldown = await request("/account/email/challenge/", { factorId: emailFactor.id });
-    assert.equal(cooldown.status, 429);
-    await cooldown.arrayBuffer();
-    // Age only this synthetic account's send windows instead of waiting a minute in HTTP acceptance.
-    for (const limit of emailSendLimits(userId, clientIdentity)) {
-        if (limit.windowMs === 60000) {
-            await pool.execute("UPDATE platform_auth_limits SET window_start = ? WHERE subject_hash = ?", [Date.now() - 60000, limit.hash]);
+            process.stdin.setEncoding("utf8");
+            process.stdin.on("data", handleCommand);
+            process.stdin.once("end", finish);
+        });
+    } else {
+        stage = "public-catalog";
+        const catalogResponse = await request("/marketplace/v1/catalog/?limit=1");
+        assert.equal(catalogResponse.status, 200);
+        const catalog = await catalogResponse.json();
+        assert.equal(catalog.page.limit, 1);
+        assert.equal(catalog.data.length, 1);
+        assert.equal(typeof catalog.data[0].publisher_slug, "string");
+        checks += 4;
+        stage = "rendered-marketplace";
+        const marketplace = await request("/marketplace/");
+        assert.equal(marketplace.status, 200);
+        assert.ok((await marketplace.text()).includes(catalog.data[0].slug));
+        const filteredMarketplace = await request(`/marketplace/?q=${randomUUID()}`);
+        assert.equal(filteredMarketplace.status, 200);
+        assert.match(await filteredMarketplace.text(), /No products matched/);
+        checks += 4;
+        if (catalog.page.nextCursor) {
+            const nextPage = await request(`/marketplace/v1/catalog/?limit=1&cursor=${encodeURIComponent(catalog.page.nextCursor)}`);
+            assert.equal(nextPage.status, 200);
+            const nextCatalog = await nextPage.json();
+            assert.ok(nextCatalog.data.every((entry) => entry.id !== catalog.data[0].id));
+            checks += 2;
         }
-    }
-    const sendCode = await request("/account/email/challenge/", { factorId: emailFactor.id });
-    assert.equal(sendCode.status, 200);
-    await sendCode.arrayBuffer();
-    assert.equal(capturedMail.at(-1)?.purpose, "sign_in");
-    const emailVerification = await request("/account/email/challenge/verify/",
-        { factorId: emailFactor.id, code: capturedMail.at(-1).code });
-    assert.equal(emailVerification.status, 200);
-    await emailVerification.arrayBuffer();
-    assert.deepEqual((await (await request("/account/session/")).json()).data,
-        { signedIn: true, assuranceLevel: "aal1" });
-    checks += 7;
+        stage = "login";
+        const login = await request("/account/session/", { email, password });
+        assert.equal(login.status, 200);
+        assert.equal((await login.json()).data.mfaRequired, true);
+        assert.equal((await (await request("/account/session/")).json()).data.signedIn, false);
+        checks += 3;
 
-    stage = "logout";
-    const savedCookies = new Map(cookies);
-    const logout = await request("/account/session/delete/", {});
-    assert.equal(logout.status, 303);
-    await logout.arrayBuffer();
-    assert.equal((await (await request("/account/session/")).json()).data.signedIn, false);
-    const anonymousAccount = await request("/account/");
-    assert.equal(anonymousAccount.status, 303);
-    assert.ok(anonymousAccount.headers.get("location").startsWith("/account/sign-in/"));
-    await anonymousAccount.arrayBuffer();
-    checks += 2;
-    cookies = savedCookies;
-    assert.equal((await (await request("/account/session/")).json()).data.signedIn, false);
-    checks += 3;
+        stage = "rendered-mfa";
+        const page = await request("/account/mfa/challenge/");
+        assert.equal(page.status, 200);
+        assert.match(await page.text(), /HTTP QA authenticator/);
+        checks += 2;
+        const counter = Buffer.alloc(8);
+        counter.writeBigUInt64BE(BigInt(Math.floor(Date.now() / 30000)));
+        const digest = createHmac("sha1", Buffer.from("12345678901234567890")).update(counter).digest();
+        const offset = digest[digest.length - 1] & 15;
+        const code = String((digest.readUInt32BE(offset) & 0x7fffffff) % 1000000).padStart(6, "0");
+        stage = "mfa-verification";
+        const verification = await request("/account/mfa/challenge/verify/", { factorId, code });
+        assert.equal(verification.status, 200);
+        assert.equal((await verification.json()).data.userId, userId);
+        assert.deepEqual((await (await request("/account/session/")).json()).data,
+            { signedIn: true, assuranceLevel: "aal2" });
+        checks += 3;
+
+        stage = "account-overview";
+        const accountPage = await request("/account/");
+        assert.equal(accountPage.status, 200);
+        assert.equal(accountPage.headers.get("cache-control"), "private, no-store");
+        const accountHtml = await accountPage.text();
+        assert.ok(accountHtml.includes(email));
+        assert.match(accountHtml, /No claimed assets yet/);
+        assert.match(accountHtml, /Send verification email/);
+        checks++;
+        checks += 4;
+
+        stage = "email-enrollment";
+        const enrollment = await request("/account/email/enroll/", { password });
+        assert.equal(enrollment.status, 200);
+        assert.equal((await enrollment.json()).data.codeSent, true);
+        assert.equal(capturedMail.at(-1)?.purpose, "enroll");
+        const enrollmentVerification = await request("/account/email/enroll/verify/", { code: capturedMail.at(-1).code });
+        assert.equal(enrollmentVerification.status, 200);
+        assert.equal((await enrollmentVerification.json()).data.emailEnabled, true);
+        checks += 5;
+        await (await request("/account/session/delete/", {})).arrayBuffer();
+        const emailLogin = await request("/account/session/", { email, password });
+        const emailLoginBody = await emailLogin.json();
+        assert.equal(emailLogin.status, 200);
+        const emailFactor = emailLoginBody.data.factors.find((factor) => factor.factor_type === "email");
+        assert.ok(emailFactor);
+        const emailChallengePage = await request("/account/mfa/challenge/");
+        assert.equal(emailChallengePage.status, 200);
+        const emailChallengeHtml = await emailChallengePage.text();
+        assert.match(emailChallengeHtml, /Send email code/);
+        assert.match(emailChallengeHtml, /data-method="email"/);
+        checks += 3;
+        const cooldown = await request("/account/email/challenge/", { factorId: emailFactor.id });
+        assert.equal(cooldown.status, 429);
+        await cooldown.arrayBuffer();
+        // Age only this synthetic account's send windows instead of waiting a minute in HTTP acceptance.
+        for (const limit of emailSendLimits(userId, clientIdentity)) {
+            if (limit.windowMs === 60000) {
+                await pool.execute("UPDATE platform_auth_limits SET window_start = ? WHERE subject_hash = ?", [Date.now() - 60000, limit.hash]);
+            }
+        }
+        const sendCode = await request("/account/email/challenge/", { factorId: emailFactor.id });
+        assert.equal(sendCode.status, 200);
+        await sendCode.arrayBuffer();
+        assert.equal(capturedMail.at(-1)?.purpose, "sign_in");
+        const emailVerification = await request("/account/email/challenge/verify/",
+            { factorId: emailFactor.id, code: capturedMail.at(-1).code });
+        assert.equal(emailVerification.status, 200);
+        await emailVerification.arrayBuffer();
+        assert.deepEqual((await (await request("/account/session/")).json()).data,
+            { signedIn: true, assuranceLevel: "aal1" });
+        checks += 7;
+
+        stage = "logout";
+        const savedCookies = new Map(cookies);
+        const logout = await request("/account/session/delete/", {});
+        assert.equal(logout.status, 303);
+        await logout.arrayBuffer();
+        assert.equal((await (await request("/account/session/")).json()).data.signedIn, false);
+        const anonymousAccount = await request("/account/");
+        assert.equal(anonymousAccount.status, 303);
+        assert.ok(anonymousAccount.headers.get("location").startsWith("/account/sign-in/"));
+        await anonymousAccount.arrayBuffer();
+        checks += 2;
+        cookies = savedCookies;
+        assert.equal((await (await request("/account/session/")).json()).data.signedIn, false);
+        checks += 3;
+    }
 } catch {
     console.error(JSON.stringify({ status: "failed", stage, checks }));
     process.exitCode = 1;
@@ -245,6 +288,6 @@ try {
     await pool?.end();
 }
 if (!process.exitCode) {
-    console.log(JSON.stringify({ status: "rendered-http-authentication-passed", checks,
+    console.log(JSON.stringify({ status: interactive ? "interactive-browser-fixture-closed" : "rendered-http-authentication-passed", checks,
         fixturesRemoved: true, realAccountUsed: false, liveWebsiteChanged: false }));
 }

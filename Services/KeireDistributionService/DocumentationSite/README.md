@@ -60,3 +60,23 @@ separate when the next source release is ahead of the signed catalog.
 Use the existing `../Scripts/deploy-windows-web.ps1` transactional deployment after
 validation. Its settings must identify the actual host. Keep its process-ownership
 checks and rollback behavior intact. A local preview is not a live deployment.
+
+### Isolated MySQL authentication browser QA
+
+Build with `KEIRE_NODE_ADAPTER_MODE=middleware` before running
+`node scripts/test-platform-http-live.mjs --interactive`. Configure
+`KEIRE_QA_POWERSHELL`, `KEIRE_QA_SETTINGS_DIRECTORY`, and `KEIRE_QA_PORT` for the
+protected local test backend. For browser cookies, also provide
+`KEIRE_QA_TLS_THUMBPRINT` for an existing trusted localhost development certificate.
+The harness validates the certificate rather than disabling TLS checks or changing trust.
+
+This explicit test workflow creates a disposable account and captures verification
+emails locally; it never sends them through Gmail. Its terminal displays only the
+synthetic credentials and captured test codes. Enter `totp` for the test authenticator
+code and `stop` to close the host and remove its fixtures. EOF or the 45-minute
+interactive limit also ends the session and runs cleanup. Treat screenshots as QA
+evidence, never as real marketplace/account content. Without `--interactive`, the
+harness runs its automated HTTP assertions and cleans up immediately.
+
+The middleware build is for this custom host. Rebuild with the default adapter mode
+before using the existing standalone production launcher.
