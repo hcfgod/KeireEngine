@@ -479,8 +479,12 @@ try {
     do {
         try {
             Start-DistributionService
-            Start-WebPlatform
+            # Caddy fronts multiple independently managed products. Bring the
+            # shared proxy up before checking the optional website renderer so
+            # a degraded website cannot make unrelated hosted services
+            # unavailable after a reboot.
             Start-CaddyProxy
+            Start-WebPlatform
         }
         catch {
             Write-HostEvent "Host startup check failed: $($_.Exception.Message)"

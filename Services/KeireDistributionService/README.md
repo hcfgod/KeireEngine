@@ -479,9 +479,10 @@ requires the schema-2 ownership/readiness probe to pass. A pre-swap failure rest
 the runtime-update switch for an unreviewed lockfile.
 
 Run `./scripts/install-web-runtime.ps1`, then validate the host with
-`./scripts/start-windows-host.ps1 -ValidateOnly`. The supervisor starts Kestrel, the loopback Astro Node service, and
-Caddy in dependency order and checks each service independently with bounded retries and a five-second timeout per HTTP
-request. Caddy is accepted only when the configured executable owns its HTTP, HTTPS, and loopback admin listeners and
+`./scripts/start-windows-host.ps1 -ValidateOnly`. The supervisor starts Kestrel and the shared Caddy proxy before it
+checks the optional loopback Astro Node service. This keeps unrelated hosted products available when the website is
+degraded. Each service receives independent bounded retries and a five-second timeout per HTTP request. Caddy is
+accepted only when the configured executable owns its HTTP, HTTPS, and loopback admin listeners and
 its `127.0.0.1:2019` admin endpoint responds. The supervisor never depends on a public HTTPS self-probe, so Windows
 Schannel credentials, router reachability, and public DNS cannot produce a false local startup failure. Keep the
 separate external availability monitor below for the public DNS, TLS, router, and origin contract. For an unattended

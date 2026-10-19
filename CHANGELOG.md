@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- The unattended Windows host now starts the shared Caddy proxy before checking the optional website renderer, so a
+  degraded website cannot prevent unrelated hosted products from returning after a reboot.
+
 - Runtime UI statistics avoid repeated tree/draw scans, and idle trees skip transition traversal.
   Destruction, reuse, clearing and animation restarts retain their existing behavior.
 - The first Scene canvas click after Escape activates navigation even while dock focus is settling.

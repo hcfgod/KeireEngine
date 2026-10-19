@@ -211,4 +211,12 @@ foreach ($forbiddenContract in @(
         "The Windows host supervisor retains forbidden probe contract '$forbiddenContract'."
 }
 
+$distributionStartIndex = $source.IndexOf('            Start-DistributionService', [StringComparison]::Ordinal)
+$caddyStartIndex = $source.IndexOf('            Start-CaddyProxy', [StringComparison]::Ordinal)
+$webStartIndex = $source.IndexOf('            Start-WebPlatform', [StringComparison]::Ordinal)
+Assert-True ($distributionStartIndex -ge 0 -and $caddyStartIndex -gt $distributionStartIndex) `
+    'The shared Caddy proxy must start after its distribution-service dependency.'
+Assert-True ($webStartIndex -gt $caddyStartIndex) `
+    'The optional website renderer must not block the shared Caddy proxy from starting.'
+
 Write-Host 'Windows host supervisor probe checks passed.'
