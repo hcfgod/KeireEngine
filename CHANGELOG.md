@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Added isolated account-data migration with source identity/password preservation, encrypted MFA/source records,
+  microsecond timestamps, duplicate-import refusal, and read-only verification. Live authentication cutover is pending.
+
 - Added an isolated MySQL connection foundation for the pending website migration, with verified TLS, precise
   database values, scoped accounts, and transaction cleanup tests. The production backend remains Supabase.
 

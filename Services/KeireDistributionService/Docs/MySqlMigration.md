@@ -3,6 +3,9 @@
 Status: preparation in progress. The website and Hub still use Supabase. Creating the local database does not
 enable a MySQL application backend, migrate accounts, or copy Storage files.
 
+The isolated account-data import is now implemented and has been verified against the initial snapshot. This is not
+login acceptance or live cutover. Marketplace data and file-body migration remain pending.
+
 ## Backend boundary
 
 Keep Supabase available as an explicitly selected backend. The MySQL implementation must provide the same account,
@@ -27,6 +30,20 @@ the trusted MySQL CA certificate, and a new absolute output directory. Do not pu
 The bootstrap credential is read, not modified. Generated credentials are saved with DPAPI CurrentUser protection
 and restricted Windows ACLs before executing MySQL DDL. Only the provisioning user can decrypt those settings.
 Runtime service identity and credential loading must be configured explicitly before deployment.
+
+`scripts/import-local-platform-accounts.ps1` sends the verified encrypted snapshot, connection settings, and a separately
+protected account encryption key to the Node importer through explicitly UTF-8 standard input. It never writes plaintext
+credentials or account exports to disk. `-CreateSchema` is only for the first import into an empty database; subsequent
+read-only checks use `-VerifyOnly` and a new result filename. A duplicate import is rejected rather than overwriting
+accounts. MySQL DDL is not transactional, so inspect the recorded failure stage before retrying schema creation.
+
+The importer retains source UUIDs and bcrypt hashes, preserves microsecond timestamps, and verifies linked identities,
+profiles, and MFA records against the source. Full sensitive account/MFA source records use AES-256-GCM with independent
+nonces and record-specific authenticated context. The 32-byte encryption key is stored separately as
+`account-record-key.dpapi` using CurrentUser DPAPI and entropy `Keire.Platform.AccountEncryption.v1`; preserve it with
+the protected settings. Loss of this key prevents reading those records. Existing Supabase sessions are archived in
+the source backup but are not active MySQL sessions; compatible authentication and a documented cutover sign-in flow
+must be completed before switching providers.
 
 The initial `Source/lib/platform-mysql.mjs` connection layer uses pinned mysql2, dedicated local accounts, verified
 TLS, bounded pooling, prepared-statement support, and lossless integer/decimal/date settings. Its transaction helper

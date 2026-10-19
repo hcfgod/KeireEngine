@@ -3,6 +3,7 @@ import { createPlatformPool, platformTransaction } from "../Source/lib/platform-
 
 // The protected Windows launcher supplies settings over stdin, never command-line arguments or a plaintext file.
 let settingsText = "";
+process.stdin.setEncoding("utf8");
 for await (const chunk of process.stdin) {
     settingsText += chunk.toString("utf8");
     if (settingsText.length > 65536) {
