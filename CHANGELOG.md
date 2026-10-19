@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Added staged MySQL marketplace browsing with search, categories, and clear disabled/unavailable states.
+
 - Added staged MySQL public catalog queries and preserved microsecond cursor timestamps to prevent pagination gaps.
 
 - Added the local account overview with scoped library/organization reads and private, non-cacheable rendering.

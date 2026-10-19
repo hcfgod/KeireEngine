@@ -1,5 +1,20 @@
 import { mysqlUtcTimestamp } from "./platform-account-import.mjs";
 
+export async function localMarketplaceListing(pool, search = "", category = "") {
+    const empty = { products: [], categories: [] };
+    try {
+        const page = await localCatalogPage(pool, { limit: 30, search, category });
+        if (!page.enabled) {
+            return { ...empty, status: "disabled" };
+        }
+        const [categories] = await pool.execute(`SELECT slug,display_name FROM marketplace_categories
+            WHERE active=TRUE ORDER BY sort_order,slug`);
+        return { status: "ready", products: page.values.slice(0, 30), categories };
+    } catch {
+        return { ...empty, status: "unavailable" };
+    }
+}
+
 export async function localCatalogPage(pool, { limit = 24, search = "", category = "", cursor = null } = {}) {
     if (!Number.isInteger(limit) || limit < 1 || limit > 50 || typeof search !== "string" || search.length > 100 ||
         typeof category !== "string" || category.length > 64) {

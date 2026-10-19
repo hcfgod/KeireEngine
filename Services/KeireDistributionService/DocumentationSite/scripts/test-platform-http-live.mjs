@@ -82,6 +82,14 @@ try {
     assert.equal(catalog.data.length, 1);
     assert.equal(typeof catalog.data[0].publisher_slug, "string");
     checks += 4;
+    stage = "rendered-marketplace";
+    const marketplace = await request("/marketplace/");
+    assert.equal(marketplace.status, 200);
+    assert.ok((await marketplace.text()).includes(catalog.data[0].slug));
+    const filteredMarketplace = await request(`/marketplace/?q=${randomUUID()}`);
+    assert.equal(filteredMarketplace.status, 200);
+    assert.match(await filteredMarketplace.text(), /No products matched/);
+    checks += 4;
     if (catalog.page.nextCursor) {
         const nextPage = await request(`/marketplace/v1/catalog/?limit=1&cursor=${encodeURIComponent(catalog.page.nextCursor)}`);
         assert.equal(nextPage.status, 200);

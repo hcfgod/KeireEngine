@@ -336,4 +336,11 @@ feature flag, published products, unsuspended publishers and active categories. 
 reviews. Search escapes literal wildcard characters, queries bind values, and limit bounds are checked before
 SQL construction. Shared cursor parsing now retains database microseconds instead of truncating to milliseconds.
 Eleven rollback-contained live checks cover visibility, literal/case-insensitive search, precision, cursor
-exclusion, disabling, and restoration. Marketplace HTML/product details and mutations still require migration.
+exclusion, disabling, and restoration. Product details and mutations still require migration.
+
+## Marketplace listing acceptance
+
+The isolated MySQL host now renders `/marketplace/` from the same visibility-filtered catalog queries as the public
+catalog API. Search and active category selection remain available, and disabled or unavailable catalogs use the
+existing user-facing states. The live website still uses Supabase. Real HTTP acceptance includes listing rendering
+and an empty-search result alongside authentication and account-isolation checks.

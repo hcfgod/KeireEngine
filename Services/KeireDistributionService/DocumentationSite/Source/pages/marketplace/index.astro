@@ -2,13 +2,16 @@
 import MarketplaceCard from "../../components/MarketplaceCard.astro";
 import PlatformLayout from "../../layouts/PlatformLayout.astro";
 import { loadMarketplaceCatalog } from "../../lib/marketplace";
+import { localMarketplaceListing } from "../../lib/platform-catalog.mjs";
 
 export const prerender = false;
 
 const supabase = Astro.locals.supabase;
 const search = (Astro.url.searchParams.get("q") ?? "").trim().slice(0, 100);
 const category = (Astro.url.searchParams.get("category") ?? "").trim().slice(0, 64);
-const { status, products, categories } = await loadMarketplaceCatalog(supabase, search, category);
+const { status, products, categories } = Astro.locals.localCatalogPool
+    ? await localMarketplaceListing(Astro.locals.localCatalogPool, search, category)
+    : await loadMarketplaceCatalog(supabase, search, category);
 if (status !== "ready") Astro.response.status = 503;
 Astro.response.headers.set("cache-control", status !== "ready" || Astro.locals.user ? "private, no-store" : "public, max-age=60, stale-while-revalidate=300");
 ---
