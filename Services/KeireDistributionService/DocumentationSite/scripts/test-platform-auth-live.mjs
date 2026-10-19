@@ -13,6 +13,8 @@ import { verifyLocalClaims } from "./platform-claims-acceptance.mjs";
 import { createRecoverySchema } from "../Source/lib/platform-recovery-store.mjs";
 import { verifyRecoveryStore } from "./platform-recovery-store-acceptance.mjs";
 import { verifyPasswordReplacement } from "./platform-password-recovery-acceptance.mjs";
+import { createRecoveryDeliverySchema } from "../Source/lib/platform-recovery-delivery.mjs";
+import { verifyRecoveryDelivery } from "./platform-recovery-delivery-acceptance.mjs";
 import { verifyLocalCatalog } from "./platform-catalog-acceptance.mjs";
 import { createPlatformPool } from "../Source/lib/platform-mysql.mjs";
 import { sealAccountRecord } from "../Source/lib/platform-account-import.mjs";
@@ -50,6 +52,9 @@ try {
     }
     if (process.argv.includes("--create-recovery-schema")) {
         await createRecoverySchema(migration);
+    }
+    if (process.argv.includes("--create-recovery-delivery-schema")) {
+        await createRecoveryDeliverySchema(migration);
     }
     stage = "fixture";
     const passwordHash = await bcrypt.hash(password, 4);
@@ -244,6 +249,8 @@ try {
     checks += await verifyRecoveryStore(runtime, userId, now);
     stage = "password-recovery-replacement";
     checks += await verifyPasswordReplacement(runtime, auth, userId, factorId, now);
+    stage = "recovery-delivery";
+    checks += await verifyRecoveryDelivery(runtime, auth, userId, now);
     stage = "public-catalog";
     checks += await verifyLocalCatalog(migration);
 
