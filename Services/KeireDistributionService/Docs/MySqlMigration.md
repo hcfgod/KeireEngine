@@ -212,3 +212,11 @@ published while the website dependency and migration gates remain incomplete.
 handle in bounded chunks. Cancellation closes the handle. Routes must authorize the object before reading.
 Private directory ACLs must prohibit external writers: handle identity checks do not prevent in-place writes
 by another privileged process. This primitive does not recover missing source objects or enable live routes.
+
+### Storage recovery inventory
+
+`planStorageRecovery` preserves bucket/object metadata and joins archive, upload, and validator-evidence
+integrity references. It rejects conflicting hashes/sizes, duplicate identities, and unreviewed versioned
+storage. Every object starts missing; metadata alone never counts as recovered bytes. Missing referenced
+objects and unreviewed media references remain explicit acceptance work. Plans contain private metadata
+and must not be logged; only the aggregate summary is suitable for validation reports.

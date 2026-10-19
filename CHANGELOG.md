@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Added private-storage recovery planning with integrity-reference reconciliation and explicit missing-file tracking.
+
 - Added bounded private-blob reads that verify complete content before yielding bytes and close handles on cancellation.
 
 - Completed the isolated public/private domain-data import with profiles, moderation, staff, audit, and contact records.
