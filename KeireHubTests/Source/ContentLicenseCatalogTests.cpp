@@ -112,7 +112,7 @@ TEST_CASE("Packaged content manifest exposes only existing learning and resource
     const auto root = std::filesystem::current_path();
     ContentCatalog manager(root / "KeireHubContent" / "Content" / "en-US.json", root);
     REQUIRE(manager.Load());
-    CHECK(manager.Snapshot()->Learn.size() == 11);
+    CHECK(manager.Snapshot()->Learn.size() == 12);
     CHECK(manager.Snapshot()->Resources.size() == 5);
     CHECK(std::ranges::all_of(manager.Snapshot()->Learn,
                               [](const auto& item) { return item.LocalFile || item.Metadata.HttpsUrl; }));
@@ -126,6 +126,11 @@ TEST_CASE("Packaged content manifest exposes only existing learning and resource
     REQUIRE(audio != manager.Snapshot()->Learn.end());
     REQUIRE(audio->LocalFile);
     CHECK(*audio->LocalFile == std::filesystem::weakly_canonical(root / "Docs/AudioProduction.md"));
+    const auto animation = std::ranges::find(manager.Snapshot()->Learn, "animation-rigging",
+                                             [](const auto& item) -> const std::string& { return item.Metadata.Id; });
+    REQUIRE(animation != manager.Snapshot()->Learn.end());
+    REQUIRE(animation->LocalFile);
+    CHECK(*animation->LocalFile == std::filesystem::weakly_canonical(root / "Docs/AnimationRigging.md"));
 }
 
 TEST_CASE("License catalog aggregates and groups actual Hub and package license files")
