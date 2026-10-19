@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
-import { createReadStream } from "node:fs";
+import { constants } from "node:fs";
+import type { FileHandle } from "node:fs/promises";
 import { link, lstat, mkdir, open, unlink } from "node:fs/promises";
 import path from "node:path";
 
@@ -39,18 +40,63 @@ export class LocalBlobStore {
         return path.join(this.root, identity.sha256);
     }
 
-    async verify(identity: BlobIdentity): Promise<void> {
+    private async openVerified(identity: BlobIdentity): Promise<FileHandle> {
         const location = this.blobPath(identity);
         const information = await lstat(location);
-        if (!information.isFile() || information.isSymbolicLink() || information.size !== identity.sizeBytes) {
+        if (!information.isFile() || information.isSymbolicLink()) {
             throw new Error("Stored blob does not match its expected size or file type.");
         }
-        const digest = createHash("sha256");
-        for await (const chunk of createReadStream(location)) {
-            digest.update(chunk);
+        // O_NOFOLLOW is unavailable on Windows; private directory ACLs remain mandatory there.
+        const file = await open(location, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+        try {
+            const opened = await file.stat();
+            if (!opened.isFile() || opened.size !== identity.sizeBytes ||
+                opened.dev !== information.dev || opened.ino !== information.ino) {
+                throw new Error("Stored blob does not match its expected size or file type.");
+            }
+            const digest = createHash("sha256");
+            const buffer = Buffer.alloc(64 * 1024);
+            let position = 0;
+            while (position < identity.sizeBytes) {
+                const result = await file.read(buffer, 0,
+                    Math.min(buffer.length, identity.sizeBytes - position), position);
+                if (result.bytesRead === 0) {
+                    throw new Error("Stored blob ended before its expected size.");
+                }
+                digest.update(buffer.subarray(0, result.bytesRead));
+                position += result.bytesRead;
+            }
+            if ((await file.stat()).size !== identity.sizeBytes || digest.digest("hex") !== identity.sha256) {
+                throw new Error("Stored blob failed SHA-256 verification.");
+            }
+            return file;
+        } catch (error) {
+            await file.close();
+            throw error;
         }
-        if (digest.digest("hex") !== identity.sha256) {
-            throw new Error("Stored blob failed SHA-256 verification.");
+    }
+
+    async verify(identity: BlobIdentity): Promise<void> {
+        const file = await this.openVerified(identity);
+        await file.close();
+    }
+
+    /** Authorize first. The directory must prohibit external writers for the lifetime of a read. */
+    async *read(identity: BlobIdentity): AsyncGenerator<Uint8Array> {
+        const file = await this.openVerified(identity);
+        try {
+            let position = 0;
+            while (position < identity.sizeBytes) {
+                const buffer = Buffer.alloc(Math.min(64 * 1024, identity.sizeBytes - position));
+                const result = await file.read(buffer, 0, buffer.length, position);
+                if (result.bytesRead === 0) {
+                    throw new Error("Stored blob ended before its expected size.");
+                }
+                position += result.bytesRead;
+                yield buffer.subarray(0, result.bytesRead);
+            }
+        } finally {
+            await file.close();
         }
     }
 

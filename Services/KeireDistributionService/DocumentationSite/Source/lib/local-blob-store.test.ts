@@ -35,6 +35,42 @@ describe("private local blob storage", () => {
         expect(await readdir(directory)).toEqual([identity.sha256]);
     });
 
+    it("reads verified bytes in bounded chunks without reusing yielded buffers", async () => {
+        const large = Buffer.alloc(150_000, 42);
+        const largeIdentity = { sha256: createHash("sha256").update(large).digest("hex"), sizeBytes: large.length };
+        await store.put(largeIdentity, chunks(large));
+        const received: Uint8Array[] = [];
+        for await (const chunk of store.read(largeIdentity)) {
+            expect(chunk.length).toBeLessThanOrEqual(64 * 1024);
+            received.push(chunk);
+        }
+        expect(Buffer.concat(received)).toEqual(large);
+    });
+
+    it("rejects corruption before yielding any bytes", async () => {
+        const corrupt = Buffer.from(bytes);
+        corrupt[corrupt.length - 1] ^= 1;
+        await writeFile(path.join(directory, identity.sha256), corrupt);
+        const reader = store.read(identity);
+        await expect(reader.next()).rejects.toThrow("SHA-256");
+    });
+
+    it("closes a cancelled read so the stored file can be removed", async () => {
+        await store.put(identity, chunks());
+        const reader = store.read(identity);
+        expect((await reader.next()).done).toBe(false);
+        await reader.return(undefined);
+        await rm(path.join(directory, identity.sha256));
+        expect(await readdir(directory)).toEqual([]);
+    });
+
+    it("supports an empty verified blob", async () => {
+        const empty = Buffer.alloc(0);
+        const emptyIdentity = { sha256: createHash("sha256").update(empty).digest("hex"), sizeBytes: 0 };
+        await store.put(emptyIdentity, chunks(empty));
+        expect(await store.read(emptyIdentity).next()).toEqual({ done: true, value: undefined });
+    });
+
     it("rejects traversal identifiers before creating any files", async () => {
         await expect(store.put({ ...identity, sha256: "../outside" }, chunks())).rejects.toThrow("identity");
         expect(await readdir(directory)).toEqual([]);

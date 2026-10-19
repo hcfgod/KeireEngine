@@ -205,3 +205,10 @@ signing compatibility and OAuth provider configuration need their own migration 
 
 No MySQL cutover or full migration acceptance has occurred. The pending Windows release must not be reported as
 published while the website dependency and migration gates remain incomplete.
+
+### Private blob reads
+
+`LocalBlobStore.read` verifies size and SHA-256 before yielding any content, then reads through the same open
+handle in bounded chunks. Cancellation closes the handle. Routes must authorize the object before reading.
+Private directory ACLs must prohibit external writers: handle identity checks do not prevent in-place writes
+by another privileged process. This primitive does not recover missing source objects or enable live routes.
