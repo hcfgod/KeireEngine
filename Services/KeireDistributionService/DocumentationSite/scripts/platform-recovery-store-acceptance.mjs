@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { tokenDigest } from "../Source/lib/platform-auth-crypto.mjs";
 import { insertRecoveryChallenge, finishRecoveryDelivery, consumeRecoveryChallenge,
-    recoveryLifetimeMs } from "../Source/lib/platform-recovery-store.mjs";
+    recoveryLifetimeMs, recoveryStatus } from "../Source/lib/platform-recovery-store.mjs";
 import { platformTransaction } from "../Source/lib/platform-mysql.mjs";
 
 export async function verifyRecoveryStore(pool, userId, now) {
@@ -18,8 +18,15 @@ export async function verifyRecoveryStore(pool, userId, now) {
         consumeRecoveryChallenge(pool, token, () => time, action);
     try {
         const pending = await create();
+        const statusAuth = { pool, now: () => now };
+        assert.equal(await recoveryStatus(statusAuth, pending), null);
         assert.equal(await consume(pending), null);
         assert.equal(await finishRecoveryDelivery(pool, pending, true), true);
+        const metadata = await recoveryStatus(statusAuth, pending);
+        assert.equal(metadata.expiresAt, now + recoveryLifetimeMs);
+        assert.ok(metadata.factors.every((factor) => Object.keys(factor).sort().join(",") === "friendlyName,id"));
+        assert.equal(Object.hasOwn(metadata, "userId"), false);
+        checks += 4;
         assert.equal(await finishRecoveryDelivery(pool, pending, false), false);
         const simultaneous = await Promise.all([consume(pending), consume(pending)]);
         assert.equal(simultaneous.filter((result) => result === "applied").length, 1);

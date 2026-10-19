@@ -57,6 +57,32 @@ export async function finishRecoveryDelivery(pool, token, sent) {
     return result.affectedRows === 1;
 }
 
+/** Display metadata only; completion repeats authorization under locks before any password change. */
+export async function recoveryStatus(auth, token) {
+    const hash = tokenDigest(token);
+    if (!hash) {
+        return null;
+    }
+    return platformTransaction(auth.pool, async (connection) => {
+        const [rows] = await connection.execute("SELECT * FROM platform_recovery_challenges WHERE token_hash=?", [hash]);
+        const row = rows[0];
+        if (!row || row.used || row.delivery_state !== "sent" || row.attempts >= maximumRecoveryAttempts) {
+            return null;
+        }
+        const [accounts] = await connection.execute("SELECT * FROM platform_accounts WHERE id=?", [row.user_id]);
+        const [factors] = await connection.execute(
+            "SELECT * FROM platform_mfa_factors WHERE user_id=? AND status='verified' ORDER BY id", [row.user_id]);
+        const now = auth.now();
+        if (!Number.isSafeInteger(now) || now < Number(row.issued_ms) || now >= Number(row.expires_ms) ||
+            !accountAvailable(accounts[0], now) || recoveryBinding(accounts[0], factors) !== row.binding_hash ||
+            factors.some((factor) => !["totp", "email"].includes(factor.factor_type))) {
+            return null;
+        }
+        return { expiresAt: Number(row.expires_ms), factors: factors.filter((factor) => factor.factor_type === "totp")
+            .map((factor) => ({ id: factor.id, friendlyName: factor.friendly_name || "Authenticator" })) };
+    });
+}
+
 /** Callback must verify required MFA and replace the password on this connection; null rejects and spends one attempt. */
 export async function consumeRecoveryChallenge(pool, token, clock, authorizeAndApply) {
     const hash = tokenDigest(token);

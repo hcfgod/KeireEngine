@@ -2,6 +2,7 @@ import { createLocalAuthenticationHttp, localBrowserRequestState } from "./platf
 import { localAccountOverview } from "./platform-account-view.mjs";
 import { localProductPage } from "./platform-product.mjs";
 import { handleLocalClaimRequest } from "./platform-claims-http.mjs";
+import { handleLocalRecoveryRequest } from "./platform-recovery-http.mjs";
 
 /** A staged provider adapter. Unported routes fail closed instead of using Supabase identities or data. */
 export async function handleLocalPlatformRequest({ backend, request, siteOrigin, clientIdentity, correlationId, render }) {
@@ -17,6 +18,10 @@ export async function handleLocalPlatformRequest({ backend, request, siteOrigin,
     }
     try {
         return await backend.withBackend(async (service) => {
+            const recoveryResponse = await handleLocalRecoveryRequest(service, request, siteOrigin, clientIdentity, correlationId);
+            if (recoveryResponse) {
+                return recoveryResponse;
+            }
             const handleAuthentication = createLocalAuthenticationHttp(service.authentication, siteOrigin, service.emailAuthentication);
             const response = await handleAuthentication(request, clientIdentity, correlationId);
             if (response) {
