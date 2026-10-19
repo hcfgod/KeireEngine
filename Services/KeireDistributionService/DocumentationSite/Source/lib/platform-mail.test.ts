@@ -17,6 +17,33 @@ function fixture() {
 }
 
 describe("verification mail delivery", () => {
+    it("sends recovery tokens only in the configured HTTPS page fragment", async () => {
+        const { transport } = fixture();
+        const mailer = createVerificationMailer(settings, () => transport, "https://example.test");
+        const token = "a".repeat(43);
+        await mailer.sendRecovery({ recipient: "user@example.com", token });
+        const message = transport.sendMail.mock.calls[0][0];
+        expect(message.text).toContain(`https://example.test/account/update-password/#recovery=${token}`);
+        expect(message.text).toContain("authenticator");
+        expect(message.subject).toBe("Reset your Kéire password");
+        expect(message.envelope.to).toEqual(["user@example.com"]);
+    });
+
+    it("rejects unconfigured recovery, redirected origins, and malformed recovery tokens", async () => {
+        const { mailer, transport } = fixture();
+        await expect(mailer.sendRecovery({ recipient: "user@example.com", token: "a".repeat(43) })).rejects.toThrow("Invalid recovery");
+        expect(transport.sendMail).not.toHaveBeenCalled();
+        for (const origin of ["http://example.test", "https://example.test/path", "https://user@example.test", "https://example.test#fragment"]) {
+            expect(() => createVerificationMailer(settings, () => transport, origin)).toThrow();
+        }
+        const configured = createVerificationMailer(settings, () => transport, "https://example.test");
+        await expect(configured.sendRecovery({ recipient: "user@example.com", token: "bad\r\ntoken" })).rejects.toThrow("Invalid recovery");
+        transport.sendMail.mockRejectedValue(new Error("private SMTP details"));
+        await expect(configured.sendRecovery({ recipient: "user@example.com", token: "a".repeat(43) }))
+            .rejects.toThrow("The recovery email could not be sent.");
+        expect(transport.sendMail).toHaveBeenCalledTimes(1);
+    });
+
     it("requires TLS and disables logging and external message content", async () => {
         const { mailer, transport, factory } = fixture();
         expect(factory).toHaveBeenCalledWith(expect.objectContaining({

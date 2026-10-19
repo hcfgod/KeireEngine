@@ -44,8 +44,14 @@ export async function loadWindowsMailSecrets({ powerShellExecutable, decryptScri
 }
 
 /** Application-owned transport. Callers must authorize and rate-limit code requests before sending. */
-export function createVerificationMailer(settings, createTransport = nodemailer.createTransport) {
+export function createVerificationMailer(settings, createTransport = nodemailer.createTransport, recoveryOrigin = null) {
     validateSettings(settings);
+    if (recoveryOrigin !== null) {
+        const origin = new URL(recoveryOrigin);
+        if (origin.protocol !== "https:" || origin.origin !== recoveryOrigin) {
+            throw new Error("Recovery email requires a canonical HTTPS origin.");
+        }
+    }
     const from = settings.fromAddress;
     const transport = createTransport({
         host: "smtp.gmail.com",
@@ -105,6 +111,35 @@ export function createVerificationMailer(settings, createTransport = nodemailer.
                 // SMTP errors can contain addresses, server responses and credential-bearing context.
                 // Do not retry here: an uncertain delivery must not create multiple valid challenges.
                 throw new Error("The verification email could not be sent. Please try again later.");
+            }
+        },
+
+        async sendRecovery({ recipient, token }) {
+            requireOpen();
+            if (!recoveryOrigin || !validAddress(recipient) || typeof token !== "string" ||
+                !/^[A-Za-z0-9_-]{43}$/.test(token)) {
+                throw new Error("Invalid recovery email request.");
+            }
+            const link = `${recoveryOrigin}/account/update-password/#recovery=${token}`;
+            try {
+                const result = await transport.sendMail({
+                    from: { name: "Kéire", address: from },
+                    to: { address: recipient },
+                    envelope: { from, to: [recipient] },
+                    subject: "Reset your Kéire password",
+                    text: `Open this link to choose a new password:\n\n${link}\n\n` +
+                        "This link expires in 15 minutes and can only be used once.\n" +
+                        "If you have an authenticator enrolled, you will still need its code.\n" +
+                        "If you did not request a password reset, you can ignore this email.\n" +
+                        "Never share this link with anyone.",
+                    disableFileAccess: true,
+                    disableUrlAccess: true,
+                });
+                if (result.accepted?.length !== 1 || result.rejected?.length > 0) {
+                    throw new Error("Recipient was not accepted.");
+                }
+            } catch {
+                throw new Error("The recovery email could not be sent. Please try again later.");
             }
         },
 
