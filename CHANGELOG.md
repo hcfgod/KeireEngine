@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Added protected local Gmail setup and a TLS-only verification-email transport for the pending optional email sign-in flow.
+
 - Added staged MySQL marketplace browsing with search, categories, and clear disabled/unavailable states.
 
 - Added staged MySQL public catalog queries and preserved microsecond cursor timestamps to prevent pagination gaps.

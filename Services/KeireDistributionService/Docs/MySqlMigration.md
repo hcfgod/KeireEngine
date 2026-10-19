@@ -344,3 +344,20 @@ The isolated MySQL host now renders `/marketplace/` from the same visibility-fil
 catalog API. Search and active category selection remain available, and disabled or unavailable catalogs use the
 existing user-facing states. The live website still uses Supabase. Real HTTP acceptance includes listing rendering
 and an empty-search result alongside authentication and account-isolation checks.
+
+## Optional email verification (in progress)
+
+`scripts/configure-local-platform-mail.ps1` collects a Google sending address and app password in a masked local
+prompt. It stores a CurrentUser DPAPI-encrypted record under `%LOCALAPPDATA%/Keire/PlatformMail`, with access limited
+to the current Windows identity and SYSTEM. It refuses to overwrite existing settings. The service must run under
+that identity or use a separately provisioned secret; credentials must never be copied into repository configuration.
+
+The application-owned verification mailer uses authenticated TLS to Gmail, fixed message templates, bounded network
+timeouts, no file/URL message content, and sanitized errors. `DocumentationSite/scripts/verify-platform-mail.mjs`
+checks SMTP authentication without sending mail. Set `KEIRE_QA_POWERSHELL` to the absolute PowerShell 7 executable.
+The private decrypt script's stdout is a parent-process protocol and must never be run directly into terminal logs.
+
+This transport is not yet connected to sign-in. Enrollment, code expiry/attempt/replay protections, account-method
+selection, and browser acceptance remain required before enabling email verification. Existing authenticator factors
+remain enforced. SMTP authentication success does not prove inbox delivery. Gmail sending limits and service blocks
+must be handled as delivery failures, without granting a session or bypassing an enrolled factor.
