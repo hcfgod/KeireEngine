@@ -4,6 +4,7 @@ import bcrypt from "bcryptjs";
 import { createLocalAuthenticationHttp } from "../Source/lib/platform-auth-http.mjs";
 import { PlatformBackend } from "../Source/lib/platform-backend.mjs";
 import { verifyAccountVisibility } from "./platform-account-view-acceptance.mjs";
+import { verifyLocalCatalog } from "./platform-catalog-acceptance.mjs";
 import { createPlatformPool } from "../Source/lib/platform-mysql.mjs";
 import { sealAccountRecord } from "../Source/lib/platform-account-import.mjs";
 import { createAuthenticationSchema, LocalPasswordAuthentication } from "../Source/lib/platform-local-auth.mjs";
@@ -201,6 +202,8 @@ try {
     checks += 4;
     stage = "account-visibility";
     checks += await verifyAccountVisibility(migration, userId, encryptionKey);
+    stage = "public-catalog";
+    checks += await verifyLocalCatalog(migration);
 
     stage = "backend-lifecycle";
     const transferredKey = Buffer.from(encryptionKey);

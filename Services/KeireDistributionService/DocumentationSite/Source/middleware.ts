@@ -80,10 +80,11 @@ export const onRequest = defineMiddleware(async (context, next) => {
             siteOrigin: runtimeEnvironment("PUBLIC_SITE_URL"),
             clientIdentity: context.locals.platformClientIdentity,
             correlationId: context.locals.correlationId,
-            render: async ({ session, pendingChallenge, accountView }) => {
+            render: async ({ session, pendingChallenge, accountView, catalogPool }) => {
                 // No Supabase user is synthesized from a local challenge or session.
                 context.locals.pendingMfaChallenge = pendingChallenge;
                 context.locals.localAccountView = accountView;
+                context.locals.localCatalogPool = catalogPool;
                 context.locals.assurance = {
                     available: true,
                     currentLevel: session ? `aal${session.assurance}` : null,

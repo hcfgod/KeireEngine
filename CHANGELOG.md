@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Added staged MySQL public catalog queries and preserved microsecond cursor timestamps to prevent pagination gaps.
+
 - Added the local account overview with scoped library/organization reads and private, non-cacheable rendering.
 
 - Added an isolated loopback MySQL website host and registered the pending-MFA status route for real HTTP testing.

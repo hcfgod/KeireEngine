@@ -168,6 +168,11 @@ function cursorTimestamp(value: unknown): string {
     if (typeof value !== "string" || value.length > 64) throw new Error("invalid timestamp");
     const parsed = new Date(value);
     if (!Number.isFinite(parsed.valueOf())) throw new Error("invalid timestamp");
+    const fraction = value.match(/\.(\d+)(?:Z|[+-]\d{2}:\d{2})$/i)?.[1];
+    if (fraction && fraction.length > 6) throw new Error("unsupported timestamp precision");
+    if (fraction && fraction.length > 3) {
+        return parsed.toISOString().replace(/\.\d{3}Z$/, `.${fraction.padEnd(6, "0")}Z`);
+    }
     return parsed.toISOString();
 }
 

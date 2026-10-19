@@ -74,6 +74,21 @@ try {
         }
         return response;
     }
+    stage = "public-catalog";
+    const catalogResponse = await request("/marketplace/v1/catalog/?limit=1");
+    assert.equal(catalogResponse.status, 200);
+    const catalog = await catalogResponse.json();
+    assert.equal(catalog.page.limit, 1);
+    assert.equal(catalog.data.length, 1);
+    assert.equal(typeof catalog.data[0].publisher_slug, "string");
+    checks += 4;
+    if (catalog.page.nextCursor) {
+        const nextPage = await request(`/marketplace/v1/catalog/?limit=1&cursor=${encodeURIComponent(catalog.page.nextCursor)}`);
+        assert.equal(nextPage.status, 200);
+        const nextCatalog = await nextPage.json();
+        assert.ok(nextCatalog.data.every((entry) => entry.id !== catalog.data[0].id));
+        checks += 2;
+    }
     stage = "login";
     const login = await request("/account/session/", { email, password });
     assert.equal(login.status, 200);

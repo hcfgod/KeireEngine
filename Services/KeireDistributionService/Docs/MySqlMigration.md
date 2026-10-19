@@ -328,3 +328,12 @@ nonmember denial, shared membership, membership removal, soft-deleted organizati
 revocation, and fixture rollback. The authentication harness now passes 63 checks. A post-test full-domain
 comparison verified all 35 tables and 221 imported rows unchanged. Existing products/orders are only read
 for fixture foreign keys; no source or real-account records are modified.
+
+### Public catalog API
+
+The staged MySQL catalog endpoint preserves the existing DTO and cursor format. It requires the marketplace
+feature flag, published products, unsuspended publishers and active categories. Ratings exclude hidden
+reviews. Search escapes literal wildcard characters, queries bind values, and limit bounds are checked before
+SQL construction. Shared cursor parsing now retains database microseconds instead of truncating to milliseconds.
+Eleven rollback-contained live checks cover visibility, literal/case-insensitive search, precision, cursor
+exclusion, disabling, and restoration. Marketplace HTML/product details and mutations still require migration.
