@@ -13,7 +13,7 @@ const factorId = randomUUID();
 const email = `http-qa-${userId}@invalid.example`;
 const password = randomBytes(24).toString("base64url");
 const clientIdentity = `qa:${userId}:127.0.0.1`;
-const origin = "https://qa.invalid.example";
+const origin = process.env.KEIRE_QA_TLS_THUMBPRINT ? `https://localhost:${process.env.KEIRE_QA_PORT}` : "https://qa.invalid.example";
 let secrets;
 let pool;
 let child;
@@ -65,7 +65,7 @@ try {
             }
         });
     });
-    const base = `http://127.0.0.1:${process.env.KEIRE_QA_PORT}`;
+    const base = process.env.KEIRE_QA_TLS_THUMBPRINT ? origin : `http://127.0.0.1:${process.env.KEIRE_QA_PORT}`;
     let cookies = new Map();
     async function request(route, body) {
         const response = await fetch(base + route, {

@@ -1,4 +1,7 @@
 import http from "node:http";
+import https from "node:https";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import assert from "node:assert/strict";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -19,7 +22,26 @@ if (!Number.isInteger(port) || port < 1024 || port > 65535) {
 }
 process.env.ASTRO_NODE_AUTOSTART = "disabled";
 process.env.KEIRE_PLATFORM_BACKEND = "mysql";
-process.env.PUBLIC_SITE_URL = "https://qa.invalid.example";
+const tlsThumbprint = process.env.KEIRE_QA_TLS_THUMBPRINT;
+process.env.PUBLIC_SITE_URL = tlsThumbprint ? `https://localhost:${port}` : "https://qa.invalid.example";
+let tlsOptions;
+if (tlsThumbprint) {
+    try {
+        if (!/^[A-Fa-f0-9]{40}$/.test(tlsThumbprint) || !path.isAbsolute(process.env.KEIRE_QA_POWERSHELL ?? "")) {
+            throw new Error("Invalid development TLS settings.");
+        }
+        const result = await promisify(execFile)(process.env.KEIRE_QA_POWERSHELL, [
+            "-NoProfile", "-NonInteractive", "-File", path.resolve(root, "../scripts/read-local-platform-qa-tls.ps1"),
+            "-Thumbprint", tlsThumbprint,
+        ], { shell: false, windowsHide: true, timeout: 15000, maxBuffer: 65536, encoding: "utf8" });
+        const payload = JSON.parse(result.stdout.replace(/^\uFEFF/, ""));
+        tlsOptions = { pfx: Buffer.from(payload.pfx, "base64"), passphrase: payload.passphrase, minVersion: "TLSv1.2" };
+        payload.pfx = null;
+        payload.passphrase = null;
+    } catch {
+        throw new Error("Isolated HTTPS setup failed; protected certificate details were suppressed.");
+    }
+}
 const entry = await import(pathToFileURL(path.join(root, "dist/server/entry.mjs")).href);
 if (entry.options.mode !== "middleware") {
     throw new Error("Build with KEIRE_NODE_ADAPTER_MODE=middleware before starting isolated QA.");
@@ -57,7 +79,7 @@ const backend = new PlatformBackend({ provider: "mysql", createMailer, loadLocal
 }) });
 await backend.withBackend(() => undefined);
 
-const server = http.createServer((request, response) => {
+const listener = (request, response) => {
     const serveApplication = async () => {
         try {
             await backend.withBackend(async () => {
@@ -103,7 +125,14 @@ const server = http.createServer((request, response) => {
                 response.end("Static resource unavailable.");
             }
         }).pipe(response);
-});
+};
+let server;
+try {
+    server = tlsOptions ? https.createServer(tlsOptions, listener) : http.createServer(listener);
+} finally {
+    tlsOptions?.pfx.fill(0);
+    tlsOptions = null;
+}
 server.requestTimeout = 30000;
 server.headersTimeout = 10000;
 let shutdown;
@@ -135,7 +164,7 @@ server.listen(port, "127.0.0.1", async () => {
     if (process.argv.includes("--smoke")) {
         let stage = "sign-in";
         try {
-            const base = `http://127.0.0.1:${port}`;
+            const base = tlsThumbprint ? `https://localhost:${port}` : `http://127.0.0.1:${port}`;
             const signIn = await fetch(`${base}/account/sign-in/`);
             assert.equal(signIn.status, 200);
             assert.match(await signIn.text(), /Sign in/);

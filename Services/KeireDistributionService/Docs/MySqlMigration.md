@@ -421,3 +421,10 @@ and explains when authenticator sign-in is needed before enrollment. The challen
 uses six digits for authenticator codes and eight for email, and provides explicit Send/Resend controls, countdowns,
 delivery feedback and network-error handling. Real HTTP acceptance verifies these rendered controls and completes
 the backend workflow. Interactive browser behavior and real inbox delivery are not yet accepted.
+
+For isolated HTTPS QA, set `KEIRE_QA_TLS_THUMBPRINT` to an existing current-user, trusted ASP.NET localhost
+development certificate. The private PowerShell pipe validates its identity, development extension, expiry and
+existing root-store trust before passing an ephemeral encrypted PFX to the process. It does not install a certificate
+or write a private key to disk. The listener remains loopback-only, with canonical origin `https://localhost:<port>`.
+Use Node's supported `NODE_USE_SYSTEM_CA=1` when running the HTTP acceptance client against Windows development
+certificates; never disable certificate verification. The full 43-check workflow passed over this HTTPS path.
