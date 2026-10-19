@@ -361,3 +361,10 @@ This transport is not yet connected to sign-in. Enrollment, code expiry/attempt/
 selection, and browser acceptance remain required before enabling email verification. Existing authenticator factors
 remain enforced. SMTP authentication success does not prove inbox delivery. Gmail sending limits and service blocks
 must be handled as delivery failures, without granting a session or bypassing an enrolled factor.
+
+Email-code proofs use a protected-key HMAC rather than an unkeyed hash of a small numeric code. The proof binds
+the account, exact email, password digest, initiating authorization, purpose, opaque challenge token and five-minute
+validity window. Only the token hash and keyed proof are persisted; plaintext codes are for delivery only.
+The proof helper is deliberately not an authentication endpoint: its caller still must lock/consume challenge rows,
+share the five-attempt budget across methods, and issue a session atomically. Those database and HTTP integrations
+remain pending; a successful proof comparison alone does not establish a session or prevent replay.
