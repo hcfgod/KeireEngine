@@ -3,6 +3,7 @@
 #include "Keire/Core.h"
 
 #include <filesystem>
+#include <functional>
 #include <memory>
 #include <span>
 
@@ -11,7 +12,7 @@ namespace KeireEditor
     class EditorSmokePlayValidation final
     {
       public:
-        explicit EditorSmokePlayValidation(std::filesystem::path output
+        explicit EditorSmokePlayValidation(std::filesystem::path output, std::function<void()> preparePointerInput
 #if defined(KEIRE_ENABLE_TEST_HOOKS)
                                            ,
                                            bool validateDeviceLoss

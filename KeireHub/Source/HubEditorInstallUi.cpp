@@ -1,6 +1,7 @@
 #include "KeireHub/HubProductUi.h"
 
 #include "KeireHub/HubModalUi.h"
+#include "KeireHubInternal/HubCatalogEmptyState.h"
 #include "KeireHubRuntime/PackageResolver.h"
 
 #include <algorithm>
@@ -325,9 +326,12 @@ namespace KeireHub
             }
 
             if (visibleEditors == 0)
-                ui.TextColored(m_Tokens.SecondaryText, snapshot.EditorCatalogRefreshing
-                                                           ? "Loading verified editor catalogs..."
-                                                           : "No verified editor release matches these filters.");
+            {
+                ui.TextColoredWrapped(m_Tokens.SecondaryText,
+                                      Detail::EditorCatalogEmptyMessage(
+                                          snapshot.EditorCatalogRefreshing, !snapshot.EditorCatalogMessage.empty(),
+                                          !m_EditorCatalogSearch.empty() || !m_EditorCatalogChannel.empty()));
+            }
         }
         ui.Spacing();
         if (HubSecondaryButton(ui, m_Tokens, "Close", {88.0F, 36.0F}))

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Hub distinguishes catalog loading failures from empty filter results and wraps its recovery guidance.
+  Catalog signature validation remains required.
+- The C# runtime reference now documents Scene equality operators and the SceneAsset stable asset type identifier.
+
 - The unattended Windows host now starts the shared Caddy proxy before checking the optional website renderer, so a
   degraded website cannot prevent unrelated hosted products from returning after a reboot.
 

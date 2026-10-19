@@ -1292,9 +1292,13 @@ void EditorWorkspaceLayer::DrawGame(Keire::UiFrame& ui)
     m_GameViewportRect = {};
     const auto inputSession = m_SceneDocument->PlaySession();
     const auto window = Owner().MainWindow();
+    // The unattended smoke fixture keeps input active even when the OS refuses foreground focus. Apply that
+    // policy here as well as after drawing the viewport, so a transient false state cannot cancel a held click.
     SetGameViewportInputActive(KeireEditor::GameViewportOwnsRuntimeInput(
-        inputSession && inputSession->State() == Keire::ScenePlayState::Playing, window && window->Focused(), false,
-        false, m_GameViewportCaptureSuspended, m_PlayChanges != nullptr));
+                                   inputSession && inputSession->State() == Keire::ScenePlayState::Playing,
+                                   window && window->Focused(), false, false, m_GameViewportCaptureSuspended,
+                                   m_PlayChanges != nullptr) ||
+                               static_cast<bool>(m_SmokePlayValidation));
     if (auto gamePanel = ui.BeginPanel(m_Game); gamePanel)
     {
         constexpr std::array aspectLabels{std::string_view("Free"), std::string_view("16:9"), std::string_view("16:10"),

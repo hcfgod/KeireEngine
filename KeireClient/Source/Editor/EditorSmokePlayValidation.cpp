@@ -150,13 +150,13 @@ namespace KeireEditor
                    diagnostics.VfxMaskEntries != 0U && diagnostics.VfxMaskedDraws != 0U && diagnostics.VfxMaskConsumed;
         }
 
-        explicit Impl(std::filesystem::path output
+        explicit Impl(std::filesystem::path output, std::function<void()> preparePointerInput
 #if defined(KEIRE_ENABLE_TEST_HOOKS)
                       ,
                       const bool validateDeviceLoss
 #endif
                       )
-            : Output(std::move(output))
+            : Output(std::move(output)), PreparePointerInput(std::move(preparePointerInput))
 #if defined(KEIRE_ENABLE_TEST_HOOKS)
               ,
               ValidateDeviceLoss(validateDeviceLoss)
@@ -512,11 +512,10 @@ namespace KeireEditor
             const auto x = viewport.Minimum.X + hitRect.X + hitRect.Width * 0.5F;
             const auto y = viewport.Minimum.Y + hitRect.Y + hitRect.Height * 0.5F;
 
-            // The sample's first-person controller requests relative cursor capture during Play. Runtime UI in the
-            // Editor is routed from ImGui's absolute pointer state, so synthetic button coordinates cannot hit a UI
-            // element while the window remains relative-locked. Release only the validation window's capture through
-            // the WindowSystem boundary, then move the real SDL cursor before queuing the native button events.
-            windows->SetCursorMode(mainWindow->Id(), Keire::CursorMode::Normal);
+            // Configure the host's desired cursor state, not only its native window. Otherwise the next frame
+            // reapplies relative capture between press and release and moves the pointer away from the button.
+            // This belongs to the UI smoke fixture; production game cursor ownership remains unchanged.
+            PreparePointerInput();
             windows->WarpCursor(mainWindow->Id(), {static_cast<std::int32_t>(x), static_cast<std::int32_t>(y)});
             NativeCursorNormalized = windows->GetCursorMode(mainWindow->Id()) == Keire::CursorMode::Normal;
             if (!NativeCursorNormalized)
@@ -549,6 +548,10 @@ namespace KeireEditor
             const auto mainWindow = application.MainWindow();
             if (!windows || !mainWindow)
                 throw std::runtime_error("Editor Play validation could not resolve the editor window service.");
+            if (windows->GetCursorMode(mainWindow->Id()) != Keire::CursorMode::Normal)
+            {
+                throw std::runtime_error("Editor Play validation lost the unlocked cursor between press and release.");
+            }
             const auto native = Keire::WindowSystemInternalAccess::NativeWindow(*windows, mainWindow->Id());
             if (!native)
                 throw std::runtime_error("Editor Play validation could not resolve the editor window.");
@@ -970,6 +973,7 @@ namespace KeireEditor
         }
 
         std::filesystem::path Output;
+        std::function<void()> PreparePointerInput;
         Phase Current = Phase::WaitForPlay;
         Keire::Ref<Keire::SceneRuntimeLoadOperation> Load;
         Keire::SceneHandle First;
@@ -1039,15 +1043,16 @@ namespace KeireEditor
 #endif
     };
 
-    EditorSmokePlayValidation::EditorSmokePlayValidation(std::filesystem::path output
+    EditorSmokePlayValidation::EditorSmokePlayValidation(std::filesystem::path output,
+                                                         std::function<void()> preparePointerInput
 #if defined(KEIRE_ENABLE_TEST_HOOKS)
                                                          ,
                                                          const bool validateDeviceLoss
 #endif
                                                          )
-        : m_Impl(std::make_unique<Impl>(std::move(output)
+        : m_Impl(std::make_unique<Impl>(std::move(output), std::move(preparePointerInput)
 #if defined(KEIRE_ENABLE_TEST_HOOKS)
-                                            ,
+                                                               ,
                                         validateDeviceLoss
 #endif
                                         ))

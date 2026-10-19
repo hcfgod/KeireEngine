@@ -382,14 +382,19 @@ EditorWorkspaceLayer::EditorWorkspaceLayer(const bool smoke, const bool initiali
       m_PlayModeCoordinator(CreatePlayModeCoordinator()),
       m_AssetOperationCoordinator(CreateAssetOperationCoordinator()),
       m_BuildCookCoordinator(CreateBuildCookCoordinator()),
-      m_SmokePlayValidation(smokePlay
-                                ? std::make_unique<KeireEditor::EditorSmokePlayValidation>(std::move(smokePlayOutput)
+      m_SmokePlayValidation(smokePlay ? std::make_unique<KeireEditor::EditorSmokePlayValidation>(
+                                            std::move(smokePlayOutput),
+                                            [this]
+                                            {
+                                                SetManagedCursorLocked(false);
+                                                SetManagedCursorVisible(true);
+                                            }
 #if defined(KEIRE_ENABLE_TEST_HOOKS)
-                                                                                               ,
-                                                                                           validateDeviceLoss
+                                            ,
+                                            validateDeviceLoss
 #endif
-                                                                                           )
-                                : nullptr)
+                                            )
+                                      : nullptr)
 {
     KeireEditor::Detail::RegisterPhysicsPropertyDrawers(*m_PropertyDrawers);
     KeireEditor::Detail::RegisterVfxPropertyDrawers(*m_PropertyDrawers);

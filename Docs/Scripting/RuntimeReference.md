@@ -4026,6 +4026,8 @@ public sealed class Scene : EngineObject, IEquatable<Scene>
     public bool Equals(Scene? other);
     public override bool Equals(object? value);
     public override int GetHashCode();
+    public static bool operator ==(Scene? left, Scene? right);
+    public static bool operator !=(Scene? left, Scene? right);
 }
 ```
 
@@ -4034,6 +4036,7 @@ public sealed class Scene : EngineObject, IEquatable<Scene>
 Sources: [RuntimeWorld.cs](../../KeireManaged/RuntimeWorld.cs)
 
 ```csharp
+[StableAssetTypeId("4b454952-4553-4345-4e45-415353455401")]
 public sealed class SceneAsset : Asset
 {
 }
