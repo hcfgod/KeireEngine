@@ -3,10 +3,70 @@ import PlatformLayout from "../../../layouts/PlatformLayout.astro";
 export const prerender = false;
 const localView = Astro.locals.localAccountView;
 if (!Astro.locals.user && !localView) return Astro.redirect("/account/sign-in/?next=/account/data/", 303);
+const profileResult = localView
+    ? { data: localView.profile, error: null }
+    : await Astro.locals.supabase!.from("profiles").select("export_requested_at,deletion_requested_at")
+        .eq("user_id", Astro.locals.user!.id).maybeSingle();
+const profile = profileResult.data;
+const unavailable = Boolean(profileResult.error) || !profile;
 ---
 <PlatformLayout title="Account data" description="Request Kéire account data export or deletion." robots="noindex">
-    <section class="platform-section"><div class="platform-shell product-details"><article class="prose"><p class="eyebrow">Data and privacy</p><h1>Request an export or account deletion.</h1><p>Requests are timestamped on your protected profile. Export and deletion fulfillment remains an administrative workflow until automated delivery passes release review.</p><div class="actions"><button class="button button--secondary" type="button" data-data-request="export">Request export</button><button class="button button--secondary" type="button" data-data-request="deletion">Request deletion</button></div><p class="form-message" aria-live="polite" data-data-message></p></article><aside class="notice-panel"><strong>Deletion consequences</strong><p>Submitting a request does not immediately delete your account or sign out your devices. Legal, security, license-acceptance, publication, and audit records may require limited retention.</p></aside></div></section>
+    <section class="platform-section">
+        <div class="platform-shell product-details">
+            <article class="prose">
+                <p class="eyebrow">Data and privacy</p><h1>Request an export or account deletion.</h1>
+                <p>Requests are recorded on your protected profile for administrative review. Submitting a request does not immediately export data, delete your account, or sign out your devices.</p>
+                {unavailable && <p class="notice-panel">Your request status is unavailable. Reload or contact support before submitting a request.</p>}
+                {profile?.export_requested_at && <p>Your export request is recorded.</p>}
+                {profile?.deletion_requested_at && <p>Your deletion request is recorded.</p>}
+                <div class="actions">
+                    <button class="button button--secondary" type="button" data-data-request="export" disabled={unavailable || Boolean(profile?.export_requested_at)}>Request export</button>
+                    <button class="button button--secondary" type="button" data-data-request="deletion" disabled={unavailable || Boolean(profile?.deletion_requested_at)}>Request deletion</button>
+                </div>
+                <p class="form-message" aria-live="polite" data-data-message></p>
+                <a href="/account/">Return to your account</a>
+            </article>
+            <aside class="notice-panel"><strong>Deletion review</strong>
+                <p>Legal, security, license-acceptance, publication, and audit records may require limited retention. Contact support if you need to discuss or withdraw a request.</p>
+            </aside>
+        </div>
+    </section>
 </PlatformLayout>
 <script>
-    for (const button of document.querySelectorAll("[data-data-request]")) button.addEventListener("click", async () => { if (!(button instanceof HTMLButtonElement)) return; const message = document.querySelector("[data-data-message]"); const response = await fetch("/account/data/request/", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ kind: button.dataset.dataRequest }) }); const result = await response.json(); if (message instanceof HTMLElement) { message.dataset.kind = response.ok ? "success" : "error"; message.textContent = response.ok ? "Request recorded. Your request awaits administrative review; your account remains available." : result.error?.message; } });
+    const buttons = document.querySelectorAll<HTMLButtonElement>("[data-data-request]");
+    const message = document.querySelector<HTMLElement>("[data-data-message]");
+    let pending = false;
+    for (const button of buttons) {
+        button.addEventListener("click", async () => {
+            if (pending || button.disabled || !message) {
+                return;
+            }
+            pending = true;
+            button.disabled = true;
+            button.setAttribute("aria-busy", "true");
+            message.dataset.kind = "";
+            message.textContent = "Recording your request…";
+            let recorded = false;
+            try {
+                const response = await fetch("/account/data/request/", {
+                    method: "POST", headers: { "content-type": "application/json" },
+                    body: JSON.stringify({ kind: button.dataset.dataRequest }),
+                    credentials: "same-origin", cache: "no-store", signal: AbortSignal.timeout(15000),
+                });
+                const result = await response.json();
+                recorded = response.ok;
+                message.dataset.kind = recorded ? "success" : "error";
+                message.textContent = recorded
+                    ? "Request recorded for administrative review. Your account remains available."
+                    : result.error?.message ?? "The request could not be recorded. Try again.";
+            } catch {
+                message.dataset.kind = "error";
+                message.textContent = "The connection was interrupted. Reload to check the request status before trying again.";
+            } finally {
+                pending = false;
+                button.disabled = recorded;
+                button.removeAttribute("aria-busy");
+            }
+        });
+    }
 </script>

@@ -151,6 +151,7 @@ try {
         assert.equal((await request(`/marketplace/v1/products/${randomUUID()}/`)).status, 404);
         assert.equal((await request("/marketplace/v1/products/not-a-uuid/")).status, 400);
         checks += 6;
+
         stage = "rendered-product-detail";
         const productPage = await request(`/marketplace/${detail.publisher_slug}/${detail.slug}/`);
         assert.equal(productPage.status, 200);
@@ -235,6 +236,12 @@ try {
             assert.equal((await request("/account/data/request/", { kind })).status, 202);
         }
         checks += 6;
+        const privacyStatus = await (await request("/account/data/")).text();
+        assert.match(privacyStatus, /Your export request is recorded/);
+        assert.match(privacyStatus, /Your deletion request is recorded/);
+        assert.equal((await request("/account/data/request/", { kind: "export" }, { origin: "https://other.invalid" })).status, 403);
+        assert.equal((await request("/account/data/request/", { kind: "export" }, { authorization: "Bearer unsupported" })).status, 401);
+        checks += 4;
         const organizationInput = { slug: `http-${userId}`, displayName: "HTTP QA organization" };
         const organizationResponse = await request("/marketplace/v1/organizations/", organizationInput);
         assert.equal(organizationResponse.status, 201);
