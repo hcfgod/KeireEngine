@@ -1,8 +1,10 @@
 ---
 import PlatformLayout from "../../../layouts/PlatformLayout.astro";
 export const prerender = false;
-if (!Astro.locals.user) return Astro.redirect("/account/sign-in/?next=/account/mfa/", 303);
-const result = await Astro.locals.supabase!.auth.mfa.listFactors();
+const localView = Astro.locals.localAccountView;
+if (!Astro.locals.user && !localView) return Astro.redirect("/account/sign-in/?next=/account/mfa/", 303);
+const result = localView ? { data: { all: localView.authenticatorFactors } }
+    : await Astro.locals.supabase!.auth.mfa.listFactors();
 const factors = result.data?.all ?? [];
 const verified = factors.filter((factor) => factor.status === "verified");
 ---
@@ -31,6 +33,13 @@ const verified = factors.filter((factor) => factor.status === "verified");
                 </article>)}
                 {Astro.locals.assurance.currentLevel !== "aal2" && <a class="button button--secondary" href="/account/mfa/challenge/?next=/account/mfa/">Verify this session</a>}
             </div> : <p class="notice-panel">No verified authenticator is enrolled.</p>}
+            {factors.filter((factor) => factor.status === "unverified").map((factor) => <div class="notice-panel">
+                <p>{factor.friendly_name ?? "Authenticator"}: unfinished setup. Cancel it to start again.</p>
+                <button class="button button--quiet" type="button" data-remove-factor={factor.id}>Cancel unfinished setup</button>
+            </div>)}
+            {localView && <label class="field"><span>Current password</span>
+                <input type="password" autocomplete="current-password" data-enrollment-password required />
+            </label>}
             <div class="actions auth-card__actions">
                 <button class="button" type="button" data-start-enrollment>Add authenticator app</button>
                 <a class="button button--quiet" href="/account/">Back to account</a>
@@ -52,38 +61,98 @@ const verified = factors.filter((factor) => factor.status === "verified");
     </section>
 </PlatformLayout>
 <script>
-    const message = document.querySelector("[data-mfa-message]");
-    const enrollment = document.querySelector("[data-enrollment]");
-    const showMessage = (text, kind = "") => { if (message instanceof HTMLElement) { message.textContent = text; message.dataset.kind = kind; } };
-    document.querySelector("[data-start-enrollment]")?.addEventListener("click", async (event) => {
-        const button = event.currentTarget;
-        if (button instanceof HTMLButtonElement) button.disabled = true;
-        showMessage("Creating a protected enrollment…");
-        const response = await fetch("/account/mfa/enroll/", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ friendlyName: "Kéire authenticator" }) });
-        const result = await response.json();
-        if (!response.ok) {
-            if (button instanceof HTMLButtonElement) button.disabled = false;
-            return showMessage(result.error?.message ?? "Enrollment could not start.", "error");
+    const message = document.querySelector<HTMLElement>("[data-mfa-message]");
+    const enrollment = document.querySelector<HTMLElement>("[data-enrollment]");
+    const password = document.querySelector<HTMLInputElement>("[data-enrollment-password]");
+    const factor = document.querySelector<HTMLInputElement>('[data-verify-enrollment] input[name="factorId"]');
+    let busy = false;
+
+    function showMessage(text: string, kind = "") {
+        if (message) {
+            message.textContent = text;
+            message.dataset.kind = kind;
         }
-        if (enrollment instanceof HTMLElement) enrollment.hidden = false;
-        const qr = document.querySelector("[data-mfa-qr]"); if (qr instanceof HTMLImageElement) qr.src = result.data.qrCode;
-        const secret = document.querySelector("[data-mfa-secret]"); if (secret instanceof HTMLElement) secret.textContent = result.data.secret;
-        const factor = document.querySelector('[data-verify-enrollment] input[name="factorId"]'); if (factor instanceof HTMLInputElement) factor.value = result.data.factorId;
-        showMessage("Scan the code and verify the first token.");
+    }
+
+    async function submit(path: string, body: object, action: (data: any) => void) {
+        if (busy) {
+            return;
+        }
+        busy = true;
+        showMessage("Working…");
+        try {
+            const response = await fetch(path, {
+                method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body),
+                credentials: "same-origin", cache: "no-store", signal: AbortSignal.timeout(15000),
+            });
+            const result = await response.json();
+            if (!response.ok) {
+                showMessage(result.error?.message ?? "The change could not be completed.", "error");
+                return;
+            }
+            action(result.data);
+        } catch {
+            showMessage("The result could not be confirmed. Reload your security settings before trying again.", "error");
+        } finally {
+            busy = false;
+        }
+    }
+
+    document.querySelector("[data-start-enrollment]")?.addEventListener("click", async () => {
+        if (password && !password.reportValidity()) {
+            return;
+        }
+        if (factor?.value) {
+            showMessage("Finish or cancel the current setup before starting another.", "error");
+            return;
+        }
+        await submit("/account/mfa/enroll/", { friendlyName: "Kéire authenticator", password: password?.value }, (data) => {
+            if (password) {
+                password.value = "";
+            }
+            if (enrollment) {
+                enrollment.hidden = false;
+            }
+            const qr = document.querySelector<HTMLImageElement>("[data-mfa-qr]");
+            const secret = document.querySelector<HTMLElement>("[data-mfa-secret]");
+            if (qr) {
+                qr.src = data.qrCode;
+            }
+            if (secret) {
+                secret.textContent = data.secret;
+            }
+            if (factor) {
+                factor.value = data.factorId;
+            }
+            showMessage("Scan the code and enter the current six-digit token. New setups expire after 15 minutes.");
+        });
     });
+
     document.querySelector("[data-verify-enrollment]")?.addEventListener("submit", async (event) => {
-        event.preventDefault(); const form = event.currentTarget; if (!(form instanceof HTMLFormElement)) return;
-        const values = new FormData(form); const response = await fetch("/account/mfa/verify/", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ factorId: values.get("factorId"), code: values.get("code") }) });
-        const result = await response.json(); if (!response.ok) return showMessage(result.error?.message ?? "The code was not accepted.", "error");
-        showMessage("Authenticator enabled. Reloading your protected session…", "success"); location.reload();
+        event.preventDefault();
+        if (!(event.currentTarget instanceof HTMLFormElement)) {
+            return;
+        }
+        const values = new FormData(event.currentTarget);
+        await submit("/account/mfa/verify/", { factorId: values.get("factorId"), code: values.get("code") }, () => location.reload());
     });
+
+    async function remove(factorId: string) {
+        await submit("/account/mfa/remove/", { factorId }, (data) => {
+            if (data.signedOut) {
+                location.assign("/account/sign-in/");
+                return;
+            }
+            location.reload();
+        });
+    }
+
     document.querySelector("[data-cancel-enrollment]")?.addEventListener("click", async () => {
-        const factor = document.querySelector('[data-verify-enrollment] input[name="factorId"]'); if (!(factor instanceof HTMLInputElement) || !factor.value) return;
-        await fetch("/account/mfa/remove/", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ factorId: factor.value }) }); location.reload();
+        if (factor?.value) {
+            await remove(factor.value);
+        }
     });
-    document.querySelectorAll("[data-remove-factor]").forEach((button) => button.addEventListener("click", async () => {
-        if (!(button instanceof HTMLButtonElement)) return; button.disabled = true;
-        const response = await fetch("/account/mfa/remove/", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ factorId: button.dataset.removeFactor }) });
-        const result = await response.json(); if (!response.ok) { button.disabled = false; return showMessage(result.error?.message ?? "The factor could not be removed.", "error"); } location.reload();
-    }));
+    for (const button of document.querySelectorAll<HTMLButtonElement>("[data-remove-factor]")) {
+        button.addEventListener("click", () => remove(button.dataset.removeFactor!));
+    }
 </script>

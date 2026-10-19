@@ -1,5 +1,6 @@
 import { cookieToken, readObject } from "./platform-auth-http.mjs";
 import { beginLocalAuthenticator, confirmLocalAuthenticator, removeLocalAuthenticator } from "./platform-mfa-management.mjs";
+import QRCode from "qrcode";
 
 const routes = new Set(["/account/mfa/enroll", "/account/mfa/verify", "/account/mfa/remove"]);
 const sessionCookie = (token, seconds) => `__Host-keire-session=${token}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${seconds}`;
@@ -40,7 +41,8 @@ export async function handleLocalMfaRequest(auth, request, siteOrigin, clientIde
                 ? await confirmLocalAuthenticator(auth, token, input.factorId, input.code)
                 : await removeLocalAuthenticator(auth, token, input.factorId);
         if (result.state === "pending") {
-            return respond({ data: { factorId: result.factorId, secret: result.secret, uri: result.uri, expiresAt: result.expiresAt } });
+            const qrCode = await QRCode.toDataURL(result.uri, { errorCorrectionLevel: "M", margin: 4, width: 320 });
+            return respond({ data: { factorId: result.factorId, secret: result.secret, qrCode, expiresAt: result.expiresAt } });
         }
         if (result.state === "authenticated") {
             const lifetime = Math.max(0, Math.floor((result.expiresAt - auth.now()) / 1000));

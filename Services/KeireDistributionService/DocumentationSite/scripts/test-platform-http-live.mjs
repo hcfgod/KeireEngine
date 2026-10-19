@@ -235,11 +235,22 @@ try {
         checks += 3;
 
         stage = "account-overview";
+        const securityPage = await request("/account/mfa/");
+        assert.equal(securityPage.status, 200);
+        const securityHtml = await securityPage.text();
+        assert.match(securityHtml, /Current password/);
+        assert.match(securityHtml, /HTTP QA authenticator/);
+        checks += 3;
         assert.equal((await request("/account/mfa/enroll/", { password: "incorrect", friendlyName: "QA setup" })).status, 400);
         const setupResponse = await request("/account/mfa/enroll/", { password, friendlyName: "QA setup" });
         assert.equal(setupResponse.status, 200);
         const setup = (await setupResponse.json()).data;
+        assert.match(await (await request("/account/mfa/")).text(), /Cancel unfinished setup/);
+        checks++;
         assert.match(setup.secret, /^[A-Z2-7]{32}$/);
+        assert.match(setup.qrCode, /^data:image\/png;base64,/);
+        assert.equal(Buffer.from(setup.qrCode.split(",")[1], "base64").subarray(0, 8).toString("hex"), "89504e470d0a1a0a");
+        checks += 2;
         assert.equal((await request("/account/mfa/verify/", { factorId: setup.factorId, code: "bad" })).status, 400);
         const cancellation = await request("/account/mfa/remove/", { factorId: setup.factorId });
         assert.equal(cancellation.status, 200);

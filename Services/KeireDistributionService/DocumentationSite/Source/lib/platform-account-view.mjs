@@ -27,7 +27,7 @@ export async function localAccountOverview(pool, session) {
         pool.execute(`SELECT provider,JSON_UNQUOTE(JSON_EXTRACT(identity_data,'$.email')) AS email
             FROM platform_identities WHERE user_id=? ORDER BY provider,id`, [userId]),
         pool.execute("SELECT role FROM platform_staff_members WHERE user_id=? AND active=TRUE AND revoked_at IS NULL", [userId]),
-        pool.execute("SELECT factor_type FROM platform_mfa_factors WHERE user_id=? AND status='verified'", [userId]),
+        pool.execute("SELECT id,factor_type,status,friendly_name FROM platform_mfa_factors WHERE user_id=? ORDER BY id", [userId]),
         pool.execute("SELECT enabled FROM platform_feature_flags WHERE `key` IN ('marketplace_enabled','publisher_portal_enabled')"),
     ]);
     const utc = (value) => value === null ? null : value.replace(" ", "T") + "Z";
@@ -44,8 +44,9 @@ export async function localAccountOverview(pool, session) {
         sessions: sessions.map((item) => ({ ...item, created_at: utc(item.created_at),
             last_used_at: utc(item.last_used_at), revoked_at: utc(item.revoked_at) })),
         staffRole: staff[0]?.role ?? null,
-        hasVerifiedFactors: factors.length > 0,
-        emailVerificationEnabled: factors.some((factor) => factor.factor_type === "email"),
+        authenticatorFactors: factors.filter((factor) => factor.factor_type === "totp"),
+        hasVerifiedFactors: factors.some((factor) => factor.status === "verified"),
+        emailVerificationEnabled: factors.some((factor) => factor.factor_type === "email" && factor.status === "verified"),
         organizationCreationEnabled: session.assurance === 2 && flags.some((flag) => Boolean(flag.enabled)),
     };
 }

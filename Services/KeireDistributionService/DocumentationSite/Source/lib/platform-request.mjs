@@ -76,12 +76,12 @@ export async function handleLocalPlatformRequest({ backend, request, siteOrigin,
                 rendered.headers.set("vary", "Cookie, Authorization");
                 return rendered;
             }
-            if (!["/account", "/account/data", "/account/sign-in", "/account/mfa/challenge"].includes(pathname) ||
+            if (!["/account", "/account/data", "/account/mfa", "/account/sign-in", "/account/mfa/challenge"].includes(pathname) ||
                 !["GET", "HEAD"].includes(request.method)) {
                 return unavailable("This platform route is awaiting local-backend migration. Please try again later.");
             }
             const state = await localBrowserRequestState(service.authentication, request);
-            const accountView = ["/account", "/account/data"].includes(pathname) && state.session
+            const accountView = ["/account", "/account/data", "/account/mfa"].includes(pathname) && state.session
                 ? await localAccountOverview(service.pool, state.session) : null;
             const rendered = await render({ ...state, accountView, emailAvailable: Boolean(service.emailAuthentication) });
             rendered.headers.set("cache-control", "private, no-store");
