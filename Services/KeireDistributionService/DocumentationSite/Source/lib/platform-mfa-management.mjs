@@ -1,6 +1,6 @@
-import { randomBytes, randomUUID } from "node:crypto";
-import { verifyImportedPassword } from "./platform-auth-crypto.mjs";
-import { sealAccountRecord } from "./platform-account-import.mjs";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { matchingTotpCounter, verifyImportedPassword } from "./platform-auth-crypto.mjs";
+import { openAccountRecord, sealAccountRecord } from "./platform-account-import.mjs";
 
 const enrollmentLifetimeMs = 15 * 60 * 1000;
 const maximumFactors = 10;
@@ -38,7 +38,8 @@ export async function beginLocalAuthenticator(auth, token, password, friendlyNam
         const secret = Array.from(entropy, (byte) => alphabet[byte & 31]).join("");
         entropy.fill(0);
         const expiresAt = auth.now() + enrollmentLifetimeMs;
-        const sealed = sealAccountRecord({ secret, enrollmentExpiresAt: expiresAt, enrollmentAttempts: 0 },
+        const sealed = sealAccountRecord({ secret, enrollmentExpiresAt: expiresAt, enrollmentAttempts: 0,
+            passwordDigest: createHash("sha256").update(accounts[0].password_hash).digest("hex") },
             auth.encryptionKey, `mfa:${factorId}`);
         await connection.execute(`INSERT INTO platform_mfa_factors
             (id,user_id,factor_type,status,friendly_name,source_sealed) VALUES (?,?,'totp','unverified',?,?)`,
@@ -47,5 +48,49 @@ export async function beginLocalAuthenticator(auth, token, password, friendlyNam
         const label = encodeURIComponent(`${issuer}:${accounts[0].email}`);
         const parameters = new URLSearchParams({ secret, issuer, algorithm: "SHA1", digits: "6", period: "30" });
         return { state: "pending", factorId, secret, uri: `otpauth://totp/${label}?${parameters}`, expiresAt };
+    }) ?? { state: "invalid_session" };
+}
+
+export async function confirmLocalAuthenticator(auth, token, factorId, code) {
+    if (typeof factorId !== "string" || !/^[0-9a-f-]{36}$/i.test(factorId)) {
+        return { state: "invalid_request" };
+    }
+    return await auth.withSessionTransaction(token, async (connection, session) => {
+        const [accounts] = await connection.execute("SELECT * FROM platform_accounts WHERE id=?", [session.userId]);
+        const [factors] = await connection.execute(
+            "SELECT * FROM platform_mfa_factors WHERE user_id=? FOR UPDATE", [session.userId]);
+        if (factors.some((factor) => factor.status === "verified" && factor.factor_type !== "email") && session.assurance !== 2) {
+            return { state: "mfa_required" };
+        }
+        const factor = factors.find((item) => item.id === factorId && item.factor_type === "totp" && item.status === "unverified");
+        if (!factor || accounts.length !== 1) {
+            return { state: "invalid_enrollment" };
+        }
+        const enrollment = openAccountRecord(factor.source_sealed, auth.encryptionKey, `mfa:${factorId}`);
+        const now = auth.now();
+        if (!Number.isSafeInteger(enrollment.enrollmentExpiresAt) || now >= enrollment.enrollmentExpiresAt ||
+            !Number.isSafeInteger(enrollment.enrollmentAttempts) || enrollment.enrollmentAttempts < 0 ||
+            enrollment.enrollmentAttempts >= 5 || enrollment.passwordDigest !==
+                createHash("sha256").update(accounts[0].password_hash ?? "").digest("hex")) {
+            return { state: "invalid_enrollment" };
+        }
+        enrollment.enrollmentAttempts++;
+        const counter = matchingTotpCounter(enrollment.secret, code, now);
+        await connection.execute("UPDATE platform_mfa_factors SET source_sealed=? WHERE id=?", [
+            sealAccountRecord(enrollment, auth.encryptionKey, `mfa:${factorId}`), factorId,
+        ]);
+        if (counter === null) {
+            return { state: "invalid_code" };
+        }
+        await connection.execute("UPDATE platform_mfa_factors SET status='verified' WHERE id=?", [factorId]);
+        await connection.execute("INSERT INTO platform_mfa_counters (factor_id,accepted_counter) VALUES (?,?)", [factorId, counter]);
+        await connection.execute("DELETE FROM platform_auth_sessions WHERE user_id=?", [session.userId]);
+        await connection.execute("UPDATE platform_auth_challenges SET used=TRUE WHERE user_id=?", [session.userId]);
+        await connection.execute("UPDATE platform_email_challenges SET used=TRUE WHERE user_id=?", [session.userId]);
+        await connection.execute(`INSERT INTO platform_audit_events
+            (occurred_at,actor_user_id,actor_session_id,action,target_type,target_id,correlation_id,metadata)
+            VALUES (UTC_TIMESTAMP(6),?,NULL,'account.authenticator_added','mfa_factor',?,?,'{}')`,
+        [session.userId, factorId, randomUUID()]);
+        return auth.issueSession(connection, accounts[0], now, factorId);
     }) ?? { state: "invalid_session" };
 }
