@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Added a protected Windows backend-settings loader that excludes migration credentials and suppresses secret-bearing child errors.
+
 - Added application-owned backend selection and lifecycle with shared initialization, request draining, and no authentication fallback.
 
 - Added a tested local browser-authentication HTTP adapter with secure cookies, MFA challenges, and origin checks.

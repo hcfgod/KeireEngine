@@ -263,3 +263,17 @@ Do not retain backend services beyond the callback or call shutdown from inside 
 
 Lifecycle acceptance now runs against real isolated MySQL as part of 43 synthetic checks. Host bootstrap,
 protected loader wiring and Astro middleware integration remain pending; this does not change the live provider.
+
+### Protected Windows runtime loader
+
+`loadWindowsPlatformSecrets` starts the reviewed `scripts/read-local-platform-runtime.ps1` helper with
+absolute executable/script/settings paths, no shell or profile, hidden window, timeout and bounded output.
+The helper decrypts CurrentUser DPAPI settings and the account key into its parent pipe only. Never run
+that helper interactively or redirect its stdout into logs. Only the runtime database account is returned;
+the migration account is excluded. The parent suppresses child errors instead of forwarding possible
+secret-bearing stdout or stack traces. The service owner must match the DPAPI owner; provisioning under
+another identity requires an explicit protected transfer, not disabling DPAPI. Deployment must provision
+trusted helper/config paths and private directory ACLs before wiring this into host startup.
+
+The actual protected runtime load and TLS database connection passed without printing secret values.
+Supabase remains live; no host configuration or service identity has changed.
