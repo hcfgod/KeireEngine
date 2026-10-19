@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Added application-owned backend selection and lifecycle with shared initialization, request draining, and no authentication fallback.
+
 - Added a tested local browser-authentication HTTP adapter with secure cookies, MFA challenges, and origin checks.
 
 - Preserved private storage bucket/object metadata in isolated MySQL, with unavailable-file state and import verification.

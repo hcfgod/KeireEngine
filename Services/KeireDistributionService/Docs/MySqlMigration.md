@@ -251,3 +251,15 @@ The protected `scripts/test-local-platform-auth.ps1` launcher runs synthetic aut
 against isolated MySQL using credentials over stdin. Forty checks cover password/MFA concurrency and
 HTTP adapter Requests/Responses, cookie handling, session lookup, CSRF and logout. This is not yet
 a deployed Astro/browser test. Fixture cleanup and a separate real-account comparison passed.
+
+### Backend ownership
+
+`PlatformBackend` is owned by the server application. `withBackend` holds a request lease; `close` rejects
+new work, drains existing leases, closes authentication, then ends the MySQL pool. Concurrent requests
+share one initialization attempt. Failed initialization remains failed until the application is restarted,
+with no automatic Supabase fallback. Supabase clients remain request-owned because they carry cookie state.
+The protected loader transfers a fresh encryption-key buffer, which is erased after authentication copies it.
+Do not retain backend services beyond the callback or call shutdown from inside a request lease.
+
+Lifecycle acceptance now runs against real isolated MySQL as part of 43 synthetic checks. Host bootstrap,
+protected loader wiring and Astro middleware integration remain pending; this does not change the live provider.

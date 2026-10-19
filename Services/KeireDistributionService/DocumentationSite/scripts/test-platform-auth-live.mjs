@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import bcrypt from "bcryptjs";
 import { createLocalAuthenticationHttp } from "../Source/lib/platform-auth-http.mjs";
+import { PlatformBackend } from "../Source/lib/platform-backend.mjs";
 import { createPlatformPool } from "../Source/lib/platform-mysql.mjs";
 import { sealAccountRecord } from "../Source/lib/platform-account-import.mjs";
 import { createAuthenticationSchema, LocalPasswordAuthentication } from "../Source/lib/platform-local-auth.mjs";
@@ -181,6 +182,23 @@ try {
     }), clientIdentity, "qa");
     assert.equal((await afterLogout.json()).data.signedIn, false);
     checks += 4;
+    stage = "backend-lifecycle";
+    const transferredKey = Buffer.from(encryptionKey);
+    const backend = new PlatformBackend({ provider: "mysql",
+        loadLocalSecrets: async () => ({ settings, accountEncryptionKey: transferredKey }) });
+    try {
+        const services = await Promise.all(Array.from({ length: 4 }, () => backend.withBackend(async (service) => {
+            assert.equal(await service.authentication.session("invalid"), null);
+            return service;
+        })));
+        assert.ok(services.every((service) => service === services[0]));
+        assert.ok(transferredKey.equals(Buffer.alloc(32)));
+        checks += 2;
+    } finally {
+        await backend.close();
+    }
+    await assert.rejects(backend.withBackend(() => undefined), /shutting down/);
+    checks++;
     console.log(JSON.stringify({ status: "local-authentication-acceptance-passed", checks,
         realAccountUsed: false, liveWebsiteChanged: false }));
 } catch {
