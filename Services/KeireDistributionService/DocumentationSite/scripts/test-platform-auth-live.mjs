@@ -3,6 +3,7 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import bcrypt from "bcryptjs";
 import { createLocalAuthenticationHttp } from "../Source/lib/platform-auth-http.mjs";
 import { PlatformBackend } from "../Source/lib/platform-backend.mjs";
+import { verifyAccountVisibility } from "./platform-account-view-acceptance.mjs";
 import { createPlatformPool } from "../Source/lib/platform-mysql.mjs";
 import { sealAccountRecord } from "../Source/lib/platform-account-import.mjs";
 import { createAuthenticationSchema, LocalPasswordAuthentication } from "../Source/lib/platform-local-auth.mjs";
@@ -198,6 +199,9 @@ try {
     }), clientIdentity, "qa");
     assert.equal((await afterLogout.json()).data.signedIn, false);
     checks += 4;
+    stage = "account-visibility";
+    checks += await verifyAccountVisibility(migration, userId, encryptionKey);
+
     stage = "backend-lifecycle";
     const transferredKey = Buffer.from(encryptionKey);
     const backend = new PlatformBackend({ provider: "mysql",

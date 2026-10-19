@@ -322,3 +322,9 @@ in a non-deleted organization. Staff status does not broaden the personal "My as
 provider/email display fields are returned, never password hashes or MFA secrets. Rendered local pages use
 private/no-store caching. Organization creation remains hidden until its mutation route is ported; security,
 OAuth and other linked workflows still need migration before public cutover.
+
+Account visibility acceptance adds 13 live checks inside a rolled-back transaction: personal ownership,
+nonmember denial, shared membership, membership removal, soft-deleted organization filtering, entitlement
+revocation, and fixture rollback. The authentication harness now passes 63 checks. A post-test full-domain
+comparison verified all 35 tables and 221 imported rows unchanged. Existing products/orders are only read
+for fixture foreign keys; no source or real-account records are modified.
