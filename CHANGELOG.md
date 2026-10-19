@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Added a tested local browser-authentication HTTP adapter with secure cookies, MFA challenges, and origin checks.
+
 - Preserved private storage bucket/object metadata in isolated MySQL, with unavailable-file state and import verification.
 
 - Added private-storage recovery planning with integrity-reference reconciliation and explicit missing-file tracking.

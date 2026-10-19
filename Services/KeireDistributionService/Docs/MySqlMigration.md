@@ -234,3 +234,15 @@ with indexed bucket/object identity and expected hash/size. Name digests enforce
 truncating source keys; future lookup must compare the full object name. No local path comes from the
 source key. Recovery timestamps require a matching expected hash. Permissions and live routes are still
 separate work; this import does not implement storage policies or authorize downloads.
+
+### Browser authentication boundary
+
+`createLocalAuthenticationHttp` is application-owned and accepts the authentication service, canonical HTTPS
+origin, and a trusted server-derived client identity. It handles browser session GET/POST, challenge
+verification, and sign-out. Session/challenge tokens stay in Secure HttpOnly host-only cookies; mutations
+require the configured Origin and bounded JSON bodies. Duplicate session cookies are rejected. Hub bearer
+OAuth must use its separate protocol adapter. Service failures return generic retryable errors.
+
+The adapter remains disconnected from live Astro middleware. It needs real-database HTTP acceptance and
+frontend MFA challenge-page integration, plus registration/recovery/OAuth and service lifecycle ownership,
+before provider cutover. Existing Supabase routes remain active. Unit HTTP tests do not prove those workflows.
