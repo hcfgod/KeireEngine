@@ -34,6 +34,18 @@ Provisioning does not modify other schemas, reset existing passwords, or restart
 
 ## Migration acceptance gates
 
+`scripts/PlatformMigrationBackup.psm1` reads the encrypted migration exports in memory. Callers must supply the
+trusted SHA-256 and exact part count, and must not print the returned JSON. The reader rejects incomplete, reordered,
+corrupted, redirected, or oversized parts and preserves the original timestamp and numeric text. Regression coverage
+is provided by `Scripts/Tests/test-platform-migration-backup.ps1`.
+
+The website's `Source/lib/local-blob-store.ts` provides the initial private immutable-byte storage primitive.
+Uploads are streamed to a temporary file, checked against the expected size and SHA-256, and published exclusively
+without replacing existing bytes. Failed/interrupted uploads are removed; corrupt existing objects cause failure.
+This is not yet wired to routes, bucket/object metadata, or authorization. Its directory must remain outside the
+public website root and must have service-owner-only write access. Windows ACL configuration remains a deployment
+requirement; POSIX file mode arguments alone do not configure Windows ACLs.
+
 1. Export the live source consistently, with schema definitions, constraints, policies, routines, views, and row counts.
    Encrypt account records and credentials at rest. Verify a decrypt/parse round trip and record an export digest.
 2. Copy every Storage object, including quarantine files and validation evidence. Preserve bucket privacy, object paths,

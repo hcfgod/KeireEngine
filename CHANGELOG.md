@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Added verified encrypted migration-backup reading and an initial private local asset-byte store, with size/hash
+  validation and exclusive publication. Website backend integration and migration remain in progress.
+
 - Added isolated local MySQL provisioning for the upcoming optional website backend, with TLS verification,
   separate runtime/migration accounts, encrypted credentials, and refusal to overwrite existing databases.
   Application migration and live backend switching remain pending.
