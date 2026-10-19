@@ -61,6 +61,24 @@ Provisioning does not modify other schemas, reset existing passwords, or restart
 
 ## Migration acceptance gates
 
+`-Section platform-support` covers full profiles, publisher applications, reviews/reports, feature flags, staff,
+audit events, contact records, and private marketplace rate limits. The import preserved one profile, one application,
+six feature flags, one staff membership, 103 audit events, and three rate-limit records; the other four tables were
+empty. Fourteen live rollback-contained checks cover profile JSON/locale/handle rules, staff revocation, review
+uniqueness/ratings, report target exclusivity/cascade, audit JSON, contact status, and rate counts. Audit/contact
+sequence IDs are retained; rollback tests may leave harmless gaps in MySQL AUTO_INCREMENT counters.
+
+`-VerifyAll` is a separate read-only launcher operation using the runtime account. It requires exact coverage of all
+public/private source tables, validates each section's source schema and import ledger, and compares every mapped
+field. It verified all 35 domain tables and 221 rows from the pinned source snapshot, plus 61 foreign keys, 50
+primary/unique keys, and ten conditional uniqueness rules. Extra or missing source tables fail the check. Auth and
+Storage schemas are outside this domain-coverage result and retain their own acceptance gates.
+
+The earlier `platform_profiles` import remains a preserved account-source record. The full `profiles` table is the
+domain destination; future service writes must use that destination consistently. Source triggers, RLS, and actor
+authorization are not supplied merely by copying domain records. No live routing or worker selection changes occur
+during these imports.
+
 `-Section marketplace-publication` imports the two public-key tables, uploads, validation reports, submissions,
 signed-publication records, and publication jobs. The initial import preserved one publication key, one validator key,
 12 uploads, 12 reports, nine submissions, eight publications, and two jobs. All fields matched the source. Sixteen live

@@ -25,9 +25,12 @@ export function verifyMarketplaceSourceColumns(schema, section = "marketplace-co
         marketplace_upload_state: /^VARCHAR\(/,
         marketplace_submission_state: /^VARCHAR\(/,
         marketplace_publication_job_state: /^VARCHAR\(/,
+        publisher_application_state: /^VARCHAR\(/,
+        marketplace_report_state: /^VARCHAR\(/,
+        platform_staff_role: /^VARCHAR\(/,
     };
     for (const table of marketplaceTables(section)) {
-        const columns = schema.columns.filter((column) => column.table_schema === "public" && column.table_name === table.name);
+        const columns = schema.columns.filter((column) => column.table_schema === (table.sourceSchema ?? "public") && column.table_name === table.name);
         if (columns.length !== Object.keys(table.columns).length || new Set(columns.map((column) => column.column_name)).size !== columns.length) {
             throw new Error(`Source schema changed for ${table.name}; review the mapping.`);
         }
@@ -35,7 +38,7 @@ export function verifyMarketplaceSourceColumns(schema, section = "marketplace-co
             const definition = table.columns[column.column_name];
             if (!definition || !typeMappings[column.udt_name]?.test(definition) ||
                 !["YES", "NO"].includes(column.is_nullable) ||
-                (column.is_nullable === "NO") !== definition.endsWith("NOT NULL")) {
+                (column.is_nullable === "NO") !== definition.includes("NOT NULL")) {
                 throw new Error(`Source column mapping changed for ${table.name}.`);
             }
         }
@@ -64,9 +67,9 @@ export function canonicalJson(value) {
     return JSON.stringify(normalize(value));
 }
 
-function normalizeValue(value, definition, textArray = false) {
+function normalizeValue(value, definition, textArray = false, jsonObject = false) {
     if (value === null) {
-        if (definition.endsWith("NOT NULL")) {
+        if (definition.includes("NOT NULL")) {
             throw new Error("A required marketplace value is null.");
         }
         return null;
@@ -78,8 +81,9 @@ function normalizeValue(value, definition, textArray = false) {
         return mysqlUtcTimestamp(value);
     }
     if (definition.startsWith("JSON")) {
-        if (!Array.isArray(value) || (textArray && value.some((item) => item !== null && typeof item !== "string"))) {
-            throw new Error("A marketplace text array cannot be converted without data loss.");
+        const validRoot = jsonObject ? typeof value === "object" && !Array.isArray(value) : Array.isArray(value);
+        if (!validRoot || (textArray && value.some((item) => item !== null && typeof item !== "string"))) {
+            throw new Error("Unexpected marketplace JSON shape; import refused.");
         }
         return canonicalJson(value);
     }
@@ -119,7 +123,7 @@ export function marketplaceRecords(snapshot, section = "marketplace-core") {
         throw new Error("Unexpected marketplace source project.");
     }
     return marketplaceTables(section).map((table) => {
-        const rows = snapshot.tables[`public.${table.name}`];
+        const rows = snapshot.tables[`${table.sourceSchema ?? "public"}.${table.name}`];
         const names = Object.keys(table.columns);
         if (!Array.isArray(rows)) {
             throw new Error(`Missing source table: ${table.name}.`);
@@ -128,7 +132,8 @@ export function marketplaceRecords(snapshot, section = "marketplace-core") {
             if (!row || Object.keys(row).length !== names.length || !names.every((name) => Object.hasOwn(row, name))) {
                 throw new Error(`Source columns changed for ${table.name}; review the mapping before import.`);
             }
-            return names.map((name) => normalizeValue(row[name], table.columns[name], table.name === "marketplace_product_versions"));
+            return names.map((name) => normalizeValue(row[name], table.columns[name],
+                table.name === "marketplace_product_versions", table.jsonObjectColumns?.includes(name)));
         });
         return { table, names, values };
     });

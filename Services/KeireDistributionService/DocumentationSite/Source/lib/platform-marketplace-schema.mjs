@@ -1,6 +1,11 @@
 import { marketplaceAccessTables } from "./platform-marketplace-access-schema.mjs";
 import { marketplaceContentTables } from "./platform-marketplace-content-schema.mjs";
 import { marketplacePublicationTables } from "./platform-marketplace-publication-schema.mjs";
+import { platformSupportTables } from "./platform-support-schema.mjs";
+
+export const marketplaceSections = Object.freeze([
+    "marketplace-core", "marketplace-access", "marketplace-content", "marketplace-publication", "platform-support",
+]);
 
 const uuid = "CHAR(36) CHARACTER SET ascii COLLATE ascii_bin";
 const time = "DATETIME(6)";
@@ -170,7 +175,8 @@ export const marketplaceCoreTables = [
 
 export function marketplaceTableSql(table) {
     if (!marketplaceCoreTables.includes(table) && !marketplaceAccessTables.includes(table) &&
-        !marketplaceContentTables.includes(table) && !marketplacePublicationTables.includes(table)) {
+        !marketplaceContentTables.includes(table) && !marketplacePublicationTables.includes(table) &&
+        !platformSupportTables.includes(table)) {
         throw new Error("Only reviewed marketplace table definitions may be created.");
     }
     const fields = Object.entries(table.columns).map(([name, definition]) => `\`${name}\` ${definition}`);
@@ -191,7 +197,23 @@ export function marketplaceTables(section = "marketplace-core") {
     if (section === "marketplace-publication") {
         return marketplacePublicationTables;
     }
+    if (section === "platform-support") {
+        return platformSupportTables;
+    }
     throw new Error("Unknown marketplace migration section.");
+}
+
+export function verifyMarketplaceTableCoverage(snapshot) {
+    if (!snapshot?.tables || typeof snapshot.tables !== "object" || Array.isArray(snapshot.tables)) {
+        throw new Error("Source table inventory is missing.");
+    }
+    const source = Object.keys(snapshot.tables).filter((name) => /^(public|private)\./.test(name)).sort();
+    const mapped = marketplaceSections.flatMap((section) => marketplaceTables(section)
+        .map((table) => `${table.sourceSchema ?? "public"}.${table.name}`)).sort();
+    if (JSON.stringify(source) !== JSON.stringify(mapped)) {
+        throw new Error("Domain table coverage differs from the source inventory.");
+    }
+    return source.length;
 }
 
 export async function createMarketplaceSchema(pool, section = "marketplace-core") {

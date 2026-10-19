@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Completed the isolated public/private domain-data import with profiles, moderation, staff, audit, and contact records.
+  Added whole-inventory verification; website/backend cutover and private-file migration remain pending.
+
 - Preserved marketplace upload, validation, submission, signed-publication, job, and public-key records in the isolated
   MySQL migration. Added lease/uniqueness checks and nested diagnostic JSON verification; workers remain disconnected.
 

@@ -4,10 +4,12 @@ param
     [Parameter(Mandatory)] [string] $BackupDirectory,
     [Parameter(Mandatory)] [string] $SettingsDirectory,
     [Parameter(Mandatory)] [string] $ResultPath,
-    [ValidateSet('marketplace-core', 'marketplace-access', 'marketplace-content', 'marketplace-publication')] [string] $Section = 'marketplace-core',
+    [ValidateSet('marketplace-core', 'marketplace-access', 'marketplace-content', 'marketplace-publication', 'platform-support')]
+    [string] $Section = 'marketplace-core',
     [switch] $CreateSchema,
     [switch] $VerifyOnly,
-    [switch] $AcceptanceOnly
+    [switch] $AcceptanceOnly,
+    [switch] $VerifyAll
 )
 
 $ErrorActionPreference = 'Stop'
@@ -19,6 +21,10 @@ try
     if (($CreateSchema -and ($VerifyOnly -or $AcceptanceOnly)) -or ($VerifyOnly -and $AcceptanceOnly))
     {
         throw 'Schema creation cannot be combined with read-only verification.'
+    }
+    if ($VerifyAll -and ($CreateSchema -or $VerifyOnly -or $AcceptanceOnly))
+    {
+        throw 'VerifyAll is a separate read-only operation.'
     }
     foreach ($path in @($BackupDirectory, $SettingsDirectory, $ResultPath))
     {
@@ -51,7 +57,14 @@ try
     } | ConvertTo-Json -Depth 100 -Compress
     $start = [Diagnostics.ProcessStartInfo]::new((Get-Command node.exe).Source)
     $start.WorkingDirectory = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../DocumentationSite'))
-    $start.ArgumentList.Add('scripts/import-platform-marketplace.mjs')
+    if ($VerifyAll)
+    {
+        $start.ArgumentList.Add('scripts/verify-platform-domain-coverage.mjs')
+    }
+    else
+    {
+        $start.ArgumentList.Add('scripts/import-platform-marketplace.mjs')
+    }
     if ($CreateSchema)
     {
         $start.ArgumentList.Add('--create-schema')
