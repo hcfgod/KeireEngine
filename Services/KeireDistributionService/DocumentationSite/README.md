@@ -91,6 +91,15 @@ or Supabase API keys. It bounds JSON bodies to 1 MiB and hides unexpected databa
 errors. It requires lease, renewal, and verified-completion service operations
 before construction; it is not currently connected to the website router.
 
+`platform-validator-report.mjs` verifies the worker's exact Ed25519 signature,
+trusted-key validity, package/version identity, evidence metadata, scan outcomes,
+and completion timestamp. It rejects duplicate signed fields and contradictory
+success reports. This verifier still requires integration with transactional
+report storage and verification of the evidence bytes. For C# worker compatibility,
+set `KEIRE_TEST_NODE_ATTESTATION=1` when running the Release distribution test
+harness; Node must be on PATH. That optional check sends only a synthetic signed
+report and its public key to Node, never a signing key.
+
 Build with `KEIRE_NODE_ADAPTER_MODE=middleware` before running
 `node scripts/test-platform-http-live.mjs --interactive`. Configure
 `KEIRE_QA_POWERSHELL`, `KEIRE_QA_SETTINGS_DIRECTORY`, and `KEIRE_QA_PORT` for the

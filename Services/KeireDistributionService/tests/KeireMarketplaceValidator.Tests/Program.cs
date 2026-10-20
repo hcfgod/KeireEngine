@@ -321,8 +321,8 @@ internal static class Program
         Guid versionId = Guid.Parse("22222222-2222-4222-8222-222222222222");
         const string storageBucket = "marketplace-packages";
         const string storagePath = "publisher/upload.keireassetpackage";
-        string evidencePath = $"{uploadId:D}/report.json";
         string digest = Sha256(packageBytes);
+        string evidencePath = $"{uploadId:D}/review-evidence-{digest}.json";
         using MarketplaceSigningKey attestationKey = MarketplaceSigningKey.Create();
         int queueCalls = 0;
         RecordingHandler handler = new(request =>
@@ -407,6 +407,10 @@ internal static class Program
         {
             Attestation = ValidatorAttestation.Sign(validationRequest, unsignedReport, attestationKey),
         };
+        if (Environment.GetEnvironmentVariable("KEIRE_TEST_NODE_ATTESTATION") == "1")
+        {
+            await VerifyNodeAttestationAsync(validationRequest, report, attestationKey.PublicDocument);
+        }
         await api.UploadEvidenceAsync(lease, evidenceBytes, default);
         await api.CompleteAsync(lease, DistributionJson.Serialize(report), default);
         Assert.True(
@@ -417,6 +421,56 @@ internal static class Program
             handler.Requests.Any(request => request.Method == HttpMethod.Put && request.RequestUri!.AbsolutePath.Contains(
                 "/storage/v1/object/upload/sign/", StringComparison.Ordinal)),
             "The signed review evidence was not uploaded before completion.");
+    }
+
+    private static async Task VerifyNodeAttestationAsync(
+        PackageValidationRequest request,
+        MarketplaceValidationReport report,
+        DistributionPublicKeyDocument key)
+    {
+        System.Diagnostics.ProcessStartInfo start = new("node")
+        {
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        };
+        start.ArgumentList.Add(Path.Combine(FindRepositoryRoot(), "Services", "KeireDistributionService",
+            "DocumentationSite", "scripts", "verify-validator-attestation-interop.mjs"));
+        using System.Diagnostics.Process process = System.Diagnostics.Process.Start(start)
+            ?? throw new InvalidOperationException("Could not start Node attestation acceptance.");
+        Task<string> output = process.StandardOutput.ReadToEndAsync();
+        Task<string> errors = process.StandardError.ReadToEndAsync();
+        byte[] fixture = DistributionJson.Serialize(new
+        {
+            upload = new
+            {
+                id = request.UploadId.ToString("D"),
+                version_id = request.VersionId.ToString("D"),
+                storage_bucket = request.StorageBucket,
+                storage_path = request.StoragePath,
+                expected_size_bytes = request.ExpectedPackageBytes,
+                expected_sha256 = request.ExpectedPackageSha256,
+            },
+            report,
+            key,
+        });
+        await process.StandardInput.BaseStream.WriteAsync(fixture);
+        process.StandardInput.Close();
+        using CancellationTokenSource deadline = new(TimeSpan.FromSeconds(30));
+        try
+        {
+            await process.WaitForExitAsync(deadline.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            process.Kill(entireProcessTree: true);
+            throw new InvalidOperationException("Node attestation acceptance timed out.");
+        }
+
+        Assert.Equal(0, process.ExitCode, $"Node attestation verification failed: {await errors}");
+        Console.Write(await output);
     }
 
     private static Task BrokerRejectsTamperedAttestationAsync()
