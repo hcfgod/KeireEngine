@@ -7,6 +7,7 @@ import { handleLocalOrganizationRequest } from "./platform-organizations-http.mj
 import { handleLocalDataRequest } from "./platform-data-http.mjs";
 import { handleLocalMfaRequest } from "./platform-mfa-http.mjs";
 import { handleLocalRegistrationRequest } from "./platform-registration-http.mjs";
+import { handleLocalPublisherApplicationRequest } from "./platform-publisher-applications-http.mjs";
 
 /** A staged provider adapter. Unported routes fail closed instead of using Supabase identities or data. */
 export async function handleLocalPlatformRequest({ backend, request, siteOrigin, clientIdentity, correlationId, render }) {
@@ -40,6 +41,9 @@ export async function handleLocalPlatformRequest({ backend, request, siteOrigin,
                 return response;
             }
             const pathname = new URL(request.url).pathname.replace(/\/+$/, "");
+            if (pathname === "/publisher/v1/applications") {
+                return handleLocalPublisherApplicationRequest(service.authentication, request, siteOrigin, correlationId);
+            }
             if (["/account/create", "/account/confirm"].includes(pathname) && ["GET", "HEAD"].includes(request.method)) {
                 const rendered = await render({ session: null, pendingChallenge: null, accountView: null,
                     localRegistration: true });

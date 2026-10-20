@@ -457,6 +457,25 @@ try {
             { origin: "https://other.invalid" })).status, 403);
         assert.match(await (await request("/account/")).text(), /HTTP QA organization/);
         checks += 6;
+        stage = "publisher-application";
+        const applicationInput = { organizationId: organization.organizationId, publicName: "HTTP QA publisher",
+            statement: "A disposable publisher application for real HTTPS acceptance." };
+        assert.equal((await request("/publisher/v1/applications/", applicationInput,
+            { origin: "https://other.invalid" })).status, 403);
+        assert.equal((await request("/publisher/v1/applications/", applicationInput,
+            { authorization: "Bearer unsupported" })).status, 401);
+        const applicationResponse = await request("/publisher/v1/applications/", applicationInput);
+        assert.equal(applicationResponse.status, 200);
+        assert.match(applicationResponse.headers.get("cache-control"), /private, no-store/);
+        const application = (await applicationResponse.json()).data;
+        assert.equal(application.state, "draft");
+        const submittedApplication = await request("/publisher/v1/applications/",
+            { ...applicationInput, applicationId: application.applicationId, action: "submit" });
+        assert.equal(submittedApplication.status, 200);
+        assert.equal((await submittedApplication.json()).data.state, "submitted");
+        assert.equal((await request("/publisher/v1/applications/",
+            { ...applicationInput, applicationId: application.applicationId })).status, 409);
+        checks += 8;
         const library = await request("/marketplace/v1/library/");
         const invalidClaim = await request("/marketplace/v1/claims/", { ownership: "organization" });
         assert.equal(invalidClaim.status, 400);
@@ -688,6 +707,8 @@ try {
             }
             await pool.execute("DELETE FROM platform_audit_events WHERE actor_user_id=? AND action IN ('account.export_requested','account.deletion_requested')", [userId]);
             await pool.execute("DELETE FROM profiles WHERE user_id=?", [userId]);
+            await pool.execute("DELETE FROM platform_audit_events WHERE actor_user_id=? AND action IN ('publisher.application_saved','publisher.application_submitted')", [userId]);
+            await pool.execute("DELETE FROM publisher_applications WHERE applicant_user_id=?", [userId]);
             await pool.execute("DELETE FROM platform_audit_events WHERE actor_user_id=? AND action='organization.created'", [userId]);
             await pool.execute(`DELETE membership FROM organization_memberships membership
                 JOIN organizations organization ON organization.id=membership.organization_id WHERE organization.created_by=?`, [userId]);
