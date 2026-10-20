@@ -19,17 +19,17 @@ function fixture() {
 }
 
 describe("application-owned backend lifecycle", () => {
-    it("drains the validator before closing its borrowed database", async () => {
+    it.each(["Validator", "Publication"])("drains %s before closing its borrowed database", async (kind) => {
         const data = fixture();
         const drain = deferred();
         const validator = { handle: vi.fn(), close: vi.fn(() => drain.promise) };
         const backend = new PlatformBackend({ provider: "mysql", loadLocalSecrets: data.loadLocalSecrets,
             createPool: data.createPool, createAuthentication: data.createAuthentication,
-            createValidator: async ({ pool }) => {
+            [`create${kind}`]: async ({ pool }) => {
                 expect(pool).toBe(data.pool);
                 return validator;
             } });
-        expect(await backend.withBackend((services) => services.validator)).toBe(validator);
+        expect(await backend.withBackend((services) => services[kind.toLowerCase()])).toBe(validator);
         const closing = backend.close();
         await Promise.resolve();
         expect(data.pool.end).not.toHaveBeenCalled();
@@ -39,23 +39,23 @@ describe("application-owned backend lifecycle", () => {
         expect(data.pool.end).toHaveBeenCalledOnce();
     });
 
-    it("cleans up a validator after later startup failure", async () => {
+    it.each(["Validator", "Publication"])("cleans up %s after later startup failure", async (kind) => {
         const data = fixture();
         const validator = { handle: vi.fn(), close: vi.fn() };
         const backend = new PlatformBackend({ provider: "mysql", loadLocalSecrets: data.loadLocalSecrets,
             createPool: data.createPool, createAuthentication: data.createAuthentication,
-            createValidator: async () => validator,
+            [`create${kind}`]: async () => validator,
             createMailer: async () => { throw new Error("mail unavailable"); } });
         await expect(backend.withBackend(() => {})).rejects.toThrow("mail unavailable");
         expect(validator.close).toHaveBeenCalledOnce();
         expect(data.pool.end).toHaveBeenCalledOnce();
     });
 
-    it("disposes the database even when validator shutdown fails", async () => {
+    it.each(["Validator", "Publication"])("disposes the database even when %s shutdown fails", async (kind) => {
         const data = fixture();
         const backend = new PlatformBackend({ provider: "mysql", loadLocalSecrets: data.loadLocalSecrets,
             createPool: data.createPool, createAuthentication: data.createAuthentication,
-            createValidator: async () => ({
+            [`create${kind}`]: async () => ({
                 handle() {},
                 close() { throw new Error("validator shutdown failed"); },
             }) });

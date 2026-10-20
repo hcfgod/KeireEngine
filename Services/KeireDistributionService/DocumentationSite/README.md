@@ -119,6 +119,16 @@ stubbed blob checks. Full queue acceptance with actual private files remains
 required before deployment. SQL boolean results are compared numerically:
 the driver can return `"0"`, which must not be interpreted as truthy.
 
+`createLocalPublicationService` assembles lease, renewal, completion and failure
+operations behind `/internal/publication/v1/queue/`. The host supplies a
+dedicated `x-keire-publication-secret`, verified stores, and database pool through
+`PlatformBackend.createPublication`. Browser credentials are rejected before
+body parsing; publication sequences are serialized as exact JSON integers.
+Shutdown drains accepted operations before the host closes their dependencies.
+An unconfigured MySQL publication service returns an unavailable response and
+does not fall through to Supabase or browser handlers. Production configuration
+and C# HTTP acceptance remain deployment prerequisites.
+
 Internal validator completion locks the current lease and trusted key, verifies
 the signature and immutable evidence bytes, rechecks expiry, and commits the
 report, upload/version states, and audit receipt in one transaction. An exact

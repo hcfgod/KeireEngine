@@ -28,6 +28,14 @@ export async function handleLocalPlatformRequest({ backend, request, siteOrigin,
     }
     try {
         return await backend.withBackend(async (service) => {
+            if (new URL(request.url).pathname.startsWith("/internal/publication/")) {
+                if (!service.publication) {
+                    return unavailable("The publication service is not configured.");
+                }
+                return await service.publication.handle(request) ?? new Response(null, {
+                    status: 404, headers: { "cache-control": "private, no-store" },
+                });
+            }
             if (new URL(request.url).pathname.startsWith("/internal/validator/")) {
                 if (!service.validator) {
                     return unavailable("The validator service is not configured.");

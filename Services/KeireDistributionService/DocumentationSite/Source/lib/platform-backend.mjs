@@ -19,7 +19,7 @@ export function selectPlatformBackend(value) {
 export class PlatformBackend {
     constructor({ provider, loadLocalSecrets, createPool = createPlatformPool,
         createAuthentication = LocalPasswordAuthentication.create, createMailer = null, createUploads = null,
-        createValidator = null,
+        createValidator = null, createPublication = null,
         createRecoveryWorker = (processNext) => new RecoveryDeliveryWorker(processNext),
         createRegistrationWorker = (processNext) => new RecoveryDeliveryWorker(processNext) }) {
         this.provider = selectPlatformBackend(provider);
@@ -41,6 +41,10 @@ export class PlatformBackend {
             throw new Error("Validator processing requires an application-owned factory.");
         }
         this.createValidator = createValidator;
+        if (createPublication !== null && typeof createPublication !== "function") {
+            throw new Error("Publication processing requires an application-owned factory.");
+        }
+        this.createPublication = createPublication;
         this.createRecoveryWorker = createRecoveryWorker;
         this.createRegistrationWorker = createRegistrationWorker;
         this.activeRequests = 0;
@@ -61,6 +65,7 @@ export class PlatformBackend {
         let registrationWorker;
         let uploads;
         let validator;
+        let publication;
         let secrets;
         try {
             // Loader transfers ownership of its fresh key buffer to this initialization operation.
@@ -77,6 +82,12 @@ export class PlatformBackend {
                     || typeof uploads.reserve !== "function" || typeof uploads.prepare !== "function"
                     || typeof uploads.complete !== "function") {
                     throw new Error("Upload factory returned an invalid service.");
+                }
+            }
+            if (this.createPublication) {
+                publication = await this.createPublication({ pool });
+                if (!publication || typeof publication.handle !== "function" || typeof publication.close !== "function") {
+                    throw new Error("Publication factory returned an invalid service.");
                 }
             }
             if (this.createValidator) {
@@ -107,10 +118,15 @@ export class PlatformBackend {
                 registrationWorker.start();
             }
             return Object.freeze({ provider: "mysql", pool, authentication, mailer, emailAuthentication, uploads: uploads ?? null,
-                validator: validator ?? null,
+                validator: validator ?? null, publication: publication ?? null,
                 registrationWorker: registrationWorker ?? null,
                 recoveryWorker: recoveryWorker ?? null });
         } catch (error) {
+            try {
+                await publication?.close?.();
+            } catch {
+                // Preserve startup failure while disposing the remaining services.
+            }
             try {
                 await validator?.close?.();
             } catch {
@@ -198,7 +214,11 @@ export class PlatformBackend {
             try {
                 try {
                     try {
-                        await backend?.validator?.close();
+                        try {
+                            await backend?.publication?.close();
+                        } finally {
+                            await backend?.validator?.close();
+                        }
                     } finally {
                         await backend?.uploads?.close();
                     }
