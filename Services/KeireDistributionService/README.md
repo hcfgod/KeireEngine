@@ -369,6 +369,15 @@ clients before activating that key in Supabase or starting its signer.
 
 Marketplace validation uses two processes with different trust levels:
 
+The broker defaults to `KEIRE_PLATFORM_BACKEND=supabase` and `KEIRE_SUPABASE_URL`.
+The staged MySQL adapter uses `KEIRE_PLATFORM_BACKEND=mysql` and `KEIRE_PLATFORM_URL`,
+an HTTPS origin, to reach `/internal/validator/v1/queue/`. Windows launches accept
+`-Backend mysql -ApiOrigin https://platform.example`; the existing `-SupabaseUrl`
+parameter remains an alias. This selects the transport only: do not switch a live
+broker until the local queue, private download/evidence endpoints, and signed-report
+acceptance have passed integration tests. Redirects are rejected instead of forwarding
+broker credentials to another destination.
+
 - `KeireMarketplaceValidatorBroker` is the only networked component. It holds one dedicated, independently rotatable
   validator-queue secret—not a Supabase API key—atomically leases an upload-once private object, streams it from a
   short-lived object-specific URL with an exact size/SHA-256 bound, renews long-running leases, and commits the worker's

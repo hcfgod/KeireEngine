@@ -6,7 +6,9 @@ namespace Keire.Marketplace.Validator.Broker;
 
 internal sealed partial class BrokerOptions
 {
-    public required Uri SupabaseUrl { get; init; }
+    public required Uri ApiOrigin { get; init; }
+
+    public string QueuePath { get; init; } = "functions/v1/marketplace-validator-queue";
 
     public required string BrokerSecret { get; init; }
 
@@ -28,12 +30,9 @@ internal sealed partial class BrokerOptions
 
     public static BrokerOptions FromEnvironment()
     {
-        string rawUrl = Require("KEIRE_SUPABASE_URL");
-        if (!Uri.TryCreate(rawUrl, UriKind.Absolute, out Uri? url) || url.Scheme != Uri.UriSchemeHttps ||
-            !string.IsNullOrEmpty(url.UserInfo) || !string.IsNullOrEmpty(url.Query) || !string.IsNullOrEmpty(url.Fragment))
-        {
-            throw new InvalidOperationException("KEIRE_SUPABASE_URL must be an HTTPS origin without credentials or query data.");
-        }
+        string provider = Environment.GetEnvironmentVariable("KEIRE_PLATFORM_BACKEND") ?? "supabase";
+        string urlVariable = provider == "mysql" ? "KEIRE_PLATFORM_URL" : "KEIRE_SUPABASE_URL";
+        (Uri origin, string queuePath) = ResolveEndpoint(provider, Require(urlVariable));
 
         string secret = Require("KEIRE_VALIDATOR_BROKER_SECRET");
         if (secret.Length is < 32 or > 256 || secret.Any(char.IsWhiteSpace))
@@ -71,7 +70,8 @@ internal sealed partial class BrokerOptions
         int validationTimeoutSeconds = ParseInteger("KEIRE_VALIDATOR_JOB_TIMEOUT_SECONDS", 1800, 60, 14400);
         return new BrokerOptions
         {
-            SupabaseUrl = new Uri(url.GetLeftPart(UriPartial.Authority) + "/", UriKind.Absolute),
+            ApiOrigin = origin,
+            QueuePath = queuePath,
             BrokerSecret = secret,
             ExpectedValidatorFingerprintSha256 = expectedFingerprint,
             AttestationVerificationKey = attestationKey,
@@ -82,6 +82,24 @@ internal sealed partial class BrokerOptions
             ReportPollInterval = TimeSpan.FromMilliseconds(reportPollMilliseconds),
             ValidationTimeout = TimeSpan.FromSeconds(validationTimeoutSeconds),
         };
+    }
+
+    internal static (Uri Origin, string QueuePath) ResolveEndpoint(string provider, string rawUrl)
+    {
+        string queuePath = provider switch
+        {
+            "supabase" => "functions/v1/marketplace-validator-queue",
+            "mysql" => "internal/validator/v1/queue/",
+            _ => throw new InvalidOperationException("KEIRE_PLATFORM_BACKEND must be supabase or mysql."),
+        };
+        if (!Uri.TryCreate(rawUrl, UriKind.Absolute, out Uri? url) || url.Scheme != Uri.UriSchemeHttps ||
+            !string.IsNullOrEmpty(url.UserInfo) || !string.IsNullOrEmpty(url.Query) ||
+            !string.IsNullOrEmpty(url.Fragment) || url.AbsolutePath != "/")
+        {
+            throw new InvalidOperationException("The validator API must be an HTTPS origin without a path, credentials, or query data.");
+        }
+
+        return (new Uri(url.GetLeftPart(UriPartial.Authority) + "/", UriKind.Absolute), queuePath);
     }
 
     private static string Require(string name)

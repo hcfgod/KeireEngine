@@ -21,7 +21,7 @@ internal static class BrokerProgram
         {
             BrokerOptions options = BrokerOptions.FromEnvironment();
             ExchangePaths exchange = ExchangePaths.Create(options.ExchangeRoot);
-            using SupabaseValidatorApi api = new(options);
+            using ValidatorQueueApi api = new(options);
             Console.WriteLine($"Marketplace validator broker '{options.WorkerId}' is ready.");
             while (!cancellation.IsCancellationRequested)
             {
@@ -66,7 +66,7 @@ internal static class BrokerProgram
     }
 
     private static async Task ProcessLeaseAsync(
-        SupabaseValidatorApi api,
+        ValidatorQueueApi api,
         BrokerOptions options,
         ExchangePaths exchange,
         ValidationLease lease,
@@ -162,7 +162,7 @@ internal static class BrokerProgram
     }
 
     private static async Task RenewLeaseAsync(
-        SupabaseValidatorApi api,
+        ValidatorQueueApi api,
         BrokerOptions options,
         Guid uploadId,
         CancellationTokenSource leaseLost)

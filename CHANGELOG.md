@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Added staged MySQL endpoint selection to the marketplace validator broker while retaining Supabase defaults and rejecting redirected queue requests.
+
 - Fixed staged MySQL publisher uploads treating an interrupted confirmation as a failed transfer. Publishers can retry confirmation for the same upload without resending its bytes.
 
 - Connected staged MySQL publisher portal reads and application drafts; reopening a draft now restores its saved fields instead of showing an empty form.

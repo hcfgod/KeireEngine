@@ -24,6 +24,8 @@ internal static class Program
             ("malware rejection stops before extraction", MalwareRejectionStopsExtractionAsync),
             ("validation failures remove private staging", ValidationFailureRemovesStagingAsync),
             ("broker keeps its scoped secret out of Supabase API auth", BrokerUsesScopedSecretHeaderAsync),
+            ("broker selects the local queue without changing its credential boundary", BrokerUsesLocalQueueAsync),
+            ("broker rejects unsafe provider origins", BrokerRejectsUnsafeOriginsAsync),
             ("broker verifies quarantine bytes and commits reports", BrokerVerifiesAndCommitsAsync),
             ("broker rejects tampered validator evidence attestations", BrokerRejectsTamperedAttestationAsync),
             ("publication signer verifies evidence and signs immutable metadata", PublicationSignerSignsMetadataAsync),
@@ -264,7 +266,7 @@ internal static class Program
         using TemporaryDirectory fixture = new();
         using MarketplaceSigningKey attestationKey = MarketplaceSigningKey.Create();
         RecordingHandler handler = new(_ => JsonResponse("{\"data\":{\"lease\":null}}"));
-        using SupabaseValidatorApi api = new(CreateBrokerOptions(fixture.Path, attestationKey), handler);
+        using ValidatorQueueApi api = new(CreateBrokerOptions(fixture.Path, attestationKey), handler);
         ValidationLease? lease = await api.LeaseAsync(default);
         Assert.True(lease is null, "An empty validator queue returned a lease.");
         HttpRequestMessage request = handler.Requests.Single();
@@ -273,6 +275,41 @@ internal static class Program
             "The broker did not send its scoped queue credential.");
         Assert.True(!request.Headers.Contains("apikey"), "The broker sent a full Supabase API credential.");
         Assert.True(request.Headers.Authorization is null, "The broker sent a bearer credential.");
+        Assert.Equal("/functions/v1/marketplace-validator-queue", request.RequestUri!.AbsolutePath,
+            "The default Supabase queue route changed.");
+    }
+
+    private static async Task BrokerUsesLocalQueueAsync()
+    {
+        using TemporaryDirectory fixture = new();
+        using MarketplaceSigningKey attestationKey = MarketplaceSigningKey.Create();
+        RecordingHandler handler = new(_ => JsonResponse("{\"data\":{\"lease\":null}}"));
+        using ValidatorQueueApi api = new(CreateBrokerOptions(fixture.Path, attestationKey, "mysql"), handler);
+        Assert.True(await api.LeaseAsync(default) is null, "An empty local queue returned a lease.");
+        HttpRequestMessage request = handler.Requests.Single();
+        Assert.Equal("https://platform.invalid/internal/validator/v1/queue/", request.RequestUri!.AbsoluteUri,
+            "The local provider used the wrong queue.");
+        Assert.Equal("validator_fixture_secret_12345678901234567890",
+            request.Headers.GetValues("x-keire-validator-secret").Single(), "The scoped credential was missing.");
+        Assert.True(!request.Headers.Contains("apikey") && request.Headers.Authorization is null,
+            "The local broker exposed another authentication credential.");
+    }
+
+    private static Task BrokerRejectsUnsafeOriginsAsync()
+    {
+        foreach (string origin in new[]
+        {
+            "http://platform.invalid", "https://user:password@platform.invalid",
+            "https://platform.invalid/path", "https://platform.invalid/?token=value",
+            "https://platform.invalid/#fragment",
+        })
+        {
+            Assert.Throws<InvalidOperationException>(() => BrokerOptions.ResolveEndpoint("mysql", origin));
+        }
+
+        Assert.Throws<InvalidOperationException>(() =>
+            BrokerOptions.ResolveEndpoint("unsupported", "https://platform.invalid"));
+        return Task.CompletedTask;
     }
 
     private static async Task BrokerVerifiesAndCommitsAsync()
@@ -331,7 +368,7 @@ internal static class Program
 
             throw new InvalidOperationException("Unexpected broker request.");
         });
-        using SupabaseValidatorApi api = new(CreateBrokerOptions(fixture.Path, attestationKey), handler);
+        using ValidatorQueueApi api = new(CreateBrokerOptions(fixture.Path, attestationKey), handler);
         ValidationLease lease = await api.LeaseAsync(default)
             ?? throw new InvalidOperationException("The fixture lease was not returned.");
         string destination = Path.Combine(fixture.Path, "download.keireassetpackage");
@@ -573,11 +610,17 @@ internal static class Program
             new string('a', 64));
     }
 
-    private static BrokerOptions CreateBrokerOptions(string exchangeRoot, MarketplaceSigningKey attestationKey)
+    private static BrokerOptions CreateBrokerOptions(
+        string exchangeRoot,
+        MarketplaceSigningKey attestationKey,
+        string provider = "supabase")
     {
+        (Uri origin, string queuePath) = BrokerOptions.ResolveEndpoint(provider,
+            provider == "mysql" ? "https://platform.invalid/" : "https://example.supabase.co/");
         return new BrokerOptions
         {
-            SupabaseUrl = new Uri("https://example.supabase.co/"),
+            ApiOrigin = origin,
+            QueuePath = queuePath,
             BrokerSecret = "validator_fixture_secret_12345678901234567890",
             ExpectedValidatorFingerprintSha256 = new string('a', 64),
             AttestationVerificationKey = MarketplaceVerificationKey.FromDocument(attestationKey.PublicDocument),

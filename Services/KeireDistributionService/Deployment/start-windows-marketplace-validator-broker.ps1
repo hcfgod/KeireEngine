@@ -13,7 +13,11 @@ param(
     [string]$SecretFile,
 
     [Parameter(Mandatory = $true)]
-    [uri]$SupabaseUrl,
+    [Alias("SupabaseUrl")]
+    [uri]$ApiOrigin,
+
+    [ValidateSet("supabase", "mysql")]
+    [string]$Backend = "supabase",
 
     [Parameter(Mandatory = $true)]
     [string]$ExpectedValidatorFingerprint,
@@ -39,9 +43,10 @@ foreach ($path in @($Broker, $Validator, $SecretFile, $AttestationPublicKey)) {
 if (-not (Test-Path -LiteralPath $ExchangeRoot -PathType Container)) {
     throw "The validator exchange root is missing: $ExchangeRoot"
 }
-if ($SupabaseUrl.Scheme -ne "https" -or -not [string]::IsNullOrEmpty($SupabaseUrl.UserInfo) -or
-    -not [string]::IsNullOrEmpty($SupabaseUrl.Query) -or -not [string]::IsNullOrEmpty($SupabaseUrl.Fragment)) {
-    throw "SupabaseUrl must be an HTTPS origin without credentials or query data."
+if ($ApiOrigin.Scheme -ne "https" -or -not [string]::IsNullOrEmpty($ApiOrigin.UserInfo) -or
+    -not [string]::IsNullOrEmpty($ApiOrigin.Query) -or -not [string]::IsNullOrEmpty($ApiOrigin.Fragment) -or
+    $ApiOrigin.AbsolutePath -ne "/") {
+    throw "ApiOrigin must be an HTTPS origin without a path, credentials, or query data."
 }
 if ($ExpectedValidatorFingerprint -cnotmatch '^[0-9a-f]{64}$') {
     throw "ExpectedValidatorFingerprint must be a lowercase SHA-256 digest."
@@ -107,7 +112,12 @@ try {
         throw "The protected validator broker secret has an invalid shape."
     }
 
-    $env:KEIRE_SUPABASE_URL = $SupabaseUrl.GetLeftPart([UriPartial]::Authority)
+    $env:KEIRE_PLATFORM_BACKEND = $Backend
+    if ($Backend -eq "mysql") {
+        $env:KEIRE_PLATFORM_URL = $ApiOrigin.GetLeftPart([UriPartial]::Authority)
+    } else {
+        $env:KEIRE_SUPABASE_URL = $ApiOrigin.GetLeftPart([UriPartial]::Authority)
+    }
     $env:KEIRE_VALIDATOR_BROKER_SECRET = $secret
     $env:KEIRE_VALIDATOR_EXPECTED_FINGERPRINT_SHA256 = $ExpectedValidatorFingerprint
     $env:KEIRE_VALIDATOR_EXCHANGE_ROOT = (Resolve-Path -LiteralPath $ExchangeRoot).Path

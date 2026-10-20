@@ -6,17 +6,17 @@ using Keire.Marketplace.Validation;
 
 namespace Keire.Marketplace.Validator.Broker;
 
-internal sealed class SupabaseValidatorApi : IDisposable
+internal sealed class ValidatorQueueApi : IDisposable
 {
     private const int MaximumApiResponseBytes = 1024 * 1024;
     private readonly HttpClient m_Http;
     private readonly BrokerOptions m_Options;
 
-    public SupabaseValidatorApi(BrokerOptions options, HttpMessageHandler? handler = null)
+    public ValidatorQueueApi(BrokerOptions options, HttpMessageHandler? handler = null)
     {
         m_Options = options;
-        m_Http = handler is null ? new HttpClient() : new HttpClient(handler, disposeHandler: true);
-        m_Http.BaseAddress = options.SupabaseUrl;
+        m_Http = new HttpClient(handler ?? new HttpClientHandler { AllowAutoRedirect = false }, disposeHandler: true);
+        m_Http.BaseAddress = options.ApiOrigin;
         m_Http.Timeout = Timeout.InfiniteTimeSpan;
         m_Http.DefaultRequestHeaders.UserAgent.ParseAdd("KeireMarketplaceValidatorBroker/0.4.2");
     }
@@ -32,7 +32,7 @@ internal sealed class SupabaseValidatorApi : IDisposable
         byte[] response = await PostQueueAsync(request, cancellationToken);
         LeaseResponse leaseResponse = DistributionJson.DeserializeStrict<LeaseResponse>(response);
         ValidationLease? lease = leaseResponse.Data.Lease;
-        lease?.Validate(m_Options.SupabaseUrl);
+        lease?.Validate(m_Options.ApiOrigin);
         return lease;
     }
 
@@ -60,7 +60,7 @@ internal sealed class SupabaseValidatorApi : IDisposable
             cancellationToken);
         if (!response.IsSuccessStatusCode)
         {
-            throw new HttpRequestException("Supabase Storage did not return the leased quarantine object.", null, response.StatusCode);
+            throw new HttpRequestException("Package storage did not return the leased quarantine object.", null, response.StatusCode);
         }
 
         if (response.Content.Headers.ContentLength is long contentLength && contentLength != lease.ExpectedSizeBytes)
@@ -166,7 +166,7 @@ internal sealed class SupabaseValidatorApi : IDisposable
         if (!response.IsSuccessStatusCode)
         {
             throw new HttpRequestException(
-                "Supabase Storage rejected the signed review-evidence upload.",
+                "Package storage rejected the signed review-evidence upload.",
                 null,
                 response.StatusCode);
         }
@@ -179,7 +179,7 @@ internal sealed class SupabaseValidatorApi : IDisposable
 
     private async Task<byte[]> PostQueueAsync(byte[] body, CancellationToken cancellationToken)
     {
-        using HttpRequestMessage request = new(HttpMethod.Post, "functions/v1/marketplace-validator-queue")
+        using HttpRequestMessage request = new(HttpMethod.Post, m_Options.QueuePath)
         {
             Content = new ByteArrayContent(body),
         };
@@ -204,7 +204,7 @@ internal sealed class SupabaseValidatorApi : IDisposable
     {
         if (content.Headers.ContentLength is long contentLength && contentLength > maximumBytes)
         {
-            throw new InvalidDataException("A Supabase response exceeds its size limit.");
+            throw new InvalidDataException("A validator queue response exceeds its size limit.");
         }
 
         await using Stream stream = await content.ReadAsStreamAsync(cancellationToken);
@@ -220,7 +220,7 @@ internal sealed class SupabaseValidatorApi : IDisposable
 
             if (result.Length > maximumBytes - count)
             {
-                throw new InvalidDataException("A Supabase response exceeds its size limit.");
+                throw new InvalidDataException("A validator queue response exceeds its size limit.");
             }
 
             result.Write(buffer, 0, count);
@@ -260,12 +260,14 @@ internal sealed class ValidationLease
     [JsonPropertyName("downloadUrl")]
     public required string DownloadUrl { get; init; }
 
-    public void Validate(Uri supabaseUrl)
+    public void Validate(Uri apiOrigin)
     {
         if (!Uri.TryCreate(DownloadUrl, UriKind.Absolute, out Uri? download) ||
             !Uri.TryCreate(EvidenceUploadUrl, UriKind.Absolute, out Uri? evidenceUpload) ||
             download.Scheme != Uri.UriSchemeHttps || evidenceUpload.Scheme != Uri.UriSchemeHttps ||
-            !SameOrigin(download, supabaseUrl) || !SameOrigin(evidenceUpload, supabaseUrl))
+            !string.IsNullOrEmpty(download.UserInfo) || !string.IsNullOrEmpty(evidenceUpload.UserInfo) ||
+            !string.IsNullOrEmpty(download.Fragment) || !string.IsNullOrEmpty(evidenceUpload.Fragment) ||
+            !SameOrigin(download, apiOrigin) || !SameOrigin(evidenceUpload, apiOrigin))
         {
             throw new InvalidDataException("The validator lease contains an untrusted download origin.");
         }

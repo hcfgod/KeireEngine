@@ -32,7 +32,11 @@ param(
 
     [string]$AttestationPublicKey,
 
-    [uri]$SupabaseUrl,
+    [Alias("SupabaseUrl")]
+    [uri]$ApiOrigin,
+
+    [ValidateSet("supabase", "mysql")]
+    [string]$Backend = "supabase",
 
     [string]$ExpectedValidatorFingerprint,
 
@@ -117,11 +121,11 @@ foreach ($file in $requiredFiles.GetEnumerator()) {
 Assert-Directory $ExchangeRoot "Validator exchange root"
 Assert-Directory $WorkRoot "Validator work root"
 
-if ($null -eq $SupabaseUrl -or $SupabaseUrl.Scheme -ne "https" -or
-    -not [string]::IsNullOrEmpty($SupabaseUrl.UserInfo) -or
-    -not [string]::IsNullOrEmpty($SupabaseUrl.Query) -or
-    -not [string]::IsNullOrEmpty($SupabaseUrl.Fragment)) {
-    throw "SupabaseUrl must be an HTTPS origin without credentials or query data."
+if ($null -eq $ApiOrigin -or $ApiOrigin.Scheme -ne "https" -or
+    -not [string]::IsNullOrEmpty($ApiOrigin.UserInfo) -or
+    -not [string]::IsNullOrEmpty($ApiOrigin.Query) -or
+    -not [string]::IsNullOrEmpty($ApiOrigin.Fragment) -or $ApiOrigin.AbsolutePath -ne "/") {
+    throw "ApiOrigin must be an HTTPS origin without a path, credentials, or query data."
 }
 if ($ExpectedValidatorFingerprint -cnotmatch '^[0-9a-f]{64}$') {
     throw "ExpectedValidatorFingerprint must be a lowercase SHA-256 digest."
@@ -139,7 +143,7 @@ if ($LASTEXITCODE -ne 0) {
 }
 & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $BrokerLauncher `
     -Broker $Broker -Validator $Validator -ExchangeRoot $ExchangeRoot -SecretFile $SecretFile `
-    -SupabaseUrl $SupabaseUrl.AbsoluteUri -ExpectedValidatorFingerprint $ExpectedValidatorFingerprint `
+    -ApiOrigin $ApiOrigin.AbsoluteUri -Backend $Backend -ExpectedValidatorFingerprint $ExpectedValidatorFingerprint `
     -WorkerId $WorkerId -AttestationPublicKey $AttestationPublicKey -ValidateOnly
 if ($LASTEXITCODE -ne 0) {
     throw "The marketplace validator broker configuration failed validation."
@@ -175,7 +179,8 @@ $brokerArguments = @(
     "-Validator", (Quote-TaskArgument ([IO.Path]::GetFullPath($Validator))),
     "-ExchangeRoot", (Quote-TaskArgument ([IO.Path]::GetFullPath($ExchangeRoot))),
     "-SecretFile", (Quote-TaskArgument ([IO.Path]::GetFullPath($SecretFile))),
-    "-SupabaseUrl", (Quote-TaskArgument $SupabaseUrl.GetLeftPart([UriPartial]::Authority)),
+    "-ApiOrigin", (Quote-TaskArgument $ApiOrigin.GetLeftPart([UriPartial]::Authority)),
+    "-Backend", (Quote-TaskArgument $Backend),
     "-ExpectedValidatorFingerprint", (Quote-TaskArgument $ExpectedValidatorFingerprint),
     "-WorkerId", (Quote-TaskArgument $WorkerId),
     "-AttestationPublicKey", (Quote-TaskArgument ([IO.Path]::GetFullPath($AttestationPublicKey)))
