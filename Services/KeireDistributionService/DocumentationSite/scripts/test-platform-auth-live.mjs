@@ -15,6 +15,7 @@ import { verifyPublisherApplications } from "./platform-publisher-applications-a
 import { verifyUploadConcurrency } from "./platform-upload-concurrency-acceptance.mjs";
 import { verifyPublicationSequence } from "./platform-publication-sequence-acceptance.mjs";
 import { verifyPublicationConcurrency } from "./platform-publication-concurrency-acceptance.mjs";
+import { verifyNativeSessions } from "./platform-native-sessions-acceptance.mjs";
 import { allocatePublicationSequence, publicationSequenceSchema } from "../Source/lib/platform-publication-sequence.mjs";
 import { verifyLocalDataRequests } from "./platform-data-requests-acceptance.mjs";
 import { verifyAuthenticatorEnrollment } from "./platform-mfa-management-acceptance.mjs";
@@ -299,6 +300,9 @@ try {
     checks += await verifyRegistrationConfirmation(runtime, auth, now);
     stage = "public-catalog";
     checks += await verifyLocalCatalog(migration);
+
+    stage = "native-sessions";
+    checks += await verifyNativeSessions(migration, userId);
 
     stage = "backend-lifecycle";
     const transferredKey = Buffer.from(encryptionKey);

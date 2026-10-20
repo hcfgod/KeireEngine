@@ -32,7 +32,7 @@ function invalidGrant() {
     return new NativeOAuthError("invalid_grant", "The desktop authorization expired or is no longer valid.");
 }
 
-function accountBinding(account, factors) {
+export function nativeAccountBinding(account, factors) {
     const enrolled = factors.map((factor) => [factor.id, factor.factor_type, factor.source_sealed])
         .sort((left, right) => left[0].localeCompare(right[0]));
     return createHash("sha256").update(JSON.stringify([
@@ -97,7 +97,7 @@ export async function decideNativeAuthorization(authentication, browserToken, po
             code_hash=?,code_expires_ms=?,user_id=?,browser_session_hash=?,account_binding=?,assurance=?
             WHERE request_hash=?`,
         [tokenDigest(code), codeExpiry, session.userId, tokenDigest(browserToken),
-            accountBinding(account, factors), session.assurance, requestHash]);
+            nativeAccountBinding(account, factors), session.assurance, requestHash]);
         await connection.execute(`INSERT INTO platform_audit_events
             (occurred_at,actor_user_id,action,target_type,target_id,correlation_id,metadata)
             VALUES (UTC_TIMESTAMP(6),?,'account.native_authorization.approved','platform_account',?,?,?)`,
@@ -133,7 +133,7 @@ export async function exchangeNativeAuthorization(pool, policy, input, issueSess
         const [[browser]] = await connection.execute(
             "SELECT * FROM platform_auth_sessions WHERE token_hash=? FOR UPDATE", [request.browser_session_hash]);
         const current = timestamp(now);
-        if (!accountAvailable(account, current) || accountBinding(account, factors) !== request.account_binding
+        if (!accountAvailable(account, current) || nativeAccountBinding(account, factors) !== request.account_binding
             || !browser || browser.user_id !== request.user_id || Number(browser.expires_ms) <= current
             || Number(request.code_expires_ms) <= current) {
             throw invalidGrant();

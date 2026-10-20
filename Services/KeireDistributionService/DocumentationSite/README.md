@@ -98,9 +98,15 @@ current account and completed browser authentication. `platform-native-identity`
 uses pinned `jose` signing with a dedicated host-loaded Ed25519 key. ID tokens
 carry the registered issuer/client, account, desktop session, nonce, five-minute
 expiry, and only approved email/profile claims; JWKS contains public material
-only. These modules are not yet exposed as a complete OAuth service: native
-session persistence, refresh rotation, rate limits, browser consent integration,
-and client acceptance must pass before activation.
+only. Native sessions persist hashed opaque access/refresh credentials separately
+from browser sessions, with 15-minute access and a fixed 30-day session limit.
+Refresh rotates credentials; reuse commits session revocation before returning
+an error. Every authenticated native operation checks revocation and current
+account/password/MFA binding in a transaction. Database acceptance uses
+connection-local tables and synthetic accounts, including rollback and reuse
+cases. These modules are not yet exposed as a complete OAuth service: production
+schema provisioning, authorization-code database acceptance, rate limits,
+browser consent integration, and client acceptance remain activation gates.
 
 `platform-validator-report.mjs` verifies the worker's exact Ed25519 signature,
 trusted-key validity, package/version identity, evidence metadata, scan outcomes,
