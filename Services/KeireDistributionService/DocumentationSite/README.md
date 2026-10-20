@@ -94,11 +94,19 @@ before construction; it is not currently connected to the website router.
 `platform-validator-report.mjs` verifies the worker's exact Ed25519 signature,
 trusted-key validity, package/version identity, evidence metadata, scan outcomes,
 and completion timestamp. It rejects duplicate signed fields and contradictory
-success reports. This verifier still requires integration with transactional
-report storage and verification of the evidence bytes. For C# worker compatibility,
+success reports. Transactional completion uses this verifier before recording
+reports and checks the evidence bytes separately. For C# worker compatibility,
 set `KEIRE_TEST_NODE_ATTESTATION=1` when running the Release distribution test
 harness; Node must be on PATH. That optional check sends only a synthetic signed
 report and its public key to Node, never a signing key.
+
+Internal validator completion locks the current lease and trusted key, verifies
+the signature and immutable evidence bytes, rechecks expiry, and commits the
+report, upload/version states, and audit receipt in one transaction. An exact
+retry from the same worker returns its recorded report ID; it cannot change an
+accepted report or consume another validation attempt. This is not yet routed
+to the live broker: private transfer endpoints and full pipeline acceptance
+remain required.
 
 Build with `KEIRE_NODE_ADAPTER_MODE=middleware` before running
 `node scripts/test-platform-http-live.mjs --interactive`. Configure

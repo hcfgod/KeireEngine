@@ -309,7 +309,7 @@ export async function verifyUploadConcurrency(pool, userId) {
             "SELECT id FROM platform_audit_events WHERE target_id=? AND action='marketplace.upload_completed'",
             [concurrentCompletion.uploadId]);
         assert.equal(completionReceipts.length, 1);
-        checks += await verifyValidatorLeases(pool, concurrentCompletion.uploadId, concurrentCompletion.versionId);
+        checks += await verifyValidatorLeases(pool, concurrentCompletion.uploadId, concurrentCompletion.versionId, store);
         checks += 3;
         checks += 7;
         assert.equal((await transferLocalUpload(authentication, "fixture", transferReservation.uploadId,
