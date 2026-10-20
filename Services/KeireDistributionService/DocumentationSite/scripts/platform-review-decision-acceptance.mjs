@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { platformTransaction } from "../Source/lib/platform-mysql.mjs";
 import { decideLocalSubmission } from "../Source/lib/platform-review-decision.mjs";
+import { handleLocalReviewRequest } from "../Source/lib/platform-review-http.mjs";
 
 export async function verifyReviewDecision(pool, connection, actor, submissionId) {
     await connection.execute(`INSERT INTO platform_staff_members
@@ -20,6 +21,11 @@ export async function verifyReviewDecision(pool, connection, actor, submissionId
     await assert.rejects(decideLocalSubmission(authentication(), "fixture", approve),
         { code: "staff.administrator_required" });
     await connection.execute("UPDATE platform_staff_members SET role='administrator' WHERE user_id=?", [actor.userId]);
+    const [[upload]] = await connection.execute("SELECT id,version_id FROM marketplace_uploads");
+    await connection.execute("UPDATE marketplace_uploads SET version_id=UUID() WHERE id=?", [upload.id]);
+    await assert.rejects(decideLocalSubmission(authentication(), "fixture", approve),
+        { code: "staff.validation_required" });
+    await connection.execute("UPDATE marketplace_uploads SET version_id=? WHERE id=?", [upload.version_id, upload.id]);
     await assert.rejects(decideLocalSubmission(authentication(true), "fixture", approve),
         /Synthetic review audit failure/);
     const [[rolledBack]] = await connection.execute("SELECT state FROM marketplace_submissions WHERE id=?", [submissionId]);
@@ -28,7 +34,13 @@ export async function verifyReviewDecision(pool, connection, actor, submissionId
     assert.equal(emptyJobs.length, 0);
     const [emptyCounter] = await connection.execute("SELECT id FROM platform_publication_sequence");
     assert.equal(emptyCounter.length, 0);
-    assert.equal((await decideLocalSubmission(authentication(), "fixture", approve)).state, "approved_pending_signature");
+    const response = await handleLocalReviewRequest(authentication(), new Request("https://qa.invalid/admin/marketplace/v1/actions/", {
+        method: "POST", headers: { origin: "https://qa.invalid", "content-type": "application/json",
+            cookie: `__Host-keire-session=${"a".repeat(43)}` },
+        body: JSON.stringify({ operation: "submission.decide", ...approve }),
+    }), "https://qa.invalid", "fixture");
+    assert.equal(response.status, 200);
+    assert.equal((await response.json()).data.submission_state, "approved_pending_signature");
     const [[job]] = await connection.execute("SELECT state,publication_sequence FROM marketplace_publication_jobs");
     assert.equal(job.state, "queued");
     assert.equal(String(job.publication_sequence), "1");
@@ -40,5 +52,5 @@ export async function verifyReviewDecision(pool, connection, actor, submissionId
     assert.equal(cancelled.state, "cancelled");
     assert.equal(cancelled.lease_owner, null);
     assert.equal(cancelled.lease_expires_at, null);
-    return 13;
+    return 15;
 }

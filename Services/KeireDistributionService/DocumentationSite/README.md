@@ -171,8 +171,12 @@ temporary-table acceptance covers allocation and rollback. The staged
 publication job, and audit together. Approval queues signing; withdrawal cancels
 queued or leased jobs and clears their leases. Real MySQL acceptance verifies
 administrator enforcement and audit-failure rollback, including counter allocation.
-Concurrent allocation, production counter provisioning, staff HTTP/UI integration,
-and the signer queue remain pending.
+`POST /admin/marketplace/v1/actions/` accepts the existing `submission.decide`
+contract through browser-session and exact-Origin guards. Other staff operations
+still return an explicit unavailable response. Approval requires the report's
+validated upload to belong to the reviewed version, in addition to matching its
+archive hash. Concurrent allocation, production counter provisioning, staff UI
+and evidence access, and the signer queue remain pending.
 
 Build with `KEIRE_NODE_ADAPTER_MODE=middleware` before running
 `node scripts/test-platform-http-live.mjs --interactive`. Configure

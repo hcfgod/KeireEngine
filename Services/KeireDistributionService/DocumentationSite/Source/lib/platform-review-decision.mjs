@@ -23,7 +23,10 @@ export async function decideLocalSubmission(authentication, token, { submissionI
             "SELECT id,product_id,archive_sha256 FROM marketplace_product_versions WHERE id=? FOR UPDATE",
             [submission.version_id]) : [[]];
         const [[report]] = submission ? await connection.execute(
-            "SELECT * FROM marketplace_validation_reports WHERE id=? FOR SHARE", [submission.validation_report_id]) : [[]];
+            `SELECT report.* FROM marketplace_validation_reports report
+             JOIN marketplace_uploads upload ON upload.id=report.upload_id
+             WHERE report.id=? AND upload.version_id=? AND upload.state='validated' FOR SHARE`,
+            [submission.validation_report_id, submission.version_id]) : [[]];
         const transition = localReviewDecision({ session, staff, submission, report, decision, note });
         if (!version || report.package_sha256 !== version.archive_sha256) {
             throw new LocalUploadError(409, "staff.validation_required",
