@@ -75,6 +75,16 @@ confirmed. Use **Retry confirmation** on the upload form to check that upload
 without resending its bytes. This recovery currently applies while the page
 remains open; reload recovery is still pending.
 
+The internal MySQL validator lease service uses transactions and `SKIP LOCKED`
+selection, expires abandoned leases in bounded batches, and stops after five
+attempts. Renewal requires the current worker and a live lease. Its acceptance
+tests copy synthetic uploads into connection-local temporary tables, preserving
+the real queue; the migration account therefore needs `CREATE TEMPORARY TABLES`
+on `keire_platform`, while the runtime account retains its existing permissions.
+The service is not exposed over HTTP until broker authentication, signed storage
+access, and report verification are integrated. Multi-connection contention
+acceptance remains required before production use.
+
 Build with `KEIRE_NODE_ADAPTER_MODE=middleware` before running
 `node scripts/test-platform-http-live.mjs --interactive`. Configure
 `KEIRE_QA_POWERSHELL`, `KEIRE_QA_SETTINGS_DIRECTORY`, and `KEIRE_QA_PORT` for the

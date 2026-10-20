@@ -151,7 +151,7 @@ SELECT (SELECT COUNT(*) FROM information_schema.schemata WHERE schema_name = '$s
     Save-ProvisioningState 'in-progress'
     Invoke-PrivateMySql @"
 CREATE USER '$migrationUser'@'127.0.0.1' IDENTIFIED BY '$migrationPassword' REQUIRE SSL;
-GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, ALTER, INDEX, REFERENCES, CREATE VIEW, SHOW VIEW
+GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, CREATE TEMPORARY TABLES, ALTER, INDEX, REFERENCES, CREATE VIEW, SHOW VIEW
 ON $schemaName.* TO '$migrationUser'@'127.0.0.1';
 "@ | Out-Null
     $stage = 'create-runtime-account'

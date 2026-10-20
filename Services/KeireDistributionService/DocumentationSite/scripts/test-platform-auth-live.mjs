@@ -258,6 +258,7 @@ try {
     checks += await verifyLocalClaims(migration, userId, auth, factorId, now);
     checks += await verifyLocalOrganizations(migration, userId);
     checks += await verifyPublisherApplications(migration, userId);
+    stage = "upload-and-validator-leases";
     checks += await verifyUploadConcurrency(migration, userId);
     stage = "account-data-requests";
     checks += await verifyLocalDataRequests(migration, userId);
@@ -295,8 +296,9 @@ try {
     checks++;
     console.log(JSON.stringify({ status: "local-authentication-acceptance-passed", checks,
         realAccountUsed: false, liveWebsiteChanged: false }));
-} catch {
-    console.error(JSON.stringify({ status: "failed", stage, checks, sensitiveDiagnosticsSuppressed: true }));
+} catch (error) {
+    const databaseCode = /^ER_[A-Z0-9_]{1,80}$/.test(error?.code ?? "") ? error.code : undefined;
+    console.error(JSON.stringify({ status: "failed", stage, checks, databaseCode, sensitiveDiagnosticsSuppressed: true }));
     process.exitCode = 1;
 } finally {
     auth?.close();

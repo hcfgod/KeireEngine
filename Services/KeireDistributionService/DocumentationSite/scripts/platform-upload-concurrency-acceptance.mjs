@@ -13,6 +13,7 @@ import { cancelLocalUpload } from "../Source/lib/platform-upload-cancel.mjs";
 import { completeResumableUpload } from "../Source/lib/platform-upload-complete.mjs";
 import { PrivateUploadFileStore } from "../Source/lib/platform-upload-file-store.mjs";
 import { prepareResumableUpload } from "../Source/lib/platform-upload-prepare.mjs";
+import { verifyValidatorLeases } from "./platform-validator-lease-acceptance.mjs";
 
 export async function verifyUploadConcurrency(pool, userId) {
     const organizationId = randomUUID();
@@ -308,6 +309,7 @@ export async function verifyUploadConcurrency(pool, userId) {
             "SELECT id FROM platform_audit_events WHERE target_id=? AND action='marketplace.upload_completed'",
             [concurrentCompletion.uploadId]);
         assert.equal(completionReceipts.length, 1);
+        checks += await verifyValidatorLeases(pool, concurrentCompletion.uploadId, concurrentCompletion.versionId);
         checks += 3;
         checks += 7;
         assert.equal((await transferLocalUpload(authentication, "fixture", transferReservation.uploadId,

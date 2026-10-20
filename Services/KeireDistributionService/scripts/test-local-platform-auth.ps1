@@ -68,6 +68,7 @@ try
     {
         $diagnostics = $errors.GetAwaiter().GetResult()
         $failureStage = 'unknown'
+        $databaseCode = $null
         foreach ($line in ($diagnostics -split "`n"))
         {
             try
@@ -76,6 +77,10 @@ try
                 if ($failure.status -eq 'failed' -and $failure.stage -match '^[a-z-]{1,80}$')
                 {
                     $failureStage = $failure.stage
+                    if ($failure.databaseCode -cmatch '^ER_[A-Z0-9_]{1,80}$')
+                    {
+                        $databaseCode = $failure.databaseCode
+                    }
                 }
             }
             catch
@@ -86,6 +91,7 @@ try
         @{
             status = 'failed'
             stage = $failureStage
+            databaseCode = $databaseCode
             cleanupFailed = $diagnostics.Contains('Synthetic authentication fixture cleanup failed')
         } | ConvertTo-Json | Set-Content -LiteralPath $ResultPath -Encoding utf8
         throw 'Authentication acceptance failed. Inspect the stage report before retrying.'
