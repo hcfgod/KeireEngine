@@ -65,7 +65,7 @@ export async function leaseValidationUpload(pool, workerId, leaseSeconds = 900) 
         await audit(connection, "marketplace.validation.leased", upload.id,
             { workerId, leaseSeconds, storageBucket: upload.storage_bucket });
         const [[deadline]] = await connection.execute(`SELECT
-            DATE_FORMAT(lease_expires_at,'%Y-%m-%dT%H:%i:%s.%fZ') AS expires_at
+            DATE_FORMAT(lease_expires_at,'%Y-%m-%dT%H:%i:%s.%fZ') AS expires_at,validation_attempts
             FROM marketplace_uploads WHERE id=?`, [upload.id]);
         return {
             uploadId: upload.id,
@@ -76,6 +76,7 @@ export async function leaseValidationUpload(pool, workerId, leaseSeconds = 900) 
             expectedSizeBytes: Number(upload.expected_size_bytes),
             expectedSha256: upload.expected_sha256,
             leaseExpiresAt: deadline.expires_at,
+            validationAttempt: Number(deadline.validation_attempts),
         };
     });
 }

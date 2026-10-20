@@ -16,7 +16,7 @@ function fixture({ expired = [], available = [], renewable = [], auditFailure = 
             if (sql.includes("ORDER BY upload.lease_expires_at")) return [expired];
             if (sql.includes("ORDER BY upload.uploaded_at")) return [available];
             if (sql.includes("SELECT id FROM marketplace_uploads")) return [renewable];
-            if (sql.includes("DATE_FORMAT")) return [[{ expires_at: deadline }]];
+            if (sql.includes("DATE_FORMAT")) return [[{ expires_at: deadline, validation_attempts: 1 }]];
             if (auditFailure && sql.includes("INSERT INTO platform_audit_events")) throw new Error("Audit unavailable");
             return [{ affectedRows: 1 }];
         }),
@@ -40,6 +40,7 @@ describe("internal validator queue leases", () => {
         expect(await leaseValidationUpload(pool, "worker-1", 60)).toEqual({
             uploadId, versionId, storageBucket: "marketplace-quarantine", storagePath: "package/path",
             expectedSizeBytes: 8388608, expectedSha256: "a".repeat(64), leaseExpiresAt: deadline,
+            validationAttempt: 1,
             evidenceStoragePath: `${uploadId}/review-evidence-${"a".repeat(64)}.json`,
         });
         expect(connection.execute.mock.calls.find(([sql]) => sql.includes("validation_attempts=validation_attempts+1"))?.[1])

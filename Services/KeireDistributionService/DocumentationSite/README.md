@@ -108,6 +108,16 @@ accepted report or consume another validation attempt. This is not yet routed
 to the live broker: private transfer endpoints and full pipeline acceptance
 remain required.
 
+Internal private-transfer handlers issue HMAC-signed package GET and evidence PUT
+links bound to an upload, worker, and validation attempt. Every transfer checks
+the live database lease; renewal preserves links, while expiry, reassignment,
+and completion revoke them. Package reads verify stored bytes before streaming.
+Evidence uploads are bounded to 8 MiB and stored immutably by SHA-256. Hosts must
+redact URL query strings from access logs because these links carry credentials.
+The handlers have isolated MySQL/filesystem acceptance coverage but are not yet
+connected to the application router or tested through the complete C# broker
+workflow. Production configuration requires a separate 32-byte link-signing key.
+
 Build with `KEIRE_NODE_ADAPTER_MODE=middleware` before running
 `node scripts/test-platform-http-live.mjs --interactive`. Configure
 `KEIRE_QA_POWERSHELL`, `KEIRE_QA_SETTINGS_DIRECTORY`, and `KEIRE_QA_PORT` for the

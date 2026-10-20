@@ -1,12 +1,15 @@
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { leaseValidationUpload, renewValidationLease } from "../Source/lib/platform-validator-leases.mjs";
 import { completeValidationUpload } from "../Source/lib/platform-validator-complete.mjs";
 import { createValidatorReportFixture } from "./validator-report-fixture.mjs";
+import { authorizeValidatorTransfer, createValidatorCapabilities } from "../Source/lib/platform-validator-capabilities.mjs";
+import { createValidatorFileHttp } from "../Source/lib/platform-validator-files.mjs";
 
 /** Connection-local copies prevent the queue test from leasing any imported customer uploads. */
 export async function verifyValidatorLeases(pool, fixtureUploadId, fixtureVersionId, evidenceStore) {
     const rawConnection = await pool.getConnection();
+    const links = createValidatorCapabilities(randomBytes(32), "https://qa.invalid.example");
     const tables = ["marketplace_uploads", "marketplace_product_versions",
         "marketplace_validation_reports", "platform_audit_events", "marketplace_validator_attestation_keys"];
     const connection = {
@@ -49,17 +52,32 @@ export async function verifyValidatorLeases(pool, fixtureUploadId, fixtureVersio
         assert.equal(lease.versionId, fixtureVersionId);
         assert.equal(lease.evidenceStoragePath, `${fixtureUploadId}/review-evidence-${lease.expectedSha256}.json`);
         assert.ok(Date.parse(lease.leaseExpiresAt) > Date.now());
+        assert.equal(lease.validationAttempt, 1);
+        const address = links.issue({ uploadId: fixtureUploadId, workerId: "validator-fixture",
+            attempt: lease.validationAttempt, purpose: "package" });
+        const claims = links.verify(address, "GET");
+        assert.equal((await authorizeValidatorTransfer(isolatedPool, claims)).id, fixtureUploadId);
+        const files = createValidatorFileHttp({ capabilities: links, pool: isolatedPool,
+            packageStore: evidenceStore, evidenceStore });
+        const download = await files(new Request(address));
+        assert.equal(download.status, 200);
+        const packageBytes = Buffer.from(await download.arrayBuffer());
+        assert.equal(createHash("sha256").update(packageBytes).digest("hex"), lease.expectedSha256);
+        assert.equal(packageBytes.length, lease.expectedSizeBytes);
         assert.equal(await leaseValidationUpload(isolatedPool, "another-worker", 60), null);
         await assert.rejects(renewValidationLease(isolatedPool, fixtureUploadId, "another-worker", 60), /lease was lost/);
         const renewed = await renewValidationLease(isolatedPool, fixtureUploadId, "validator-fixture", 120);
         assert.ok(Date.parse(renewed.leaseExpiresAt) > Date.parse(lease.leaseExpiresAt));
+        assert.equal((await authorizeValidatorTransfer(isolatedPool, claims)).id, fixtureUploadId);
         const [[active]] = await connection.execute("SELECT state,validation_attempts FROM marketplace_uploads");
         assert.equal(active.state, "leased");
         assert.equal(active.validation_attempts, 1);
         await connection.execute(`UPDATE marketplace_uploads
             SET lease_expires_at=TIMESTAMPADD(SECOND,-1,UTC_TIMESTAMP(6))`);
         await assert.rejects(renewValidationLease(isolatedPool, fixtureUploadId, "validator-fixture", 60), /lease was lost/);
+        await assert.rejects(authorizeValidatorTransfer(isolatedPool, claims), /invalid or expired/);
         assert.equal((await leaseValidationUpload(isolatedPool, "replacement-worker", 60)).uploadId, fixtureUploadId);
+        await assert.rejects(authorizeValidatorTransfer(isolatedPool, claims), /invalid or expired/);
         const [[retried]] = await connection.execute("SELECT validation_attempts FROM marketplace_uploads");
         assert.equal(retried.validation_attempts, 2);
         await connection.execute(`UPDATE marketplace_uploads SET validation_attempts=5,
@@ -76,7 +94,7 @@ export async function verifyValidatorLeases(pool, fixtureUploadId, fixtureVersio
         assert.equal(await leaseValidationUpload(isolatedPool, "replacement-worker", 60), null);
         await connection.execute(`UPDATE marketplace_uploads SET state='uploaded',validation_attempts=0`);
         await connection.execute("UPDATE marketplace_product_versions SET state='uploaded'");
-        await leaseValidationUpload(isolatedPool, "completion-worker", 900);
+        const completionLease = await leaseValidationUpload(isolatedPool, "completion-worker", 900);
         const [[upload]] = await connection.execute("SELECT * FROM marketplace_uploads");
         const signed = createValidatorReportFixture(upload);
         const evidence = Buffer.from('{"schemaVersion":1,"files":[]}');
@@ -94,10 +112,12 @@ export async function verifyValidatorLeases(pool, fixtureUploadId, fixtureVersio
         [key.key_id, key.algorithm, key.public_key_base64, fingerprint, key.valid_from]);
         await assert.rejects(completeValidationUpload(isolatedPool, evidenceStore, fixtureUploadId,
             "completion-worker", signed.report), /evidence is missing/);
-        async function* evidenceChunks() {
-            yield evidence;
-        }
-        await evidenceStore.put(evidenceIdentity, evidenceChunks());
+        const evidenceAddress = links.issue({ uploadId: fixtureUploadId, workerId: "completion-worker",
+            attempt: completionLease.validationAttempt, purpose: "evidence" });
+        const evidenceResponse = await files(new Request(evidenceAddress, {
+            method: "PUT", headers: { "content-type": "application/json", "x-upsert": "false" }, body: evidence,
+        }));
+        assert.equal(evidenceResponse.status, 200);
         const failingPool = { getConnection: async () => {
             const owned = await isolatedPool.getConnection();
             return { ...owned, execute: async (sql, parameters) => {
@@ -133,8 +153,12 @@ export async function verifyValidatorLeases(pool, fixtureUploadId, fixtureVersio
         const [receipts] = await connection.execute(`SELECT id FROM platform_audit_events
             WHERE action='marketplace.validation.completed'`);
         assert.equal(receipts.length, 1);
-        return 31;
+        assert.equal((await files(new Request(evidenceAddress, {
+            method: "PUT", headers: { "content-type": "application/json" }, body: evidence,
+        }))).status, 403);
+        return 41;
     } finally {
+        links.close();
         // Closing the connection also removes its private temporary tables, including on assertion failure.
         connection.destroy();
     }
