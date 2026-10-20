@@ -1,0 +1,113 @@
+---
+import PlatformLayout from "../../../layouts/PlatformLayout.astro";
+export const prerender = false;
+if (!Astro.locals.localRegistration) {
+    return Astro.redirect("/account/sign-in/", 303);
+}
+---
+<PlatformLayout title="Confirm your email" description="Finish creating your Kéire account." robots="noindex">
+    <section class="platform-shell account-shell">
+        <div>
+            <p class="eyebrow">Email confirmation</p>
+            <h1 class="display-title">Your account,<br /><span>ready to create.</span></h1>
+            <p class="lead">Enter the password you chose when registering. This confirms your email and finishes creating your account.</p>
+        </div>
+        <div class="auth-card">
+            <h2>Confirm your account</h2>
+            <p class="form-message" role="status" aria-live="polite" data-confirmation-message>Checking your confirmation link…</p>
+            <form class="form-stack" data-confirmation-form>
+                <fieldset disabled>
+                    <label class="field">
+                        <span>Registration password</span>
+                        <input name="password" type="password" autocomplete="current-password" maxlength="256" required />
+                    </label>
+                    <button class="button" type="submit">Confirm account</button>
+                </fieldset>
+            </form>
+            <p>If you did not request this account, close this page. No account will be created.</p>
+            <p><a href="/account/sign-in/">Sign in</a> · <a href="/account/create/">Start registration again</a></p>
+        </div>
+    </section>
+</PlatformLayout>
+<script>
+    const form = document.querySelector<HTMLFormElement>("[data-confirmation-form]");
+    const message = document.querySelector<HTMLElement>("[data-confirmation-message]");
+    if (form && message) {
+        const fields = form.querySelector("fieldset")!;
+        const password = form.querySelector<HTMLInputElement>("[name=password]")!;
+
+        function showMessage(text: string, kind = "") {
+            message!.textContent = text;
+            message!.dataset.kind = kind;
+        }
+
+        async function initialize() {
+            const hasFragment = Boolean(location.hash);
+            const token = new URLSearchParams(location.hash.slice(1)).get("registration");
+            if (hasFragment) {
+                history.replaceState(null, "", location.pathname + location.search);
+            }
+            try {
+                const response = await fetch(hasFragment ? "/account/registration/session/" : "/account/registration/status/", {
+                    method: hasFragment ? "POST" : "GET",
+                    headers: { "content-type": "application/json" },
+                    body: hasFragment ? JSON.stringify({ token }) : undefined,
+                    cache: "no-store",
+                    credentials: "same-origin",
+                    signal: AbortSignal.timeout(15000),
+                });
+                const result = await response.json();
+                if (!response.ok) {
+                    showMessage(result.error?.message ?? "This link could not be checked. Start registration again.", "error");
+                    return;
+                }
+                fields.disabled = false;
+                showMessage("Enter the password you chose when registering.");
+            } catch {
+                showMessage("We could not check this link. Reopen the email link and try again.", "error");
+            }
+        }
+
+        form.addEventListener("submit", async (event) => {
+            event.preventDefault();
+            if (fields.disabled) {
+                return;
+            }
+            fields.disabled = true;
+            form.setAttribute("aria-busy", "true");
+            showMessage("Confirming your account…");
+            let completed = false;
+            try {
+                const response = await fetch("/account/registration/confirm/", {
+                    method: "POST",
+                    headers: { "content-type": "application/json" },
+                    body: JSON.stringify({ password: password.value }),
+                    cache: "no-store",
+                    credentials: "same-origin",
+                    signal: AbortSignal.timeout(15000),
+                });
+                const result = await response.json();
+                if (!response.ok) {
+                    showMessage(result.error?.message ?? "Confirmation could not be completed. Try signing in or start registration again.", "error");
+                    return;
+                }
+                completed = true;
+                form.reset();
+                form.hidden = true;
+                showMessage("Your email is verified and your account is ready. Sign in to continue.", "success");
+            } catch {
+                showMessage("The result could not be confirmed. Try signing in before starting registration again.", "error");
+            } finally {
+                form.removeAttribute("aria-busy");
+                if (!completed) {
+                    fields.disabled = false;
+                }
+            }
+        });
+        void initialize();
+    }
+</script>
+<style>
+    [hidden] { display: none !important; }
+    fieldset { border: 0; padding: 0; margin: 0; display: grid; gap: 1rem; min-width: 0; }
+</style>

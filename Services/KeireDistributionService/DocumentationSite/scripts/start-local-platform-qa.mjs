@@ -54,6 +54,12 @@ const createMailer = mailMode === "disabled" ? null : async () => {
     if (mailMode === "capture") {
         return {
             recoveryEnabled: true,
+            registrationEnabled: true,
+            sendRegistration: async (message) => {
+                await new Promise((resolve, reject) => {
+                    process.send({ type: "qa-registration-email", message }, (error) => error ? reject(error) : resolve());
+                });
+            },
             sendRecovery: async (message) => {
                 await new Promise((resolve, reject) => {
                     process.send({ type: "qa-recovery-email", message }, (error) => error ? reject(error) : resolve());

@@ -40,6 +40,14 @@ export async function handleLocalPlatformRequest({ backend, request, siteOrigin,
                 return response;
             }
             const pathname = new URL(request.url).pathname.replace(/\/+$/, "");
+            if (["/account/create", "/account/confirm"].includes(pathname) && ["GET", "HEAD"].includes(request.method)) {
+                const rendered = await render({ session: null, pendingChallenge: null, accountView: null,
+                    localRegistration: true });
+                rendered.headers.set("cache-control", "private, no-store");
+                rendered.headers.set("referrer-policy", "no-referrer");
+                rendered.headers.set("vary", "Cookie, Authorization");
+                return rendered;
+            }
             if (pathname === "/account/data/request") {
                 return handleLocalDataRequest(service.authentication, request, siteOrigin, correlationId);
             }

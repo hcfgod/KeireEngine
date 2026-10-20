@@ -149,6 +149,19 @@ try {
             process.stdin.once("end", finish);
         });
     } else {
+        stage = "registration-pages";
+        const registrationPage = await request("/account/create/");
+        assert.equal(registrationPage.status, 200);
+        assert.match(await registrationPage.text(), /data-create-account/);
+        const confirmationPage = await request("/account/confirm/");
+        assert.equal(confirmationPage.status, 200);
+        assert.match(await confirmationPage.text(), /Registration password/);
+        assert.equal(confirmationPage.headers.get("referrer-policy"), "no-referrer");
+        assert.equal((await request("/account/registration/", { accepted: false })).status, 400);
+        assert.equal((await request("/account/registration/session/", { token: "invalid" })).status, 400);
+        assert.equal((await request("/account/registration/status/")).status, 400);
+        assert.equal((await request("/account/registration/confirm/", { password: "synthetic" })).status, 400);
+        checks += 9;
         stage = "public-catalog";
         const catalogResponse = await request("/marketplace/v1/catalog/?limit=1");
         assert.equal(catalogResponse.status, 200);

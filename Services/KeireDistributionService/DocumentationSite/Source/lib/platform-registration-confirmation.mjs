@@ -59,6 +59,9 @@ async function insertVerifiedAccount(connection, pending, encryptionKey, now) {
         JSON.stringify({ origin: "local_registration" })]);
     await connection.execute(`INSERT INTO platform_profiles (user_id,display_name,source_record) VALUES (?,?,?)`,
     [userId, pending.displayName, JSON.stringify({ user_id: userId, display_name: pending.displayName })]);
+    await connection.execute(`INSERT INTO profiles
+        (user_id,display_name,created_at,updated_at,notification_preferences,locale)
+        VALUES (?,?,?,?,'{}','en')`, [userId, pending.displayName, timestamp, timestamp]);
     await connection.execute(`INSERT INTO platform_audit_events
         (occurred_at,actor_user_id,actor_session_id,action,target_type,target_id,correlation_id,metadata)
         VALUES (?, ?,NULL,'account.registered','account',?,?,?)`,

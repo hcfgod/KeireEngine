@@ -76,6 +76,10 @@ export async function verifyRegistrationConfirmation(pool, auth, now) {
         const userId = accounts[0].id;
         const [profiles] = await pool.execute("SELECT display_name FROM platform_profiles WHERE user_id=?", [userId]);
         assert.equal(profiles[0].display_name, input.displayName);
+        const [websiteProfiles] = await pool.execute("SELECT display_name,locale FROM profiles WHERE user_id=?", [userId]);
+        assert.equal(websiteProfiles[0].display_name, input.displayName);
+        assert.equal(websiteProfiles[0].locale, "en");
+        checks += 2;
         const [identities] = await pool.execute("SELECT provider FROM platform_identities WHERE user_id=?", [userId]);
         assert.deepEqual(identities.map((row) => row.provider), ["email"]);
         const [sessions] = await pool.execute("SELECT token_hash FROM platform_auth_sessions WHERE user_id=?", [userId]);
