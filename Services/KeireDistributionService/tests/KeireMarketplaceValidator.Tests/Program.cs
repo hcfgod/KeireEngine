@@ -529,7 +529,7 @@ internal static partial class Program
         return Task.CompletedTask;
     }
 
-    private static Task PublicationSignerSignsMetadataAsync()
+    private static async Task PublicationSignerSignsMetadataAsync()
     {
         using MarketplaceSigningKey attestationKey = MarketplaceSigningKey.Create();
         using MarketplaceSigningKey publicationKey = MarketplaceSigningKey.Create();
@@ -551,7 +551,11 @@ internal static partial class Program
             "The signed publication changed the approved version identity.");
         Assert.Equal(lease.StoragePath, document.ReleaseStoragePath,
             "The signed publication changed the immutable upload-once object path.");
-        return Task.CompletedTask;
+        if (Environment.GetEnvironmentVariable("KEIRE_TEST_NODE_PUBLICATION") == "1")
+        {
+            await VerifyNodePublicationAsync(lease, publicationKey);
+            await VerifyNodePublicationAsync(CreatePublicationLease(attestationKey, long.MaxValue), publicationKey);
+        }
     }
 
     private static Task PublicationSignerRejectsTamperedLeaseAsync()
@@ -565,7 +569,9 @@ internal static partial class Program
         return Task.CompletedTask;
     }
 
-    private static PublicationLease CreatePublicationLease(MarketplaceSigningKey attestationKey)
+    private static PublicationLease CreatePublicationLease(
+        MarketplaceSigningKey attestationKey,
+        long sequence = 42)
     {
         Guid uploadId = Guid.Parse("11111111-1111-4111-8111-111111111111");
         Guid versionId = Guid.Parse("22222222-2222-4222-8222-222222222222");
@@ -610,7 +616,7 @@ internal static partial class Program
             ArtifactSha256 = packageSha256,
             ArtifactSizeBytes = request.ExpectedPackageBytes,
             ManifestSha256 = unsignedReport.ManifestSha256!,
-            PublicationSequence = 42,
+            PublicationSequence = sequence,
             PublicationExpiresAt = DateTimeOffset.UtcNow.AddYears(1),
             ValidationAttestation = Encoding.UTF8.GetString(DistributionJson.Serialize(signed)),
             AttestationKeyId = attestationKey.PublicDocument.KeyId,

@@ -100,6 +100,15 @@ set `KEIRE_TEST_NODE_ATTESTATION=1` when running the Release distribution test
 harness; Node must be on PATH. That optional check sends only a synthetic signed
 report and its public key to Node, never a signing key.
 
+Publication signature interoperability has a separate
+`KEIRE_TEST_NODE_PUBLICATION=1` switch in the same Release test harness. It
+passes documents produced by the actual C# publication signer to the Node
+verifier, including the maximum signed 64-bit sequence. It checks exact signed
+bytes and rejects changed sequence numbers, storage paths, and inactive keys.
+Fixtures contain only synthetic release metadata and public keys. This checks
+the signature contract; database publication completion and queue acceptance
+must also pass before enabling the MySQL signer.
+
 Internal validator completion locks the current lease and trusted key, verifies
 the signature and immutable evidence bytes, rechecks expiry, and commits the
 report, upload/version states, and audit receipt in one transaction. An exact
