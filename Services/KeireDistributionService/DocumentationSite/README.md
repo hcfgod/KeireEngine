@@ -161,6 +161,14 @@ MySQL product, version, report, submission, and audit tables, including failed
 authorization, audit-write rollback, duplicate rejection, and resubmission.
 Browser-driven review and staff decisions remain separate production gates.
 
+Staged staff-review policy preserves administrator-only signing approval and
+administrator rejection to withdraw approval. A local publication sequence
+allocator locks a dedicated counter within the caller's transaction and stays
+above imported jobs and signed publication documents. It preserves exact
+64-bit values and fails on malformed sequence metadata or exhaustion. Its
+temporary-table acceptance covers allocation and rollback; concurrent writers,
+production table provisioning, and atomic approval/job integration remain pending.
+
 Build with `KEIRE_NODE_ADAPTER_MODE=middleware` before running
 `node scripts/test-platform-http-live.mjs --interactive`. Configure
 `KEIRE_QA_POWERSHELL`, `KEIRE_QA_SETTINGS_DIRECTORY`, and `KEIRE_QA_PORT` for the
