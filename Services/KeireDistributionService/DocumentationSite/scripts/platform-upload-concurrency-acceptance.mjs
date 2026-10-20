@@ -12,6 +12,7 @@ import { localUploadStatus } from "../Source/lib/platform-upload-status.mjs";
 import { cancelLocalUpload } from "../Source/lib/platform-upload-cancel.mjs";
 import { completeResumableUpload } from "../Source/lib/platform-upload-complete.mjs";
 import { PrivateUploadFileStore } from "../Source/lib/platform-upload-file-store.mjs";
+import { prepareResumableUpload } from "../Source/lib/platform-upload-prepare.mjs";
 
 export async function verifyUploadConcurrency(pool, userId) {
     const organizationId = randomUUID();
@@ -245,10 +246,16 @@ export async function verifyUploadConcurrency(pool, userId) {
         const spoolRoot = path.join(temporaryRoot, "resumable");
         await mkdir(spoolRoot, { mode: 0o700 });
         const spool = new PrivateUploadFileStore({ directory: spoolRoot });
-        const fileId = randomUUID().replaceAll("-", "");
-        await spool.create({ id: fileId, size: bytes.length, offset: 0,
-            metadata: { reservationId: resumableReservation.uploadId } });
+        const prepared = await prepareResumableUpload(authentication, "fixture", resumableReservation.uploadId, spool);
+        const fileId = prepared.fileId;
+        assert.equal(fileId, resumableReservation.uploadId.replaceAll("-", ""));
+        assert.equal(prepared.offset, 0);
         await spool.write(Readable.from([bytes.subarray(0, 10)]), fileId, 0);
+        const resumed = await prepareResumableUpload(authentication, "fixture", resumableReservation.uploadId, spool);
+        assert.equal(resumed.fileId, fileId);
+        assert.equal(resumed.offset, 10);
+        assert.equal(resumed.uploadUrl, prepared.uploadUrl);
+        checks += 5;
         await assert.rejects(completeResumableUpload(authentication, "fixture", resumableReservation.uploadId,
             fileId, spool, store), { code: "publisher.transfer_incomplete" });
         const restartedSpool = new PrivateUploadFileStore({ directory: spoolRoot });
@@ -262,14 +269,18 @@ export async function verifyUploadConcurrency(pool, userId) {
             metadata: { reservationId: randomUUID() } });
         await assert.rejects(completeResumableUpload(authentication, "fixture", resumableReservation.uploadId,
             otherFileId, spool, store), { code: "publisher.transfer_mismatch" });
-        // A replacement transport file is independent of the corrupt one, which remains unavailable for publication.
-        const validFileId = randomUUID().replaceAll("-", "");
-        await spool.create({ id: validFileId, size: bytes.length, offset: 0,
-            metadata: { reservationId: resumableReservation.uploadId } });
+        // Corrupt bytes require a fresh reservation, never replacement of the current transfer file.
+        await cancelLocalUpload(authentication, "fixture", resumableReservation.uploadId);
+        const validReservation = await reserveLocalUpload(authentication, "fixture", {
+            ...input, productId: reservation.productId, version: "1.0.3",
+            expectedSizeBytes: identity.sizeBytes, expectedSha256: identity.sha256,
+        });
+        const validPrepared = await prepareResumableUpload(authentication, "fixture", validReservation.uploadId, spool);
+        const validFileId = validPrepared.fileId;
         await spool.write(Readable.from([bytes]), validFileId, 0);
-        assert.equal((await completeResumableUpload(authentication, "fixture", resumableReservation.uploadId,
+        assert.equal((await completeResumableUpload(authentication, "fixture", validReservation.uploadId,
             validFileId, spool, store)).state, "uploaded");
-        assert.equal((await localUploadStatus(authentication, "fixture", resumableReservation.uploadId)).versionState, "uploaded");
+        assert.equal((await localUploadStatus(authentication, "fixture", validReservation.uploadId)).versionState, "uploaded");
         checks += 7;
         await assert.rejects(transferLocalUpload(authentication, "fixture", transferReservation.uploadId,
             store, chunks(bytes)), { code: "publisher.upload_not_writable" });

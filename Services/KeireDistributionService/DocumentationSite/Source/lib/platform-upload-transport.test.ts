@@ -18,6 +18,33 @@ afterEach(async () => {
 });
 
 describe("local resumable transport", () => {
+    it("supports a prepared reservation without allowing additional transfer files", async () => {
+        const root = await mkdtemp(path.join(tmpdir(), "keire-tus-"));
+        roots.push(root);
+        const datastore = new PrivateUploadFileStore({ directory: root });
+        const uploadId = "11111111-1111-4111-8111-111111111111";
+        const id = uploadId.replaceAll("-", "");
+        await datastore.create({ id, size: 6, offset: 0, metadata: { reservationId: uploadId } });
+        const transport = createUploadTransport({
+            datastore, siteOrigin: origin, allowCreation: false,
+            authorize: async () => ({ uploadId, expectedSizeBytes: 6 }),
+        });
+        const headers = { origin, "tus-resumable": "1.0.0" };
+        const extra = await transport.handle(new Request(`${origin}/publisher/v1/transfer`, {
+            method: "POST", headers: { ...headers, "upload-length": "6" },
+        }));
+        expect(extra.status).toBe(405);
+        const resumed = await transport.handle(new Request(`${origin}/publisher/v1/transfer/${id}`, {
+            method: "HEAD", headers,
+        }));
+        expect(resumed.status).toBe(200);
+        expect(resumed.headers.get("upload-offset")).toBe("0");
+        const wrong = await transport.handle(new Request(`${origin}/publisher/v1/transfer/${"a".repeat(32)}`, {
+            method: "HEAD", headers,
+        }));
+        expect(wrong.status).toBe(403);
+    });
+
     it("retains offsets across requests and rejects another reservation", async () => {
         const root = await mkdtemp(path.join(tmpdir(), "keire-tus-"));
         roots.push(root);

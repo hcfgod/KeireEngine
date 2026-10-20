@@ -7,6 +7,9 @@ export async function completeResumableUpload(authentication, sessionToken, uplo
         throw new LocalUploadError(400, "publisher.transfer_invalid", "The resumable transfer identifier is invalid.");
     }
     const reservation = await authorizeLocalUpload(authentication, sessionToken, uploadId);
+    if (fileId !== reservation.uploadId.replaceAll("-", "").toLowerCase()) {
+        throw new LocalUploadError(403, "publisher.transfer_mismatch", "This transfer belongs to a different upload.");
+    }
     let upload;
     try {
         upload = await datastore.getUpload(fileId);

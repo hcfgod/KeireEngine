@@ -2,7 +2,8 @@ import { Server } from "@tus/server";
 import { LocalUploadError } from "./platform-upload-product.mjs";
 
 /** Application-owned transport. Authorization must resolve the current reservation on every request. */
-export function createUploadTransport({ datastore, authorize, siteOrigin, path = "/publisher/v1/transfer" }) {
+export function createUploadTransport({ datastore, authorize, siteOrigin, path = "/publisher/v1/transfer",
+    allowCreation = true }) {
     const origin = new URL(siteOrigin);
     if (origin.protocol !== "https:" || origin.origin !== siteOrigin) {
         throw new Error("Uploads require a canonical HTTPS origin.");
@@ -21,6 +22,9 @@ export function createUploadTransport({ datastore, authorize, siteOrigin, path =
         allowedHeaders: ["x-signature"],
         maxSize: (request) => reservations.get(request)?.expectedSizeBytes ?? 0,
         onIncomingRequest: async (request, fileId) => {
+            if (request.method === "POST" && !allowCreation) {
+                reject(405, "Create a publisher reservation before transferring bytes.");
+            }
             if (!["POST", "PATCH", "HEAD", "OPTIONS"].includes(request.method)) {
                 reject(405, "Use the publisher cancellation endpoint to cancel an upload.");
             }
@@ -47,6 +51,9 @@ export function createUploadTransport({ datastore, authorize, siteOrigin, path =
             }
             reservations.set(request, reservation);
             if (request.method !== "POST" && fileId) {
+                if (!allowCreation && fileId !== reservation.uploadId.replaceAll("-", "").toLowerCase()) {
+                    reject(403, "This transfer does not belong to the upload reservation.");
+                }
                 const upload = await datastore.getUpload(fileId);
                 if (upload.metadata?.reservationId !== reservation.uploadId
                     || upload.size !== reservation.expectedSizeBytes) {

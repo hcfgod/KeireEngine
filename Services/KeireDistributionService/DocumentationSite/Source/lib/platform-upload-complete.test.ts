@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { completeResumableUpload } from "./platform-upload-complete.mjs";
 
 const uploadId = "11111111-1111-4111-8111-111111111111";
-const fileId = "a".repeat(32);
+const fileId = uploadId.replaceAll("-", "");
 
 function fixture() {
     let active = true;
