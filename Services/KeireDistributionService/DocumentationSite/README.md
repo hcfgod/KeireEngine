@@ -134,6 +134,15 @@ tables or rerunning blindly. Provisioning does not enable public routes.
 Production key/configuration and actual Hub/browser HTTPS acceptance are still
 required before enabling this service publicly.
 
+`platform-native-settings.mjs` defines the protected issuer-settings payload.
+Setup generates a dedicated Ed25519 key; runtime loading validates the exact
+schema, expected HTTPS origin, registered client, canonical PKCS8 encoding and
+public-key fingerprint. Invalid settings fail without exposing parser details
+or generating a replacement key. The payload contains a private key: transport
+it only through a private pipe into OS-protected storage. This module does not
+itself persist or encrypt settings; the protected Windows setup/host loader
+must be connected before production activation.
+
 `platform-validator-report.mjs` verifies the worker's exact Ed25519 signature,
 trusted-key validity, package/version identity, evidence metadata, scan outcomes,
 and completion timestamp. It rejects duplicate signed fields and contradictory
