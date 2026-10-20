@@ -125,7 +125,13 @@ JWKS; missing configuration fails closed. MySQL consent uses the existing
 browser session and an origin-checked decision form, while Supabase retains its
 original consent implementation. Isolated MySQL acceptance covers the browser
 redirect, sign-in requirement, consent render state and cross-origin rejection.
-Production configuration and actual Hub/browser HTTPS acceptance are still
+The protected `test-local-platform-auth.ps1 -CreateNativeSchema` runner provisions
+the four native tables with the migration account and verifies runtime read
+access before running synthetic-account acceptance. This is an initial setup
+operation: it refuses any existing native table, including a partial setup.
+MySQL DDL is not transactional; inspect a failed setup rather than deleting
+tables or rerunning blindly. Provisioning does not enable public routes.
+Production key/configuration and actual Hub/browser HTTPS acceptance are still
 required before enabling this service publicly.
 
 `platform-validator-report.mjs` verifies the worker's exact Ed25519 signature,

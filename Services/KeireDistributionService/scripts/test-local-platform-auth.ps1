@@ -7,7 +7,8 @@ param
     [switch] $CreateRecoverySchema,
     [switch] $CreateRecoveryDeliverySchema,
     [switch] $CreateRegistrationSchema,
-    [switch] $CreatePublicationSequenceSchema
+    [switch] $CreatePublicationSequenceSchema,
+    [switch] $CreateNativeSchema
 )
 
 $ErrorActionPreference = 'Stop'
@@ -54,6 +55,10 @@ try
         $start.ArgumentList.Add('--create-publication-sequence-schema')
     }
     $start.UseShellExecute = $false
+    if ($CreateNativeSchema)
+    {
+        $start.ArgumentList.Add('--create-native-schema')
+    }
     $start.CreateNoWindow = $true
     $start.RedirectStandardInput = $true
     $start.RedirectStandardOutput = $true

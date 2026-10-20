@@ -16,6 +16,7 @@ import { verifyUploadConcurrency } from "./platform-upload-concurrency-acceptanc
 import { verifyPublicationSequence } from "./platform-publication-sequence-acceptance.mjs";
 import { verifyPublicationConcurrency } from "./platform-publication-concurrency-acceptance.mjs";
 import { verifyNativeSessions } from "./platform-native-sessions-acceptance.mjs";
+import { createNativeSchema } from "../Source/lib/platform-native-provision.mjs";
 import { allocatePublicationSequence, publicationSequenceSchema } from "../Source/lib/platform-publication-sequence.mjs";
 import { verifyLocalDataRequests } from "./platform-data-requests-acceptance.mjs";
 import { verifyAuthenticatorEnrollment } from "./platform-mfa-management-acceptance.mjs";
@@ -83,6 +84,15 @@ try {
         } finally {
             await connection.rollback();
             connection.release();
+        }
+    }
+    if (process.argv.includes("--create-native-schema")) {
+        stage = "native-schema-provisioning";
+        const tables = await createNativeSchema(migration);
+        for (const table of tables) {
+            const [[row]] = await runtime.execute(`SELECT COUNT(*) AS count FROM ${table}`);
+            assert.equal(Number(row.count), 0);
+            checks++;
         }
     }
     stage = "fixture";
