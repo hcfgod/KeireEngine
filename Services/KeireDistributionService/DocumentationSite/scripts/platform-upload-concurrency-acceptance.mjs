@@ -1,5 +1,10 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+import { mkdtemp, readdir, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { LocalBlobStore } from "../Source/lib/local-blob-store.ts";
+import { transferLocalUpload } from "../Source/lib/platform-upload-transfer.mjs";
 import { platformTransaction } from "../Source/lib/platform-mysql.mjs";
 import { reserveLocalUpload } from "../Source/lib/platform-upload-reservation.mjs";
 
@@ -12,6 +17,7 @@ export async function verifyUploadConcurrency(pool, userId) {
             (connection) => action(connection, actor)),
     };
     let checks = 0;
+    const temporaryRoot = await mkdtemp(path.join(tmpdir(), "keire-upload-transfer-"));
     try {
         await platformTransaction(pool, async (connection) => {
             await connection.execute(`INSERT INTO organizations
@@ -70,6 +76,75 @@ export async function verifyUploadConcurrency(pool, userId) {
         const [afterFailure] = await pool.execute("SELECT id FROM marketplace_products WHERE publisher_id=?", [publisherId]);
         assert.deepEqual(afterFailure.map((item) => item.id), [reservation.productId]);
         checks += 2;
+        const bytes = Buffer.from("Synthetic private package bytes for local transfer acceptance.");
+        const identity = { sha256: createHash("sha256").update(bytes).digest("hex"), sizeBytes: bytes.length };
+        const transferReservation = await reserveLocalUpload(authentication, "fixture", {
+            ...input, productId: reservation.productId, version: "1.0.1",
+            expectedSizeBytes: identity.sizeBytes, expectedSha256: identity.sha256,
+        });
+        const store = new LocalBlobStore(temporaryRoot);
+        async function* chunks(value) {
+            yield value.subarray(0, 10);
+            yield value.subarray(10);
+        }
+        await assert.rejects(transferLocalUpload(authentication, "fixture", transferReservation.uploadId,
+            store, chunks(Buffer.alloc(bytes.length))), /SHA-256/);
+        assert.deepEqual(await readdir(temporaryRoot), []);
+        const [failedTransfer] = await pool.execute("SELECT state,uploaded_at FROM marketplace_uploads WHERE id=?",
+            [transferReservation.uploadId]);
+        assert.equal(failedTransfer[0].state, "uploading");
+        assert.equal(failedTransfer[0].uploaded_at, null);
+        const disconnected = new Error("Synthetic client disconnect");
+        async function* interruptedChunks() {
+            yield bytes.subarray(0, 10);
+            throw disconnected;
+        }
+        await assert.rejects(transferLocalUpload(authentication, "fixture", transferReservation.uploadId,
+            store, interruptedChunks()), (error) => error === disconnected);
+        assert.deepEqual(await readdir(temporaryRoot), []);
+        const completionFailure = new Error("Synthetic completion audit failure");
+        const completionAuthentication = {
+            withSessionTransaction: (_token, action) => platformTransaction(pool, (connection) => action({
+                execute: (sql, parameters) => {
+                    if (sql.includes("'marketplace.upload_completed'")) {
+                        throw completionFailure;
+                    }
+                    return connection.execute(sql, parameters);
+                },
+            }, actor)),
+        };
+        await assert.rejects(transferLocalUpload(completionAuthentication, "fixture", transferReservation.uploadId,
+            store, chunks(bytes)), (error) => error === completionFailure);
+        await store.verify(identity);
+        const [rolledBackCompletion] = await pool.execute(`SELECT upload.state,version.state AS version_state
+            FROM marketplace_uploads upload JOIN marketplace_product_versions version ON version.id=upload.version_id
+            WHERE upload.id=?`, [transferReservation.uploadId]);
+        assert.equal(rolledBackCompletion[0].state, "uploading");
+        assert.equal(rolledBackCompletion[0].version_state, "draft");
+        checks += 5;
+        const completed = await transferLocalUpload(authentication, "fixture", transferReservation.uploadId,
+            store, chunks(bytes));
+        assert.equal(completed.state, "uploaded");
+        await store.verify(identity);
+        const stored = [];
+        for await (const chunk of store.read(identity)) {
+            stored.push(chunk);
+        }
+        assert.deepEqual(Buffer.concat(stored), bytes);
+        const [completedRows] = await pool.execute(`SELECT upload.state,upload.uploaded_at,version.state AS version_state
+            FROM marketplace_uploads upload JOIN marketplace_product_versions version ON version.id=upload.version_id
+            WHERE upload.id=?`, [transferReservation.uploadId]);
+        assert.equal(completedRows[0].state, "uploaded");
+        assert.equal(completedRows[0].version_state, "uploaded");
+        assert.ok(completedRows[0].uploaded_at);
+        const [completedAudit] = await pool.execute(
+            "SELECT metadata FROM platform_audit_events WHERE target_id=? AND action='marketplace.upload_completed'",
+            [transferReservation.uploadId]);
+        assert.equal(completedAudit.length, 1);
+        assert.equal(completedAudit[0].metadata.sha256, identity.sha256);
+        await assert.rejects(transferLocalUpload(authentication, "fixture", transferReservation.uploadId,
+            store, chunks(bytes)), { code: "publisher.upload_not_writable" });
+        checks += 12;
     } finally {
         await platformTransaction(pool, async (connection) => {
             await connection.execute(`DELETE audit FROM platform_audit_events audit
@@ -86,6 +161,11 @@ export async function verifyUploadConcurrency(pool, userId) {
             await connection.execute("DELETE FROM publishers WHERE id=?", [publisherId]);
             await connection.execute("DELETE FROM organizations WHERE id=?", [organizationId]);
         });
+        if (path.dirname(path.resolve(temporaryRoot)) !== path.resolve(tmpdir()) ||
+            !path.basename(temporaryRoot).startsWith("keire-upload-transfer-")) {
+            throw new Error("Refusing cleanup outside the isolated upload fixture directory");
+        }
+        await rm(temporaryRoot, { recursive: true, force: true });
     }
     const [remaining] = await pool.execute("SELECT id FROM publishers WHERE id=?", [publisherId]);
     assert.equal(remaining.length, 0);
