@@ -11,6 +11,7 @@ import { PlatformBackend } from "../Source/lib/platform-backend.mjs";
 import { verifyAccountVisibility } from "./platform-account-view-acceptance.mjs";
 import { verifyLocalClaims } from "./platform-claims-acceptance.mjs";
 import { verifyLocalOrganizations } from "./platform-organizations-acceptance.mjs";
+import { verifyPublisherApplications } from "./platform-publisher-applications-acceptance.mjs";
 import { verifyLocalDataRequests } from "./platform-data-requests-acceptance.mjs";
 import { verifyAuthenticatorEnrollment } from "./platform-mfa-management-acceptance.mjs";
 import { createRecoverySchema } from "../Source/lib/platform-recovery-store.mjs";
@@ -255,6 +256,7 @@ try {
     stage = "marketplace-claims";
     checks += await verifyLocalClaims(migration, userId, auth, factorId, now);
     checks += await verifyLocalOrganizations(migration, userId);
+    checks += await verifyPublisherApplications(migration, userId);
     stage = "account-data-requests";
     checks += await verifyLocalDataRequests(migration, userId);
     stage = "authenticator-enrollment";

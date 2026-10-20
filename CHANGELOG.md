@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Added staged MySQL publisher-application save/submit transactions with authenticator and organization-role checks, protected review transitions, and atomic audit records.
+
 - Fixed email sign-in becoming stuck after connection failures or invalid server responses; added bounded waits, retry feedback, and duplicate-submit protection.
 
 - Added staged MySQL asset-claim transactions with license verification, organization permissions, safe retries, and browser request validation.
