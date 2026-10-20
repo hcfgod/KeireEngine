@@ -4,6 +4,8 @@ import { platformTransaction } from "../Source/lib/platform-mysql.mjs";
 import { createLocalOrganization } from "../Source/lib/platform-organizations.mjs";
 import { saveLocalPublisherApplication } from "../Source/lib/platform-publisher-applications.mjs";
 import { localPublisherPortal } from "../Source/lib/platform-publisher-portal.mjs";
+import { selectUploadProduct } from "../Source/lib/platform-upload-product.mjs";
+import { localUploadInput } from "../Source/lib/platform-upload-input.mjs";
 
 export async function verifyPublisherApplications(pool, userId) {
     const rollback = new Error("Rollback publisher application fixtures");
@@ -93,6 +95,42 @@ export async function verifyPublisherApplications(pool, userId) {
         for (const field of ["publishers", "products", "versions", "uploads", "validationReports"]) {
             assert.deepEqual(downgraded[field], []);
         }
+        checks += 10;
+        const publisherId = randomUUID();
+        await connection.execute(`INSERT INTO publishers
+            (id,organization_id,slug,display_name,summary,verified,created_at,updated_at)
+            VALUES (?,?,?,'QA upload publisher','',FALSE,UTC_TIMESTAMP(6),UTC_TIMESTAMP(6))`,
+        [publisherId, organization.organizationId, `qa-${publisherId}`]);
+        const [categories] = await connection.execute("SELECT id FROM marketplace_categories WHERE active=TRUE ORDER BY id LIMIT 1");
+        const [licenses] = await connection.execute("SELECT license_id,revision FROM marketplace_license_revisions ORDER BY license_id,revision LIMIT 1");
+        const uploadInput = localUploadInput({
+            publisherId, categoryId: categories[0].id, productName: "QA Upload Product",
+            productSummary: "A disposable product for upload reservation validation.",
+            licenseSpdx: licenses[0].license_id, licenseRevision: licenses[0].revision,
+            version: "1.0.0", minimumEngineVersion: "0.4.7", installKind: "asset_import",
+            platforms: ["windows"], architectures: ["x64"], rendererCapabilities: [],
+            expectedSizeBytes: 100, expectedSha256: "a".repeat(64),
+        });
+        const actor = { userId, assurance: 2 };
+        await assert.rejects(selectUploadProduct(connection, { userId, assurance: 1 }, uploadInput),
+            { code: "account.mfa_required" });
+        await assert.rejects(selectUploadProduct(connection, { userId: randomUUID(), assurance: 2 }, uploadInput),
+            { code: "publisher.not_manageable" });
+        const productId = await selectUploadProduct(connection, actor, uploadInput);
+        assert.equal(await selectUploadProduct(connection, actor, uploadInput), productId);
+        const [offers] = await connection.execute("SELECT amount_minor,active FROM marketplace_offers WHERE product_id=?", [productId]);
+        assert.equal(offers.length, 1);
+        assert.equal(Number(offers[0].amount_minor), 0);
+        assert.equal(offers[0].active, 1);
+        const collisionId = await selectUploadProduct(connection, actor, { ...uploadInput, productName: "QA Upload Product!" });
+        assert.notEqual(collisionId, productId);
+        await connection.execute("UPDATE marketplace_products SET state='published' WHERE id=?", [productId]);
+        assert.equal(await selectUploadProduct(connection, actor, { ...uploadInput, productId }), productId);
+        await assert.rejects(selectUploadProduct(connection, actor,
+            { ...uploadInput, productId, productSummary: "Changed summary must not overwrite a published listing." }),
+        { code: "publisher.published_product_metadata_immutable" });
+        await assert.rejects(selectUploadProduct(connection, actor, { ...uploadInput, productId: randomUUID() }),
+            { code: "publisher.product_not_editable" });
         checks += 10;
         throw rollback;
     }), (error) => error === rollback);
