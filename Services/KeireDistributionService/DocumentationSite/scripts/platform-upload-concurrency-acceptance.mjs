@@ -7,6 +7,7 @@ import { LocalBlobStore } from "../Source/lib/local-blob-store.ts";
 import { transferLocalUpload } from "../Source/lib/platform-upload-transfer.mjs";
 import { platformTransaction } from "../Source/lib/platform-mysql.mjs";
 import { reserveLocalUpload } from "../Source/lib/platform-upload-reservation.mjs";
+import { localUploadStatus } from "../Source/lib/platform-upload-status.mjs";
 
 export async function verifyUploadConcurrency(pool, userId) {
     const organizationId = randomUUID();
@@ -142,6 +143,31 @@ export async function verifyUploadConcurrency(pool, userId) {
             [transferReservation.uploadId]);
         assert.equal(completedAudit.length, 1);
         assert.equal(completedAudit[0].metadata.sha256, identity.sha256);
+        assert.deepEqual(await localUploadStatus(authentication, "fixture", transferReservation.uploadId), {
+            uploadId: transferReservation.uploadId,
+            state: "uploaded",
+            validationAttempts: 0,
+            versionId: transferReservation.versionId,
+            versionState: "uploaded",
+            validation: null,
+        });
+        const outsiderAuthentication = {
+            withSessionTransaction: (_token, action) => platformTransaction(pool,
+                (connection) => action(connection, { userId: randomUUID(), assurance: 2 })),
+        };
+        await assert.rejects(localUploadStatus(outsiderAuthentication, "fixture", transferReservation.uploadId),
+            { code: "publisher.upload_not_found" });
+        await pool.execute("UPDATE organization_memberships SET role='member' WHERE organization_id=? AND user_id=?",
+            [organizationId, userId]);
+        await assert.rejects(localUploadStatus(authentication, "fixture", transferReservation.uploadId),
+            { code: "publisher.upload_not_found" });
+        await pool.execute("UPDATE organization_memberships SET role='owner' WHERE organization_id=? AND user_id=?",
+            [organizationId, userId]);
+        await pool.execute("UPDATE publishers SET suspended_at=UTC_TIMESTAMP(6) WHERE id=?", [publisherId]);
+        await assert.rejects(localUploadStatus(authentication, "fixture", transferReservation.uploadId),
+            { code: "publisher.upload_not_found" });
+        await pool.execute("UPDATE publishers SET suspended_at=NULL WHERE id=?", [publisherId]);
+        checks += 4;
         await assert.rejects(transferLocalUpload(authentication, "fixture", transferReservation.uploadId,
             store, chunks(bytes)), { code: "publisher.upload_not_writable" });
         checks += 12;

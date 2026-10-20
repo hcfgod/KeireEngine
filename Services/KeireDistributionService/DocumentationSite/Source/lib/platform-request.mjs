@@ -9,6 +9,7 @@ import { handleLocalDataRequest } from "./platform-data-http.mjs";
 import { handleLocalMfaRequest } from "./platform-mfa-http.mjs";
 import { handleLocalRegistrationRequest } from "./platform-registration-http.mjs";
 import { handleLocalPublisherApplicationRequest } from "./platform-publisher-applications-http.mjs";
+import { handleLocalUploadStatusRequest } from "./platform-upload-status-http.mjs";
 
 /** A staged provider adapter. Unported routes fail closed instead of using Supabase identities or data. */
 export async function handleLocalPlatformRequest({ backend, request, siteOrigin, clientIdentity, correlationId, render }) {
@@ -42,6 +43,10 @@ export async function handleLocalPlatformRequest({ backend, request, siteOrigin,
                 return response;
             }
             const pathname = new URL(request.url).pathname.replace(/\/+$/, "");
+            const uploadStatus = /^\/publisher\/v1\/uploads\/([^/]+)$/.exec(pathname);
+            if (uploadStatus && request.method === "GET") {
+                return handleLocalUploadStatusRequest(service.authentication, request, uploadStatus[1], correlationId);
+            }
             if (pathname === "/publisher/v1/applications") {
                 return handleLocalPublisherApplicationRequest(service.authentication, request, siteOrigin, correlationId);
             }
