@@ -12,6 +12,7 @@ import { verifyAccountVisibility } from "./platform-account-view-acceptance.mjs"
 import { verifyLocalClaims } from "./platform-claims-acceptance.mjs";
 import { verifyLocalOrganizations } from "./platform-organizations-acceptance.mjs";
 import { verifyPublisherApplications } from "./platform-publisher-applications-acceptance.mjs";
+import { verifyUploadConcurrency } from "./platform-upload-concurrency-acceptance.mjs";
 import { verifyLocalDataRequests } from "./platform-data-requests-acceptance.mjs";
 import { verifyAuthenticatorEnrollment } from "./platform-mfa-management-acceptance.mjs";
 import { createRecoverySchema } from "../Source/lib/platform-recovery-store.mjs";
@@ -257,6 +258,7 @@ try {
     checks += await verifyLocalClaims(migration, userId, auth, factorId, now);
     checks += await verifyLocalOrganizations(migration, userId);
     checks += await verifyPublisherApplications(migration, userId);
+    checks += await verifyUploadConcurrency(migration, userId);
     stage = "account-data-requests";
     checks += await verifyLocalDataRequests(migration, userId);
     stage = "authenticator-enrollment";
