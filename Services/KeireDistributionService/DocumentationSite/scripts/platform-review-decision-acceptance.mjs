@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { platformTransaction } from "../Source/lib/platform-mysql.mjs";
 import { decideLocalSubmission } from "../Source/lib/platform-review-decision.mjs";
 import { handleLocalReviewRequest } from "../Source/lib/platform-review-http.mjs";
-import { leaseLocalPublication, renewLocalPublication } from "../Source/lib/platform-publication-leases.mjs";
+import { failLocalPublication, leaseLocalPublication, renewLocalPublication } from "../Source/lib/platform-publication-leases.mjs";
 
 export async function verifyReviewDecision(pool, connection, actor, submissionId) {
     await connection.execute(`INSERT INTO platform_staff_members
@@ -63,6 +63,20 @@ export async function verifyReviewDecision(pool, connection, actor, submissionId
     assert.equal(waiting.lease_owner, null);
     await connection.execute("UPDATE marketplace_publication_jobs SET retry_after=DATE_SUB(UTC_TIMESTAMP(6),INTERVAL 1 SECOND)");
     assert.equal((await leaseLocalPublication(pool, "other-signer", "publication-fixture")).job_id, lease.job_id);
+    await assert.rejects(failLocalPublication(pool, lease.job_id, "signer-fixture", "publication.fixture", true),
+        { code: "publication.lease_lost" });
+    assert.equal((await failLocalPublication(pool, lease.job_id, "other-signer", "publication.fixture", true)).state, "retry_wait");
+    const [[retry]] = await connection.execute(`SELECT last_error_code,lease_owner,
+        TIMESTAMPDIFF(SECOND,UTC_TIMESTAMP(6),retry_after) AS remaining FROM marketplace_publication_jobs`);
+    assert.equal(retry.last_error_code, "publication.fixture");
+    assert.equal(retry.lease_owner, null);
+    assert.ok(Number(retry.remaining) >= 295 && Number(retry.remaining) <= 300);
+    assert.equal(await leaseLocalPublication(pool, "other-signer", "publication-fixture"), null);
+    await connection.execute("UPDATE marketplace_publication_jobs SET retry_after=DATE_SUB(UTC_TIMESTAMP(6),INTERVAL 1 SECOND)");
+    await leaseLocalPublication(pool, "other-signer", "publication-fixture");
+    assert.equal((await failLocalPublication(pool, lease.job_id, "other-signer", "publication.permanent", false)).state, "failed");
+    await connection.execute(`UPDATE marketplace_publication_jobs SET state='leased',lease_owner='other-signer',
+        lease_expires_at=DATE_ADD(UTC_TIMESTAMP(6),INTERVAL 1 MINUTE)`);
     await connection.execute(`UPDATE marketplace_publication_jobs SET attempt_count=5,
         lease_expires_at=DATE_SUB(UTC_TIMESTAMP(6),INTERVAL 1 SECOND)`);
     assert.equal(await leaseLocalPublication(pool, "signer-fixture", "publication-fixture"), null);
@@ -77,5 +91,7 @@ export async function verifyReviewDecision(pool, connection, actor, submissionId
     assert.equal(cancelled.lease_owner, null);
     assert.equal(cancelled.lease_expires_at, null);
     await assert.rejects(renewLocalPublication(pool, lease.job_id, "signer-fixture"), { code: "publication.lease_lost" });
-    return 28;
+    await assert.rejects(failLocalPublication(pool, lease.job_id, "other-signer", "publication.fixture", true),
+        { code: "publication.lease_lost" });
+    return 36;
 }

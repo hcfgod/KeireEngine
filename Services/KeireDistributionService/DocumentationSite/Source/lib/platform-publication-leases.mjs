@@ -100,3 +100,33 @@ export async function renewLocalPublication(pool, jobId, workerId, leaseSeconds 
         return deadline;
     });
 }
+
+export async function failLocalPublication(pool, jobId, workerId, errorCode, retryable) {
+    validateWorker(workerId, 300);
+    if (typeof jobId !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(jobId)
+        || typeof errorCode !== "string" || !/^[a-z][a-z0-9._-]{2,127}$/.test(errorCode)
+        || typeof retryable !== "boolean") {
+        throw new LocalUploadError(400, "publication.failure_invalid", "The publication failure report is invalid.");
+    }
+    return platformTransaction(pool, async (connection) => {
+        const [[job]] = await connection.execute(`SELECT id,attempt_count FROM marketplace_publication_jobs
+            WHERE id=? AND state='leased' AND lease_owner=? AND lease_expires_at>UTC_TIMESTAMP(6) FOR UPDATE`,
+        [jobId, workerId]);
+        if (!job) {
+            throw new LocalUploadError(409, "publication.lease_lost", "The publication lease was lost.");
+        }
+        const attempt = Number(job.attempt_count);
+        const retry = retryable && attempt < 5;
+        const delayMinutes = [1, 5, 15, 60][Math.max(0, Math.min(attempt - 1, 3))];
+        const state = retry ? "retry_wait" : "failed";
+        await connection.execute(`UPDATE marketplace_publication_jobs SET state=?,lease_owner=NULL,lease_expires_at=NULL,
+            retry_after=CASE WHEN ? THEN TIMESTAMPADD(MINUTE,?,UTC_TIMESTAMP(6)) ELSE NULL END,
+            last_error_code=?,updated_at=UTC_TIMESTAMP(6) WHERE id=?`,
+        [state, retry, delayMinutes, errorCode, jobId]);
+        await connection.execute(`INSERT INTO platform_audit_events
+            (occurred_at,action,target_type,target_id,correlation_id,metadata)
+            VALUES (UTC_TIMESTAMP(6),'marketplace.publication.failed','marketplace_publication_job',?,?,?)`,
+        [jobId, randomUUID(), JSON.stringify({ workerId, errorCode, retryable, state, attempt })]);
+        return { state };
+    });
+}

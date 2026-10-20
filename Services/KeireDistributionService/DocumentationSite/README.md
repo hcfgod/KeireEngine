@@ -194,8 +194,11 @@ current approval, and matching validated upload/report metadata. They select wor
 with `SKIP LOCKED`, recover expired leases in bounded batches, delay retries by
 five minutes, and stop after five attempts. Renewal checks the owning worker and
 continued approval. Real temporary-table tests cover those transitions; the
-publication HTTP boundary, explicit failure handling, and signed completion are
-not enabled yet. Sequence values remain exact decimal strings internally and
+Explicit worker failure handling also checks a live owned lease, records a
+bounded error code, and commits its audit with the state change. Retry delays are
+1, 5, 15, and 60 minutes; permanent errors and attempt five stop retries.
+The publication HTTP boundary and signed completion are not enabled yet.
+Sequence values remain exact decimal strings internally and
 must be serialized as exact JSON integers at the eventual C# HTTP boundary.
 
 Build with `KEIRE_NODE_ADAPTER_MODE=middleware` before running
