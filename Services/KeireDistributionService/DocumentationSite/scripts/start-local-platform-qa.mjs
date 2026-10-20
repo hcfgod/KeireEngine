@@ -10,6 +10,8 @@ import { PlatformBackend } from "../Source/lib/platform-backend.mjs";
 import { loadWindowsPlatformSecrets } from "../Source/lib/platform-secrets.mjs";
 import { createVerificationMailer, loadWindowsMailSecrets } from "../Source/lib/platform-mail.mjs";
 import { createQaServerDrain } from "./qa-server-drain.mjs";
+import { LocalPasswordAuthentication } from "../Source/lib/platform-local-auth.mjs";
+import { openAccountRecord } from "../Source/lib/platform-account-import.mjs";
 
 // Isolated loopback acceptance host. Production reverse-proxy trust and deployment remain separate gates.
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -85,7 +87,37 @@ const createMailer = mailMode === "disabled" ? null : async () => {
         settings.password = null;
     }
 };
-const backend = new PlatformBackend({ provider: "mysql", createMailer, loadLocalSecrets: () => loadWindowsPlatformSecrets({
+async function createQaAuthentication(pool, key) {
+    const authentication = await LocalPasswordAuthentication.create(pool, key);
+    const trackedEmail = process.env.KEIRE_QA_REGISTRATION_EMAIL;
+    if (mailMode === "capture" && trackedEmail && /^registration-qa-[a-f0-9-]{36}@invalid\.example$/.test(trackedEmail)) {
+        // Record only the named disposable fixture before insertion, including uncertain database outcomes.
+        authentication.pool = new Proxy(pool, {
+            get(target, property) {
+                if (property === "execute") {
+                    return async (sql, values) => {
+                        if (sql.startsWith("INSERT INTO platform_registration_requests")) {
+                            const pending = openAccountRecord(values[2], authentication.encryptionKey, `registration:${values[0]}`);
+                            if (pending.email === trackedEmail) {
+                                await new Promise((resolve, reject) => {
+                                    process.send({ type: "qa-registration-request", id: values[0] },
+                                        (error) => error ? reject(error) : resolve());
+                                });
+                            }
+                        }
+                        return target.execute(sql, values);
+                    };
+                }
+                const value = Reflect.get(target, property);
+                return typeof value === "function" ? value.bind(target) : value;
+            },
+        });
+    }
+    return authentication;
+}
+
+const backend = new PlatformBackend({ provider: "mysql", createMailer, createAuthentication: createQaAuthentication,
+    loadLocalSecrets: () => loadWindowsPlatformSecrets({
     powerShellExecutable: process.env.KEIRE_QA_POWERSHELL,
     decryptScriptPath: path.resolve(root, "../scripts/read-local-platform-runtime.ps1"),
     settingsDirectory: process.env.KEIRE_QA_SETTINGS_DIRECTORY,

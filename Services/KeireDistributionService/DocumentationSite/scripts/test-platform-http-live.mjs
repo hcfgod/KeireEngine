@@ -14,6 +14,8 @@ import { emailSendLimits } from "../Source/lib/platform-email-limits.mjs";
 const userId = randomUUID();
 const factorId = randomUUID();
 const email = `http-qa-${userId}@invalid.example`;
+const registrationEmail = `registration-qa-${userId}@invalid.example`;
+const registrationPassword = randomBytes(24).toString("base64url");
 const password = randomBytes(24).toString("base64url");
 const clientIdentity = `qa:${userId}:127.0.0.1`;
 const origin = process.env.KEIRE_QA_TLS_THUMBPRINT ? `https://localhost:${process.env.KEIRE_QA_PORT}` : "https://qa.invalid.example";
@@ -28,6 +30,8 @@ let stage = "settings";
 let checks = 0;
 const capturedMail = [];
 const capturedRecovery = [];
+const capturedRegistration = [];
+const registrationRequestIds = new Set();
 const interactive = process.argv.includes("--interactive");
 
 function syntheticAuthenticatorCode(secret, offset = 0) {
@@ -68,11 +72,18 @@ try {
 
     stage = "host-startup";
     child = fork(fileURLToPath(new URL("./start-local-platform-qa.mjs", import.meta.url)), [], {
-        env: { ...process.env, KEIRE_QA_CLIENT_NAMESPACE: userId, KEIRE_QA_MAIL_MODE: "capture" }, silent: true, windowsHide: true,
+        env: { ...process.env, KEIRE_QA_CLIENT_NAMESPACE: userId, KEIRE_QA_MAIL_MODE: "capture",
+            KEIRE_QA_REGISTRATION_EMAIL: registrationEmail }, silent: true, windowsHide: true,
     });
     child.stdout.resume();
     child.stderr.resume();
     child.on("message", (message) => {
+        if (message?.type === "qa-registration-request" && /^[a-f0-9-]{36}$/.test(message.id)) {
+            registrationRequestIds.add(message.id);
+        }
+        if (message?.type === "qa-registration-email" && message.message?.recipient === registrationEmail) {
+            capturedRegistration.push(message.message);
+        }
         if (message?.type === "qa-shutdown-phase" && ["connections", "services", "complete"].includes(message.phase)) {
             shutdownPhase = message.phase;
         }
@@ -180,6 +191,78 @@ try {
         assert.equal((await request("/account/registration/status/")).status, 400);
         assert.equal((await request("/account/registration/confirm/", { password: "synthetic" })).status, 400);
         checks += 9;
+        stage = "registration-request-http";
+        const registration = await request("/account/registration/", {
+            email: registrationEmail, password: registrationPassword, displayName: "HTTPS Registration QA", accepted: true,
+        });
+        assert.equal(registration.status, 202);
+        assert.deepEqual((await registration.json()).data, { verificationRequired: true });
+        assert.equal(registration.headers.has("set-cookie"), false);
+        const [beforeConfirmation] = await pool.execute("SELECT id FROM platform_accounts WHERE email_key=?", [registrationEmail]);
+        assert.equal(beforeConfirmation.length, 0);
+        checks += 4;
+        stage = "registration-delivery-http";
+        let registrationToken;
+        for (let attempt = 0; attempt < 50; attempt++) {
+            registrationToken = capturedRegistration.at(-1)?.token;
+            if (registrationToken) {
+                const [rows] = await pool.execute("SELECT delivery_state FROM platform_registration_requests WHERE token_hash=?",
+                    [createHash("sha256").update(registrationToken).digest("hex")]);
+                if (rows[0]?.delivery_state === "sent") {
+                    break;
+                }
+            }
+            await new Promise((resolve) => setTimeout(resolve, 100));
+        }
+        assert.ok(registrationToken);
+        assert.equal(registrationRequestIds.size, 1);
+        checks += 2;
+        stage = "registration-confirmation-http";
+        const registrationExchange = await request("/account/registration/session/", { token: registrationToken });
+        assert.equal(registrationExchange.status, 200);
+        assert.ok(cookies.get("__Host-keire-registration"));
+        assert.equal((await request("/account/registration/status/")).status, 200);
+        assert.equal((await request("/account/registration/confirm/", { password: "incorrect" })).status, 400);
+        const confirmed = await request("/account/registration/confirm/", { password: registrationPassword });
+        assert.equal(confirmed.status, 200);
+        assert.deepEqual((await confirmed.json()).data, { confirmed: true });
+        assert.equal(cookies.get("__Host-keire-registration"), "");
+        assert.equal((await request("/account/registration/session/", { token: registrationToken })).status, 400);
+        assert.equal((await (await request("/account/session/")).json()).data.signedIn, false);
+        checks += 9;
+        stage = "registration-login-http";
+        assert.equal((await request("/account/session/", { email: registrationEmail, password: registrationPassword })).status, 200);
+        const registeredAccount = await request("/account/");
+        assert.equal(registeredAccount.status, 200);
+        assert.match(await registeredAccount.text(), /HTTPS Registration QA/);
+        assert.equal((await request("/account/data/")).status, 200);
+        checks += 4;
+        stage = "registration-existing-account-http";
+        const originalRequestIds = new Set(registrationRequestIds);
+        const replacementPassword = randomBytes(24).toString("base64url");
+        const duplicateRegistration = await request("/account/registration/", {
+            email: registrationEmail, password: replacementPassword, displayName: "Unwanted replacement", accepted: true,
+        });
+        assert.equal(duplicateRegistration.status, 202);
+        assert.deepEqual((await duplicateRegistration.json()).data, { verificationRequired: true });
+        const duplicateId = [...registrationRequestIds].find((id) => !originalRequestIds.has(id));
+        assert.ok(duplicateId);
+        let duplicateState;
+        for (let attempt = 0; attempt < 50; attempt++) {
+            const [rows] = await pool.execute("SELECT delivery_state,payload_sealed FROM platform_registration_requests WHERE id=?", [duplicateId]);
+            duplicateState = rows[0];
+            if (duplicateState?.delivery_state === "failed") {
+                break;
+            }
+            await new Promise((resolve) => setTimeout(resolve, 100));
+        }
+        assert.equal(duplicateState.delivery_state, "failed");
+        assert.equal(duplicateState.payload_sealed, null);
+        assert.equal(capturedRegistration.length, 1);
+        assert.equal((await request("/account/session/", { email: registrationEmail, password: replacementPassword })).status, 401);
+        assert.equal((await request("/account/session/", { email: registrationEmail, password: registrationPassword })).status, 200);
+        checks += 8;
+        cookies = new Map();
         stage = "public-catalog";
         const catalogResponse = await request("/marketplace/v1/catalog/?limit=1");
         assert.equal(catalogResponse.status, 200);
@@ -545,6 +628,35 @@ try {
     }
     try {
         if (fixtureCreated) {
+            const [registeredAccounts] = await pool.execute("SELECT id FROM platform_accounts WHERE email_key=?", [registrationEmail]);
+            for (const { id } of registeredAccounts) {
+                await pool.execute("DELETE FROM platform_auth_sessions WHERE user_id=?", [id]);
+                await pool.execute("DELETE FROM platform_auth_challenges WHERE user_id=?", [id]);
+                await pool.execute("DELETE FROM platform_audit_events WHERE actor_user_id=? AND action='account.registered'", [id]);
+                await pool.execute("DELETE FROM platform_profiles WHERE user_id=?", [id]);
+                await pool.execute("DELETE FROM platform_identities WHERE user_id=?", [id]);
+                await pool.execute("DELETE FROM platform_accounts WHERE id=?", [id]);
+            }
+            for (const id of registrationRequestIds) {
+                await pool.execute("DELETE FROM platform_registration_requests WHERE id=?", [id]);
+            }
+            const registrationLimits = [
+                `email:registration:${registrationEmail}`, `client:registration:${clientIdentity}`,
+                `pair:registration:${clientIdentity}\0registration:${registrationEmail}`,
+                `client:registration-confirm:${clientIdentity}`,
+                `email:${registrationEmail}`, `client:${clientIdentity}`, `pair:${clientIdentity}\0${registrationEmail}`,
+            ];
+            for (const registration of capturedRegistration) {
+                const hash = createHash("sha256").update(registration.token).digest("hex");
+                registrationLimits.push(`email:registration-confirm:${hash}`,
+                    `pair:registration-confirm:${clientIdentity}\0registration-confirm:${hash}`);
+            }
+            for (const subject of registrationLimits) {
+                await pool.execute("DELETE FROM platform_auth_limits WHERE subject_hash=?",
+                    [createHash("sha256").update(subject).digest("hex")]);
+            }
+            const [remainingRegistrationAccounts] = await pool.execute("SELECT id FROM platform_accounts WHERE email_key=?", [registrationEmail]);
+            assert.equal(remainingRegistrationAccounts.length, 0);
             await pool.execute("DELETE FROM platform_audit_events WHERE actor_user_id=? AND action IN ('account.authenticator_added','account.authenticator_removed','account.authenticator_setup_cancelled')", [userId]);
             for (const subject of [`email:mfa-enroll:${userId}`, `client:mfa-enroll:${clientIdentity}`,
                 `pair:mfa-enroll:${clientIdentity}\0mfa-enroll:${userId}`]) {
