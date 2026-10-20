@@ -3,6 +3,7 @@ import { LocalPasswordAuthentication } from "./platform-local-auth.mjs";
 import { LocalEmailAuthentication } from "./platform-email-auth.mjs";
 import { RecoveryDeliveryWorker } from "./platform-recovery-worker.mjs";
 import { processRecoveryDelivery } from "./platform-recovery-delivery.mjs";
+import { processRegistrationDelivery } from "./platform-registration-delivery.mjs";
 
 export function selectPlatformBackend(value) {
     if (value === undefined || value === "supabase") {
@@ -18,7 +19,8 @@ export function selectPlatformBackend(value) {
 export class PlatformBackend {
     constructor({ provider, loadLocalSecrets, createPool = createPlatformPool,
         createAuthentication = LocalPasswordAuthentication.create, createMailer = null,
-        createRecoveryWorker = (processNext) => new RecoveryDeliveryWorker(processNext) }) {
+        createRecoveryWorker = (processNext) => new RecoveryDeliveryWorker(processNext),
+        createRegistrationWorker = (processNext) => new RecoveryDeliveryWorker(processNext) }) {
         this.provider = selectPlatformBackend(provider);
         if (this.provider === "mysql" && typeof loadLocalSecrets !== "function") {
             throw new Error("MySQL requires a protected local secrets loader.");
@@ -31,6 +33,7 @@ export class PlatformBackend {
         }
         this.createMailer = createMailer;
         this.createRecoveryWorker = createRecoveryWorker;
+        this.createRegistrationWorker = createRegistrationWorker;
         this.activeRequests = 0;
         this.closing = false;
         this.initialization = null;
@@ -46,6 +49,7 @@ export class PlatformBackend {
         let authentication;
         let mailer;
         let recoveryWorker;
+        let registrationWorker;
         let secrets;
         try {
             // Loader transfers ownership of its fresh key buffer to this initialization operation.
@@ -70,9 +74,22 @@ export class PlatformBackend {
                 recoveryWorker = this.createRecoveryWorker(() => processRecoveryDelivery(authentication, mailer));
                 recoveryWorker.start();
             }
+            if (mailer?.registrationEnabled === true) {
+                if (typeof mailer.sendRegistration !== "function") {
+                    throw new Error("Registration delivery requires a configured registration mail transport.");
+                }
+                registrationWorker = this.createRegistrationWorker(() => processRegistrationDelivery(authentication, mailer));
+                registrationWorker.start();
+            }
             return Object.freeze({ provider: "mysql", pool, authentication, mailer, emailAuthentication,
+                registrationWorker: registrationWorker ?? null,
                 recoveryWorker: recoveryWorker ?? null });
         } catch (error) {
+            try {
+                await registrationWorker?.close();
+            } catch {
+                // Dispose the remaining services even when registration startup or shutdown failed.
+            }
             try {
                 await recoveryWorker?.close();
             } catch {
@@ -142,7 +159,11 @@ export class PlatformBackend {
             return;
         }
         try {
-            await backend?.recoveryWorker?.close();
+            try {
+                await backend?.registrationWorker?.close();
+            } finally {
+                await backend?.recoveryWorker?.close();
+            }
         } finally {
             try {
                 await backend?.mailer?.close();

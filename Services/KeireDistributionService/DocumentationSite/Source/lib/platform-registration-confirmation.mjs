@@ -6,6 +6,23 @@ import { platformTransaction } from "./platform-mysql.mjs";
 const invalid = Object.freeze({ state: "invalid_confirmation" });
 const maximumAttempts = 5;
 
+export async function registrationStatus(authentication, token) {
+    const digest = tokenDigest(token);
+    if (!digest) {
+        return null;
+    }
+    const [rows] = await authentication.pool.execute(`SELECT delivery_state,used,attempts,created_ms,expires_ms
+        FROM platform_registration_requests WHERE token_hash=?`, [digest]);
+    const request = rows[0];
+    const now = authentication.now();
+    if (!request || request.used || request.delivery_state !== "sent" ||
+        Number(request.attempts) >= maximumAttempts || !Number.isSafeInteger(now) ||
+        now < Number(request.created_ms) || now >= Number(request.expires_ms)) {
+        return null;
+    }
+    return { expiresAt: Number(request.expires_ms) };
+}
+
 async function retireRequest(connection, id) {
     await connection.execute(
         "UPDATE platform_registration_requests SET used=TRUE,payload_sealed=NULL WHERE id=?", [id]);

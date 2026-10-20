@@ -19,6 +19,40 @@ function fixture() {
 }
 
 describe("application-owned backend lifecycle", () => {
+    it("drains registration before disposing its transport and database", async () => {
+        const data = fixture();
+        const drain = deferred();
+        const worker = { start: vi.fn(), close: vi.fn(() => drain.promise) };
+        const mailer = { registrationEnabled: true, sendRegistration: vi.fn(), sendVerification: vi.fn(), close: vi.fn() };
+        const backend = new PlatformBackend({ provider: "mysql", loadLocalSecrets: data.loadLocalSecrets,
+            createPool: data.createPool, createAuthentication: data.createAuthentication,
+            createMailer: async () => mailer, createRegistrationWorker: () => worker });
+        expect(await backend.withBackend((services) => services.registrationWorker)).toBe(worker);
+        expect(worker.start).toHaveBeenCalledTimes(1);
+        const closing = backend.close();
+        await Promise.resolve();
+        expect(mailer.close).not.toHaveBeenCalled();
+        expect(data.pool.end).not.toHaveBeenCalled();
+        drain.resolve();
+        await closing;
+        expect(worker.close).toHaveBeenCalledTimes(1);
+        expect(mailer.close).toHaveBeenCalledTimes(1);
+        expect(data.pool.end).toHaveBeenCalledTimes(1);
+    });
+
+    it("cleans up registration workers that fail during startup", async () => {
+        const data = fixture();
+        const worker = { start() { throw new Error("startup failed"); }, close: vi.fn() };
+        const mailer = { registrationEnabled: true, sendRegistration() {}, sendVerification() {}, close: vi.fn() };
+        const backend = new PlatformBackend({ provider: "mysql", loadLocalSecrets: data.loadLocalSecrets,
+            createPool: data.createPool, createAuthentication: data.createAuthentication,
+            createMailer: async () => mailer, createRegistrationWorker: () => worker });
+        await expect(backend.withBackend(() => {})).rejects.toThrow("startup failed");
+        expect(worker.close).toHaveBeenCalledTimes(1);
+        expect(mailer.close).toHaveBeenCalledTimes(1);
+        expect(data.pool.end).toHaveBeenCalledTimes(1);
+    });
+
     it("drains enabled recovery delivery before disposing borrowed resources", async () => {
         const data = fixture();
         const drain = deferred();

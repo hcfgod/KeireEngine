@@ -77,6 +77,7 @@ export function createVerificationMailer(settings, createTransport = nodemailer.
 
     return Object.freeze({
         recoveryEnabled: recoveryOrigin !== null,
+        registrationEnabled: recoveryOrigin !== null,
         async verify() {
             requireOpen();
             try {
