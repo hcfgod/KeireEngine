@@ -85,6 +85,12 @@ The service is not exposed over HTTP until broker authentication, signed storage
 access, and report verification are integrated. Multi-connection contention
 acceptance remains required before production use.
 
+The staged validator HTTP boundary requires a separate 32–256 character broker
+secret, HTTPS, and POST requests without browser Origin, cookies, bearer tokens,
+or Supabase API keys. It bounds JSON bodies to 1 MiB and hides unexpected database
+errors. It requires lease, renewal, and verified-completion service operations
+before construction; it is not currently connected to the website router.
+
 Build with `KEIRE_NODE_ADAPTER_MODE=middleware` before running
 `node scripts/test-platform-http-live.mjs --interactive`. Configure
 `KEIRE_QA_POWERSHELL`, `KEIRE_QA_SETTINGS_DIRECTORY`, and `KEIRE_QA_PORT` for the

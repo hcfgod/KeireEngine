@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { platformTransaction } from "./platform-mysql.mjs";
+import { ValidatorQueueError } from "./platform-validator-error.mjs";
 
 const maximumAttempts = 5;
 const recoveryBatchSize = 50;
@@ -90,7 +91,7 @@ export async function renewValidationLease(pool, uploadId, workerId, leaseSecond
             WHERE id=? AND state='leased' AND lease_owner=? AND lease_expires_at>UTC_TIMESTAMP(6)
             FOR UPDATE`, [uploadId, workerId]);
         if (!rows.length) {
-            throw new Error("The validation lease was lost.");
+            throw new ValidatorQueueError(409, "validator.lease_lost", "The validation lease was lost.");
         }
         await connection.execute(`UPDATE marketplace_uploads SET
             lease_expires_at=TIMESTAMPADD(SECOND,?,UTC_TIMESTAMP(6)) WHERE id=?`, [leaseSeconds, uploadId]);
