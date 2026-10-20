@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
-import { mkdtemp, readdir, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, rm } from "node:fs/promises";
+import { Readable } from "node:stream";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { LocalBlobStore } from "../Source/lib/local-blob-store.ts";
@@ -9,6 +10,8 @@ import { platformTransaction } from "../Source/lib/platform-mysql.mjs";
 import { reserveLocalUpload } from "../Source/lib/platform-upload-reservation.mjs";
 import { localUploadStatus } from "../Source/lib/platform-upload-status.mjs";
 import { cancelLocalUpload } from "../Source/lib/platform-upload-cancel.mjs";
+import { completeResumableUpload } from "../Source/lib/platform-upload-complete.mjs";
+import { PrivateUploadFileStore } from "../Source/lib/platform-upload-file-store.mjs";
 
 export async function verifyUploadConcurrency(pool, userId) {
     const organizationId = randomUUID();
@@ -235,6 +238,39 @@ export async function verifyUploadConcurrency(pool, userId) {
         await transferLocalUpload(authentication, "fixture", replacement.uploadId, store, chunks(bytes));
         assert.equal((await localUploadStatus(authentication, "fixture", replacement.uploadId)).state, "uploaded");
         checks += 9;
+        const resumableReservation = await reserveLocalUpload(authentication, "fixture", {
+            ...input, productId: reservation.productId, version: "1.0.3",
+            expectedSizeBytes: identity.sizeBytes, expectedSha256: identity.sha256,
+        });
+        const spoolRoot = path.join(temporaryRoot, "resumable");
+        await mkdir(spoolRoot, { mode: 0o700 });
+        const spool = new PrivateUploadFileStore({ directory: spoolRoot });
+        const fileId = randomUUID().replaceAll("-", "");
+        await spool.create({ id: fileId, size: bytes.length, offset: 0,
+            metadata: { reservationId: resumableReservation.uploadId } });
+        await spool.write(Readable.from([bytes.subarray(0, 10)]), fileId, 0);
+        await assert.rejects(completeResumableUpload(authentication, "fixture", resumableReservation.uploadId,
+            fileId, spool, store), { code: "publisher.transfer_incomplete" });
+        const restartedSpool = new PrivateUploadFileStore({ directory: spoolRoot });
+        assert.equal((await restartedSpool.getUpload(fileId)).offset, 10);
+        await restartedSpool.write(Readable.from([Buffer.alloc(bytes.length - 10)]), fileId, 10);
+        await assert.rejects(completeResumableUpload(authentication, "fixture", resumableReservation.uploadId,
+            fileId, restartedSpool, store), /SHA-256/);
+        assert.equal((await localUploadStatus(authentication, "fixture", resumableReservation.uploadId)).state, "uploading");
+        const otherFileId = randomUUID().replaceAll("-", "");
+        await spool.create({ id: otherFileId, size: bytes.length, offset: 0,
+            metadata: { reservationId: randomUUID() } });
+        await assert.rejects(completeResumableUpload(authentication, "fixture", resumableReservation.uploadId,
+            otherFileId, spool, store), { code: "publisher.transfer_mismatch" });
+        // A replacement transport file is independent of the corrupt one, which remains unavailable for publication.
+        const validFileId = randomUUID().replaceAll("-", "");
+        await spool.create({ id: validFileId, size: bytes.length, offset: 0,
+            metadata: { reservationId: resumableReservation.uploadId } });
+        await spool.write(Readable.from([bytes]), validFileId, 0);
+        assert.equal((await completeResumableUpload(authentication, "fixture", resumableReservation.uploadId,
+            validFileId, spool, store)).state, "uploaded");
+        assert.equal((await localUploadStatus(authentication, "fixture", resumableReservation.uploadId)).versionState, "uploaded");
+        checks += 7;
         await assert.rejects(transferLocalUpload(authentication, "fixture", transferReservation.uploadId,
             store, chunks(bytes)), { code: "publisher.upload_not_writable" });
         checks += 12;
