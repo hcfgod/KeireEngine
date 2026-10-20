@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { fork } from "node:child_process";
 import { createHash, createHmac, randomBytes, randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
+import { connect as connectTls } from "node:tls";
 import bcrypt from "bcryptjs";
 import jsQR from "jsqr";
 import sharp from "sharp";
@@ -20,6 +21,8 @@ let secrets;
 let pool;
 let child;
 let childExited;
+let shutdownPhase = "not-started";
+let spareConnection;
 let fixtureCreated = false;
 let stage = "settings";
 let checks = 0;
@@ -70,6 +73,9 @@ try {
     child.stdout.resume();
     child.stderr.resume();
     child.on("message", (message) => {
+        if (message?.type === "qa-shutdown-phase" && ["connections", "services", "complete"].includes(message.phase)) {
+            shutdownPhase = message.phase;
+        }
         if (message?.type === "qa-recovery-email" && message.message?.recipient === email) {
             capturedRecovery.push(message.message);
             if (interactive) {
@@ -99,6 +105,18 @@ try {
         });
     });
     const base = process.env.KEIRE_QA_TLS_THUMBPRINT ? origin : `http://127.0.0.1:${process.env.KEIRE_QA_PORT}`;
+    if (process.argv.includes("--idle-connection")) {
+        if (!process.env.KEIRE_QA_TLS_THUMBPRINT) {
+            throw new Error("The idle connection check requires the trusted HTTPS QA listener.");
+        }
+        await new Promise((resolve, reject) => {
+            spareConnection = connectTls({
+                host: "127.0.0.1", port: Number(process.env.KEIRE_QA_PORT), servername: "localhost",
+                rejectUnauthorized: true,
+            }, resolve);
+            spareConnection.once("error", reject);
+        });
+    }
     let cookies = new Map();
     async function request(route, body, extraHeaders = {}, method = body === undefined ? "GET" : "POST") {
         const response = await fetch(base + route, {
@@ -516,7 +534,7 @@ try {
         }
         const timer = setTimeout(() => {
             process.exitCode = 1;
-            console.error("QA host did not stop gracefully within its deadline.");
+            console.error(`QA host did not stop gracefully within its deadline (${shutdownPhase}).`);
             child.kill();
         }, 15000);
         const exitCode = await childExited;
@@ -576,6 +594,7 @@ try {
         console.error("Synthetic HTTP fixture cleanup failed.");
         process.exitCode = 1;
     }
+    spareConnection?.destroy();
     secrets?.accountEncryptionKey.fill(0);
     capturedMail.length = 0;
     await pool?.end();

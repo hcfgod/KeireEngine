@@ -9,6 +9,7 @@ import send from "send";
 import { PlatformBackend } from "../Source/lib/platform-backend.mjs";
 import { loadWindowsPlatformSecrets } from "../Source/lib/platform-secrets.mjs";
 import { createVerificationMailer, loadWindowsMailSecrets } from "../Source/lib/platform-mail.mjs";
+import { createQaServerDrain } from "./qa-server-drain.mjs";
 
 // Isolated loopback acceptance host. Production reverse-proxy trust and deployment remain separate gates.
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -147,11 +148,15 @@ try {
 }
 server.requestTimeout = 30000;
 server.headersTimeout = 10000;
+const drainServer = createQaServerDrain(server, Boolean(tlsThumbprint));
 let shutdown;
 function close() {
     shutdown ??= (async () => {
-        await new Promise((resolve) => server.close(resolve));
+        process.send?.({ type: "qa-shutdown-phase", phase: "connections" });
+        await drainServer();
+        process.send?.({ type: "qa-shutdown-phase", phase: "services" });
         await backend.close();
+        process.send?.({ type: "qa-shutdown-phase", phase: "complete" });
     })();
     return shutdown;
 }
