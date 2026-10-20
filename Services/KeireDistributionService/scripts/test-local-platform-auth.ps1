@@ -5,7 +5,8 @@ param
     [Parameter(Mandatory)] [string] $ResultPath,
     [switch] $CreateEmailSchema,
     [switch] $CreateRecoverySchema,
-    [switch] $CreateRecoveryDeliverySchema
+    [switch] $CreateRecoveryDeliverySchema,
+    [switch] $CreateRegistrationSchema
 )
 
 $ErrorActionPreference = 'Stop'
@@ -42,6 +43,10 @@ try
     if ($CreateRecoveryDeliverySchema)
     {
         $start.ArgumentList.Add('--create-recovery-delivery-schema')
+    }
+    if ($CreateRegistrationSchema)
+    {
+        $start.ArgumentList.Add('--create-registration-schema')
     }
     $start.UseShellExecute = $false
     $start.CreateNoWindow = $true
