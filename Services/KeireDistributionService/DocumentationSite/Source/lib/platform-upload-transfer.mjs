@@ -2,7 +2,8 @@ import { randomUUID } from "node:crypto";
 import { LocalUploadError } from "./platform-upload-product.mjs";
 
 async function authorizedUpload(authentication, token, uploadId, action) {
-    if (typeof uploadId !== "string" || !/^[0-9a-f-]{36}$/.test(uploadId)) {
+    if (typeof uploadId !== "string"
+        || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(uploadId)) {
         throw new LocalUploadError(400, "publisher.upload_invalid", "The upload identifier is invalid.");
     }
     const result = await authentication.withSessionTransaction(token, async (connection, session) => {
@@ -22,9 +23,9 @@ async function authorizedUpload(authentication, token, uploadId, action) {
             JOIN publishers publisher ON publisher.id=product.publisher_id
             JOIN organizations organization ON organization.id=publisher.organization_id
             JOIN organization_memberships member ON member.organization_id=organization.id
-            WHERE upload.id=? AND member.user_id=? AND member.role IN ('owner','admin')
+            WHERE upload.id=? AND upload.created_by=? AND member.user_id=? AND member.role IN ('owner','admin')
             AND organization.deleted_at IS NULL AND publisher.suspended_at IS NULL FOR UPDATE`,
-        [uploadId, session.userId]);
+        [uploadId, session.userId, session.userId]);
         const upload = rows[0];
         if (!upload) {
             throw new LocalUploadError(404, "publisher.upload_not_found", "This upload is unavailable to your account.");
@@ -38,6 +39,15 @@ async function authorizedUpload(authentication, token, uploadId, action) {
         throw new LocalUploadError(401, "account.authentication_required", "Sign in again to upload a package.");
     }
     return result;
+}
+
+/** Resolve the current identity without retaining database locks while receiving bytes. */
+export async function authorizeLocalUpload(authentication, sessionToken, uploadId) {
+    return authorizedUpload(authentication, sessionToken, uploadId, async (_connection, _session, upload) => ({
+        uploadId: upload.id,
+        expectedSha256: upload.expected_sha256,
+        expectedSizeBytes: Number(upload.expected_size_bytes),
+    }));
 }
 
 /** Internal streaming boundary. A verified immutable blob is queued only after a fresh authorization check. */

@@ -4,7 +4,7 @@ import { mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { LocalBlobStore } from "../Source/lib/local-blob-store.ts";
-import { transferLocalUpload } from "../Source/lib/platform-upload-transfer.mjs";
+import { authorizeLocalUpload, transferLocalUpload } from "../Source/lib/platform-upload-transfer.mjs";
 import { platformTransaction } from "../Source/lib/platform-mysql.mjs";
 import { reserveLocalUpload } from "../Source/lib/platform-upload-reservation.mjs";
 import { localUploadStatus } from "../Source/lib/platform-upload-status.mjs";
@@ -85,6 +85,12 @@ export async function verifyUploadConcurrency(pool, userId) {
             expectedSizeBytes: identity.sizeBytes, expectedSha256: identity.sha256,
         });
         const store = new LocalBlobStore(temporaryRoot);
+        assert.deepEqual(await authorizeLocalUpload(authentication, "fixture", transferReservation.uploadId), {
+            uploadId: transferReservation.uploadId,
+            expectedSha256: identity.sha256,
+            expectedSizeBytes: identity.sizeBytes,
+        });
+        checks += 1;
         async function* chunks(value) {
             yield value.subarray(0, 10);
             yield value.subarray(10);

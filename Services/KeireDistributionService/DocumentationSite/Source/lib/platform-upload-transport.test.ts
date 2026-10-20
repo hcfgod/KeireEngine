@@ -37,6 +37,11 @@ describe("local resumable transport", () => {
             { "upload-offset": "0", "content-type": "application/offset+octet-stream" }, "abc");
         expect(patch.status).toBe(204);
         expect((await send(location, "HEAD")).headers.get("upload-offset")).toBe("3");
+        const browserHead = await transport.handle(new Request(location, {
+            method: "HEAD", headers: { "tus-resumable": "1.0.0" },
+        }));
+        expect(browserHead.status).toBe(200);
+        expect(browserHead.headers.get("upload-offset")).toBe("3");
         expect((await send(location, "PATCH",
             { "upload-offset": "0", "content-type": "application/offset+octet-stream" }, "def")).status).toBe(409);
         reservationId = "reservation-two";

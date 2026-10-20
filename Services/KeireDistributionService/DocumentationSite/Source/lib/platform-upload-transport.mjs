@@ -1,4 +1,5 @@
 import { Server } from "@tus/server";
+import { LocalUploadError } from "./platform-upload-product.mjs";
 
 /** Application-owned transport. Authorization must resolve the current reservation on every request. */
 export function createUploadTransport({ datastore, authorize, siteOrigin, path = "/publisher/v1/transfer" }) {
@@ -26,10 +27,20 @@ export function createUploadTransport({ datastore, authorize, siteOrigin, path =
             if (request.method === "OPTIONS") {
                 return;
             }
-            if (request.headers.get("origin") !== siteOrigin) {
+            const requestOrigin = request.headers.get("origin");
+            // Same-origin browser HEAD probes may omit Origin; they still require reservation authorization.
+            if (requestOrigin !== siteOrigin && !(request.method === "HEAD" && requestOrigin === null)) {
                 reject(403, "The upload request origin could not be verified.");
             }
-            const reservation = await authorize(request);
+            let reservation;
+            try {
+                reservation = await authorize(request);
+            } catch (error) {
+                if (error instanceof LocalUploadError) {
+                    reject(error.status, error.message);
+                }
+                reject(503, "Upload authorization is temporarily unavailable.");
+            }
             if (!reservation || !Number.isSafeInteger(reservation.expectedSizeBytes)
                 || reservation.expectedSizeBytes < 1 || typeof reservation.uploadId !== "string") {
                 reject(403, "The upload reservation is unavailable.");
