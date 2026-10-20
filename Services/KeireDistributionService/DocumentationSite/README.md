@@ -176,6 +176,16 @@ evidence, signs and submits a synthetic report, and retries completion; the
 database must contain exactly one report. This tests the real broker transport
 and signature contracts, not the separate malware/compilation worker process.
 
+Add `KEIRE_TEST_PUBLICATION_CSHARP=1` to that C# validator HTTPS run to exercise
+the actual `PublicationQueueApi` and signer against the resulting validated
+report. The isolated publication fixture verifies the report's signature,
+renews the lease, signs sequence `9007199254740993`, completes publication,
+and retries the same completion. The service verifies the real temporary
+package and evidence files; the database must contain exactly one publication
+and audit receipt. Both C# validator and HTTPS flags are required, so this
+additional acceptance cannot silently skip its prerequisites. The temporary
+queue records are reset only within the fixture's connection-local tables.
+
 The staged `submitLocalVersion` operation preserves the existing publisher review
 transition: verified session, enabled publisher portal, active organization
 owner/admin membership, an unsuspended publisher, a validated version, and a

@@ -5,13 +5,19 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 
 export async function verifyCSharpValidatorHttp(http, brokerSecret, registerPublicKey) {
+    return verifyCSharpQueueHttp("validator", { origin: http.origin, brokerSecret }, registerPublicKey);
+}
+
+export async function verifyCSharpQueueHttp(kind, configuration, registerPublicKey) {
+    assert.ok(["validator", "publication"].includes(kind));
     const executable = process.env.KEIRE_QA_DOTNET;
     assert.ok(path.isAbsolute(executable ?? ""), "Set the isolated acceptance .NET executable.");
     const assembly = fileURLToPath(new URL(
         "../../tests/KeireMarketplaceValidator.Tests/bin/Release/net10.0/KeireMarketplaceValidator.Tests.dll",
         import.meta.url));
     const child = spawn(executable, [assembly], {
-        env: { ...process.env, KEIRE_TEST_LIVE_VALIDATOR: "1" },
+        env: { ...process.env, KEIRE_TEST_LIVE_VALIDATOR: kind === "validator" ? "1" : "0",
+            KEIRE_TEST_LIVE_PUBLICATION: kind === "publication" ? "1" : "0" },
         windowsHide: true, stdio: ["pipe", "pipe", "pipe"],
     });
     const completion = new Promise((resolve, reject) => {
@@ -24,7 +30,7 @@ export async function verifyCSharpValidatorHttp(http, brokerSecret, registerPubl
     const lines = createInterface({ input: child.stdout });
     let stage = "csharp-start";
     try {
-        child.stdin.write(`${JSON.stringify({ origin: http.origin, brokerSecret })}\n`);
+        child.stdin.write(`${JSON.stringify(configuration)}\n`);
         let registered = false;
         let passed = false;
         for await (const line of lines) {
@@ -36,7 +42,7 @@ export async function verifyCSharpValidatorHttp(http, brokerSecret, registerPubl
                 child.stdin.end("ready\n");
                 stage = "csharp-workflow";
             } else {
-                assert.equal(document.status, "csharp-validator-https-passed");
+                assert.equal(document.status, `csharp-${kind}-https-passed`);
                 passed = true;
             }
         }

@@ -10,6 +10,15 @@ import { handleLocalPlatformRequest } from "../Source/lib/platform-request.mjs";
 
 /** Only accepts the caller's isolated database fixture and stores; never opens the real queue itself. */
 export async function createQaValidatorHttp({ pool, packageStore, evidenceStore, brokerSecret, transferKey }) {
+    return createQaPlatformHttp("validator", (siteOrigin) => createLocalValidatorService({
+        pool, packageStore, evidenceStore, brokerSecret, transferKey, siteOrigin,
+    }));
+}
+
+export async function createQaPlatformHttp(serviceName, createService) {
+    if (!["validator", "publication"].includes(serviceName) || typeof createService !== "function") {
+        throw new Error("Invalid isolated queue fixture.");
+    }
     const thumbprint = process.env.KEIRE_QA_TLS_THUMBPRINT;
     const powershell = process.env.KEIRE_QA_POWERSHELL;
     if (!/^[a-fA-F0-9]{40}$/.test(thumbprint ?? "") || !path.isAbsolute(powershell ?? "")) {
@@ -37,7 +46,7 @@ export async function createQaValidatorHttp({ pool, packageStore, evidenceStore,
             }
             const request = new Request(new URL(incoming.url, origin), options);
             const response = await handleLocalPlatformRequest({
-                backend: { provider: "mysql", withBackend: (action) => action({ validator: service }) },
+                backend: { provider: "mysql", withBackend: (action) => action({ [serviceName]: service }) },
                 request, siteOrigin: origin, correlationId: "isolated-validator-acceptance",
                 render: () => { throw new Error("Validator requests must not render browser pages."); },
             });
@@ -62,9 +71,7 @@ export async function createQaValidatorHttp({ pool, packageStore, evidenceStore,
             server.listen(0, "127.0.0.1", resolve);
         });
         origin = `https://localhost:${server.address().port}`;
-        service = createLocalValidatorService({
-            pool, packageStore, evidenceStore, brokerSecret, transferKey, siteOrigin: origin,
-        });
+        service = createService(origin);
     } catch (error) {
         server.close();
         throw error;

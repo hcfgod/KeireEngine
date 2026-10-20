@@ -9,9 +9,14 @@ import { createQaValidatorHttp } from "./qa-validator-http.mjs";
 import { verifyCSharpValidatorHttp } from "./qa-validator-csharp.mjs";
 import { verifyVersionSubmission } from "./platform-version-submit-acceptance.mjs";
 import { publicationSequenceSchema } from "../Source/lib/platform-publication-sequence.mjs";
+import { verifyCSharpPublication } from "./qa-publication-csharp.mjs";
 
 /** Connection-local copies prevent the queue test from leasing any imported customer uploads. */
 export async function verifyValidatorLeases(pool, fixtureUploadId, fixtureVersionId, evidenceStore) {
+    if (process.env.KEIRE_TEST_PUBLICATION_CSHARP === "1"
+        && (process.env.KEIRE_TEST_VALIDATOR_HTTPS !== "1" || process.env.KEIRE_TEST_VALIDATOR_CSHARP !== "1")) {
+        throw new Error("C# publication acceptance requires the C# validator HTTPS fixture.");
+    }
     const rawConnection = await pool.getConnection();
     const links = createValidatorCapabilities(randomBytes(32), "https://qa.invalid.example");
     let http;
@@ -210,7 +215,11 @@ export async function verifyValidatorLeases(pool, fixtureUploadId, fixtureVersio
             });
             const [[reportCount]] = await connection.execute("SELECT COUNT(*) AS total FROM marketplace_validation_reports");
             assert.equal(Number(reportCount.total), 1);
-            return 53 + await verifyVersionSubmission(isolatedPool, fixtureVersionId);
+            let checks = 53 + await verifyVersionSubmission(isolatedPool, fixtureVersionId);
+            if (process.env.KEIRE_TEST_PUBLICATION_CSHARP === "1") {
+                checks += await verifyCSharpPublication(isolatedPool, connection, evidenceStore);
+            }
+            return checks;
         }
         return (http ? 50 : 41) + await verifyVersionSubmission(isolatedPool, fixtureVersionId);
     } finally {

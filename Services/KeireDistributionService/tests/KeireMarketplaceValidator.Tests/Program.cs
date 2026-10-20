@@ -14,6 +14,10 @@ internal static partial class Program
 {
     public static async Task<int> Main()
     {
+        if (Environment.GetEnvironmentVariable("KEIRE_TEST_LIVE_PUBLICATION") == "1")
+        {
+            return await RunLivePublicationAsync();
+        }
         if (Environment.GetEnvironmentVariable("KEIRE_TEST_LIVE_VALIDATOR") == "1")
         {
             return await RunLiveValidatorAsync();
