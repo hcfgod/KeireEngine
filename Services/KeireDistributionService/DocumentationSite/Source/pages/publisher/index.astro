@@ -6,6 +6,7 @@ export const prerender = false;
 
 const supabase = Astro.locals.supabase;
 const localView = Astro.locals.localPublisherView;
+const uploadsAvailable = !localView || localView.uploadsAvailable === true;
 const user = Astro.locals.localAccountView?.user ?? Astro.locals.user;
 let enabled = false;
 let applications: any[] = [];
@@ -143,7 +144,9 @@ const editableApplication = applications.find((item: any) => ["draft", "changes_
 
                     <div class="publisher-workspace">
                         <section id="new-release" class="publisher-section">
-                            {localView && <p class="notice-panel">Application drafts and review requests are available. Package uploads and release submission are temporarily unavailable while the local publishing service is being migrated.</p>}
+                            {localView && <p class="notice-panel">{uploadsAvailable
+                                ? "Private package uploads are available. Release submission is currently unavailable."
+                                : "Package uploads and release submission are temporarily unavailable. You can still save and submit publisher applications."}</p>}
                             <div class="publisher-section__heading">
                                 <div><p class="eyebrow">Private quarantine</p><h2>Upload a package for validation</h2></div>
                                 <span class="status-badge">Unsigned draft</span>
@@ -153,7 +156,9 @@ const editableApplication = applications.find((item: any) => ["draft", "changes_
                                 <p>After validation passes, use <strong>Submit to Staff review</strong> below. Until then, the exact package remains private to your publisher and will not appear in the Staff moderation queue.</p>
                             </div>
                             {publishers.length && categories.length && licenses.length ? (
-                                <form class="publisher-upload" data-publisher-upload>
+                                <form class="publisher-upload" data-publisher-upload
+                                    data-local-uploads={localView ? "true" : "false"}
+                                    data-uploads-available={uploadsAvailable ? "true" : "false"}>
                                     <input type="hidden" name="productId" value={requestedProduct?.id ?? ""} />
                                     <div class="publisher-upload__grid">
                                         {requestedProduct ? (
@@ -273,7 +278,7 @@ const editableApplication = applications.find((item: any) => ["draft", "changes_
                                     </div>
 
                                     <div class="actions">
-                                        <button class="button" type="submit" data-upload-submit disabled={Boolean(localView)}>Hash and upload privately</button>
+                                        <button class="button" type="submit" data-upload-submit disabled={!uploadsAvailable}>Hash and upload privately</button>
                                         <button class="button button--secondary" type="button" data-upload-cancel hidden>Cancel upload</button>
                                     </div>
                                     <p class="form-message" data-upload-message role="status" aria-live="polite"></p>
@@ -380,6 +385,7 @@ const editableApplication = applications.find((item: any) => ["draft", "changes_
     import { sha256 } from "@noble/hashes/sha2.js";
     import { bytesToHex } from "@noble/hashes/utils.js";
     import { Upload } from "tus-js-client";
+    import { publisherUploadTransport } from "../../lib/publisher-upload-client";
 
     const maximumPackageBytes = 64 * 1024 * 1024 * 1024;
     const hashChunkBytes = 4 * 1024 * 1024;
@@ -497,6 +503,9 @@ const editableApplication = applications.find((item: any) => ["draft", "changes_
 
     const uploadForm = document.querySelector<HTMLFormElement>("[data-publisher-upload]");
     if (uploadForm) {
+        const localUploads = uploadForm.dataset.localUploads === "true";
+        const uploadsAvailable = uploadForm.dataset.uploadsAvailable === "true";
+        let busy = false;
         const fileInput = uploadForm.elements.namedItem("package") as HTMLInputElement;
         const summary = uploadForm.querySelector<HTMLElement>("[data-file-summary]");
         const fileName = uploadForm.querySelector<HTMLElement>("[data-file-name]");
@@ -519,10 +528,11 @@ const editableApplication = applications.find((item: any) => ["draft", "changes_
             if (progress) progress.value = value;
             if (percent) percent.textContent = `${Math.round(value)}%`;
         };
-        const setBusy = (busy: boolean, cancellable = false) => {
-            if (submit) submit.disabled = busy;
-            fileInput.disabled = busy;
-            if (cancel) cancel.hidden = !busy || !cancellable;
+        const setBusy = (value: boolean, cancellable = false) => {
+            busy = value;
+            if (submit) submit.disabled = value || !uploadsAvailable;
+            fileInput.disabled = value;
+            if (cancel) cancel.hidden = !value || !cancellable;
         };
         const cancelReservation = async (uploadId: string) => {
             await responseData(await fetch(`/publisher/v1/uploads/${encodeURIComponent(uploadId)}/`, {
@@ -545,7 +555,7 @@ const editableApplication = applications.find((item: any) => ["draft", "changes_
             userCancelled = true;
             const uploadId = activeUploadId;
             try {
-                await activeUpload?.abort(true);
+                await activeUpload?.abort(!localUploads);
                 if (uploadId) await cancelReservation(uploadId);
                 if (message) { message.textContent = "Upload cancelled. No package was queued."; message.dataset.kind = ""; }
             } catch (error) {
@@ -563,6 +573,9 @@ const editableApplication = applications.find((item: any) => ["draft", "changes_
 
         uploadForm.addEventListener("submit", async (event) => {
             event.preventDefault();
+            if (busy || !uploadsAvailable) {
+                return;
+            }
             const file = fileInput.files?.[0];
             if (!file || !file.name.toLowerCase().endsWith(".keireassetpackage") ||
                 file.size < 1 || file.size > maximumPackageBytes) {
@@ -606,14 +619,12 @@ const editableApplication = applications.find((item: any) => ["draft", "changes_
                 activeUploadId = reservation.uploadId;
                 setBusy(true, true);
                 setProgress("Uploading to private quarantine…", 0);
-                if (message) message.textContent = "A path-scoped grant was created. Uploading securely…";
+                if (message) message.textContent = "Uploading securely. Interrupted transfers will retry automatically…";
                 await new Promise<void>((resolve, reject) => {
                     activeUpload = new Upload(file, {
-                        endpoint: reservation.resumableEndpoint,
-                        headers: { "x-signature": reservation.uploadToken },
+                        ...publisherUploadTransport(reservation, localUploads, window.location.origin),
                         retryDelays: [0, 3_000, 5_000, 10_000, 20_000],
                         chunkSize: 6 * 1024 * 1024,
-                        uploadDataDuringCreation: true,
                         removeFingerprintOnSuccess: true,
                         metadata: {
                             bucketName: reservation.bucket,

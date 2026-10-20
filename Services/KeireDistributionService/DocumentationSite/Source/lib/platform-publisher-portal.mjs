@@ -27,7 +27,7 @@ export async function localPublisherPortal(authentication, sessionToken) {
         }
         const [flags] = await connection.execute(
             "SELECT enabled FROM platform_feature_flags WHERE `key`='publisher_portal_enabled'");
-        const data = { enabled: flags.some((flag) => Boolean(flag.enabled)), applications: [], organizations: [],
+        const data = { enabled: flags.some((flag) => Boolean(flag.enabled)), uploadsAvailable: false, applications: [], organizations: [],
             publishers: [], products: [], categories: [], licenses: [], versions: [], uploads: [], validationReports: [] };
         if (!data.enabled) {
             return data;

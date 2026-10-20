@@ -477,7 +477,7 @@ try {
         assert.match(publisherDraftHtml, /HTTP QA publisher/);
         assert.match(publisherDraftHtml, /A disposable publisher application for real HTTPS acceptance/);
         assert.match(publisherDraftHtml, new RegExp(`data-application-id="${application.applicationId}"`));
-        assert.match(publisherDraftHtml, /temporarily unavailable while the local publishing service/);
+        assert.match(publisherDraftHtml, /Private package uploads are available/);
         const submittedApplication = await request("/publisher/v1/applications/",
             { ...applicationInput, applicationId: application.applicationId, action: "submit" });
         assert.equal(submittedApplication.status, 200);

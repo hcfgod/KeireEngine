@@ -65,6 +65,7 @@ export async function handleLocalPlatformRequest({ backend, request, siteOrigin,
                 }
                 const publisherView = await localPublisherPortal(service.authentication,
                     cookieToken(request, "__Host-keire-session"));
+                publisherView.uploadsAvailable = Boolean(service.uploads);
                 const accountView = await localAccountOverview(service.pool, state.session);
                 const rendered = await render({ ...state, accountView, publisherView });
                 for (const [name, value] of Object.entries(headers)) {
