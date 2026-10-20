@@ -17,6 +17,36 @@ function fixture() {
 }
 
 describe("verification mail delivery", () => {
+    it("sends registration links only to the configured origin and keeps tokens out of the query", async () => {
+        const { transport } = fixture();
+        const mailer = createVerificationMailer(settings, () => transport, "https://example.test");
+        const token = "a".repeat(43);
+        await mailer.sendRegistration({ recipient: "user@example.com", token });
+        const message = transport.sendMail.mock.calls[0][0];
+        expect(message.text).toContain(`https://example.test/account/confirm/#registration=${token}`);
+        expect(message.text).toContain("password you chose");
+        expect(message.text).toContain("No account has been created");
+        expect(message.envelope.to).toEqual(["user@example.com"]);
+        transport.sendMail.mockRejectedValue(new Error("private SMTP response"));
+        await expect(mailer.sendRegistration({ recipient: "user@example.com", token }))
+            .rejects.toThrow("The registration email could not be sent.");
+        expect(transport.sendMail).toHaveBeenCalledTimes(2);
+    });
+
+    it("rejects registration messages without an origin or with malformed recipients or tokens", async () => {
+        const { mailer, transport } = fixture();
+        await expect(mailer.sendRegistration({ recipient: "user@example.com", token: "a".repeat(43) }))
+            .rejects.toThrow("Invalid registration");
+        const configured = createVerificationMailer(settings, () => transport, "https://example.test");
+        for (const request of [
+            { recipient: "user@example.com\r\nBcc: other@example.com", token: "a".repeat(43) },
+            { recipient: "user@example.com", token: "invalid" },
+        ]) {
+            await expect(configured.sendRegistration(request)).rejects.toThrow("Invalid registration");
+        }
+        expect(transport.sendMail).not.toHaveBeenCalled();
+    });
+
     it("sends recovery tokens only in the configured HTTPS page fragment", async () => {
         const { transport } = fixture();
         const mailer = createVerificationMailer(settings, () => transport, "https://example.test");

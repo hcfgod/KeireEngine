@@ -144,6 +144,35 @@ export function createVerificationMailer(settings, createTransport = nodemailer.
             }
         },
 
+        async sendRegistration({ recipient, token }) {
+            requireOpen();
+            if (!recoveryOrigin || !validAddress(recipient) || typeof token !== "string" ||
+                !/^[A-Za-z0-9_-]{43}$/.test(token)) {
+                throw new Error("Invalid registration email request.");
+            }
+            const link = `${recoveryOrigin}/account/confirm/#registration=${token}`;
+            try {
+                const result = await transport.sendMail({
+                    from: { name: "Kéire", address: from },
+                    to: { address: recipient },
+                    envelope: { from, to: [recipient] },
+                    subject: "Verify your Kéire account",
+                    text: `Confirm your email address using this link:\n\n${link}\n\n` +
+                        "This link expires 30 minutes after your registration request and can only be used once.\n" +
+                        "You must enter the password you chose when requesting this account.\n" +
+                        "If you did not request this account, ignore this email. No account has been created.\n" +
+                        "Never share this link with anyone.",
+                    disableFileAccess: true,
+                    disableUrlAccess: true,
+                });
+                if (result.accepted?.length !== 1 || result.rejected?.length > 0) {
+                    throw new Error("Recipient was not accepted.");
+                }
+            } catch {
+                throw new Error("The registration email could not be sent. Please try again later.");
+            }
+        },
+
         close() {
             if (!closed) {
                 closed = true;

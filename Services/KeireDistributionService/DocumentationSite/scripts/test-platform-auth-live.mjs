@@ -265,7 +265,7 @@ try {
     stage = "recovery-delivery";
     checks += await verifyRecoveryDelivery(runtime, auth, userId, now);
     stage = "registration-staging";
-    checks += await verifyRegistrationStaging(runtime, auth, now);
+    checks += await verifyRegistrationStaging(runtime, auth, now, email);
     stage = "public-catalog";
     checks += await verifyLocalCatalog(migration);
 
