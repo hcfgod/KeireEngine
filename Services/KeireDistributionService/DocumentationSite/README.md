@@ -118,6 +118,13 @@ The handlers have isolated MySQL/filesystem acceptance coverage but are not yet
 connected to the application router or tested through the complete C# broker
 workflow. Production configuration requires a separate 32-byte link-signing key.
 
+`createLocalValidatorService` assembles queue operations and private transfers,
+minting both transfer URLs while keeping the internal attempt counter out of the
+strict C# lease response. It borrows the host's pool and verified stores, rejects
+new requests during shutdown, and drains accepted handlers before clearing its
+keys. Hosts must also finish or cancel outstanding response streams before
+disposing storage. Application lifecycle/router integration remains pending.
+
 Build with `KEIRE_NODE_ADAPTER_MODE=middleware` before running
 `node scripts/test-platform-http-live.mjs --interactive`. Configure
 `KEIRE_QA_POWERSHELL`, `KEIRE_QA_SETTINGS_DIRECTORY`, and `KEIRE_QA_PORT` for the
