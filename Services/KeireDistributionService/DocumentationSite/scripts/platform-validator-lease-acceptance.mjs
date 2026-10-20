@@ -6,6 +6,7 @@ import { createValidatorReportFixture } from "./validator-report-fixture.mjs";
 import { authorizeValidatorTransfer, createValidatorCapabilities } from "../Source/lib/platform-validator-capabilities.mjs";
 import { createValidatorFileHttp } from "../Source/lib/platform-validator-files.mjs";
 import { createQaValidatorHttp } from "./qa-validator-http.mjs";
+import { verifyCSharpValidatorHttp } from "./qa-validator-csharp.mjs";
 
 /** Connection-local copies prevent the queue test from leasing any imported customer uploads. */
 export async function verifyValidatorLeases(pool, fixtureUploadId, fixtureVersionId, evidenceStore) {
@@ -187,6 +188,23 @@ export async function verifyValidatorLeases(pool, fixtureUploadId, fixtureVersio
         assert.equal((await transfer(new Request(evidenceAddress, {
             method: "PUT", headers: { "content-type": "application/json" }, body: evidence,
         }))).status, 403);
+        if (http && process.env.KEIRE_TEST_VALIDATOR_CSHARP === "1") {
+            await connection.execute("DELETE FROM marketplace_validation_reports");
+            await connection.execute("DELETE FROM platform_audit_events");
+            await connection.execute("UPDATE marketplace_uploads SET state='uploaded',validation_attempts=0");
+            await connection.execute("UPDATE marketplace_product_versions SET state='uploaded'");
+            await verifyCSharpValidatorHttp(http, brokerSecret, async (document) => {
+                assert.equal(document.algorithm, "Ed25519");
+                await connection.execute(`INSERT INTO marketplace_validator_attestation_keys
+                    (key_id,algorithm,public_key_base64,fingerprint,active,valid_from,valid_until,created_at)
+                    VALUES (?,'ed25519',?,?,TRUE,UTC_TIMESTAMP(6),NULL,UTC_TIMESTAMP(6))`,
+                [document.keyId, document.publicKey,
+                    `sha256:${createHash("sha256").update(Buffer.from(document.publicKey, "base64")).digest("hex")}`]);
+            });
+            const [[reportCount]] = await connection.execute("SELECT COUNT(*) AS total FROM marketplace_validation_reports");
+            assert.equal(Number(reportCount.total), 1);
+            return 53;
+        }
         return http ? 50 : 41;
     } finally {
         try {

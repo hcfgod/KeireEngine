@@ -297,6 +297,9 @@ try {
     console.log(JSON.stringify({ status: "local-authentication-acceptance-passed", checks,
         realAccountUsed: false, liveWebsiteChanged: false }));
 } catch (error) {
+    if (/^csharp-[a-z-]{1,60}$/.test(error?.fixtureStage ?? "")) {
+        stage = error.fixtureStage;
+    }
     const databaseCode = /^ER_[A-Z0-9_]{1,80}$/.test(error?.code ?? "") ? error.code : undefined;
     console.error(JSON.stringify({ status: "failed", stage, checks, databaseCode, sensitiveDiagnosticsSuppressed: true }));
     process.exitCode = 1;

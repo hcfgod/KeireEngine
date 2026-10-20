@@ -137,7 +137,15 @@ renewal, evidence upload, and signed completion through a real loopback HTTPS
 listener. This uses connection-local copies of the synthetic upload tables and
 temporary blob storage; it cannot claim imported uploads. It requires an already
 trusted localhost certificate and never disables certificate verification.
-The client in this check is Node; C# broker end-to-end acceptance is separate.
+The default client in this check is Node. To additionally exercise the real C#
+`ValidatorQueueApi`, first build `KeireMarketplaceValidator.Tests` in Release,
+set `KEIRE_TEST_VALIDATOR_CSHARP=1`, and set `KEIRE_QA_DOTNET` to the absolute
+compatible .NET executable. The child receives only fixture credentials through
+stdin, generates an ephemeral signing key, and registers its public key in the
+connection-local fixture. It verifies package bytes, renews its lease, uploads
+evidence, signs and submits a synthetic report, and retries completion; the
+database must contain exactly one report. This tests the real broker transport
+and signature contracts, not the separate malware/compilation worker process.
 
 Build with `KEIRE_NODE_ADAPTER_MODE=middleware` before running
 `node scripts/test-platform-http-live.mjs --interactive`. Configure

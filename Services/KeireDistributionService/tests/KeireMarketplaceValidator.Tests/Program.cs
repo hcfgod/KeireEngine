@@ -10,10 +10,14 @@ using Keire.Marketplace.Validator.Broker;
 
 namespace Keire.Marketplace.Validator.Tests;
 
-internal static class Program
+internal static partial class Program
 {
     public static async Task<int> Main()
     {
+        if (Environment.GetEnvironmentVariable("KEIRE_TEST_LIVE_VALIDATOR") == "1")
+        {
+            return await RunLiveValidatorAsync();
+        }
         (string Name, Func<Task> Test)[] tests =
         [
             ("secret findings redact values", SecretFindingsRedactValuesAsync),
