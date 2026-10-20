@@ -8,6 +8,7 @@ import { transferLocalUpload } from "../Source/lib/platform-upload-transfer.mjs"
 import { platformTransaction } from "../Source/lib/platform-mysql.mjs";
 import { reserveLocalUpload } from "../Source/lib/platform-upload-reservation.mjs";
 import { localUploadStatus } from "../Source/lib/platform-upload-status.mjs";
+import { cancelLocalUpload } from "../Source/lib/platform-upload-cancel.mjs";
 
 export async function verifyUploadConcurrency(pool, userId) {
     const organizationId = randomUUID();
@@ -168,6 +169,35 @@ export async function verifyUploadConcurrency(pool, userId) {
             { code: "publisher.upload_not_found" });
         await pool.execute("UPDATE publishers SET suspended_at=NULL WHERE id=?", [publisherId]);
         checks += 4;
+        await assert.rejects(cancelLocalUpload(authentication, "fixture", transferReservation.uploadId),
+            { code: "publisher.upload_not_cancellable" });
+        await assert.rejects(cancelLocalUpload(outsiderAuthentication, "fixture", reservation.uploadId),
+            { code: "publisher.upload_not_found" });
+        const cancellationFailure = new Error("Synthetic cancellation audit failure");
+        const cancellationAuthentication = {
+            withSessionTransaction: (_token, action) => platformTransaction(pool, (connection) => action({
+                execute: (sql, parameters) => {
+                    if (sql.includes("'marketplace.upload_cancelled'")) {
+                        throw cancellationFailure;
+                    }
+                    return connection.execute(sql, parameters);
+                },
+            }, actor)),
+        };
+        await assert.rejects(cancelLocalUpload(cancellationAuthentication, "fixture", reservation.uploadId),
+            (error) => error === cancellationFailure);
+        assert.equal((await localUploadStatus(authentication, "fixture", reservation.uploadId)).state, "created");
+        assert.deepEqual(await cancelLocalUpload(authentication, "fixture", reservation.uploadId),
+            { uploadId: reservation.uploadId, state: "expired" });
+        assert.deepEqual(await cancelLocalUpload(authentication, "fixture", reservation.uploadId),
+            { uploadId: reservation.uploadId, state: "expired" });
+        const [cancellationAudits] = await pool.execute(
+            "SELECT id FROM platform_audit_events WHERE target_id=? AND action='marketplace.upload_cancelled'",
+            [reservation.uploadId]);
+        assert.equal(cancellationAudits.length, 1);
+        await assert.rejects(transferLocalUpload(authentication, "fixture", reservation.uploadId, store, chunks(bytes)),
+            { code: "publisher.upload_not_writable" });
+        checks += 8;
         await assert.rejects(transferLocalUpload(authentication, "fixture", transferReservation.uploadId,
             store, chunks(bytes)), { code: "publisher.upload_not_writable" });
         checks += 12;

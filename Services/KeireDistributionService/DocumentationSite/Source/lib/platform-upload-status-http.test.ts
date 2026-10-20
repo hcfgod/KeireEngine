@@ -8,14 +8,39 @@ const cookie = `__Host-keire-session=${"a".repeat(43)}`;
 function fixture(withSessionTransaction = vi.fn()) {
     const render = vi.fn();
     const backend = { provider: "mysql", withBackend: async (action) => action({ authentication: { withSessionTransaction } }) };
-    const request = (headers = {}, id = uploadId) => handleLocalPlatformRequest({
-        backend, request: new Request(`${origin}/publisher/v1/uploads/${id}/`, { headers }),
+    const request = (headers = {}, id = uploadId, method = "GET") => handleLocalPlatformRequest({
+        backend, request: new Request(`${origin}/publisher/v1/uploads/${id}/`, { headers, method }),
         siteOrigin: origin, correlationId: "qa", clientIdentity: "qa", render,
     });
     return { request, render, withSessionTransaction };
 }
 
 describe("local upload status HTTP routing", () => {
+    it("requires the exact origin before cancelling an upload", async () => {
+        const test = fixture();
+        for (const headers of [{ cookie }, { cookie, origin: "https://other.example" }]) {
+            expect((await test.request(headers, uploadId, "DELETE")).status).toBe(403);
+        }
+        expect(test.withSessionTransaction).not.toHaveBeenCalled();
+    });
+
+    it("cancels an authorized pending upload and returns its terminal state", async () => {
+        const execute = vi.fn(async (sql) => {
+            if (sql.includes("platform_feature_flags")) {
+                return [[{ enabled: 1 }]];
+            }
+            if (sql.includes("SELECT upload.id")) {
+                return [[{ id: uploadId, version_id: "version", state: "uploading", version_state: "draft" }]];
+            }
+            return [{ affectedRows: 1 }];
+        });
+        const test = fixture(vi.fn(async (_token, action) => action({ execute }, { assurance: 2, userId: "owner" })));
+        const response = await test.request({ cookie, origin }, uploadId, "DELETE");
+        expect(response.status).toBe(200);
+        expect((await response.json()).data).toEqual({ uploadId, state: "expired" });
+        expect(execute.mock.calls.some(([sql]) => sql.includes("marketplace.upload_cancelled"))).toBe(true);
+    });
+
     it("rejects anonymous and bearer requests without accessing data", async () => {
         const test = fixture();
         for (const headers of [{}, { cookie, authorization: "Bearer unsupported" }]) {

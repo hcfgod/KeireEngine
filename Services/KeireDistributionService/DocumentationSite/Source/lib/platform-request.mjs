@@ -44,8 +44,8 @@ export async function handleLocalPlatformRequest({ backend, request, siteOrigin,
             }
             const pathname = new URL(request.url).pathname.replace(/\/+$/, "");
             const uploadStatus = /^\/publisher\/v1\/uploads\/([^/]+)$/.exec(pathname);
-            if (uploadStatus && request.method === "GET") {
-                return handleLocalUploadStatusRequest(service.authentication, request, uploadStatus[1], correlationId);
+            if (uploadStatus && ["GET", "DELETE"].includes(request.method)) {
+                return handleLocalUploadStatusRequest(service.authentication, request, uploadStatus[1], correlationId, siteOrigin);
             }
             if (pathname === "/publisher/v1/applications") {
                 return handleLocalPublisherApplicationRequest(service.authentication, request, siteOrigin, correlationId);
