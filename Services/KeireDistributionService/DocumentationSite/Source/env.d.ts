@@ -22,6 +22,7 @@ declare namespace App {
         localAccountView?: Awaited<ReturnType<typeof import("./lib/platform-account-view.mjs").localAccountOverview>> | null;
         localRecovery?: boolean;
         localRegistration?: boolean;
+        localPublisherView?: Awaited<ReturnType<typeof import("./lib/platform-publisher-portal.mjs").localPublisherPortal>>;
         pendingMfaChallenge: {
             factors: Array<{ id: string; friendly_name: string | null; factor_type?: string }>;
             expiresAt: number;

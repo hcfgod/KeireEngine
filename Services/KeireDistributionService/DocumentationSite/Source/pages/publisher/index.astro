@@ -5,7 +5,8 @@ import { mfaChallengePath } from "../../lib/auth";
 export const prerender = false;
 
 const supabase = Astro.locals.supabase;
-const user = Astro.locals.user;
+const localView = Astro.locals.localPublisherView;
+const user = Astro.locals.localAccountView?.user ?? Astro.locals.user;
 let enabled = false;
 let applications: any[] = [];
 let organizations: any[] = [];
@@ -17,7 +18,10 @@ let versions: any[] = [];
 let uploads: any[] = [];
 let validationReports: any[] = [];
 
-if (supabase) {
+if (localView) {
+    ({ enabled, applications, organizations, publishers, products, categories, licenses,
+        versions, uploads, validationReports } = localView);
+} else if (supabase) {
     const flag = await supabase.from("platform_feature_flags").select("enabled")
         .eq("key", "publisher_portal_enabled").maybeSingle();
     enabled = flag.data?.enabled === true;
@@ -29,7 +33,7 @@ if (supabase) {
             .select("license_id,revision,display_name,license_kind").order("display_name");
         licenses = licenseResult.data ?? [];
         const applicationResult = await supabase.from("publisher_applications")
-            .select("id,public_name,state,submitted_at,decision_note,updated_at")
+            .select("id,organization_id,public_name,website_url,portfolio_url,statement,state,submitted_at,decision_note,updated_at")
             .eq("applicant_user_id", user.id).order("updated_at", { ascending: false });
         applications = applicationResult.data ?? [];
 
@@ -101,6 +105,7 @@ const requestedPublisher = publishers.find((publisher: any) => publisher.id === 
 const requestedProductPublished = requestedProduct?.state === "published";
 const isNeonForgeUploadSample = requestedProduct?.slug === "neon-forge-creator-pack";
 const activeValidationStates = new Set(["created", "uploading", "uploaded", "leased"]);
+const editableApplication = applications.find((item: any) => ["draft", "changes_requested"].includes(item.state));
 ---
 
 <PlatformLayout title="Publisher portal" description="Create private package releases, upload exact bytes to quarantine, review validation, and submit immutable Kéire Marketplace releases." active="marketplace" robots="noindex">
@@ -138,6 +143,7 @@ const activeValidationStates = new Set(["created", "uploading", "uploaded", "lea
 
                     <div class="publisher-workspace">
                         <section id="new-release" class="publisher-section">
+                            {localView && <p class="notice-panel">Application drafts and review requests are available. Package uploads and release submission are temporarily unavailable while the local publishing service is being migrated.</p>}
                             <div class="publisher-section__heading">
                                 <div><p class="eyebrow">Private quarantine</p><h2>Upload a package for validation</h2></div>
                                 <span class="status-badge">Unsigned draft</span>
@@ -267,7 +273,7 @@ const activeValidationStates = new Set(["created", "uploading", "uploaded", "lea
                                     </div>
 
                                     <div class="actions">
-                                        <button class="button" type="submit" data-upload-submit>Hash and upload privately</button>
+                                        <button class="button" type="submit" data-upload-submit disabled={Boolean(localView)}>Hash and upload privately</button>
                                         <button class="button button--secondary" type="button" data-upload-cancel hidden>Cancel upload</button>
                                     </div>
                                     <p class="form-message" data-upload-message role="status" aria-live="polite"></p>
@@ -296,7 +302,7 @@ const activeValidationStates = new Set(["created", "uploading", "uploaded", "lea
                                             </div>
                                             <p>These exact validated bytes are still private. Submit them to create the audited Staff moderation entry.</p>
                                             <div class="actions">
-                                                <button class="button" type="button" data-submit-version={version.id}>Submit to Staff review</button>
+                                                <button class="button" type="button" data-submit-version={version.id} disabled={Boolean(localView)}>Submit to Staff review</button>
                                             </div>
                                         </article>
                                     ))}
@@ -328,7 +334,7 @@ const activeValidationStates = new Set(["created", "uploading", "uploaded", "lea
                                                     <td><span class:list={["status-badge", report?.passed && "status-badge--ready"]} data-validation-state>{validationLabel}</span><small data-validation-detail>{report ? report.validator_version : validationPending ? "Waiting for an isolated validator" : "No validation report"}</small></td>
                                                     <td>{new Date(upload.created_at).toLocaleString()}</td>
                                                     <td>{report?.passed && upload.state === "validated" && version?.state === "validated"
-                                                        ? <div><button class="button button--compact" type="button" data-submit-version={version.id}>Submit to Staff review</button><small>Required before Staff can review it.</small></div>
+                                                        ? <div><button class="button button--compact" type="button" data-submit-version={version.id} disabled={Boolean(localView)}>Submit to Staff review</button><small>Required before Staff can review it.</small></div>
                                                         : <small>{version?.state === "submitted" ? "In staff review" : "Available after validation"}</small>}</td>
                                                 </tr>;
                                             })}
@@ -351,13 +357,13 @@ const activeValidationStates = new Set(["created", "uploading", "uploaded", "lea
                             <div class="publisher-section__heading"><div><p class="eyebrow">Publisher identity</p><h2>Application</h2></div></div>
                             {applications.length ? <div class="data-table-wrap"><table class="data-table"><thead><tr><th>Public name</th><th>State</th><th>Updated</th></tr></thead><tbody>{applications.map((application: any) => <tr><td>{application.public_name}</td><td><span class="status-badge">{application.state}</span></td><td>{new Date(application.updated_at).toLocaleDateString()}</td></tr>)}</tbody></table></div> : <p class="notice-panel">No publisher application has been started.</p>}
                             {organizations.length ? (
-                                <form class="form-stack notice-panel publisher-application" data-publisher-application data-application-id={applications.find((item: any) => ["draft", "changes_requested"].includes(item.state))?.id ?? ""}>
+                                <form class="form-stack notice-panel publisher-application" data-publisher-application data-application-id={editableApplication?.id ?? ""}>
                                     <h3>Publisher application</h3>
-                                    <label class="field"><span>Publishing organization</span><select name="organizationId" required><option value="">Choose an organization</option>{organizations.map((membership: any) => <option value={membership.organizations?.id}>{membership.organizations?.display_name}</option>)}</select></label>
-                                    <label class="field"><span>Public publisher name</span><input name="publicName" minlength="2" maxlength="96" required /></label>
-                                    <label class="field"><span>Website (optional)</span><input name="websiteUrl" type="url" maxlength="2048" placeholder="https://" /></label>
-                                    <label class="field"><span>Portfolio (optional)</span><input name="portfolioUrl" type="url" maxlength="2048" placeholder="https://" /></label>
-                                    <label class="field"><span>Publishing statement</span><textarea name="statement" minlength="20" maxlength="5000" required></textarea></label>
+                                    <label class="field"><span>Publishing organization</span><select name="organizationId" required><option value="">Choose an organization</option>{organizations.map((membership: any) => <option value={membership.organizations?.id} selected={editableApplication?.organization_id === membership.organizations?.id}>{membership.organizations?.display_name}</option>)}</select></label>
+                                    <label class="field"><span>Public publisher name</span><input name="publicName" value={editableApplication?.public_name ?? ""} minlength="2" maxlength="96" required /></label>
+                                    <label class="field"><span>Website (optional)</span><input name="websiteUrl" value={editableApplication?.website_url ?? ""} type="url" maxlength="2048" placeholder="https://" /></label>
+                                    <label class="field"><span>Portfolio (optional)</span><input name="portfolioUrl" value={editableApplication?.portfolio_url ?? ""} type="url" maxlength="2048" placeholder="https://" /></label>
+                                    <label class="field"><span>Publishing statement</span><textarea name="statement" minlength="20" maxlength="5000" required>{editableApplication?.statement ?? ""}</textarea></label>
                                     <div class="actions"><button class="button button--secondary" type="submit" name="intent" value="save">Save draft</button><button class="button" type="submit" name="intent" value="submit">Submit for review</button></div>
                                     <p class="form-message" role="status" aria-live="polite"></p>
                                 </form>

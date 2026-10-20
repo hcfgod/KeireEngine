@@ -469,13 +469,24 @@ try {
         assert.match(applicationResponse.headers.get("cache-control"), /private, no-store/);
         const application = (await applicationResponse.json()).data;
         assert.equal(application.state, "draft");
+        const publisherDraft = await request("/publisher/");
+        assert.equal(publisherDraft.status, 200);
+        assert.match(publisherDraft.headers.get("cache-control"), /private, no-store/);
+        const publisherDraftHtml = await publisherDraft.text();
+        assert.match(publisherDraftHtml, /HTTP QA publisher/);
+        assert.match(publisherDraftHtml, /A disposable publisher application for real HTTPS acceptance/);
+        assert.match(publisherDraftHtml, new RegExp(`data-application-id="${application.applicationId}"`));
+        assert.match(publisherDraftHtml, /temporarily unavailable while the local publishing service/);
         const submittedApplication = await request("/publisher/v1/applications/",
             { ...applicationInput, applicationId: application.applicationId, action: "submit" });
         assert.equal(submittedApplication.status, 200);
         assert.equal((await submittedApplication.json()).data.state, "submitted");
         assert.equal((await request("/publisher/v1/applications/",
             { ...applicationInput, applicationId: application.applicationId })).status, 409);
-        checks += 8;
+        const publisherSubmittedHtml = await (await request("/publisher/")).text();
+        assert.match(publisherSubmittedHtml, /HTTP QA publisher/);
+        assert.doesNotMatch(publisherSubmittedHtml, new RegExp(`data-application-id="${application.applicationId}"`));
+        checks += 16;
         const library = await request("/marketplace/v1/library/");
         const invalidClaim = await request("/marketplace/v1/claims/", { ownership: "organization" });
         assert.equal(invalidClaim.status, 400);

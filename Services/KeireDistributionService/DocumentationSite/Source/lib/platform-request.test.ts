@@ -13,6 +13,14 @@ function fixture(pathname = "/account/sign-in/") {
 }
 
 describe("staged local platform request routing", () => {
+    it("redirects anonymous publisher readers without rendering private data", async () => {
+        const { options } = fixture("/publisher/");
+        const response = await handleLocalPlatformRequest(options);
+        expect(response.status).toBe(303);
+        expect(response.headers.get("location")).toBe("/account/sign-in/?next=%2Fpublisher%2F");
+        expect(response.headers.get("cache-control")).toBe("private, no-store");
+        expect(options.render).not.toHaveBeenCalled();
+    });
     it("routes public product reads without treating browser cookies as ownership", async () => {
         const { options, authentication } = fixture("/marketplace/v1/products/00000000-0000-4000-8000-000000000001/");
         expect((await handleLocalPlatformRequest(options)).status).toBe(200);

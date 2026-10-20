@@ -1,4 +1,5 @@
-import { createLocalAuthenticationHttp, localBrowserRequestState } from "./platform-auth-http.mjs";
+import { cookieToken, createLocalAuthenticationHttp, localBrowserRequestState } from "./platform-auth-http.mjs";
+import { localPublisherPortal } from "./platform-publisher-portal.mjs";
 import { localAccountOverview } from "./platform-account-view.mjs";
 import { localProductPage } from "./platform-product.mjs";
 import { handleLocalClaimRequest } from "./platform-claims-http.mjs";
@@ -43,6 +44,23 @@ export async function handleLocalPlatformRequest({ backend, request, siteOrigin,
             const pathname = new URL(request.url).pathname.replace(/\/+$/, "");
             if (pathname === "/publisher/v1/applications") {
                 return handleLocalPublisherApplicationRequest(service.authentication, request, siteOrigin, correlationId);
+            }
+            if (pathname === "/publisher" && ["GET", "HEAD"].includes(request.method)) {
+                const state = await localBrowserRequestState(service.authentication, request);
+                const headers = { "cache-control": "private, no-store", "vary": "Cookie, Authorization" };
+                if (!state.session || state.session.assurance !== 2) {
+                    return new Response(null, { status: 303, headers: { ...headers,
+                        location: state.session ? "/account/mfa/challenge/?next=%2Fpublisher%2F"
+                            : "/account/sign-in/?next=%2Fpublisher%2F" } });
+                }
+                const publisherView = await localPublisherPortal(service.authentication,
+                    cookieToken(request, "__Host-keire-session"));
+                const accountView = await localAccountOverview(service.pool, state.session);
+                const rendered = await render({ ...state, accountView, publisherView });
+                for (const [name, value] of Object.entries(headers)) {
+                    rendered.headers.set(name, value);
+                }
+                return rendered;
             }
             if (["/account/create", "/account/confirm"].includes(pathname) && ["GET", "HEAD"].includes(request.method)) {
                 const rendered = await render({ session: null, pendingChallenge: null, accountView: null,

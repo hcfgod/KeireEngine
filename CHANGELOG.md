@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Connected staged MySQL publisher portal reads and application drafts; reopening a draft now restores its saved fields instead of showing an empty form.
+
 - Added staged MySQL publisher-application save/submit transactions with authenticator and organization-role checks, protected review transitions, and atomic audit records.
 
 - Fixed email sign-in becoming stuck after connection failures or invalid server responses; added bounded waits, retry feedback, and duplicate-submit protection.

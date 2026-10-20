@@ -32,7 +32,8 @@ export async function localPublisherPortal(authentication, sessionToken) {
         if (!data.enabled) {
             return data;
         }
-        const [applications] = await connection.execute(`SELECT id,public_name,state,submitted_at,decision_note,updated_at
+        const [applications] = await connection.execute(`SELECT id,organization_id,public_name,website_url,portfolio_url,
+            statement,state,submitted_at,decision_note,updated_at
             FROM publisher_applications WHERE applicant_user_id=? ORDER BY updated_at DESC,id LIMIT 100`, [session.userId]);
         data.applications = timestamps(applications, ["submitted_at", "updated_at"]);
         const [organizations] = await connection.execute(`SELECT member.role,organization.id,organization.display_name,organization.slug
