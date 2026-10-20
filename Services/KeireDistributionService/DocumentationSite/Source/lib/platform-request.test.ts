@@ -13,6 +13,33 @@ function fixture(pathname = "/account/sign-in/") {
 }
 
 describe("staged local platform request routing", () => {
+    it("routes broker requests without browser authentication or rendering", async () => {
+        const { options, authentication } = fixture("/internal/validator/v1/queue/");
+        const expected = Response.json({ data: { lease: null } });
+        const handle = vi.fn(async () => expected);
+        options.backend.withBackend = async (action) => action({ authentication, validator: { handle } });
+        expect(await handleLocalPlatformRequest(options)).toBe(expected);
+        expect(handle).toHaveBeenCalledWith(options.request);
+        expect(authentication.session).not.toHaveBeenCalled();
+        expect(options.render).not.toHaveBeenCalled();
+    });
+
+    it("fails closed when validator processing is not configured", async () => {
+        const { options, authentication } = fixture("/internal/validator/v1/queue/");
+        expect((await handleLocalPlatformRequest(options)).status).toBe(503);
+        expect(authentication.session).not.toHaveBeenCalled();
+        expect(options.render).not.toHaveBeenCalled();
+    });
+
+    it("does not send unknown validator paths to browser handlers", async () => {
+        const { options, authentication } = fixture("/internal/validator/unknown/");
+        options.backend.withBackend = async (action) => action({
+            authentication, validator: { handle: async () => null },
+        });
+        expect((await handleLocalPlatformRequest(options)).status).toBe(404);
+        expect(options.render).not.toHaveBeenCalled();
+    });
+
     it("redirects anonymous publisher readers without rendering private data", async () => {
         const { options } = fixture("/publisher/");
         const response = await handleLocalPlatformRequest(options);

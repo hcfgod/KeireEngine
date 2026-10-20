@@ -123,7 +123,12 @@ minting both transfer URLs while keeping the internal attempt counter out of the
 strict C# lease response. It borrows the host's pool and verified stores, rejects
 new requests during shutdown, and drains accepted handlers before clearing its
 keys. Hosts must also finish or cancel outstanding response streams before
-disposing storage. Application lifecycle/router integration remains pending.
+disposing storage. `PlatformBackend` accepts an optional `createValidator`
+factory and disposes that service before uploads and the database, including
+partial startup failures. MySQL requests under `/internal/validator/` route
+exclusively to this service, returning 503 when it is not configured; they never
+fall through to browser authentication or rendering. Production and QA host
+configuration and complete broker acceptance remain pending.
 
 Build with `KEIRE_NODE_ADAPTER_MODE=middleware` before running
 `node scripts/test-platform-http-live.mjs --interactive`. Configure

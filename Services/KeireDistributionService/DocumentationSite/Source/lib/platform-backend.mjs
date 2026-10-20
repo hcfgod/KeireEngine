@@ -19,6 +19,7 @@ export function selectPlatformBackend(value) {
 export class PlatformBackend {
     constructor({ provider, loadLocalSecrets, createPool = createPlatformPool,
         createAuthentication = LocalPasswordAuthentication.create, createMailer = null, createUploads = null,
+        createValidator = null,
         createRecoveryWorker = (processNext) => new RecoveryDeliveryWorker(processNext),
         createRegistrationWorker = (processNext) => new RecoveryDeliveryWorker(processNext) }) {
         this.provider = selectPlatformBackend(provider);
@@ -36,6 +37,10 @@ export class PlatformBackend {
             throw new Error("Upload storage requires an application-owned factory.");
         }
         this.createUploads = createUploads;
+        if (createValidator !== null && typeof createValidator !== "function") {
+            throw new Error("Validator processing requires an application-owned factory.");
+        }
+        this.createValidator = createValidator;
         this.createRecoveryWorker = createRecoveryWorker;
         this.createRegistrationWorker = createRegistrationWorker;
         this.activeRequests = 0;
@@ -55,6 +60,7 @@ export class PlatformBackend {
         let recoveryWorker;
         let registrationWorker;
         let uploads;
+        let validator;
         let secrets;
         try {
             // Loader transfers ownership of its fresh key buffer to this initialization operation.
@@ -71,6 +77,12 @@ export class PlatformBackend {
                     || typeof uploads.reserve !== "function" || typeof uploads.prepare !== "function"
                     || typeof uploads.complete !== "function") {
                     throw new Error("Upload factory returned an invalid service.");
+                }
+            }
+            if (this.createValidator) {
+                validator = await this.createValidator({ pool });
+                if (!validator || typeof validator.handle !== "function" || typeof validator.close !== "function") {
+                    throw new Error("Validator factory returned an invalid service.");
                 }
             }
             if (this.createMailer) {
@@ -95,9 +107,15 @@ export class PlatformBackend {
                 registrationWorker.start();
             }
             return Object.freeze({ provider: "mysql", pool, authentication, mailer, emailAuthentication, uploads: uploads ?? null,
+                validator: validator ?? null,
                 registrationWorker: registrationWorker ?? null,
                 recoveryWorker: recoveryWorker ?? null });
         } catch (error) {
+            try {
+                await validator?.close?.();
+            } catch {
+                // Preserve startup failure while disposing remaining borrowed resources.
+            }
             try {
                 await uploads?.close?.();
             } catch {
@@ -179,7 +197,11 @@ export class PlatformBackend {
         try {
             try {
                 try {
-                    await backend?.uploads?.close();
+                    try {
+                        await backend?.validator?.close();
+                    } finally {
+                        await backend?.uploads?.close();
+                    }
                 } finally {
                     await backend?.registrationWorker?.close();
                 }

@@ -19,6 +19,51 @@ function fixture() {
 }
 
 describe("application-owned backend lifecycle", () => {
+    it("drains the validator before closing its borrowed database", async () => {
+        const data = fixture();
+        const drain = deferred();
+        const validator = { handle: vi.fn(), close: vi.fn(() => drain.promise) };
+        const backend = new PlatformBackend({ provider: "mysql", loadLocalSecrets: data.loadLocalSecrets,
+            createPool: data.createPool, createAuthentication: data.createAuthentication,
+            createValidator: async ({ pool }) => {
+                expect(pool).toBe(data.pool);
+                return validator;
+            } });
+        expect(await backend.withBackend((services) => services.validator)).toBe(validator);
+        const closing = backend.close();
+        await Promise.resolve();
+        expect(data.pool.end).not.toHaveBeenCalled();
+        drain.resolve();
+        await closing;
+        expect(validator.close).toHaveBeenCalledOnce();
+        expect(data.pool.end).toHaveBeenCalledOnce();
+    });
+
+    it("cleans up a validator after later startup failure", async () => {
+        const data = fixture();
+        const validator = { handle: vi.fn(), close: vi.fn() };
+        const backend = new PlatformBackend({ provider: "mysql", loadLocalSecrets: data.loadLocalSecrets,
+            createPool: data.createPool, createAuthentication: data.createAuthentication,
+            createValidator: async () => validator,
+            createMailer: async () => { throw new Error("mail unavailable"); } });
+        await expect(backend.withBackend(() => {})).rejects.toThrow("mail unavailable");
+        expect(validator.close).toHaveBeenCalledOnce();
+        expect(data.pool.end).toHaveBeenCalledOnce();
+    });
+
+    it("disposes the database even when validator shutdown fails", async () => {
+        const data = fixture();
+        const backend = new PlatformBackend({ provider: "mysql", loadLocalSecrets: data.loadLocalSecrets,
+            createPool: data.createPool, createAuthentication: data.createAuthentication,
+            createValidator: async () => ({
+                handle() {},
+                close() { throw new Error("validator shutdown failed"); },
+            }) });
+        await backend.withBackend(() => {});
+        await expect(backend.close()).rejects.toThrow("validator shutdown failed");
+        expect(data.pool.end).toHaveBeenCalledOnce();
+    });
+
     it("drains upload storage before authentication and database shutdown", async () => {
         const data = fixture();
         const drain = deferred();
