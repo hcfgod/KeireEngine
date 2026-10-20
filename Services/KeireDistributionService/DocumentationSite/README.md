@@ -189,6 +189,15 @@ it consumes no sequence and grants no additional runtime permissions.
 Staff UI
 and evidence access, and the signer queue remain pending.
 
+Internal MySQL publication lease operations now require an active signing key,
+current approval, and matching validated upload/report metadata. They select work
+with `SKIP LOCKED`, recover expired leases in bounded batches, delay retries by
+five minutes, and stop after five attempts. Renewal checks the owning worker and
+continued approval. Real temporary-table tests cover those transitions; the
+publication HTTP boundary, explicit failure handling, and signed completion are
+not enabled yet. Sequence values remain exact decimal strings internally and
+must be serialized as exact JSON integers at the eventual C# HTTP boundary.
+
 Build with `KEIRE_NODE_ADAPTER_MODE=middleware` before running
 `node scripts/test-platform-http-live.mjs --interactive`. Configure
 `KEIRE_QA_POWERSHELL`, `KEIRE_QA_SETTINGS_DIRECTORY`, and `KEIRE_QA_PORT` for the

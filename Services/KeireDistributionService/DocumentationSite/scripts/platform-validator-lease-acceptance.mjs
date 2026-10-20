@@ -18,10 +18,10 @@ export async function verifyValidatorLeases(pool, fixtureUploadId, fixtureVersio
     const tables = ["marketplace_uploads", "marketplace_product_versions",
         "marketplace_validation_reports", "platform_audit_events", "marketplace_validator_attestation_keys",
         "marketplace_products", "marketplace_submissions", "marketplace_publication_jobs",
-        "marketplace_publications", "platform_staff_members"];
+        "marketplace_publications", "platform_staff_members", "marketplace_signature_keys"];
     const connection = {
         execute: (sql, parameters) => rawConnection.execute(
-            sql.replace(/\b(marketplace_uploads|marketplace_product_versions|marketplace_validation_reports|platform_audit_events|marketplace_validator_attestation_keys|marketplace_products|marketplace_submissions|marketplace_publication_jobs|marketplace_publications|platform_staff_members|platform_publication_sequence)\b/g,
+            sql.replace(/\b(marketplace_uploads|marketplace_product_versions|marketplace_validation_reports|platform_audit_events|marketplace_validator_attestation_keys|marketplace_products|marketplace_submissions|marketplace_publication_jobs|marketplace_publications|platform_staff_members|platform_publication_sequence|marketplace_signature_keys)\b/g,
                 (table) => `${table}_qa_lease`), parameters),
         beginTransaction: () => rawConnection.beginTransaction(),
         commit: () => rawConnection.commit(),
