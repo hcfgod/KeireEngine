@@ -10,6 +10,7 @@ import { createPlatformPool } from "../Source/lib/platform-mysql.mjs";
 import { sealAccountRecord } from "../Source/lib/platform-account-import.mjs";
 import { loadWindowsPlatformSecrets } from "../Source/lib/platform-secrets.mjs";
 import { emailSendLimits } from "../Source/lib/platform-email-limits.mjs";
+import { verifyUploadHttp } from "./platform-upload-http-acceptance.mjs";
 
 const userId = randomUUID();
 const factorId = randomUUID();
@@ -487,6 +488,8 @@ try {
         assert.match(publisherSubmittedHtml, /HTTP QA publisher/);
         assert.doesNotMatch(publisherSubmittedHtml, new RegExp(`data-application-id="${application.applicationId}"`));
         checks += 16;
+        stage = "publisher-upload-status-cancellation";
+        checks += await verifyUploadHttp(pool, userId, organization.organizationId, request);
         const library = await request("/marketplace/v1/library/");
         const invalidClaim = await request("/marketplace/v1/claims/", { ownership: "organization" });
         assert.equal(invalidClaim.status, 400);
