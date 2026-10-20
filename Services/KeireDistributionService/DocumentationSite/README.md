@@ -140,8 +140,20 @@ schema, expected HTTPS origin, registered client, canonical PKCS8 encoding and
 public-key fingerprint. Invalid settings fail without exposing parser details
 or generating a replacement key. The payload contains a private key: transport
 it only through a private pipe into OS-protected storage. This module does not
-itself persist or encrypt settings; the protected Windows setup/host loader
-must be connected before production activation.
+itself persist or encrypt settings. Windows setup is provided by
+`scripts/configure-local-platform-native.ps1` in the parent service directory:
+pass a dedicated new absolute `-SettingsDirectory` and canonical `-SiteOrigin`.
+It stores `native-settings.dpapi` with CurrentUser DPAPI and a directory ACL for
+the current user and SYSTEM. Existing directories are refused. The service must
+run under the same Windows identity and use `loadWindowsNativeSecrets` with the
+private `read-local-platform-native.ps1` subprocess; never run that reader in a
+visible terminal. No private key is placed in command arguments or plaintext
+files. Host factory wiring is still required before production activation.
+
+`scripts/test-native-protected-settings.mjs` exercises actual Windows protection,
+stable reload, overwrite refusal and mismatched-host rejection. Set
+`KEIRE_QA_POWERSHELL` to the absolute PowerShell 7 executable. It retains only
+encrypted isolated fixture settings in the reported temporary directory.
 
 `platform-validator-report.mjs` verifies the worker's exact Ed25519 signature,
 trusted-key validity, package/version identity, evidence metadata, scan outcomes,
