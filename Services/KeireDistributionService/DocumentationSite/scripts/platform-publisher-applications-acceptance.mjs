@@ -6,6 +6,7 @@ import { saveLocalPublisherApplication } from "../Source/lib/platform-publisher-
 import { localPublisherPortal } from "../Source/lib/platform-publisher-portal.mjs";
 import { selectUploadProduct } from "../Source/lib/platform-upload-product.mjs";
 import { localUploadInput } from "../Source/lib/platform-upload-input.mjs";
+import { reserveLocalUpload } from "../Source/lib/platform-upload-reservation.mjs";
 
 export async function verifyPublisherApplications(pool, userId) {
     const rollback = new Error("Rollback publisher application fixtures");
@@ -132,6 +133,23 @@ export async function verifyPublisherApplications(pool, userId) {
         await assert.rejects(selectUploadProduct(connection, actor, { ...uploadInput, productId: randomUUID() }),
             { code: "publisher.product_not_editable" });
         checks += 10;
+        const reserved = await reserveLocalUpload(auth(), "fixture", { ...uploadInput, productId });
+        assert.equal(reserved.productId, productId);
+        assert.match(reserved.storagePath, new RegExp(`/${"a".repeat(64)}\\.keireassetpackage$`));
+        assert.ok(Date.parse(reserved.expiresAt) > Date.now());
+        await assert.rejects(reserveLocalUpload(auth(), "fixture", { ...uploadInput, productId }),
+            { code: "publisher.upload_already_active" });
+        await connection.execute("UPDATE marketplace_uploads SET expires_at='2000-01-01' WHERE id=?", [reserved.uploadId]);
+        const replacement = await reserveLocalUpload(auth(), "fixture",
+            { ...uploadInput, productId, expectedSha256: "b".repeat(64) });
+        assert.equal(replacement.versionId, reserved.versionId);
+        assert.notEqual(replacement.uploadId, reserved.uploadId);
+        const [oldUpload] = await connection.execute("SELECT state FROM marketplace_uploads WHERE id=?", [reserved.uploadId]);
+        assert.equal(oldUpload[0].state, "expired");
+        await connection.execute("UPDATE marketplace_product_versions SET state='published' WHERE id=?", [reserved.versionId]);
+        await assert.rejects(reserveLocalUpload(auth(), "fixture", { ...uploadInput, productId }),
+            { code: "publisher.version_not_editable" });
+        checks += 8;
         throw rollback;
     }), (error) => error === rollback);
     const [remaining] = await pool.execute("SELECT id FROM publisher_applications WHERE id=?", [applicationId]);
