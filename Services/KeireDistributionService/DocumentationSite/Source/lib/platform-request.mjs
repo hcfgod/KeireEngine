@@ -10,6 +10,7 @@ import { handleLocalMfaRequest } from "./platform-mfa-http.mjs";
 import { handleLocalRegistrationRequest } from "./platform-registration-http.mjs";
 import { handleLocalPublisherApplicationRequest } from "./platform-publisher-applications-http.mjs";
 import { handleLocalUploadStatusRequest } from "./platform-upload-status-http.mjs";
+import { handleLocalUploadRequest } from "./platform-uploads-http.mjs";
 
 /** A staged provider adapter. Unported routes fail closed instead of using Supabase identities or data. */
 export async function handleLocalPlatformRequest({ backend, request, siteOrigin, clientIdentity, correlationId, render }) {
@@ -25,6 +26,10 @@ export async function handleLocalPlatformRequest({ backend, request, siteOrigin,
     }
     try {
         return await backend.withBackend(async (service) => {
+            const uploadResponse = await handleLocalUploadRequest(service, request, siteOrigin, correlationId);
+            if (uploadResponse) {
+                return uploadResponse;
+            }
             const registrationResponse = await handleLocalRegistrationRequest(service, request, siteOrigin, clientIdentity, correlationId);
             if (registrationResponse) {
                 return registrationResponse;
