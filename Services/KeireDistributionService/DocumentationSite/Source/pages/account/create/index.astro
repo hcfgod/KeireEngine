@@ -14,5 +14,54 @@ if (Astro.locals.user) return Astro.redirect("/account/", 303);
 </PlatformLayout>
 <script>
     const form = document.querySelector("[data-create-account]");
-    form?.addEventListener("submit", async (event) => { event.preventDefault(); if (!(form instanceof HTMLFormElement)) return; const data = new FormData(form); const message = form.querySelector("[data-create-message]"); const response = await fetch("/account/registration/", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ displayName: data.get("displayName"), email: data.get("email"), password: data.get("password"), accepted: data.get("accepted") === "on" }) }); const result = await response.json(); if (message instanceof HTMLElement) { message.dataset.kind = response.ok ? "success" : "error"; message.textContent = response.ok ? "Check your email to verify the account." : result.error?.message; } });
+    let submitting = false;
+
+    form?.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        if (!(form instanceof HTMLFormElement) || submitting) {
+            return;
+        }
+        const data = new FormData(form);
+        const message = form.querySelector<HTMLElement>("[data-create-message]");
+        const button = form.querySelector<HTMLButtonElement>('button[type="submit"]');
+        submitting = true;
+        if (button) {
+            button.disabled = true;
+        }
+        if (message) {
+            message.dataset.kind = "";
+            message.textContent = "Creating your account…";
+        }
+        try {
+            const response = await fetch("/account/registration/", {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                cache: "no-store",
+                signal: AbortSignal.timeout(15000),
+                body: JSON.stringify({
+                    displayName: data.get("displayName"),
+                    email: data.get("email"),
+                    password: data.get("password"),
+                    accepted: data.get("accepted") === "on",
+                }),
+            });
+            const result = await response.json();
+            if (message) {
+                message.dataset.kind = response.ok ? "success" : "error";
+                message.textContent = response.ok
+                    ? "Check your email to verify the account."
+                    : result.error?.message ?? "Account creation is unavailable. Please try again later.";
+            }
+        } catch {
+            if (message) {
+                message.dataset.kind = "error";
+                message.textContent = "We could not confirm account creation. Check your inbox before trying again.";
+            }
+        } finally {
+            submitting = false;
+            if (button) {
+                button.disabled = false;
+            }
+        }
+    });
 </script>

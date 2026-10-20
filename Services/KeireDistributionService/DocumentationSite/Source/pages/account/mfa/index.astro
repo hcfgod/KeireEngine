@@ -124,7 +124,8 @@ const verified = factors.filter((factor) => factor.status === "verified");
             if (factor) {
                 factor.value = data.factorId;
             }
-            showMessage("Scan the code and enter the current six-digit token. New setups expire after 15 minutes.");
+            const instructions = "Scan the code and enter the current six-digit token.";
+            showMessage(password ? `${instructions} New setups expire after 15 minutes.` : instructions);
         });
     });
 
