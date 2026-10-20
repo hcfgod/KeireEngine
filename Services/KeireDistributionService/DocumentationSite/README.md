@@ -156,7 +156,10 @@ use the authenticated transaction. The MySQL adapter routes
 `POST /publisher/v1/versions/{id}/submit/` through this operation with exact
 HTTPS Origin and browser-session checks. Bearer credentials are rejected and
 unexpected errors give an unconfirmed-submission message without database details.
-Real-database submission acceptance remains required before production cutover.
+The local authentication acceptance harness exercises submission against temporary
+MySQL product, version, report, submission, and audit tables, including failed
+authorization, audit-write rollback, duplicate rejection, and resubmission.
+Browser-driven review and staff decisions remain separate production gates.
 
 Build with `KEIRE_NODE_ADAPTER_MODE=middleware` before running
 `node scripts/test-platform-http-live.mjs --interactive`. Configure

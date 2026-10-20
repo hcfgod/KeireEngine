@@ -34,6 +34,8 @@ describe("local validated release submission", () => {
         const insert = execute.mock.calls.find(([sql]) => sql.includes("INSERT INTO marketplace_submissions"));
         expect(insert?.[1]).toEqual([result.submissionId, versionId, "report", "user"]);
         expect(execute.mock.calls.at(-1)?.[0]).toContain("INSERT INTO platform_audit_events");
+        expect(execute.mock.calls.at(-1)?.[0]).toContain("correlation_id");
+        expect(execute.mock.calls.at(-1)?.[1][2]).toMatch(/^[0-9a-f-]{36}$/);
     });
 
     it.each([

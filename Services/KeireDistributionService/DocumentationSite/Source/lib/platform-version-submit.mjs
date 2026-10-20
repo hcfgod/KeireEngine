@@ -58,9 +58,9 @@ export async function submitLocalVersion(authentication, token, versionId) {
         await connection.execute(`UPDATE marketplace_products SET state='submitted',
             updated_at=UTC_TIMESTAMP(6) WHERE id=?`, [version.product_id]);
         await connection.execute(`INSERT INTO platform_audit_events
-            (occurred_at,actor_user_id,action,target_type,target_id,metadata)
-            VALUES (UTC_TIMESTAMP(6),?,'marketplace.submission_created','marketplace_submission',?,?)`,
-        [session.userId, submissionId, JSON.stringify({ versionId, validationReportId: report.id })]);
+            (occurred_at,actor_user_id,action,target_type,target_id,correlation_id,metadata)
+            VALUES (UTC_TIMESTAMP(6),?,'marketplace.submission_created','marketplace_submission',?,?,?)`,
+        [session.userId, submissionId, randomUUID(), JSON.stringify({ versionId, validationReportId: report.id })]);
         return { submissionId, state: "submitted" };
     });
     if (!result) {

@@ -7,6 +7,7 @@ import { authorizeValidatorTransfer, createValidatorCapabilities } from "../Sour
 import { createValidatorFileHttp } from "../Source/lib/platform-validator-files.mjs";
 import { createQaValidatorHttp } from "./qa-validator-http.mjs";
 import { verifyCSharpValidatorHttp } from "./qa-validator-csharp.mjs";
+import { verifyVersionSubmission } from "./platform-version-submit-acceptance.mjs";
 
 /** Connection-local copies prevent the queue test from leasing any imported customer uploads. */
 export async function verifyValidatorLeases(pool, fixtureUploadId, fixtureVersionId, evidenceStore) {
@@ -14,10 +15,11 @@ export async function verifyValidatorLeases(pool, fixtureUploadId, fixtureVersio
     const links = createValidatorCapabilities(randomBytes(32), "https://qa.invalid.example");
     let http;
     const tables = ["marketplace_uploads", "marketplace_product_versions",
-        "marketplace_validation_reports", "platform_audit_events", "marketplace_validator_attestation_keys"];
+        "marketplace_validation_reports", "platform_audit_events", "marketplace_validator_attestation_keys",
+        "marketplace_products", "marketplace_submissions"];
     const connection = {
         execute: (sql, parameters) => rawConnection.execute(
-            sql.replace(/\b(marketplace_uploads|marketplace_product_versions|marketplace_validation_reports|platform_audit_events|marketplace_validator_attestation_keys)\b/g,
+            sql.replace(/\b(marketplace_uploads|marketplace_product_versions|marketplace_validation_reports|platform_audit_events|marketplace_validator_attestation_keys|marketplace_products|marketplace_submissions)\b/g,
                 (table) => `${table}_qa_lease`), parameters),
         beginTransaction: () => rawConnection.beginTransaction(),
         commit: () => rawConnection.commit(),
@@ -38,8 +40,10 @@ export async function verifyValidatorLeases(pool, fixtureUploadId, fixtureVersio
         for (const table of tables) {
             await rawConnection.execute(`CREATE TEMPORARY TABLE ${table}_qa_lease LIKE ${table}`);
         }
+        const [[originalVersion]] = await rawConnection.execute(
+            "SELECT product_id FROM marketplace_product_versions WHERE id=?", [fixtureVersionId]);
         for (const [table, id] of [["marketplace_uploads", fixtureUploadId],
-            ["marketplace_product_versions", fixtureVersionId]]) {
+            ["marketplace_product_versions", fixtureVersionId], ["marketplace_products", originalVersion.product_id]]) {
             const [columns] = await rawConnection.execute(`SHOW COLUMNS FROM ${table}`);
             const writable = columns.filter((column) => !/VIRTUAL GENERATED|STORED GENERATED/.test(column.Extra));
             assert.ok(writable.every((column) => /^[a-z_][a-z0-9_]*$/.test(column.Field)));
@@ -203,9 +207,9 @@ export async function verifyValidatorLeases(pool, fixtureUploadId, fixtureVersio
             });
             const [[reportCount]] = await connection.execute("SELECT COUNT(*) AS total FROM marketplace_validation_reports");
             assert.equal(Number(reportCount.total), 1);
-            return 53;
+            return 53 + await verifyVersionSubmission(isolatedPool, fixtureVersionId);
         }
-        return http ? 50 : 41;
+        return (http ? 50 : 41) + await verifyVersionSubmission(isolatedPool, fixtureVersionId);
     } finally {
         try {
             await http?.close();
