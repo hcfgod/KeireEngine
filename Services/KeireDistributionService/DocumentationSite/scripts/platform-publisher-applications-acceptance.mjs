@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { platformTransaction } from "../Source/lib/platform-mysql.mjs";
 import { createLocalOrganization } from "../Source/lib/platform-organizations.mjs";
 import { saveLocalPublisherApplication } from "../Source/lib/platform-publisher-applications.mjs";
+import { localPublisherPortal } from "../Source/lib/platform-publisher-portal.mjs";
 
 export async function verifyPublisherApplications(pool, userId) {
     const rollback = new Error("Rollback publisher application fixtures");
@@ -55,6 +56,44 @@ export async function verifyPublisherApplications(pool, userId) {
             [applicationId]);
         assert.deepEqual(audit, [{ actor_user_id: userId }]);
         checks += 14;
+        const portal = await localPublisherPortal(auth(), "fixture");
+        assert.equal(portal.enabled, true);
+        assert.deepEqual(portal.applications.map((item) => item.id), [applicationId]);
+        assert.deepEqual(portal.organizations.map((item) => item.organizations.id), [organization.organizationId]);
+        for (const field of ["publishers", "products", "versions", "uploads", "validationReports"]) {
+            assert.deepEqual(portal[field], []);
+        }
+        const outsider = await localPublisherPortal(auth(2, randomUUID()), "fixture");
+        assert.deepEqual(outsider.applications, []);
+        assert.deepEqual(outsider.organizations, []);
+        await assert.rejects(localPublisherPortal(auth(1), "fixture"), { code: "account.mfa_required" });
+        checks += 11;
+        const [existingPublishers] = await connection.execute(`SELECT publisher.id,publisher.organization_id
+            FROM publishers publisher JOIN organizations organization ON organization.id=publisher.organization_id
+            WHERE publisher.suspended_at IS NULL AND organization.deleted_at IS NULL
+            AND EXISTS (SELECT 1 FROM marketplace_products product WHERE product.publisher_id=publisher.id)
+            ORDER BY publisher.id LIMIT 1`);
+        assert.equal(existingPublishers.length, 1);
+        const existingPublisher = existingPublishers[0];
+        // Only a synthetic user's membership is added, and the enclosing transaction always rolls back.
+        await connection.execute(`INSERT INTO organization_memberships
+            (organization_id,user_id,role,invited_by,created_at) VALUES (?,?,'admin',?,UTC_TIMESTAMP(6))`,
+        [existingPublisher.organization_id, userId, userId]);
+        const authorized = await localPublisherPortal(auth(), "fixture");
+        assert.deepEqual(authorized.publishers.map((item) => item.id), [existingPublisher.id]);
+        assert.ok(authorized.products.length > 0);
+        assert.ok(authorized.products.every((item) => item.publisher_id === existingPublisher.id));
+        const [expectedVersions] = await connection.execute(`SELECT version.id FROM marketplace_product_versions version
+            JOIN marketplace_products product ON product.id=version.product_id WHERE product.publisher_id=?
+            ORDER BY version.updated_at DESC,version.id LIMIT 100`, [existingPublisher.id]);
+        assert.deepEqual(authorized.versions.map((item) => item.id), expectedVersions.map((item) => item.id));
+        await connection.execute("UPDATE organization_memberships SET role='member' WHERE organization_id=? AND user_id=?",
+            [existingPublisher.organization_id, userId]);
+        const downgraded = await localPublisherPortal(auth(), "fixture");
+        for (const field of ["publishers", "products", "versions", "uploads", "validationReports"]) {
+            assert.deepEqual(downgraded[field], []);
+        }
+        checks += 10;
         throw rollback;
     }), (error) => error === rollback);
     const [remaining] = await pool.execute("SELECT id FROM publisher_applications WHERE id=?", [applicationId]);
