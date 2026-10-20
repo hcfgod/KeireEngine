@@ -198,6 +198,37 @@ export async function verifyUploadConcurrency(pool, userId) {
         await assert.rejects(transferLocalUpload(authentication, "fixture", reservation.uploadId, store, chunks(bytes)),
             { code: "publisher.upload_not_writable" });
         checks += 8;
+        const retry = await reserveLocalUpload(authentication, "fixture", {
+            ...input, productId: reservation.productId,
+        });
+        assert.notEqual(retry.uploadId, reservation.uploadId);
+        assert.equal(retry.versionId, reservation.versionId);
+        assert.notEqual(retry.storagePath, reservation.storagePath);
+        assert.equal((await localUploadStatus(authentication, "fixture", reservation.uploadId)).state, "expired");
+        assert.equal((await localUploadStatus(authentication, "fixture", retry.uploadId)).state, "created");
+        await cancelLocalUpload(authentication, "fixture", retry.uploadId);
+        const raceReservation = await reserveLocalUpload(authentication, "fixture", {
+            ...input, productId: reservation.productId, version: "1.0.2",
+            expectedSizeBytes: identity.sizeBytes, expectedSha256: identity.sha256,
+        });
+        let replacement;
+        const cancellationDuringTransfer = {
+            put: async (reservedIdentity, incoming) => {
+                await store.put(reservedIdentity, incoming);
+                await cancelLocalUpload(authentication, "fixture", raceReservation.uploadId);
+                replacement = await reserveLocalUpload(authentication, "fixture", {
+                    ...input, productId: reservation.productId, version: "1.0.2",
+                    expectedSizeBytes: identity.sizeBytes, expectedSha256: identity.sha256,
+                });
+            },
+        };
+        await assert.rejects(transferLocalUpload(authentication, "fixture", raceReservation.uploadId,
+            cancellationDuringTransfer, chunks(bytes)), { code: "publisher.upload_not_writable" });
+        assert.equal((await localUploadStatus(authentication, "fixture", replacement.uploadId)).state, "created");
+        assert.equal((await localUploadStatus(authentication, "fixture", raceReservation.uploadId)).state, "expired");
+        await transferLocalUpload(authentication, "fixture", replacement.uploadId, store, chunks(bytes));
+        assert.equal((await localUploadStatus(authentication, "fixture", replacement.uploadId)).state, "uploaded");
+        checks += 9;
         await assert.rejects(transferLocalUpload(authentication, "fixture", transferReservation.uploadId,
             store, chunks(bytes)), { code: "publisher.upload_not_writable" });
         checks += 12;

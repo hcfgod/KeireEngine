@@ -39,12 +39,12 @@ export async function reserveLocalUpload(authentication, sessionToken, rawInput)
             [...metadata, versionId, productId, input.version]);
         }
         const uploadId = randomUUID();
-        const storagePath = `${productId}/${versionId}/${input.expectedSha256}.keireassetpackage`;
+        let storagePath = `${productId}/${versionId}/${input.expectedSha256}.keireassetpackage`;
         const [previous] = await connection.execute(
             "SELECT id FROM marketplace_uploads WHERE storage_path_digest=UNHEX(SHA2(?,256)) FOR UPDATE", [storagePath]);
         if (previous.length) {
-            throw new LocalUploadError(409, "publisher.upload_content_already_reserved",
-                "These exact release bytes already have an upload record. Check its status before uploading again.");
+            // Retain historical reservations. A fresh ID prevents an old cancelled request from completing this retry.
+            storagePath = `${productId}/${versionId}/${uploadId}/${input.expectedSha256}.keireassetpackage`;
         }
         await connection.execute(`INSERT INTO marketplace_uploads
             (id,version_id,created_by,storage_bucket,storage_path,expected_size_bytes,expected_sha256,
