@@ -282,7 +282,9 @@ const editableApplication = applications.find((item: any) => ["draft", "changes_
                                         <button class="button button--secondary" type="button" data-upload-cancel hidden>Cancel upload</button>
                                     </div>
                                     <p class="form-message" data-upload-message role="status" aria-live="polite"></p>
-                                    <p class="publisher-security-note">The grant is path-scoped, expires after two hours, cannot overwrite an existing object, and never exposes a service credential to this browser.</p>
+                                    <p class="publisher-security-note">{localView
+                                        ? "Uploads require your signed-in account, expire after two hours, and cannot overwrite an existing package."
+                                        : "The upload grant expires after two hours and cannot overwrite an existing package."}</p>
                                 </form>
                             ) : (
                                 <div class="notice-panel">
@@ -385,7 +387,7 @@ const editableApplication = applications.find((item: any) => ["draft", "changes_
     import { sha256 } from "@noble/hashes/sha2.js";
     import { bytesToHex } from "@noble/hashes/utils.js";
     import { Upload } from "tus-js-client";
-    import { publisherUploadTransport } from "../../lib/publisher-upload-client";
+    import { confirmLocalUpload, publisherUploadTransport } from "../../lib/publisher-upload-client";
 
     const maximumPackageBytes = 64 * 1024 * 1024 * 1024;
     const hashChunkBytes = 4 * 1024 * 1024;
@@ -520,6 +522,7 @@ const editableApplication = applications.find((item: any) => ["draft", "changes_
         const cancel = uploadForm.querySelector<HTMLButtonElement>("[data-upload-cancel]");
         let activeUpload: Upload | null = null;
         let activeUploadId: string | null = null;
+        let pendingCompletionId: string | null = null;
         let userCancelled = false;
 
         const setProgress = (label: string, value: number) => {
@@ -539,6 +542,30 @@ const editableApplication = applications.find((item: any) => ["draft", "changes_
                 method: "DELETE",
                 credentials: "same-origin",
             }));
+        };
+        const confirmPendingUpload = async () => {
+            if (!pendingCompletionId) return;
+            setBusy(true, false);
+            try {
+                await confirmLocalUpload(pendingCompletionId);
+                pendingCompletionId = null;
+                activeUpload = null;
+                activeUploadId = null;
+                if (message) {
+                    message.textContent = "Upload received. See its validation status below.";
+                    message.dataset.kind = "success";
+                }
+                window.setTimeout(() => window.location.reload(), 1_250);
+            } catch (error) {
+                if (message) {
+                    const detail = error instanceof Error ? error.message : "The response was interrupted.";
+                    message.textContent = `${detail} Click Retry confirmation to check the same upload without sending the file again.`;
+                    message.dataset.kind = "error";
+                }
+                setBusy(false);
+                fileInput.disabled = true;
+                if (submit) submit.textContent = "Retry confirmation";
+            }
         };
 
         fileInput.addEventListener("change", () => {
@@ -574,6 +601,10 @@ const editableApplication = applications.find((item: any) => ["draft", "changes_
         uploadForm.addEventListener("submit", async (event) => {
             event.preventDefault();
             if (busy || !uploadsAvailable) {
+                return;
+            }
+            if (pendingCompletionId) {
+                await confirmPendingUpload();
                 return;
             }
             const file = fileInput.files?.[0];
@@ -641,6 +672,11 @@ const editableApplication = applications.find((item: any) => ["draft", "changes_
                 setProgress("Queuing validation…", 100);
                 const completedUploadId = activeUploadId;
                 if (!completedUploadId) throw new Error("The upload reservation was lost before completion.");
+                if (localUploads) {
+                    pendingCompletionId = completedUploadId;
+                    await confirmPendingUpload();
+                    return;
+                }
                 await responseData(await fetch(`/publisher/v1/uploads/${encodeURIComponent(completedUploadId)}/complete/`, {
                     method: "POST",
                     credentials: "same-origin",

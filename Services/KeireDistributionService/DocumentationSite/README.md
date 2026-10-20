@@ -63,6 +63,18 @@ checks and rollback behavior intact. A local preview is not a live deployment.
 
 ### Isolated MySQL authentication browser QA
 
+With the existing protected QA settings, `node scripts/test-platform-http-live.mjs
+--interactive --publisher-preview` adds a disposable publisher and an 8 MiB
+synthetic package for browser transport testing. These bytes are not a valid
+engine package and do not prove validator acceptance. Enter `stop` in the test
+terminal to close the host and clean up fixtures; verify the final
+`fixturesRemoved` result before considering cleanup complete.
+
+Staged local uploads retain the same reservation when completion cannot be
+confirmed. Use **Retry confirmation** on the upload form to check that upload
+without resending its bytes. This recovery currently applies while the page
+remains open; reload recovery is still pending.
+
 Build with `KEIRE_NODE_ADAPTER_MODE=middleware` before running
 `node scripts/test-platform-http-live.mjs --interactive`. Configure
 `KEIRE_QA_POWERSHELL`, `KEIRE_QA_SETTINGS_DIRECTORY`, and `KEIRE_QA_PORT` for the

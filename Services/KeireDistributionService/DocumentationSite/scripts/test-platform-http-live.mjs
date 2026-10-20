@@ -11,6 +11,7 @@ import { sealAccountRecord } from "../Source/lib/platform-account-import.mjs";
 import { loadWindowsPlatformSecrets } from "../Source/lib/platform-secrets.mjs";
 import { emailSendLimits } from "../Source/lib/platform-email-limits.mjs";
 import { verifyUploadHttp } from "./platform-upload-http-acceptance.mjs";
+import { createPublisherPreview } from "./qa-publisher-preview.mjs";
 
 const userId = randomUUID();
 const factorId = randomUUID();
@@ -27,6 +28,7 @@ let childExited;
 let shutdownPhase = "not-started";
 let spareConnection;
 let fixtureCreated = false;
+let publisherPreview;
 let stage = "settings";
 let checks = 0;
 const capturedMail = [];
@@ -146,6 +148,11 @@ try {
     }
     if (interactive) {
         stage = "interactive-browser";
+        if (process.argv.includes("--publisher-preview")) {
+            publisherPreview = await createPublisherPreview(pool, userId);
+            console.log(JSON.stringify({ syntheticPublisherPreview: true, packagePath: publisherPreview.packagePath,
+                note: "Upload transport fixture only; these bytes are not a valid engine package." }));
+        }
         if (process.argv.includes("--registration-preview")) {
             const registration = await request("/account/registration/", {
                 email: registrationEmail, password: registrationPassword, displayName: "Browser Registration QA", accepted: true,
@@ -688,6 +695,7 @@ try {
         }
     }
     try {
+        await publisherPreview?.close();
         if (fixtureCreated) {
             const [registeredAccounts] = await pool.execute("SELECT id FROM platform_accounts WHERE email_key=?", [registrationEmail]);
             for (const { id } of registeredAccounts) {

@@ -19,3 +19,24 @@ export function publisherUploadTransport(reservation: Record<string, unknown>, l
     return { uploadUrl: url.href, headers: { "x-signature": reservation.uploadId },
         withCredentials: true, uploadDataDuringCreation: false };
 }
+
+/** Confirmation is idempotent; an uncertain response must never trigger cancellation or a new reservation. */
+export async function confirmLocalUpload(uploadId: string, request: typeof fetch = fetch): Promise<void> {
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(uploadId)) {
+        throw new Error("The upload reference is invalid.");
+    }
+    const response = await request(`/publisher/v1/uploads/${uploadId}/complete/`, {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: "{}",
+    });
+    const payload = await response.json().catch(() => null);
+    if (!response.ok) {
+        throw new Error(payload?.error?.message ?? "Upload confirmation is temporarily unavailable.");
+    }
+    if (payload?.data?.uploadId !== uploadId
+        || !["uploaded", "leased", "validated", "failed"].includes(payload?.data?.state)) {
+        throw new Error("The server did not confirm this upload.");
+    }
+}
