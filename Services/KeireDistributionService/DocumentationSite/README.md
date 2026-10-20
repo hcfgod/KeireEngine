@@ -148,7 +148,11 @@ the current user and SYSTEM. Existing directories are refused. The service must
 run under the same Windows identity and use `loadWindowsNativeSecrets` with the
 private `read-local-platform-native.ps1` subprocess; never run that reader in a
 visible terminal. No private key is placed in command arguments or plaintext
-files. Host factory wiring is still required before production activation.
+files. `windowsNativeServiceFactory` supplies the optional backend `createNative`
+factory and captures the expected origin/client at host construction. The
+isolated QA host opts in with `KEIRE_QA_NATIVE_SETTINGS_DIRECTORY`; its settings
+must match `PUBLIC_SITE_URL`. Production listener deployment remains a separate
+activation gate. Do not use a production-bound key with a different QA origin.
 
 `scripts/test-native-protected-settings.mjs` exercises actual Windows protection,
 stable reload, overwrite refusal and mismatched-host rejection. Set

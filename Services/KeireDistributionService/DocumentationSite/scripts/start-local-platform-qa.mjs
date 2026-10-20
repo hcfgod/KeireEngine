@@ -13,6 +13,7 @@ import { createQaServerDrain } from "./qa-server-drain.mjs";
 import { LocalPasswordAuthentication } from "../Source/lib/platform-local-auth.mjs";
 import { openAccountRecord } from "../Source/lib/platform-account-import.mjs";
 import { createQaUploadService } from "./qa-upload-service.mjs";
+import { windowsNativeServiceFactory } from "../Source/lib/platform-native-factory.mjs";
 
 // Isolated loopback acceptance host. Production reverse-proxy trust and deployment remain separate gates.
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -118,6 +119,13 @@ async function createQaAuthentication(pool, key) {
 }
 
 const backend = new PlatformBackend({ provider: "mysql", createMailer, createAuthentication: createQaAuthentication,
+    createNative: process.env.KEIRE_QA_NATIVE_SETTINGS_DIRECTORY ? windowsNativeServiceFactory({
+        powerShellExecutable: process.env.KEIRE_QA_POWERSHELL,
+        decryptScriptPath: path.resolve(root, "../scripts/read-local-platform-native.ps1"),
+        settingsDirectory: process.env.KEIRE_QA_NATIVE_SETTINGS_DIRECTORY,
+        siteOrigin: process.env.PUBLIC_SITE_URL,
+        clientId: "keire-hub-desktop",
+    }) : null,
     createUploads: process.send && process.env.KEIRE_QA_UPLOADS === "isolated"
         ? ({ authentication }) => createQaUploadService(authentication, process.env.PUBLIC_SITE_URL, process.env.KEIRE_QA_POWERSHELL)
         : null,

@@ -7,6 +7,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadWindowsNativeSecrets } from "../Source/lib/platform-native-secrets.mjs";
 import { createNativeIdentitySigner } from "../Source/lib/platform-native-identity.mjs";
+import { windowsNativeServiceFactory } from "../Source/lib/platform-native-factory.mjs";
 
 const execute = promisify(execFile);
 const scripts = fileURLToPath(new URL("../../scripts/", import.meta.url));
@@ -31,6 +32,19 @@ try {
     assert.deepEqual(await readFile(path.join(settingsDirectory, "native-settings.dpapi")), encrypted);
     await assert.rejects(loadWindowsNativeSecrets({ ...loader, siteOrigin: "https://wrong.invalid" }),
         { message: "Protected native identity settings are unavailable." });
+    const native = await windowsNativeServiceFactory(loader)({
+        pool: { getConnection() { throw new Error("Discovery must not access the database."); } },
+        authentication: { session() {}, withSessionTransaction() {} },
+    });
+    try {
+        const response = await native.handle(new Request(`${siteOrigin}/auth/v1/.well-known/jwks.json`));
+        assert.equal(response.status, 200);
+        const publicDocument = await response.json();
+        assert.equal(publicDocument.keys[0].kid, configured.keyId);
+        assert.equal(Object.hasOwn(publicDocument.keys[0], "d"), false);
+    } finally {
+        await native.close();
+    }
     console.log(JSON.stringify({ status: "native-protected-settings-passed", settingsDirectory,
         stableIdentity: true, replacementRejected: true, hostMismatchRejected: true }));
 } catch {
