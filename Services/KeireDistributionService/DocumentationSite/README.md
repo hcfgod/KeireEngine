@@ -130,6 +130,15 @@ exclusively to this service, returning 503 when it is not configured; they never
 fall through to browser authentication or rendering. Production and QA host
 configuration and complete broker acceptance remain pending.
 
+Set `KEIRE_TEST_VALIDATOR_HTTPS=1`, `NODE_USE_SYSTEM_CA=1`,
+`KEIRE_QA_TLS_THUMBPRINT`, and `KEIRE_QA_POWERSHELL` when running the local
+authentication acceptance harness to exercise validator lease, download,
+renewal, evidence upload, and signed completion through a real loopback HTTPS
+listener. This uses connection-local copies of the synthetic upload tables and
+temporary blob storage; it cannot claim imported uploads. It requires an already
+trusted localhost certificate and never disables certificate verification.
+The client in this check is Node; C# broker end-to-end acceptance is separate.
+
 Build with `KEIRE_NODE_ADAPTER_MODE=middleware` before running
 `node scripts/test-platform-http-live.mjs --interactive`. Configure
 `KEIRE_QA_POWERSHELL`, `KEIRE_QA_SETTINGS_DIRECTORY`, and `KEIRE_QA_PORT` for the

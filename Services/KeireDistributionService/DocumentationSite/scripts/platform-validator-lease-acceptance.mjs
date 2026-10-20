@@ -5,11 +5,13 @@ import { completeValidationUpload } from "../Source/lib/platform-validator-compl
 import { createValidatorReportFixture } from "./validator-report-fixture.mjs";
 import { authorizeValidatorTransfer, createValidatorCapabilities } from "../Source/lib/platform-validator-capabilities.mjs";
 import { createValidatorFileHttp } from "../Source/lib/platform-validator-files.mjs";
+import { createQaValidatorHttp } from "./qa-validator-http.mjs";
 
 /** Connection-local copies prevent the queue test from leasing any imported customer uploads. */
 export async function verifyValidatorLeases(pool, fixtureUploadId, fixtureVersionId, evidenceStore) {
     const rawConnection = await pool.getConnection();
     const links = createValidatorCapabilities(randomBytes(32), "https://qa.invalid.example");
+    let http;
     const tables = ["marketplace_uploads", "marketplace_product_versions",
         "marketplace_validation_reports", "platform_audit_events", "marketplace_validator_attestation_keys"];
     const connection = {
@@ -94,7 +96,33 @@ export async function verifyValidatorLeases(pool, fixtureUploadId, fixtureVersio
         assert.equal(await leaseValidationUpload(isolatedPool, "replacement-worker", 60), null);
         await connection.execute(`UPDATE marketplace_uploads SET state='uploaded',validation_attempts=0`);
         await connection.execute("UPDATE marketplace_product_versions SET state='uploaded'");
-        const completionLease = await leaseValidationUpload(isolatedPool, "completion-worker", 900);
+        const brokerSecret = randomBytes(32).toString("hex");
+        if (process.env.KEIRE_TEST_VALIDATOR_HTTPS === "1") {
+            http = await createQaValidatorHttp({
+                pool: isolatedPool, packageStore: evidenceStore, evidenceStore,
+                brokerSecret, transferKey: randomBytes(32),
+            });
+        }
+        async function queueRequest(action, extra = {}) {
+            const response = await fetch(`${http.origin}/internal/validator/v1/queue/`, {
+                method: "POST",
+                headers: { "content-type": "application/json", "x-keire-validator-secret": brokerSecret },
+                body: JSON.stringify({ action, workerId: "completion-worker", leaseSeconds: 900, ...extra }),
+            });
+            assert.equal(response.status, 200);
+            return (await response.json()).data;
+        }
+        const completionLease = http
+            ? (await queueRequest("lease")).lease
+            : await leaseValidationUpload(isolatedPool, "completion-worker", 900);
+        if (http) {
+            assert.equal(Object.hasOwn(completionLease, "validationAttempt"), false);
+            const downloaded = await fetch(completionLease.downloadUrl);
+            assert.equal(downloaded.status, 200);
+            assert.equal(createHash("sha256").update(Buffer.from(await downloaded.arrayBuffer())).digest("hex"),
+                completionLease.expectedSha256);
+            assert.ok(Date.parse((await queueRequest("renew", { uploadId: fixtureUploadId })).leaseExpiresAt) > Date.now());
+        }
         const [[upload]] = await connection.execute("SELECT * FROM marketplace_uploads");
         const signed = createValidatorReportFixture(upload);
         const evidence = Buffer.from('{"schemaVersion":1,"files":[]}');
@@ -112,9 +140,10 @@ export async function verifyValidatorLeases(pool, fixtureUploadId, fixtureVersio
         [key.key_id, key.algorithm, key.public_key_base64, fingerprint, key.valid_from]);
         await assert.rejects(completeValidationUpload(isolatedPool, evidenceStore, fixtureUploadId,
             "completion-worker", signed.report), /evidence is missing/);
-        const evidenceAddress = links.issue({ uploadId: fixtureUploadId, workerId: "completion-worker",
+        const evidenceAddress = http ? completionLease.evidenceUploadUrl : links.issue({ uploadId: fixtureUploadId, workerId: "completion-worker",
             attempt: completionLease.validationAttempt, purpose: "evidence" });
-        const evidenceResponse = await files(new Request(evidenceAddress, {
+        const transfer = (request) => http ? fetch(request) : files(request);
+        const evidenceResponse = await transfer(new Request(evidenceAddress, {
             method: "PUT", headers: { "content-type": "application/json", "x-upsert": "false" }, body: evidence,
         }));
         assert.equal(evidenceResponse.status, 200);
@@ -135,8 +164,10 @@ export async function verifyValidatorLeases(pool, fixtureUploadId, fixtureVersio
         assert.equal(rolledBackUpload.state, "leased");
         const [[rolledBackVersion]] = await connection.execute("SELECT state FROM marketplace_product_versions");
         assert.equal(rolledBackVersion.state, "validating");
-        const result = await completeValidationUpload(isolatedPool, evidenceStore, fixtureUploadId,
-            "completion-worker", signed.report);
+        const result = http
+            ? await queueRequest("complete", { uploadId: fixtureUploadId, report: signed.report })
+            : await completeValidationUpload(isolatedPool, evidenceStore, fixtureUploadId,
+                "completion-worker", signed.report);
         const [[completed]] = await connection.execute("SELECT id,passed FROM marketplace_validation_reports");
         assert.equal(result.reportId, completed.id);
         assert.equal(completed.passed, 1);
@@ -153,13 +184,17 @@ export async function verifyValidatorLeases(pool, fixtureUploadId, fixtureVersio
         const [receipts] = await connection.execute(`SELECT id FROM platform_audit_events
             WHERE action='marketplace.validation.completed'`);
         assert.equal(receipts.length, 1);
-        assert.equal((await files(new Request(evidenceAddress, {
+        assert.equal((await transfer(new Request(evidenceAddress, {
             method: "PUT", headers: { "content-type": "application/json" }, body: evidence,
         }))).status, 403);
-        return 41;
+        return http ? 50 : 41;
     } finally {
-        links.close();
-        // Closing the connection also removes its private temporary tables, including on assertion failure.
-        connection.destroy();
+        try {
+            await http?.close();
+        } finally {
+            links.close();
+            // Closing the connection also removes its private temporary tables, including on assertion failure.
+            connection.destroy();
+        }
     }
 }
