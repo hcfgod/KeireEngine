@@ -91,6 +91,17 @@ or Supabase API keys. It bounds JSON bodies to 1 MiB and hides unexpected databa
 errors. It requires lease, renewal, and verified-completion service operations
 before construction; it is not currently connected to the website router.
 
+Native desktop authentication is being implemented separately from browser
+sessions. Its internal authorization modules validate registered callbacks and
+S256 PKCE, hash single-use request/code credentials, and bind consent to the
+current account and completed browser authentication. `platform-native-identity`
+uses pinned `jose` signing with a dedicated host-loaded Ed25519 key. ID tokens
+carry the registered issuer/client, account, desktop session, nonce, five-minute
+expiry, and only approved email/profile claims; JWKS contains public material
+only. These modules are not yet exposed as a complete OAuth service: native
+session persistence, refresh rotation, rate limits, browser consent integration,
+and client acceptance must pass before activation.
+
 `platform-validator-report.mjs` verifies the worker's exact Ed25519 signature,
 trusted-key validity, package/version identity, evidence metadata, scan outcomes,
 and completion timestamp. It rejects duplicate signed fields and contradictory
