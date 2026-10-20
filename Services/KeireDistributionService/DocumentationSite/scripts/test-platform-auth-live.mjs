@@ -20,6 +20,7 @@ import { createRecoveryDeliverySchema } from "../Source/lib/platform-recovery-de
 import { verifyRecoveryDelivery } from "./platform-recovery-delivery-acceptance.mjs";
 import { createRegistrationSchema } from "../Source/lib/platform-registration.mjs";
 import { verifyRegistrationStaging } from "./platform-registration-acceptance.mjs";
+import { verifyRegistrationConfirmation } from "./platform-registration-confirmation-acceptance.mjs";
 import { verifyLocalCatalog } from "./platform-catalog-acceptance.mjs";
 import { createPlatformPool } from "../Source/lib/platform-mysql.mjs";
 import { sealAccountRecord } from "../Source/lib/platform-account-import.mjs";
@@ -266,6 +267,8 @@ try {
     checks += await verifyRecoveryDelivery(runtime, auth, userId, now);
     stage = "registration-staging";
     checks += await verifyRegistrationStaging(runtime, auth, now, email);
+    stage = "registration-confirmation";
+    checks += await verifyRegistrationConfirmation(runtime, auth, now);
     stage = "public-catalog";
     checks += await verifyLocalCatalog(migration);
 
