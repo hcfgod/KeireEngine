@@ -85,7 +85,7 @@ async function runSubmissionChecks(pool, connection, actor, versionId) {
         stage = "submission-review-decision";
         return 12 + await verifyReviewDecision(pool, connection, actor, data.submissionId);
     } catch (error) {
-        error.fixtureStage = stage;
+        error.fixtureStage ??= stage;
         throw error;
     }
 }

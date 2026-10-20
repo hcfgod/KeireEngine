@@ -3,6 +3,7 @@ import { platformTransaction } from "../Source/lib/platform-mysql.mjs";
 import { decideLocalSubmission } from "../Source/lib/platform-review-decision.mjs";
 import { handleLocalReviewRequest } from "../Source/lib/platform-review-http.mjs";
 import { failLocalPublication, leaseLocalPublication, renewLocalPublication } from "../Source/lib/platform-publication-leases.mjs";
+import { verifyPublicationCompletion } from "./platform-publication-complete-acceptance.mjs";
 
 export async function verifyReviewDecision(pool, connection, actor, submissionId) {
     await connection.execute(`INSERT INTO platform_staff_members
@@ -93,5 +94,5 @@ export async function verifyReviewDecision(pool, connection, actor, submissionId
     await assert.rejects(renewLocalPublication(pool, lease.job_id, "signer-fixture"), { code: "publication.lease_lost" });
     await assert.rejects(failLocalPublication(pool, lease.job_id, "other-signer", "publication.fixture", true),
         { code: "publication.lease_lost" });
-    return 36;
+    return 36 + await verifyPublicationCompletion(pool, connection);
 }

@@ -53,7 +53,7 @@ export async function completeValidationUpload(pool, evidenceStore, uploadId, wo
         if (receipt) {
             return { reportId: receipt.id };
         }
-        if (upload.state !== "leased" || upload.lease_owner !== workerId || !upload.lease_live) {
+        if (upload.state !== "leased" || upload.lease_owner !== workerId || Number(upload.lease_live) !== 1) {
             throw lostLease();
         }
         const keyId = report?.attestation?.signature?.keyId;
@@ -75,7 +75,7 @@ export async function completeValidationUpload(pool, evidenceStore, uploadId, wo
                 WHERE key_id=? AND active=TRUE AND valid_from<=UTC_TIMESTAMP(6)
                 AND (valid_until IS NULL OR valid_until>UTC_TIMESTAMP(6))) AS lease_live
             FROM marketplace_uploads WHERE id=?`, [keyId, uploadId]);
-        if (!current.lease_live) {
+        if (Number(current?.lease_live) !== 1) {
             throw lostLease();
         }
         const reportId = randomUUID();

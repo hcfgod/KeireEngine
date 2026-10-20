@@ -109,6 +109,16 @@ Fixtures contain only synthetic release metadata and public keys. This checks
 the signature contract; database publication completion and queue acceptance
 must also pass before enabling the MySQL signer.
 
+`completeLocalPublication` locks the current job and approval records, verifies
+the signed metadata and immutable package/evidence stores, and rechecks lease
+and key validity after file verification. Publication, product/version states,
+submission state, and an exact retry receipt commit together. The database
+acceptance fixture tests rollback, missing evidence, expiry during verification,
+key deactivation, and duplicate/foreign retries using temporary tables and
+stubbed blob checks. Full queue acceptance with actual private files remains
+required before deployment. SQL boolean results are compared numerically:
+the driver can return `"0"`, which must not be interpreted as truthy.
+
 Internal validator completion locks the current lease and trusted key, verifies
 the signature and immutable evidence bytes, rechecks expiry, and commits the
 report, upload/version states, and audit receipt in one transaction. An exact

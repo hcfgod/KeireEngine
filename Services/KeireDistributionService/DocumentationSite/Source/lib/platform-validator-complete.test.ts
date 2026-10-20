@@ -42,11 +42,18 @@ describe("transactional validator completion", () => {
         expect(connection.rollback).toHaveBeenCalledOnce();
     });
 
-    it("does not commit a lease that expires while evidence is verified", async () => {
+    it.each([0, "0", null, undefined])("rejects an expired final lease result (%s)", async (live) => {
         const { complete, state, connection } = fixture();
-        state.live = 0;
+        state.live = live;
         await expect(complete()).rejects.toThrow("lease was lost");
         expect(connection.execute.mock.calls.some(([sql]) => /^(INSERT|UPDATE)/.test(sql))).toBe(false);
+    });
+
+    it("rejects a string-valued false initial lease before reading evidence", async () => {
+        const { complete, upload, evidenceStore } = fixture();
+        upload.lease_live = "0";
+        await expect(complete()).rejects.toThrow("lease was lost");
+        expect(evidenceStore.verify).not.toHaveBeenCalled();
     });
 
     it("rolls all completion changes back when audit storage fails", async () => {
