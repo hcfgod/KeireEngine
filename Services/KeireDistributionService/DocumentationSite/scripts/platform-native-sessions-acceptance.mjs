@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { generateKeyPairSync } from "node:crypto";
 import { jwtVerify, createLocalJWKSet } from "jose";
 import { nativeSessionSchema } from "../Source/lib/platform-native-session-schema.mjs";
-import { nativeAccountBinding } from "../Source/lib/platform-native-authorization.mjs";
+import { nativeAccountBinding, nativeAuthorizationSchema } from "../Source/lib/platform-native-authorization.mjs";
+import { verifyNativeAuthorization } from "./platform-native-authorization-acceptance.mjs";
 import { createNativeIdentitySigner } from "../Source/lib/platform-native-identity.mjs";
 import { issueNativeSession, refreshNativeSession, withNativeSessionTransaction } from "../Source/lib/platform-native-sessions.mjs";
 import { platformTransaction } from "../Source/lib/platform-mysql.mjs";
@@ -15,19 +16,20 @@ export async function verifyNativeSessions(pool, userId) {
         privateKey: generateKeyPairSync("ed25519").privateKey,
     });
     const tables = ["platform_native_sessions", "platform_native_access_tokens", "platform_native_refresh_tokens",
-        "platform_accounts", "platform_mfa_factors", "platform_audit_events"];
+        "platform_accounts", "platform_mfa_factors", "platform_audit_events",
+        "platform_native_authorizations", "platform_auth_sessions"];
     const names = new RegExp(`\\b(${tables.join("|")})\\b`, "g");
     const connection = {
         execute: (sql, values) => raw.execute(sql.replace(names, (table) => `${table}_qa_native`), values),
         beginTransaction: () => raw.beginTransaction(), commit: () => raw.commit(), rollback: () => raw.rollback(),
         release() {}, destroy: () => raw.destroy(),
     };
-    const isolatedPool = { getConnection: async () => connection };
+    const isolatedPool = { getConnection: async () => connection, execute: connection.execute };
     try {
-        for (const schema of nativeSessionSchema) {
+        for (const schema of [...nativeSessionSchema, nativeAuthorizationSchema]) {
             await connection.execute(schema.replace("CREATE TABLE", "CREATE TEMPORARY TABLE"));
         }
-        for (const table of ["platform_accounts", "platform_mfa_factors", "platform_audit_events"]) {
+        for (const table of ["platform_accounts", "platform_mfa_factors", "platform_audit_events", "platform_auth_sessions"]) {
             await raw.execute(`CREATE TEMPORARY TABLE ${table}_qa_native LIKE ${table}`);
         }
         // Copy only the harness-owned synthetic identity, never customer accounts.
@@ -93,7 +95,7 @@ export async function verifyNativeSessions(pool, userId) {
         assert.equal(await readIdentity(otherSession.access_token), null);
         await assert.rejects(refreshNativeSession(isolatedPool, signer, signer.clientId, otherSession.refresh_token, () => now),
             { code: "invalid_grant" });
-        return 21;
+        return 21 + await verifyNativeAuthorization(isolatedPool, connection, signer, userId);
     } finally {
         signer.close();
         raw.destroy();
