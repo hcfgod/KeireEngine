@@ -36,22 +36,55 @@ const reference = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a
 </PlatformLayout>
 <script>
     const form = document.querySelector("[data-auth-form]");
+    let submitting = false;
+
     form?.addEventListener("submit", async (event) => {
         event.preventDefault();
-        if (!(form instanceof HTMLFormElement)) return;
-        const message = form.querySelector("[data-auth-message]");
-        const submit = form.querySelector("button[type=submit]");
-        if (submit instanceof HTMLButtonElement) submit.disabled = true;
-        const values = new FormData(form);
-        const response = await fetch("/account/session/", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ email: values.get("email"), password: values.get("password") }) });
-        const result = await response.json();
-        if (message instanceof HTMLElement) { message.dataset.kind = response.ok ? "success" : "error"; message.textContent = response.ok ? "Signed in. Loading your account…" : result.error?.message ?? "Sign-in failed."; }
-        if (response.ok) {
-            const next = form.dataset.next || "/account/";
-            location.href = result.data?.mfaRequired
-                ? `/account/mfa/challenge/?next=${encodeURIComponent(next)}`
-                : next;
+        if (!(form instanceof HTMLFormElement) || submitting) {
+            return;
         }
-        if (submit instanceof HTMLButtonElement) submit.disabled = false;
+        const message = form.querySelector<HTMLElement>("[data-auth-message]");
+        const submit = form.querySelector<HTMLButtonElement>("button[type=submit]");
+        const values = new FormData(form);
+        submitting = true;
+        if (submit) {
+            submit.disabled = true;
+        }
+        if (message) {
+            message.dataset.kind = "";
+            message.textContent = "Signing in…";
+        }
+        try {
+            const response = await fetch("/account/session/", {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                cache: "no-store",
+                signal: AbortSignal.timeout(15000),
+                body: JSON.stringify({ email: values.get("email"), password: values.get("password") }),
+            });
+            const result = await response.json();
+            if (message) {
+                message.dataset.kind = response.ok ? "success" : "error";
+                message.textContent = response.ok
+                    ? "Sign-in accepted. Loading the next step…"
+                    : result.error?.message ?? "Sign-in failed. Please try again.";
+            }
+            if (response.ok) {
+                const next = form.dataset.next || "/account/";
+                location.href = result.data?.mfaRequired
+                    ? `/account/mfa/challenge/?next=${encodeURIComponent(next)}`
+                    : next;
+            }
+        } catch {
+            if (message) {
+                message.dataset.kind = "error";
+                message.textContent = "We could not confirm sign-in. Check your connection and try again.";
+            }
+        } finally {
+            submitting = false;
+            if (submit) {
+                submit.disabled = false;
+            }
+        }
     });
 </script>

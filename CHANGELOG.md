@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Fixed email sign-in becoming stuck after connection failures or invalid server responses; added bounded waits, retry feedback, and duplicate-submit protection.
+
 - Added staged MySQL asset-claim transactions with license verification, organization permissions, safe retries, and browser request validation.
 
 - Added staged MySQL browser library reads with personal and organization access checks, revocation filtering, and precise pagination.

@@ -145,6 +145,30 @@ try {
     }
     if (interactive) {
         stage = "interactive-browser";
+        if (process.argv.includes("--registration-preview")) {
+            const registration = await request("/account/registration/", {
+                email: registrationEmail, password: registrationPassword, displayName: "Browser Registration QA", accepted: true,
+            });
+            assert.equal(registration.status, 202);
+            let previewToken;
+            let previewReady = false;
+            for (let attempt = 0; attempt < 50; attempt++) {
+                previewToken = capturedRegistration.at(-1)?.token;
+                if (previewToken) {
+                    const [rows] = await pool.execute("SELECT delivery_state FROM platform_registration_requests WHERE token_hash=?",
+                        [createHash("sha256").update(previewToken).digest("hex")]);
+                    if (rows[0]?.delivery_state === "sent") {
+                        previewReady = true;
+                        break;
+                    }
+                }
+                await new Promise((resolve) => setTimeout(resolve, 100));
+            }
+            assert.ok(previewToken);
+            assert.ok(previewReady, "Registration preview delivery did not finish.");
+            console.log(JSON.stringify({ syntheticRegistrationPreview: true,
+                url: `${base}/account/confirm/#registration=${previewToken}` }));
+        }
         console.log(JSON.stringify({ syntheticBrowserAccount: true, url: `${base}/account/sign-in/`, email, password,
             commands: "totp prints the synthetic authenticator code; stop cleans up and exits" }));
         await new Promise((resolve) => {
