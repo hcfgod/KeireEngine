@@ -152,8 +152,11 @@ transition: verified session, enabled publisher portal, active organization
 owner/admin membership, an unsuspended publisher, a validated version, and a
 matching successful report are required. Requested changes reuse their submission
 ID and clear the previous assignment/decision. State updates and the audit entry
-use the authenticated transaction. HTTP wiring and real-database submission
-acceptance are still required before enabling this operation.
+use the authenticated transaction. The MySQL adapter routes
+`POST /publisher/v1/versions/{id}/submit/` through this operation with exact
+HTTPS Origin and browser-session checks. Bearer credentials are rejected and
+unexpected errors give an unconfirmed-submission message without database details.
+Real-database submission acceptance remains required before production cutover.
 
 Build with `KEIRE_NODE_ADAPTER_MODE=middleware` before running
 `node scripts/test-platform-http-live.mjs --interactive`. Configure

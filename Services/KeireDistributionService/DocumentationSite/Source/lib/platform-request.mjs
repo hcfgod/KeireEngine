@@ -11,6 +11,7 @@ import { handleLocalRegistrationRequest } from "./platform-registration-http.mjs
 import { handleLocalPublisherApplicationRequest } from "./platform-publisher-applications-http.mjs";
 import { handleLocalUploadStatusRequest } from "./platform-upload-status-http.mjs";
 import { handleLocalUploadRequest } from "./platform-uploads-http.mjs";
+import { handleLocalVersionSubmit } from "./platform-version-submit-http.mjs";
 
 /** A staged provider adapter. Unported routes fail closed instead of using Supabase identities or data. */
 export async function handleLocalPlatformRequest({ backend, request, siteOrigin, clientIdentity, correlationId, render }) {
@@ -34,6 +35,10 @@ export async function handleLocalPlatformRequest({ backend, request, siteOrigin,
                 return response ?? new Response(null, {
                     status: 404, headers: { "cache-control": "private, no-store" },
                 });
+            }
+            const submissionResponse = await handleLocalVersionSubmit(service.authentication, request, siteOrigin, correlationId);
+            if (submissionResponse) {
+                return submissionResponse;
             }
             const uploadResponse = await handleLocalUploadRequest(service, request, siteOrigin, correlationId);
             if (uploadResponse) {
