@@ -175,7 +175,13 @@ administrator enforcement and audit-failure rollback, including counter allocati
 contract through browser-session and exact-Origin guards. Other staff operations
 still return an explicit unavailable response. Approval requires the report's
 validated upload to belong to the reviewed version, in addition to matching its
-archive hash. Concurrent allocation, production counter provisioning, staff UI
+archive hash. Two-connection allocation acceptance verifies ten distinct sequence
+numbers and removal of its uniquely named fixture tables. Enable it with
+`KEIRE_TEST_PUBLICATION_CONCURRENCY=1` and configure `KEIRE_QA_POWERSHELL`,
+`KEIRE_QA_BOOTSTRAP_CREDENTIAL`, `KEIRE_QA_BOOTSTRAP_ENTROPY`, and
+`KEIRE_QA_BOOTSTRAP_CA`. The protected bootstrap credential is used only by a
+scoped cleanup helper; the migration account receives no additional DROP rights.
+Production counter provisioning, staff UI
 and evidence access, and the signer queue remain pending.
 
 Build with `KEIRE_NODE_ADAPTER_MODE=middleware` before running

@@ -14,6 +14,7 @@ import { verifyLocalOrganizations } from "./platform-organizations-acceptance.mj
 import { verifyPublisherApplications } from "./platform-publisher-applications-acceptance.mjs";
 import { verifyUploadConcurrency } from "./platform-upload-concurrency-acceptance.mjs";
 import { verifyPublicationSequence } from "./platform-publication-sequence-acceptance.mjs";
+import { verifyPublicationConcurrency } from "./platform-publication-concurrency-acceptance.mjs";
 import { verifyLocalDataRequests } from "./platform-data-requests-acceptance.mjs";
 import { verifyAuthenticatorEnrollment } from "./platform-mfa-management-acceptance.mjs";
 import { createRecoverySchema } from "../Source/lib/platform-recovery-store.mjs";
@@ -263,6 +264,10 @@ try {
     checks += await verifyUploadConcurrency(migration, userId);
     stage = "publication-sequence";
     checks += await verifyPublicationSequence(migration);
+    if (process.env.KEIRE_TEST_PUBLICATION_CONCURRENCY === "1") {
+        stage = "publication-concurrency";
+        checks += await verifyPublicationConcurrency(migration);
+    }
     stage = "account-data-requests";
     checks += await verifyLocalDataRequests(migration, userId);
     stage = "authenticator-enrollment";
