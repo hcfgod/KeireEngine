@@ -81,9 +81,12 @@ export async function verifyUploadHttp(pool, userId, organizationId, request, pr
         const complete = await request(`/publisher/v1/uploads/${retry.uploadId}/complete/`, {});
         assert.equal(complete.status, 200);
         assert.equal((await complete.json()).data.state, "uploaded");
+        const repeated = await request(`/publisher/v1/uploads/${retry.uploadId}/complete/`, {});
+        assert.equal(repeated.status, 200);
+        assert.equal((await repeated.json()).data.state, "uploaded");
         const finalStatus = await request(`/publisher/v1/uploads/${retry.uploadId}/`);
         assert.equal((await finalStatus.json()).data.versionState, "uploaded");
-        return 28;
+        return 30;
     } finally {
         await platformTransaction(pool, async (connection) => {
             await connection.execute(`DELETE audit FROM platform_audit_events audit

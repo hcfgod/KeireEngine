@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { LocalUploadError } from "./platform-upload-product.mjs";
 
-async function authorizedUpload(authentication, token, uploadId, action) {
+async function authorizedUpload(authentication, token, uploadId, action, allowCompleted = false) {
     if (typeof uploadId !== "string"
         || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(uploadId)) {
         throw new LocalUploadError(400, "publisher.upload_invalid", "The upload identifier is invalid.");
@@ -15,7 +15,7 @@ async function authorizedUpload(authentication, token, uploadId, action) {
         if (!flags.some((flag) => Boolean(flag.enabled))) {
             throw new LocalUploadError(503, "publisher.disabled", "Publisher uploads are not enabled.");
         }
-        const [rows] = await connection.execute(`SELECT upload.id,upload.version_id,upload.state,
+        const [rows] = await connection.execute(`SELECT upload.id,upload.version_id,upload.state,upload.uploaded_at,
             upload.expected_sha256,upload.expected_size_bytes,upload.storage_bucket,upload.expires_at>UTC_TIMESTAMP(6) AS unexpired,
             version.state AS version_state FROM marketplace_uploads upload
             JOIN marketplace_product_versions version ON version.id=upload.version_id
@@ -30,6 +30,15 @@ async function authorizedUpload(authentication, token, uploadId, action) {
         if (!upload) {
             throw new LocalUploadError(404, "publisher.upload_not_found", "This upload is unavailable to your account.");
         }
+        if (allowCompleted && upload.uploaded_at && ["uploaded", "leased", "validated", "failed"].includes(upload.state)) {
+            const [receipts] = await connection.execute(`SELECT id FROM platform_audit_events
+                WHERE target_type='marketplace_upload' AND target_id=? AND action='marketplace.upload_completed' LIMIT 1`,
+            [upload.id]);
+            if (receipts.length) {
+                upload.completion = { uploadId: upload.id, versionId: upload.version_id, state: upload.state };
+                return action(connection, session, upload);
+            }
+        }
         if (!upload.unexpired || !["created", "uploading"].includes(upload.state) || upload.version_state !== "draft") {
             throw new LocalUploadError(409, "publisher.upload_not_writable", "This upload is expired or no longer accepts bytes.");
         }
@@ -42,25 +51,35 @@ async function authorizedUpload(authentication, token, uploadId, action) {
 }
 
 /** Resolve the current identity without retaining database locks while receiving bytes. */
-export async function authorizeLocalUpload(authentication, sessionToken, uploadId) {
+export async function authorizeLocalUpload(authentication, sessionToken, uploadId, allowCompleted = false) {
     return authorizedUpload(authentication, sessionToken, uploadId, async (_connection, _session, upload) => ({
         uploadId: upload.id,
         expectedSha256: upload.expected_sha256,
         expectedSizeBytes: Number(upload.expected_size_bytes),
-    }));
+        ...(upload.completion ? { completion: upload.completion } : {}),
+    }), allowCompleted);
 }
 
 /** Internal streaming boundary. A verified immutable blob is queued only after a fresh authorization check. */
 export async function transferLocalUpload(authentication, sessionToken, uploadId, blobStore, chunks) {
     const identity = await authorizedUpload(authentication, sessionToken, uploadId, async (connection, _session, upload) => {
+        if (upload.completion) {
+            return { completion: upload.completion };
+        }
         await connection.execute("UPDATE marketplace_uploads SET state='uploading' WHERE id=?", [uploadId]);
         return { sha256: upload.expected_sha256, sizeBytes: Number(upload.expected_size_bytes) };
-    });
+    }, true);
+    if (identity.completion) {
+        return identity.completion;
+    }
     // Never hold database locks while a client sends a potentially large archive.
     await blobStore.put(identity, chunks);
     return authorizedUpload(authentication, sessionToken, uploadId, async (connection, session, upload) => {
         if (upload.expected_sha256 !== identity.sha256 || Number(upload.expected_size_bytes) !== identity.sizeBytes) {
             throw new LocalUploadError(409, "publisher.upload_changed", "The upload reservation changed during transfer.");
+        }
+        if (upload.completion) {
+            return upload.completion;
         }
         await connection.execute(
             "UPDATE marketplace_uploads SET state='uploaded',uploaded_at=UTC_TIMESTAMP(6) WHERE id=?", [uploadId]);
@@ -72,5 +91,5 @@ export async function transferLocalUpload(authentication, sessionToken, uploadId
         [session.userId, uploadId, randomUUID(), JSON.stringify({ versionId: upload.version_id,
             storageBucket: upload.storage_bucket, sizeBytes: identity.sizeBytes, sha256: identity.sha256 })]);
         return { uploadId, versionId: upload.version_id, state: "uploaded" };
-    });
+    }, true);
 }

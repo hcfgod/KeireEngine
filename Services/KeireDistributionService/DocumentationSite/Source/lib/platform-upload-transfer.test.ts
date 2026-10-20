@@ -24,6 +24,19 @@ function fixture() {
 }
 
 describe("private upload transfer", () => {
+    it("returns a recorded completion without reading or rewriting bytes", async () => {
+        const test = fixture();
+        Object.assign(test.upload, { state: "uploaded", version_state: "uploaded", uploaded_at: "2026-10-20", unexpired: 0 });
+        const original = test.execute.getMockImplementation();
+        test.execute.mockImplementation(async (sql) => sql.includes("SELECT id FROM platform_audit_events")
+            ? [[{ id: "receipt" }]] : original(sql));
+        const put = vi.fn();
+        expect(await transferLocalUpload(test.authentication, "token", uploadId, { put }, {}))
+            .toEqual({ uploadId, versionId: "version", state: "uploaded" });
+        expect(put).not.toHaveBeenCalled();
+        expect(test.execute.mock.calls.some(([sql]) => sql.startsWith("UPDATE"))).toBe(false);
+    });
+
     it("uses only the reserved identity and queues after storage verification", async () => {
         const test = fixture();
         const chunks = {};

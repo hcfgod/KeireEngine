@@ -6,9 +6,12 @@ export async function completeResumableUpload(authentication, sessionToken, uplo
     if (typeof fileId !== "string" || !/^[a-f0-9]{32}$/.test(fileId)) {
         throw new LocalUploadError(400, "publisher.transfer_invalid", "The resumable transfer identifier is invalid.");
     }
-    const reservation = await authorizeLocalUpload(authentication, sessionToken, uploadId);
+    const reservation = await authorizeLocalUpload(authentication, sessionToken, uploadId, true);
     if (fileId !== reservation.uploadId.replaceAll("-", "").toLowerCase()) {
         throw new LocalUploadError(403, "publisher.transfer_mismatch", "This transfer belongs to a different upload.");
+    }
+    if (reservation.completion) {
+        return reservation.completion;
     }
     let upload;
     try {

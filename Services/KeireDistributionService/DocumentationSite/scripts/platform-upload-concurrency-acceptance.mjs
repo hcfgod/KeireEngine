@@ -281,9 +281,37 @@ export async function verifyUploadConcurrency(pool, userId) {
         assert.equal((await completeResumableUpload(authentication, "fixture", validReservation.uploadId,
             validFileId, spool, store)).state, "uploaded");
         assert.equal((await localUploadStatus(authentication, "fixture", validReservation.uploadId)).versionState, "uploaded");
+        await spool.remove(validFileId);
+        assert.equal((await completeResumableUpload(authentication, "fixture", validReservation.uploadId,
+            validFileId, spool, store)).state, "uploaded");
+        const concurrentCompletion = await reserveLocalUpload(authentication, "fixture", {
+            ...input, productId: reservation.productId, version: "1.0.4",
+            expectedSizeBytes: identity.sizeBytes, expectedSha256: identity.sha256,
+        });
+        let arrivals = 0;
+        let release;
+        const bothVerified = new Promise((resolve) => { release = resolve; });
+        const synchronizedStore = { put: async (reservedIdentity, incoming) => {
+            await store.put(reservedIdentity, incoming);
+            arrivals++;
+            if (arrivals === 2) {
+                release();
+            }
+            await bothVerified;
+        } };
+        const completions = await Promise.all([
+            transferLocalUpload(authentication, "fixture", concurrentCompletion.uploadId, synchronizedStore, chunks(bytes)),
+            transferLocalUpload(authentication, "fixture", concurrentCompletion.uploadId, synchronizedStore, chunks(bytes)),
+        ]);
+        assert.deepEqual(completions.map((value) => value.state), ["uploaded", "uploaded"]);
+        const [completionReceipts] = await pool.execute(
+            "SELECT id FROM platform_audit_events WHERE target_id=? AND action='marketplace.upload_completed'",
+            [concurrentCompletion.uploadId]);
+        assert.equal(completionReceipts.length, 1);
+        checks += 3;
         checks += 7;
-        await assert.rejects(transferLocalUpload(authentication, "fixture", transferReservation.uploadId,
-            store, chunks(bytes)), { code: "publisher.upload_not_writable" });
+        assert.equal((await transferLocalUpload(authentication, "fixture", transferReservation.uploadId,
+            store, chunks(bytes))).state, "uploaded");
         checks += 12;
     } finally {
         await platformTransaction(pool, async (connection) => {
