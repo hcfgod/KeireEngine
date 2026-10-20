@@ -18,7 +18,7 @@ export function selectPlatformBackend(value) {
 /** Owned by the server application, not a process-global singleton or a request. */
 export class PlatformBackend {
     constructor({ provider, loadLocalSecrets, createPool = createPlatformPool,
-        createAuthentication = LocalPasswordAuthentication.create, createMailer = null,
+        createAuthentication = LocalPasswordAuthentication.create, createMailer = null, createUploads = null,
         createRecoveryWorker = (processNext) => new RecoveryDeliveryWorker(processNext),
         createRegistrationWorker = (processNext) => new RecoveryDeliveryWorker(processNext) }) {
         this.provider = selectPlatformBackend(provider);
@@ -32,6 +32,10 @@ export class PlatformBackend {
             throw new Error("Email delivery requires an application-owned factory.");
         }
         this.createMailer = createMailer;
+        if (createUploads !== null && typeof createUploads !== "function") {
+            throw new Error("Upload storage requires an application-owned factory.");
+        }
+        this.createUploads = createUploads;
         this.createRecoveryWorker = createRecoveryWorker;
         this.createRegistrationWorker = createRegistrationWorker;
         this.activeRequests = 0;
@@ -50,6 +54,7 @@ export class PlatformBackend {
         let mailer;
         let recoveryWorker;
         let registrationWorker;
+        let uploads;
         let secrets;
         try {
             // Loader transfers ownership of its fresh key buffer to this initialization operation.
@@ -60,6 +65,14 @@ export class PlatformBackend {
             pool = await this.createPool(secrets.settings, "runtime");
             await pool.query("SELECT 1");
             authentication = await this.createAuthentication(pool, secrets.accountEncryptionKey);
+            if (this.createUploads) {
+                uploads = await this.createUploads({ authentication, pool });
+                if (!uploads || typeof uploads.close !== "function" || typeof uploads.handle !== "function"
+                    || typeof uploads.reserve !== "function" || typeof uploads.prepare !== "function"
+                    || typeof uploads.complete !== "function") {
+                    throw new Error("Upload factory returned an invalid service.");
+                }
+            }
             if (this.createMailer) {
                 mailer = await this.createMailer();
                 if (!mailer || typeof mailer.sendVerification !== "function" || typeof mailer.close !== "function") {
@@ -81,10 +94,15 @@ export class PlatformBackend {
                 registrationWorker = this.createRegistrationWorker(() => processRegistrationDelivery(authentication, mailer));
                 registrationWorker.start();
             }
-            return Object.freeze({ provider: "mysql", pool, authentication, mailer, emailAuthentication,
+            return Object.freeze({ provider: "mysql", pool, authentication, mailer, emailAuthentication, uploads: uploads ?? null,
                 registrationWorker: registrationWorker ?? null,
                 recoveryWorker: recoveryWorker ?? null });
         } catch (error) {
+            try {
+                await uploads?.close?.();
+            } catch {
+                // Dispose remaining services even when upload shutdown fails.
+            }
             try {
                 await registrationWorker?.close();
             } catch {
@@ -160,7 +178,11 @@ export class PlatformBackend {
         }
         try {
             try {
-                await backend?.registrationWorker?.close();
+                try {
+                    await backend?.uploads?.close();
+                } finally {
+                    await backend?.registrationWorker?.close();
+                }
             } finally {
                 await backend?.recoveryWorker?.close();
             }

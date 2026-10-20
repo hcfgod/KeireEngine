@@ -19,6 +19,41 @@ function fixture() {
 }
 
 describe("application-owned backend lifecycle", () => {
+    it("drains upload storage before authentication and database shutdown", async () => {
+        const data = fixture();
+        const drain = deferred();
+        const uploads = { close: vi.fn(() => drain.promise), handle() {}, reserve() {}, prepare() {}, complete() {} };
+        const backend = new PlatformBackend({ provider: "mysql", loadLocalSecrets: data.loadLocalSecrets,
+            createPool: data.createPool, createAuthentication: data.createAuthentication,
+            createUploads: async ({ authentication, pool }) => {
+                expect(authentication).toBe(data.authentication);
+                expect(pool).toBe(data.pool);
+                return uploads;
+            } });
+        expect(await backend.withBackend((services) => services.uploads)).toBe(uploads);
+        const closing = backend.close();
+        await Promise.resolve();
+        expect(data.authentication.close).not.toHaveBeenCalled();
+        expect(data.pool.end).not.toHaveBeenCalled();
+        drain.resolve();
+        await closing;
+        expect(uploads.close).toHaveBeenCalledTimes(1);
+        expect(data.authentication.close).toHaveBeenCalledTimes(1);
+        expect(data.pool.end).toHaveBeenCalledTimes(1);
+    });
+
+    it("disposes uploads after a later initialization failure", async () => {
+        const data = fixture();
+        const uploads = { close: vi.fn(), handle() {}, reserve() {}, prepare() {}, complete() {} };
+        const backend = new PlatformBackend({ provider: "mysql", loadLocalSecrets: data.loadLocalSecrets,
+            createPool: data.createPool, createAuthentication: data.createAuthentication,
+            createUploads: async () => uploads,
+            createMailer: async () => { throw new Error("mail startup failure"); } });
+        await expect(backend.withBackend(() => {})).rejects.toThrow("mail startup failure");
+        expect(uploads.close).toHaveBeenCalledTimes(1);
+        expect(data.pool.end).toHaveBeenCalledTimes(1);
+    });
+
     it("drains registration before disposing its transport and database", async () => {
         const data = fixture();
         const drain = deferred();
