@@ -6,7 +6,8 @@ param
     [switch] $CreateEmailSchema,
     [switch] $CreateRecoverySchema,
     [switch] $CreateRecoveryDeliverySchema,
-    [switch] $CreateRegistrationSchema
+    [switch] $CreateRegistrationSchema,
+    [switch] $CreatePublicationSequenceSchema
 )
 
 $ErrorActionPreference = 'Stop'
@@ -47,6 +48,10 @@ try
     if ($CreateRegistrationSchema)
     {
         $start.ArgumentList.Add('--create-registration-schema')
+    }
+    if ($CreatePublicationSequenceSchema)
+    {
+        $start.ArgumentList.Add('--create-publication-sequence-schema')
     }
     $start.UseShellExecute = $false
     $start.CreateNoWindow = $true

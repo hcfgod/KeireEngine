@@ -181,7 +181,12 @@ numbers and removal of its uniquely named fixture tables. Enable it with
 `KEIRE_QA_BOOTSTRAP_CREDENTIAL`, `KEIRE_QA_BOOTSTRAP_ENTROPY`, and
 `KEIRE_QA_BOOTSTRAP_CA`. The protected bootstrap credential is used only by a
 scoped cleanup helper; the migration account receives no additional DROP rights.
-Production counter provisioning, staff UI
+Provision the local counter by passing `-CreatePublicationSequenceSchema` to
+`test-local-platform-auth.ps1` with the existing protected settings/result
+arguments. This additive step creates only the counter table, then verifies
+allocation using the runtime account inside a transaction that is rolled back;
+it consumes no sequence and grants no additional runtime permissions.
+Staff UI
 and evidence access, and the signer queue remain pending.
 
 Build with `KEIRE_NODE_ADAPTER_MODE=middleware` before running

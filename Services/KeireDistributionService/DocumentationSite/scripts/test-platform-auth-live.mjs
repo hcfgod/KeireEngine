@@ -15,6 +15,7 @@ import { verifyPublisherApplications } from "./platform-publisher-applications-a
 import { verifyUploadConcurrency } from "./platform-upload-concurrency-acceptance.mjs";
 import { verifyPublicationSequence } from "./platform-publication-sequence-acceptance.mjs";
 import { verifyPublicationConcurrency } from "./platform-publication-concurrency-acceptance.mjs";
+import { allocatePublicationSequence, publicationSequenceSchema } from "../Source/lib/platform-publication-sequence.mjs";
 import { verifyLocalDataRequests } from "./platform-data-requests-acceptance.mjs";
 import { verifyAuthenticatorEnrollment } from "./platform-mfa-management-acceptance.mjs";
 import { createRecoverySchema } from "../Source/lib/platform-recovery-store.mjs";
@@ -68,6 +69,20 @@ try {
     }
     if (process.argv.includes("--create-registration-schema")) {
         await createRegistrationSchema(migration);
+    }
+    if (process.argv.includes("--create-publication-sequence-schema")) {
+        stage = "publication-sequence-provisioning";
+        await migration.execute(publicationSequenceSchema);
+        const connection = await runtime.getConnection();
+        try {
+            await connection.beginTransaction();
+            const next = await allocatePublicationSequence(connection);
+            assert.ok(BigInt(next) > 0n);
+            checks++;
+        } finally {
+            await connection.rollback();
+            connection.release();
+        }
     }
     stage = "fixture";
     const passwordHash = await bcrypt.hash(password, 4);
