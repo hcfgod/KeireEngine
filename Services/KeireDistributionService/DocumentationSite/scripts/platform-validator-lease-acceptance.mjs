@@ -8,6 +8,7 @@ import { createValidatorFileHttp } from "../Source/lib/platform-validator-files.
 import { createQaValidatorHttp } from "./qa-validator-http.mjs";
 import { verifyCSharpValidatorHttp } from "./qa-validator-csharp.mjs";
 import { verifyVersionSubmission } from "./platform-version-submit-acceptance.mjs";
+import { publicationSequenceSchema } from "../Source/lib/platform-publication-sequence.mjs";
 
 /** Connection-local copies prevent the queue test from leasing any imported customer uploads. */
 export async function verifyValidatorLeases(pool, fixtureUploadId, fixtureVersionId, evidenceStore) {
@@ -16,10 +17,11 @@ export async function verifyValidatorLeases(pool, fixtureUploadId, fixtureVersio
     let http;
     const tables = ["marketplace_uploads", "marketplace_product_versions",
         "marketplace_validation_reports", "platform_audit_events", "marketplace_validator_attestation_keys",
-        "marketplace_products", "marketplace_submissions"];
+        "marketplace_products", "marketplace_submissions", "marketplace_publication_jobs",
+        "marketplace_publications", "platform_staff_members"];
     const connection = {
         execute: (sql, parameters) => rawConnection.execute(
-            sql.replace(/\b(marketplace_uploads|marketplace_product_versions|marketplace_validation_reports|platform_audit_events|marketplace_validator_attestation_keys|marketplace_products|marketplace_submissions)\b/g,
+            sql.replace(/\b(marketplace_uploads|marketplace_product_versions|marketplace_validation_reports|platform_audit_events|marketplace_validator_attestation_keys|marketplace_products|marketplace_submissions|marketplace_publication_jobs|marketplace_publications|platform_staff_members|platform_publication_sequence)\b/g,
                 (table) => `${table}_qa_lease`), parameters),
         beginTransaction: () => rawConnection.beginTransaction(),
         commit: () => rawConnection.commit(),
@@ -37,6 +39,7 @@ export async function verifyValidatorLeases(pool, fixtureUploadId, fixtureVersio
         }),
     };
     try {
+        await connection.execute(publicationSequenceSchema.replace("CREATE TABLE IF NOT EXISTS", "CREATE TEMPORARY TABLE"));
         for (const table of tables) {
             await rawConnection.execute(`CREATE TEMPORARY TABLE ${table}_qa_lease LIKE ${table}`);
         }

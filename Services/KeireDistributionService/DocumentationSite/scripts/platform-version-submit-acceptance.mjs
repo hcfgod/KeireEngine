@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { platformTransaction } from "../Source/lib/platform-mysql.mjs";
 import { submitLocalVersion } from "../Source/lib/platform-version-submit.mjs";
 import { handleLocalVersionSubmit } from "../Source/lib/platform-version-submit-http.mjs";
+import { verifyReviewDecision } from "./platform-review-decision-acceptance.mjs";
 
 /** Caller supplies connection-local product/version/report/submission/audit copies. */
 export async function verifyVersionSubmission(pool, versionId) {
@@ -81,7 +82,8 @@ async function runSubmissionChecks(pool, connection, actor, versionId) {
         const [[updated]] = await connection.execute("SELECT decision_note,assigned_to FROM marketplace_submissions");
         assert.equal(updated.decision_note, null);
         assert.equal(updated.assigned_to, null);
-        return 12;
+        stage = "submission-review-decision";
+        return 12 + await verifyReviewDecision(pool, connection, actor, data.submissionId);
     } catch (error) {
         error.fixtureStage = stage;
         throw error;
