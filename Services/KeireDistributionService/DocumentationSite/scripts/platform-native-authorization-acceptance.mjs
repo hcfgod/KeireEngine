@@ -8,6 +8,7 @@ import { issueNativeSession, withNativeSessionTransaction } from "../Source/lib/
 import { createNativeTokenHttp } from "../Source/lib/platform-native-token-http.mjs";
 import { reserveNativeRequest } from "../Source/lib/platform-native-limits.mjs";
 import { createNativeBrowserHttp } from "../Source/lib/platform-native-browser.mjs";
+import { createNativeAccountHttp } from "../Source/lib/platform-native-account-http.mjs";
 
 /** Reuses the caller's connection-local identity and native tables, never the real account/session tables. */
 export async function verifyNativeAuthorization(pool, connection, signer, userId) {
@@ -97,6 +98,16 @@ export async function verifyNativeAuthorization(pool, connection, signer, userId
         const exchanged = await post(form);
         assert.equal(exchanged.status, 200);
         const httpTokens = await exchanged.json();
+        const accountHttp = createNativeAccountHttp({ pool, siteOrigin: "https://qa.invalid", clientId: policy.clientId });
+        const accountRequest = (accessToken, logout = false) => accountHttp(new Request(
+            `https://qa.invalid/auth/v1/${logout ? "logout?scope=local" : "user"}`, {
+                method: logout ? "POST" : "GET", headers: { authorization: `Bearer ${accessToken}` },
+            }));
+        const accountResponse = await accountRequest(httpTokens.access_token);
+        assert.equal(accountResponse.status, 200);
+        assert.deepEqual(await accountResponse.json(), {
+            id: userId, email: account.email, email_confirmed_at: account.email_confirmed_at,
+        });
         assert.equal(await readNative(httpTokens.access_token), userId);
         assert.equal((await post(form)).status, 400);
         const refresh = new URLSearchParams({
@@ -107,6 +118,7 @@ export async function verifyNativeAuthorization(pool, connection, signer, userId
         const rotated = await refreshed.json();
         assert.equal((await post(refresh)).status, 400);
         assert.equal(await readNative(rotated.access_token), null);
+        assert.equal((await accountRequest(rotated.access_token)).status, 401);
         for (let attempt = 0; attempt < 20; attempt++) {
             await reserveNativeRequest(pool, "isolated-limit-client", "authorize", now);
         }
@@ -119,7 +131,10 @@ export async function verifyNativeAuthorization(pool, connection, signer, userId
         // Browser logout cancels pending consent codes, but does not sign out the already-created desktop session.
         assert.equal(await withNativeSessionTransaction(pool, tokens.access_token,
             (_transaction, actor) => actor.userId, () => now), userId);
-        return 28;
+        assert.equal((await accountRequest(tokens.access_token, true)).status, 204);
+        assert.equal((await accountRequest(tokens.access_token)).status, 401);
+        assert.equal(await readNative(tokens.access_token), null);
+        return 34;
     } finally {
         authentication.close();
     }

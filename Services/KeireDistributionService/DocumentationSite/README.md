@@ -154,6 +154,15 @@ isolated QA host opts in with `KEIRE_QA_NATIVE_SETTINGS_DIRECTORY`; its settings
 must match `PUBLIC_SITE_URL`. Production listener deployment remains a separate
 activation gate. Do not use a production-bound key with a different QA origin.
 
+The native service also implements bearer-only `GET /auth/v1/user` and
+`POST /auth/v1/logout?scope=local`. Every request rechecks the native session,
+account security binding and registered client. Account responses expose only
+the Hub's user ID, email and confirmation timestamp and require email scope.
+Local logout revokes the authenticated native session; browser sessions remain
+independent. Cookies, browser Origin and legacy API-key headers are rejected.
+Profile editing, device registration and download authorization remain separate
+migration gates, as does native client provider configuration.
+
 `scripts/test-native-protected-settings.mjs` exercises actual Windows protection,
 stable reload, overwrite refusal and mismatched-host rejection. Set
 `KEIRE_QA_POWERSHELL` to the absolute PowerShell 7 executable. It retains only
