@@ -34,6 +34,7 @@ internal static partial class Program
             ("broker rejects tampered validator evidence attestations", BrokerRejectsTamperedAttestationAsync),
             ("publication signer verifies evidence and signs immutable metadata", PublicationSignerSignsMetadataAsync),
             ("publication signer rejects a tampered lease", PublicationSignerRejectsTamperedLeaseAsync),
+            ("publication signer preserves scoped credentials across backend choices", PublicationSignerSelectsBackendAsync),
         ];
         int failures = 0;
         foreach ((string name, Func<Task> test) in tests)

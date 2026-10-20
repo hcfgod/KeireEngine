@@ -5,7 +5,8 @@ param(
     [string]$Signer,
     [string]$ProtectedPrivateKey,
     [string]$ProtectedQueueSecret,
-    [uri]$SupabaseUrl,
+    [Alias("SupabaseUrl")] [uri]$ApiOrigin,
+    [ValidateSet("supabase", "mysql")] [string]$Backend = "supabase",
     [string]$PublicationPublicKey,
     [string]$ValidatorAttestationPublicKey,
     [string]$WorkerId,
@@ -46,7 +47,7 @@ foreach ($path in @($Launcher, $Signer, $ProtectedPrivateKey, $ProtectedQueueSec
 
 & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $Launcher `
     -Signer $Signer -ProtectedPrivateKey $ProtectedPrivateKey -ProtectedQueueSecret $ProtectedQueueSecret `
-    -SupabaseUrl $SupabaseUrl.AbsoluteUri -PublicationPublicKey $PublicationPublicKey `
+    -ApiOrigin $ApiOrigin.AbsoluteUri -Backend $Backend -PublicationPublicKey $PublicationPublicKey `
     -ValidatorAttestationPublicKey $ValidatorAttestationPublicKey -WorkerId $WorkerId -ValidateOnly
 if ($LASTEXITCODE -ne 0) { throw "The Marketplace publication signer configuration failed validation." }
 if ($ValidateOnly) {
@@ -61,7 +62,8 @@ $arguments = @(
     "-Signer", (Quote-TaskArgument ([IO.Path]::GetFullPath($Signer))),
     "-ProtectedPrivateKey", (Quote-TaskArgument ([IO.Path]::GetFullPath($ProtectedPrivateKey))),
     "-ProtectedQueueSecret", (Quote-TaskArgument ([IO.Path]::GetFullPath($ProtectedQueueSecret))),
-    "-SupabaseUrl", (Quote-TaskArgument $SupabaseUrl.GetLeftPart([UriPartial]::Authority)),
+    "-ApiOrigin", (Quote-TaskArgument $ApiOrigin.GetLeftPart([UriPartial]::Authority)),
+    "-Backend", (Quote-TaskArgument $Backend),
     "-PublicationPublicKey", (Quote-TaskArgument ([IO.Path]::GetFullPath($PublicationPublicKey))),
     "-ValidatorAttestationPublicKey", (Quote-TaskArgument ([IO.Path]::GetFullPath($ValidatorAttestationPublicKey))),
     "-WorkerId", (Quote-TaskArgument $WorkerId)

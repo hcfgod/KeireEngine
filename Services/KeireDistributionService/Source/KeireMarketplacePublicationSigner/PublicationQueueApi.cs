@@ -12,8 +12,8 @@ internal sealed class PublicationQueueApi : IDisposable
     public PublicationQueueApi(SignerOptions options, HttpMessageHandler? handler = null)
     {
         m_Options = options;
-        m_Http = handler is null ? new HttpClient() : new HttpClient(handler, disposeHandler: true);
-        m_Http.BaseAddress = options.SupabaseUrl;
+        m_Http = new HttpClient(handler ?? new HttpClientHandler { AllowAutoRedirect = false }, disposeHandler: true);
+        m_Http.BaseAddress = options.ApiOrigin;
         m_Http.Timeout = Timeout.InfiniteTimeSpan;
         m_Http.DefaultRequestHeaders.UserAgent.ParseAdd("KeireMarketplacePublicationSigner/0.4.2");
     }
@@ -79,7 +79,7 @@ internal sealed class PublicationQueueApi : IDisposable
 
     private async Task<byte[]> PostAsync(PublicationQueueRequest body, CancellationToken cancellationToken)
     {
-        using HttpRequestMessage request = new(HttpMethod.Post, "functions/v1/marketplace-publication-queue")
+        using HttpRequestMessage request = new(HttpMethod.Post, m_Options.QueuePath)
         {
             Content = new ByteArrayContent(DistributionJson.Serialize(body)),
         };

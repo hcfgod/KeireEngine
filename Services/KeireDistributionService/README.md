@@ -423,6 +423,13 @@ pinned worker digest, and attestation public-key path. Pin the reviewed worker e
 ClamAV socket, and grants write access only to its exchange and work roots. Confirm the worker log says it is ready for
 offline jobs before starting the broker.
 
+The publication signer defaults to Supabase. Select `KEIRE_PLATFORM_BACKEND=mysql`
+and `KEIRE_PLATFORM_URL` for the local HTTPS origin and `/internal/publication/v1/queue/`.
+Windows launchers accept `-Backend mysql -ApiOrigin https://your-host`; `-SupabaseUrl`
+remains an alias for existing deployments. Origins cannot include paths, credentials,
+query strings, or fragments, and queue requests do not follow redirects.
+The MySQL signer queue and full publication acceptance must be ready before switching a live signer.
+
 Install `marketplace-publication-signer.env.example` with mode `0640` for a dedicated `keire-publication` identity and
 install `keire-marketplace-publication-signer.service.example`. This signer has network access but receives only leased
 metadata and the validator attestation. It has no Storage grant, package path credential, or database key. Its private

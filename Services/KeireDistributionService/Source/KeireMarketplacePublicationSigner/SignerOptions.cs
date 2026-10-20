@@ -5,7 +5,9 @@ namespace Keire.Marketplace.PublicationSigner;
 
 internal sealed partial class SignerOptions
 {
-    public required Uri SupabaseUrl { get; init; }
+    public required Uri ApiOrigin { get; init; }
+
+    public string QueuePath { get; init; } = "functions/v1/marketplace-publication-queue";
 
     public required string QueueSecret { get; init; }
 
@@ -21,12 +23,9 @@ internal sealed partial class SignerOptions
 
     public static SignerOptions FromEnvironment()
     {
-        string rawUrl = Require("KEIRE_SUPABASE_URL");
-        if (!Uri.TryCreate(rawUrl, UriKind.Absolute, out Uri? url) || url.Scheme != Uri.UriSchemeHttps ||
-            !string.IsNullOrEmpty(url.UserInfo) || !string.IsNullOrEmpty(url.Query) || !string.IsNullOrEmpty(url.Fragment))
-        {
-            throw new InvalidOperationException("KEIRE_SUPABASE_URL must be an HTTPS origin without credentials or query data.");
-        }
+        string provider = Environment.GetEnvironmentVariable("KEIRE_PLATFORM_BACKEND") ?? "supabase";
+        string urlVariable = provider == "mysql" ? "KEIRE_PLATFORM_URL" : "KEIRE_SUPABASE_URL";
+        (Uri origin, string queuePath) = ResolveEndpoint(provider, Require(urlVariable));
 
         string secret = Require("KEIRE_MARKETPLACE_PUBLICATION_SIGNER_SECRET");
         if (secret.Length is < 32 or > 256 || secret.Any(char.IsWhiteSpace))
@@ -42,7 +41,8 @@ internal sealed partial class SignerOptions
 
         return new SignerOptions
         {
-            SupabaseUrl = new Uri(url.GetLeftPart(UriPartial.Authority) + "/", UriKind.Absolute),
+            ApiOrigin = origin,
+            QueuePath = queuePath,
             QueueSecret = secret,
             WorkerId = worker,
             LeaseSeconds = ParseInteger("KEIRE_MARKETPLACE_PUBLICATION_LEASE_SECONDS", 300, 60, 900),
@@ -53,6 +53,24 @@ internal sealed partial class SignerOptions
             ValidatorVerificationKey = MarketplaceVerificationKey.FromFile(
                 Require("KEIRE_VALIDATOR_ATTESTATION_PUBLIC_KEY")),
         };
+    }
+
+    internal static (Uri Origin, string QueuePath) ResolveEndpoint(string provider, string rawUrl)
+    {
+        string queuePath = provider switch
+        {
+            "supabase" => "functions/v1/marketplace-publication-queue",
+            "mysql" => "internal/publication/v1/queue/",
+            _ => throw new InvalidOperationException("KEIRE_PLATFORM_BACKEND must be supabase or mysql."),
+        };
+        if (!Uri.TryCreate(rawUrl, UriKind.Absolute, out Uri? url) || url.Scheme != Uri.UriSchemeHttps ||
+            !string.IsNullOrEmpty(url.UserInfo) || !string.IsNullOrEmpty(url.Query) ||
+            !string.IsNullOrEmpty(url.Fragment) || url.AbsolutePath != "/")
+        {
+            throw new InvalidOperationException("The publication API must be an HTTPS origin without a path, credentials, or query data.");
+        }
+
+        return (new Uri(url.GetLeftPart(UriPartial.Authority) + "/", UriKind.Absolute), queuePath);
     }
 
     private static string Require(string name)

@@ -3,7 +3,8 @@ param(
     [Parameter(Mandatory = $true)] [string]$Signer,
     [Parameter(Mandatory = $true)] [string]$ProtectedPrivateKey,
     [Parameter(Mandatory = $true)] [string]$ProtectedQueueSecret,
-    [Parameter(Mandatory = $true)] [uri]$SupabaseUrl,
+    [Parameter(Mandatory = $true)] [Alias("SupabaseUrl")] [uri]$ApiOrigin,
+    [ValidateSet("supabase", "mysql")] [string]$Backend = "supabase",
     [Parameter(Mandatory = $true)] [string]$PublicationPublicKey,
     [Parameter(Mandatory = $true)] [string]$ValidatorAttestationPublicKey,
     [Parameter(Mandatory = $true)] [string]$WorkerId,
@@ -17,9 +18,10 @@ foreach ($path in @($Signer, $ProtectedPrivateKey, $ProtectedQueueSecret, $Publi
         $ValidatorAttestationPublicKey)) {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Required publication signer file is missing: $path" }
 }
-if ($SupabaseUrl.Scheme -ne "https" -or -not [string]::IsNullOrEmpty($SupabaseUrl.UserInfo) -or
-    -not [string]::IsNullOrEmpty($SupabaseUrl.Query) -or -not [string]::IsNullOrEmpty($SupabaseUrl.Fragment)) {
-    throw "SupabaseUrl must be an HTTPS origin without credentials or query data."
+if ($ApiOrigin.Scheme -ne "https" -or -not [string]::IsNullOrEmpty($ApiOrigin.UserInfo) -or
+    -not [string]::IsNullOrEmpty($ApiOrigin.Query) -or -not [string]::IsNullOrEmpty($ApiOrigin.Fragment) -or
+    $ApiOrigin.AbsolutePath -ne "/") {
+    throw "ApiOrigin must be an HTTPS origin without a path, credentials, or query data."
 }
 if ($WorkerId -cnotmatch '^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$') { throw "WorkerId contains unsupported characters." }
 
@@ -80,7 +82,12 @@ try {
         $queueSecret.Length -gt 256 -or $queueSecret -match '\s') {
         throw "A protected publication signer secret has an invalid shape."
     }
-    $env:KEIRE_SUPABASE_URL = $SupabaseUrl.GetLeftPart([UriPartial]::Authority)
+    $env:KEIRE_PLATFORM_BACKEND = $Backend
+    if ($Backend -eq "mysql") {
+        $env:KEIRE_PLATFORM_URL = $ApiOrigin.GetLeftPart([UriPartial]::Authority)
+    } else {
+        $env:KEIRE_SUPABASE_URL = $ApiOrigin.GetLeftPart([UriPartial]::Authority)
+    }
     $env:KEIRE_MARKETPLACE_PUBLICATION_SIGNER_SECRET = $queueSecret
     $env:KEIRE_MARKETPLACE_PUBLICATION_PRIVATE_KEY = $privateKey
     $env:KEIRE_MARKETPLACE_PUBLICATION_PUBLIC_KEY = (Resolve-Path -LiteralPath $PublicationPublicKey).Path
