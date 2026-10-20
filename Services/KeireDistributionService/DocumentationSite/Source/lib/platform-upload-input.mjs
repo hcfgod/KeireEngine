@@ -6,8 +6,13 @@ const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const portableToken = /^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$/;
 
 export class LocalUploadInputError extends Error {
+    static [Symbol.hasInstance](value) {
+        return value?.[Symbol.for("Keire.LocalUploadInputError")] === true;
+    }
+
     constructor(field) {
         super(`The package release field ${field} is invalid.`);
+        Object.defineProperty(this, Symbol.for("Keire.LocalUploadInputError"), { value: true });
         this.status = 400;
         this.code = "publisher.upload_invalid";
     }

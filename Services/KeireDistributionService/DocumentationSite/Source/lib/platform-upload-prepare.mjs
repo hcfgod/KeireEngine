@@ -32,5 +32,5 @@ export async function prepareResumableUpload(authentication, sessionToken, uploa
             "The saved transfer does not match this reservation. Cancel it and start a new upload.");
     }
     return { uploadId: reservation.uploadId, fileId, offset: upload.offset,
-        uploadUrl: `/publisher/v1/transfer/${fileId}` };
+        uploadUrl: `/publisher/v1/transfer/${fileId}/` };
 }

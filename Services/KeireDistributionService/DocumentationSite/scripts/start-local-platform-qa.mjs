@@ -12,6 +12,7 @@ import { createVerificationMailer, loadWindowsMailSecrets } from "../Source/lib/
 import { createQaServerDrain } from "./qa-server-drain.mjs";
 import { LocalPasswordAuthentication } from "../Source/lib/platform-local-auth.mjs";
 import { openAccountRecord } from "../Source/lib/platform-account-import.mjs";
+import { createQaUploadService } from "./qa-upload-service.mjs";
 
 // Isolated loopback acceptance host. Production reverse-proxy trust and deployment remain separate gates.
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -117,6 +118,9 @@ async function createQaAuthentication(pool, key) {
 }
 
 const backend = new PlatformBackend({ provider: "mysql", createMailer, createAuthentication: createQaAuthentication,
+    createUploads: process.send && process.env.KEIRE_QA_UPLOADS === "isolated"
+        ? ({ authentication }) => createQaUploadService(authentication, process.env.PUBLIC_SITE_URL, process.env.KEIRE_QA_POWERSHELL)
+        : null,
     loadLocalSecrets: () => loadWindowsPlatformSecrets({
     powerShellExecutable: process.env.KEIRE_QA_POWERSHELL,
     decryptScriptPath: path.resolve(root, "../scripts/read-local-platform-runtime.ps1"),

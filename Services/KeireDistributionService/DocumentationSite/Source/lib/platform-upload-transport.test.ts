@@ -34,7 +34,7 @@ describe("local resumable transport", () => {
             method: "POST", headers: { ...headers, "upload-length": "6" },
         }));
         expect(extra.status).toBe(405);
-        const resumed = await transport.handle(new Request(`${origin}/publisher/v1/transfer/${id}`, {
+        const resumed = await transport.handle(new Request(`${origin}/publisher/v1/transfer/${id}/`, {
             method: "HEAD", headers,
         }));
         expect(resumed.status).toBe(200);

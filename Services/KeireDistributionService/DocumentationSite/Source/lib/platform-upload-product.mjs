@@ -2,8 +2,14 @@ import { randomUUID } from "node:crypto";
 import { localUploadProductSlugs } from "./platform-upload-input.mjs";
 
 export class LocalUploadError extends Error {
+    static [Symbol.hasInstance](value) {
+        return value?.[Symbol.for("Keire.LocalUploadError")] === true;
+    }
+
     constructor(status, code, message) {
         super(message);
+        // The application host and bundled routes may load distinct copies of this module.
+        Object.defineProperty(this, Symbol.for("Keire.LocalUploadError"), { value: true });
         this.status = status;
         this.code = code;
     }

@@ -20,6 +20,14 @@ export function createUploadTransport({ datastore, authorize, siteOrigin, path =
         allowedOrigins: [siteOrigin],
         allowedCredentials: true,
         allowedHeaders: ["x-signature"],
+        getFileIdFromRequest: (request) => {
+            const pathname = new URL(request.url).pathname;
+            if (!pathname.startsWith(`${path}/`)) {
+                return undefined;
+            }
+            const id = pathname.slice(path.length + 1).replace(/\/$/, "");
+            return /^[a-f0-9]{32}$/.test(id) ? id : undefined;
+        },
         maxSize: (request) => reservations.get(request)?.expectedSizeBytes ?? 0,
         onIncomingRequest: async (request, fileId) => {
             if (request.method === "POST" && !allowCreation) {

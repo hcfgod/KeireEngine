@@ -73,7 +73,7 @@ try {
 
     stage = "host-startup";
     child = fork(fileURLToPath(new URL("./start-local-platform-qa.mjs", import.meta.url)), [], {
-        env: { ...process.env, KEIRE_QA_CLIENT_NAMESPACE: userId, KEIRE_QA_MAIL_MODE: "capture",
+        env: { ...process.env, KEIRE_QA_CLIENT_NAMESPACE: userId, KEIRE_QA_MAIL_MODE: "capture", KEIRE_QA_UPLOADS: "isolated",
             KEIRE_QA_REGISTRATION_EMAIL: registrationEmail }, silent: true, windowsHide: true,
     });
     child.stdout.resume();
@@ -134,7 +134,7 @@ try {
         const response = await fetch(base + route, {
             method, redirect: "manual", signal: AbortSignal.timeout(10000),
             headers: { origin, "content-type": "application/json", cookie: [...cookies].map(([key, value]) => `${key}=${value}`).join("; "), ...extraHeaders },
-            body: body === undefined ? undefined : JSON.stringify(body),
+            body: body === undefined ? undefined : body instanceof Uint8Array ? body : JSON.stringify(body),
         });
         for (const value of response.headers.getSetCookie()) {
             assert.ok(value.includes("HttpOnly; Secure; SameSite=Lax"));
@@ -489,7 +489,8 @@ try {
         assert.doesNotMatch(publisherSubmittedHtml, new RegExp(`data-application-id="${application.applicationId}"`));
         checks += 16;
         stage = "publisher-upload-status-cancellation";
-        checks += await verifyUploadHttp(pool, userId, organization.organizationId, request);
+        checks += await verifyUploadHttp(pool, userId, organization.organizationId, request,
+            (phase) => { stage = `publisher-upload-${phase}`; });
         const library = await request("/marketplace/v1/library/");
         const invalidClaim = await request("/marketplace/v1/claims/", { ownership: "organization" });
         assert.equal(invalidClaim.status, 400);
@@ -660,8 +661,11 @@ try {
         assert.equal((await request("/account/mfa/enroll/", { password: nextPassword, friendlyName: "Cannot enroll" })).status, 401);
         checks += 5;
     }
-} catch {
-    console.error(JSON.stringify({ status: "failed", stage, checks }));
+} catch (error) {
+    const assertion = error?.code === "ERR_ASSERTION" && typeof error.actual === "number"
+        && typeof error.expected === "number" ? { actual: error.actual, expected: error.expected,
+            message: stage === "publisher-upload-first-chunk" ? error.message.slice(0, 250) : undefined } : undefined;
+    console.error(JSON.stringify({ status: "failed", stage, checks, assertion }));
     process.exitCode = 1;
 } finally {
     if (child && child.exitCode === null) {
