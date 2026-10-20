@@ -147,6 +147,14 @@ evidence, signs and submits a synthetic report, and retries completion; the
 database must contain exactly one report. This tests the real broker transport
 and signature contracts, not the separate malware/compilation worker process.
 
+The staged `submitLocalVersion` operation preserves the existing publisher review
+transition: verified session, enabled publisher portal, active organization
+owner/admin membership, an unsuspended publisher, a validated version, and a
+matching successful report are required. Requested changes reuse their submission
+ID and clear the previous assignment/decision. State updates and the audit entry
+use the authenticated transaction. HTTP wiring and real-database submission
+acceptance are still required before enabling this operation.
+
 Build with `KEIRE_NODE_ADAPTER_MODE=middleware` before running
 `node scripts/test-platform-http-live.mjs --interactive`. Configure
 `KEIRE_QA_POWERSHELL`, `KEIRE_QA_SETTINGS_DIRECTORY`, and `KEIRE_QA_PORT` for the
