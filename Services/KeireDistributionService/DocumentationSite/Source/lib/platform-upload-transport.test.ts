@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { FileStore } from "@tus/file-store";
+import { PrivateUploadFileStore } from "./platform-upload-file-store.mjs";
 import { createUploadTransport } from "./platform-upload-transport.mjs";
 
 const roots: string[] = [];
@@ -23,7 +23,7 @@ describe("local resumable transport", () => {
         roots.push(root);
         let reservationId = "reservation-one";
         const transport = createUploadTransport({
-            datastore: new FileStore({ directory: root }),
+            datastore: new PrivateUploadFileStore({ directory: root }),
             siteOrigin: origin,
             authorize: async () => ({ uploadId: reservationId, expectedSizeBytes: 6 }),
         });
