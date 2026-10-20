@@ -1,9 +1,10 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 
 export class NativeOAuthError extends Error {
-    constructor(code, message) {
+    constructor(code, message, status = 400) {
         super(message);
         this.code = code;
+        this.status = status;
     }
 }
 

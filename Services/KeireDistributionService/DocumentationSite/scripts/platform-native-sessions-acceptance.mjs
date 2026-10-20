@@ -17,7 +17,7 @@ export async function verifyNativeSessions(pool, userId) {
     });
     const tables = ["platform_native_sessions", "platform_native_access_tokens", "platform_native_refresh_tokens",
         "platform_accounts", "platform_mfa_factors", "platform_audit_events",
-        "platform_native_authorizations", "platform_auth_sessions"];
+        "platform_native_authorizations", "platform_auth_sessions", "platform_auth_limits"];
     const names = new RegExp(`\\b(${tables.join("|")})\\b`, "g");
     const connection = {
         execute: (sql, values) => raw.execute(sql.replace(names, (table) => `${table}_qa_native`), values),
@@ -29,7 +29,8 @@ export async function verifyNativeSessions(pool, userId) {
         for (const schema of [...nativeSessionSchema, nativeAuthorizationSchema]) {
             await connection.execute(schema.replace("CREATE TABLE", "CREATE TEMPORARY TABLE"));
         }
-        for (const table of ["platform_accounts", "platform_mfa_factors", "platform_audit_events", "platform_auth_sessions"]) {
+        for (const table of ["platform_accounts", "platform_mfa_factors", "platform_audit_events",
+            "platform_auth_sessions", "platform_auth_limits"]) {
             await raw.execute(`CREATE TEMPORARY TABLE ${table}_qa_native LIKE ${table}`);
         }
         // Copy only the harness-owned synthetic identity, never customer accounts.

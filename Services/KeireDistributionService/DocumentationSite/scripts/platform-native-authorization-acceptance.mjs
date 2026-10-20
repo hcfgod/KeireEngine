@@ -5,6 +5,8 @@ import { newOpaqueToken, tokenDigest } from "../Source/lib/platform-auth-crypto.
 import { createNativeOAuthPolicy } from "../Source/lib/platform-native-oauth-policy.mjs";
 import { createNativeAuthorization, decideNativeAuthorization, exchangeNativeAuthorization } from "../Source/lib/platform-native-authorization.mjs";
 import { issueNativeSession, withNativeSessionTransaction } from "../Source/lib/platform-native-sessions.mjs";
+import { createNativeTokenHttp } from "../Source/lib/platform-native-token-http.mjs";
+import { reserveNativeRequest } from "../Source/lib/platform-native-limits.mjs";
 
 /** Reuses the caller's connection-local identity and native tables, never the real account/session tables. */
 export async function verifyNativeAuthorization(pool, connection, signer, userId) {
@@ -62,14 +64,46 @@ export async function verifyNativeAuthorization(pool, connection, signer, userId
         await assert.rejects(exchange(code), { code: "invalid_grant" });
         await assert.rejects(decideNativeAuthorization(authentication, browserToken,
             policy, requestToken, true, () => now), { code: "invalid_grant" });
+        const tokenHttp = createNativeTokenHttp({ pool, policy, signer });
+        const approved = await approve();
+        const form = new URLSearchParams({
+            grant_type: "authorization_code", client_id: policy.clientId, code: approved.code,
+            redirect_uri: policy.redirectUri, code_verifier: "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk",
+        });
+        const post = (body) => tokenHttp(new Request("https://qa.invalid/auth/v1/oauth/token", {
+            method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: body.toString(),
+        }), "isolated-native-http");
+        const exchanged = await post(form);
+        assert.equal(exchanged.status, 200);
+        const httpTokens = await exchanged.json();
+        assert.equal(await readNative(httpTokens.access_token), userId);
+        assert.equal((await post(form)).status, 400);
+        const refresh = new URLSearchParams({
+            grant_type: "refresh_token", client_id: policy.clientId, refresh_token: httpTokens.refresh_token,
+        });
+        const refreshed = await post(refresh);
+        assert.equal(refreshed.status, 200);
+        const rotated = await refreshed.json();
+        assert.equal((await post(refresh)).status, 400);
+        assert.equal(await readNative(rotated.access_token), null);
+        for (let attempt = 0; attempt < 20; attempt++) {
+            await reserveNativeRequest(pool, "isolated-limit-client", "authorize", now);
+        }
+        await assert.rejects(reserveNativeRequest(pool, "isolated-limit-client", "authorize", now),
+            { code: "slow_down", status: 429 });
+        await reserveNativeRequest(pool, "isolated-limit-client", "authorize", now + 600000);
         const pending = await approve();
         await authentication.signOut(browserToken);
         await assert.rejects(exchange(pending.code), { code: "invalid_grant" });
         // Browser logout cancels pending consent codes, but does not sign out the already-created desktop session.
         assert.equal(await withNativeSessionTransaction(pool, tokens.access_token,
             (_transaction, actor) => actor.userId, () => now), userId);
-        return 12;
+        return 20;
     } finally {
         authentication.close();
+    }
+
+    async function readNative(accessToken) {
+        return withNativeSessionTransaction(pool, accessToken, (_transaction, actor) => actor.userId, () => Date.now());
     }
 }

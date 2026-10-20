@@ -112,6 +112,16 @@ OAuth service: production schema provisioning, rate limits, browser consent
 integration, concurrent-session acceptance, and client acceptance remain
 activation gates.
 
+The internal native token HTTP adapter accepts bounded form-encoded
+authorization-code and refresh grants at `/auth/v1/oauth/token`. It rejects
+browser cookies, Origin, bearer/API-key headers, duplicate fields and query
+parameters. OAuth error responses and all token responses are non-cacheable.
+The host supplies trusted client identity for persisted request limits
+(20 authorization requests per ten minutes, 60 token requests per minute).
+The adapter is tested against isolated MySQL state but is not yet publicly
+routed; authorization/consent pages and host lifecycle integration must be
+completed before enabling it.
+
 `platform-validator-report.mjs` verifies the worker's exact Ed25519 signature,
 trusted-key validity, package/version identity, evidence metadata, scan outcomes,
 and completion timestamp. It rejects duplicate signed fields and contradictory
