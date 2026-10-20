@@ -13,6 +13,12 @@ declare namespace App {
         platformBackend?: import("./lib/platform-backend.mjs").PlatformBackend;
         platformClientIdentity?: string;
         localEmailAvailable?: boolean;
+        localNativeConsent?: {
+            authorization_id: string;
+            client: { name: string };
+            redirect_uri: string;
+            scope: string;
+        };
         localMarketplaceContext?: {
             pool: Awaited<ReturnType<typeof import("./lib/platform-mysql.mjs").createPlatformPool>>;
             session: { userId: string; assurance: number } | null;

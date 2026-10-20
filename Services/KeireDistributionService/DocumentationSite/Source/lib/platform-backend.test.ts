@@ -19,7 +19,7 @@ function fixture() {
 }
 
 describe("application-owned backend lifecycle", () => {
-    it.each(["Validator", "Publication"])("drains %s before closing its borrowed database", async (kind) => {
+    it.each(["Validator", "Publication", "Native"])("drains %s before closing its borrowed database", async (kind) => {
         const data = fixture();
         const drain = deferred();
         const validator = { handle: vi.fn(), close: vi.fn(() => drain.promise) };
@@ -39,7 +39,7 @@ describe("application-owned backend lifecycle", () => {
         expect(data.pool.end).toHaveBeenCalledOnce();
     });
 
-    it.each(["Validator", "Publication"])("cleans up %s after later startup failure", async (kind) => {
+    it.each(["Validator", "Publication", "Native"])("cleans up %s after later startup failure", async (kind) => {
         const data = fixture();
         const validator = { handle: vi.fn(), close: vi.fn() };
         const backend = new PlatformBackend({ provider: "mysql", loadLocalSecrets: data.loadLocalSecrets,
@@ -51,7 +51,7 @@ describe("application-owned backend lifecycle", () => {
         expect(data.pool.end).toHaveBeenCalledOnce();
     });
 
-    it.each(["Validator", "Publication"])("disposes the database even when %s shutdown fails", async (kind) => {
+    it.each(["Validator", "Publication", "Native"])("disposes the database even when %s shutdown fails", async (kind) => {
         const data = fixture();
         const backend = new PlatformBackend({ provider: "mysql", loadLocalSecrets: data.loadLocalSecrets,
             createPool: data.createPool, createAuthentication: data.createAuthentication,

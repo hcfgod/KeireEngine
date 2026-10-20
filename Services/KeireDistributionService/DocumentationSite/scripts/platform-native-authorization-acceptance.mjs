@@ -7,6 +7,7 @@ import { createNativeAuthorization, decideNativeAuthorization, exchangeNativeAut
 import { issueNativeSession, withNativeSessionTransaction } from "../Source/lib/platform-native-sessions.mjs";
 import { createNativeTokenHttp } from "../Source/lib/platform-native-token-http.mjs";
 import { reserveNativeRequest } from "../Source/lib/platform-native-limits.mjs";
+import { createNativeBrowserHttp } from "../Source/lib/platform-native-browser.mjs";
 
 /** Reuses the caller's connection-local identity and native tables, never the real account/session tables. */
 export async function verifyNativeAuthorization(pool, connection, signer, userId) {
@@ -26,6 +27,7 @@ export async function verifyNativeAuthorization(pool, connection, signer, userId
         totp ? 2 : 1, totp?.id ?? null, now + 3600000]);
     const authentication = await LocalPasswordAuthentication.create(pool, Buffer.alloc(32), () => now);
     const policy = createNativeOAuthPolicy({ siteOrigin: "https://qa.invalid", clientId: signer.clientId });
+    const browserHttp = createNativeBrowserHttp({ pool, authentication, policy, siteOrigin: "https://qa.invalid" });
     const parameters = new URLSearchParams({
         response_type: "code", client_id: policy.clientId, redirect_uri: policy.redirectUri,
         scope: "openid email", state: "s".repeat(43), nonce: "n".repeat(43),
@@ -37,10 +39,29 @@ export async function verifyNativeAuthorization(pool, connection, signer, userId
             code, verifier, clientId: policy.clientId, redirectUri: policy.redirectUri,
         }, issuer, () => now);
     async function approve() {
-        const { requestToken } = await createNativeAuthorization(pool, policy, parameters, () => now);
-        const { redirectUrl } = await decideNativeAuthorization(authentication, browserToken,
-            policy, requestToken, true, () => now);
-        const redirect = new URL(redirectUrl);
+        const started = await browserHttp(new Request(`https://qa.invalid/auth/v1/oauth/authorize?${parameters}`), "browser-fixture");
+        assert.equal(started.status, 303);
+        const consentUrl = new URL(started.headers.get("location"), "https://qa.invalid");
+        const requestToken = consentUrl.searchParams.get("authorization_id");
+        const anonymous = await browserHttp(new Request(consentUrl), "browser-fixture");
+        assert.equal(anonymous.status, 303);
+        assert.ok(anonymous.headers.get("location").startsWith("/account/sign-in/?next="));
+        const cookie = `__Host-keire-session=${browserToken}`;
+        const consent = await browserHttp(new Request(consentUrl, { headers: { cookie } }), "browser-fixture", async (view) => {
+            assert.equal(view.session.userId, userId);
+            assert.equal(view.nativeConsent.authorization_id, requestToken);
+            return new Response("consent fixture");
+        });
+        assert.equal(consent.status, 200);
+        assert.equal(consent.headers.get("referrer-policy"), "no-referrer");
+        const decision = (origin) => new Request("https://qa.invalid/oauth/decision/", {
+            method: "POST", headers: { origin, cookie, "content-type": "application/x-www-form-urlencoded" },
+            body: new URLSearchParams({ authorization_id: requestToken, decision: "approve" }).toString(),
+        });
+        assert.equal((await browserHttp(decision("https://other.invalid"), "browser-fixture")).status, 403);
+        const approved = await browserHttp(decision("https://qa.invalid"), "browser-fixture");
+        assert.equal(approved.status, 303);
+        const redirect = new URL(approved.headers.get("location"));
         assert.equal(redirect.searchParams.get("state"), "s".repeat(43));
         return { requestToken, code: redirect.searchParams.get("code") };
     }
@@ -98,7 +119,7 @@ export async function verifyNativeAuthorization(pool, connection, signer, userId
         // Browser logout cancels pending consent codes, but does not sign out the already-created desktop session.
         assert.equal(await withNativeSessionTransaction(pool, tokens.access_token,
             (_transaction, actor) => actor.userId, () => now), userId);
-        return 20;
+        return 28;
     } finally {
         authentication.close();
     }

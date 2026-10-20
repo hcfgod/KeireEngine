@@ -80,7 +80,8 @@ export const onRequest = defineMiddleware(async (context, next) => {
             siteOrigin: runtimeEnvironment("PUBLIC_SITE_URL"),
             clientIdentity: context.locals.platformClientIdentity,
             correlationId: context.locals.correlationId,
-            render: async ({ session, pendingChallenge, accountView, catalogPool, emailAvailable, productView, marketplaceContext, localRecovery, localRegistration, publisherView }) => {
+            render: async ({ session, pendingChallenge, accountView, catalogPool, emailAvailable, productView, marketplaceContext, localRecovery, localRegistration, publisherView, nativeConsent }) => {
+                context.locals.localNativeConsent = nativeConsent;
                 context.locals.localPublisherView = publisherView;
                 context.locals.localRecovery = localRecovery === true;
                 context.locals.localRegistration = localRegistration === true;

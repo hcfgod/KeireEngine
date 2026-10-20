@@ -108,8 +108,8 @@ cases. Authorization-code database acceptance also runs the normal browser
 session reader, consent, PKCE exchange, native issuance, and code reuse rejection.
 Browser logout invalidates pending codes while an already-issued desktop
 session stays independent. These modules are not yet exposed as a complete
-OAuth service: production schema provisioning, rate limits, browser consent
-integration, concurrent-session acceptance, and client acceptance remain
+OAuth service: production schema/key provisioning, host configuration,
+concurrent-session acceptance, and native client acceptance remain
 activation gates.
 
 The internal native token HTTP adapter accepts bounded form-encoded
@@ -118,9 +118,15 @@ browser cookies, Origin, bearer/API-key headers, duplicate fields and query
 parameters. OAuth error responses and all token responses are non-cacheable.
 The host supplies trusted client identity for persisted request limits
 (20 authorization requests per ten minutes, 60 token requests per minute).
-The adapter is tested against isolated MySQL state but is not yet publicly
-routed; authorization/consent pages and host lifecycle integration must be
-completed before enabling it.
+The optional `PlatformBackend.createNative` factory owns the native service and
+drains accepted requests before closing its identity signer. Exclusive routing
+covers authorization, token exchange, consent, decisions, discovery and public
+JWKS; missing configuration fails closed. MySQL consent uses the existing
+browser session and an origin-checked decision form, while Supabase retains its
+original consent implementation. Isolated MySQL acceptance covers the browser
+redirect, sign-in requirement, consent render state and cross-origin rejection.
+Production configuration and actual Hub/browser HTTPS acceptance are still
+required before enabling this service publicly.
 
 `platform-validator-report.mjs` verifies the worker's exact Ed25519 signature,
 trusted-key validity, package/version identity, evidence metadata, scan outcomes,

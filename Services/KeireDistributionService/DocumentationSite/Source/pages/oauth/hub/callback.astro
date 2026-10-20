@@ -20,7 +20,7 @@ const success = Boolean(validCode && validState);
         <div class="auth-card">
             <span class={`status-badge ${success ? "status-badge--ready" : ""}`}>{success ? "Authorization approved" : "Authorization not completed"}</span>
             <h1>{success ? "Return securely to Kéire Hub" : "Kéire Hub was not authorized"}</h1>
-            <p>{success ? "The single-use authorization code is ready. Kéire Hub will exchange it with Supabase using the PKCE verifier that never left the app." : errorDescription}</p>
+            <p>{success ? "The single-use authorization code is ready. Kéire Hub will exchange it securely using the PKCE verifier that never left the app." : errorDescription}</p>
             {hubUrl && (
                 <div class="hub-handoff">
                     <ol class="hub-handoff__steps" aria-label="Complete Hub sign-in">

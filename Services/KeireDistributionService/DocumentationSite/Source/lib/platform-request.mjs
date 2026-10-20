@@ -13,6 +13,7 @@ import { handleLocalUploadStatusRequest } from "./platform-upload-status-http.mj
 import { handleLocalUploadRequest } from "./platform-uploads-http.mjs";
 import { handleLocalVersionSubmit } from "./platform-version-submit-http.mjs";
 import { handleLocalReviewRequest } from "./platform-review-http.mjs";
+import { isNativeAuthorizationPath } from "./platform-native-service.mjs";
 
 /** A staged provider adapter. Unported routes fail closed instead of using Supabase identities or data. */
 export async function handleLocalPlatformRequest({ backend, request, siteOrigin, clientIdentity, correlationId, render }) {
@@ -28,6 +29,14 @@ export async function handleLocalPlatformRequest({ backend, request, siteOrigin,
     }
     try {
         return await backend.withBackend(async (service) => {
+            if (isNativeAuthorizationPath(new URL(request.url).pathname)) {
+                if (!service.native) {
+                    return unavailable("Desktop sign-in is not configured. Please try again later.");
+                }
+                return await service.native.handle(request, clientIdentity, render) ?? new Response(null, {
+                    status: 404, headers: { "cache-control": "private, no-store" },
+                });
+            }
             if (new URL(request.url).pathname.startsWith("/internal/publication/")) {
                 if (!service.publication) {
                     return unavailable("The publication service is not configured.");

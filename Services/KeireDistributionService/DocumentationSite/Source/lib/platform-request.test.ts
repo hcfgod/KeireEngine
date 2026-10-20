@@ -13,6 +13,18 @@ function fixture(pathname = "/account/sign-in/") {
 }
 
 describe("staged local platform request routing", () => {
+    it.each(["/auth/v1/oauth/token", "/oauth/consent/", "/auth/v1/.well-known/jwks.json"])(
+        "routes native authorization %s exclusively to its owned service", async (pathname) => {
+            const { options, authentication } = fixture(pathname);
+            expect((await handleLocalPlatformRequest(options)).status).toBe(503);
+            const expected = new Response("native");
+            const handle = vi.fn(async () => expected);
+            options.backend.withBackend = async (action) => action({ authentication, native: { handle } });
+            expect(await handleLocalPlatformRequest(options)).toBe(expected);
+            expect(handle).toHaveBeenCalledWith(options.request, options.clientIdentity, options.render);
+            expect(authentication.session).not.toHaveBeenCalled();
+        },
+    );
     it.each(["validator", "publication"])("routes %s without browser authentication or rendering", async (service) => {
         const { options, authentication } = fixture(`/internal/${service}/v1/queue/`);
         const expected = Response.json({ data: { lease: null } });

@@ -3,7 +3,7 @@ import { issueNativeSession, refreshNativeSession } from "./platform-native-sess
 import { reserveNativeRequest } from "./platform-native-limits.mjs";
 import { NativeOAuthError } from "./platform-native-oauth-policy.mjs";
 
-async function readTokenForm(request) {
+export async function readNativeForm(request) {
     if (request.headers.get("content-type")?.split(";")[0].trim().toLowerCase() !== "application/x-www-form-urlencoded"
         || !request.body) {
         throw new NativeOAuthError("invalid_request", "Use a form-encoded desktop token request.");
@@ -33,6 +33,11 @@ async function readTokenForm(request) {
     } catch {
         throw new NativeOAuthError("invalid_request", "The desktop token request is malformed.");
     }
+    return parameters;
+}
+
+async function readTokenForm(request) {
+    const parameters = await readNativeForm(request);
     const grantType = parameters.get("grant_type");
     const required = grantType === "authorization_code"
         ? ["grant_type", "client_id", "code", "redirect_uri", "code_verifier"]

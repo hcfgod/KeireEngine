@@ -650,13 +650,21 @@ for (const contract of [
     'import { sha256 } from "@noble/hashes/sha2.js"',
     "hashChunkBytes = 4 * 1024 * 1024",
     "chunkSize: 6 * 1024 * 1024",
-    'headers: { "x-signature": reservation.uploadToken }',
+    '...publisherUploadTransport(reservation, localUploads, window.location.origin)',
     'contentType: "application/vnd.keire.asset-package"',
     "cancelReservation",
     "data-submit-version",
     "/publisher/v1/versions/",
 ]) {
     assert(publisherPage.includes(contract), `Publisher package upload is missing ${contract}.`);
+}
+const publisherUploadClient = await readFile(
+    path.join(siteRoot, "Source", "lib", "publisher-upload-client.ts"), "utf8");
+for (const contract of [
+    'headers: { "x-signature": reservation.uploadToken }',
+    'headers: { "x-signature": reservation.uploadId }',
+]) {
+    assert(publisherUploadClient.includes(contract), `Publisher upload transport is missing ${contract}.`);
 }
 const caddyConfig = await readFile(path.join(repositoryRoot, "Services", "KeireDistributionService", "Deployment",
     "Caddyfile.example"), "utf8");
