@@ -179,6 +179,13 @@ records fail and roll back rather than reporting a partial success. This is
 not a general-purpose database REST endpoint. Device registration, download
 authorization and native client provider configuration remain migration gates.
 
+`registerNativeDevice` is the internal MySQL device-registration transaction.
+It requires a live native session, the registered client and the Hub OAuth
+feature flag. Stored bindings use a `mysql:` prefix so imported Supabase device
+identifiers are not reused. Repeated registration updates the name/last-used
+time but cannot reactivate a revoked row. HTTP wiring and real-database device
+acceptance are still pending; this helper alone does not enable downloads.
+
 `scripts/test-native-protected-settings.mjs` exercises actual Windows protection,
 stable reload, overwrite refusal and mismatched-host rejection. Set
 `KEIRE_QA_POWERSHELL` to the absolute PowerShell 7 executable. It retains only
