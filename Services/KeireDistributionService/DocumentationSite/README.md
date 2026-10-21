@@ -116,8 +116,11 @@ Native refresh acceptance now also holds two distinct physical MySQL
 connections and races the same refresh credential. Exactly one rotation may
 succeed; the replay must revoke that session, including the returned replacement
 access and refresh credentials. This test uses only the harness-owned synthetic
-identity and removes its native tokens/sessions afterward. Concurrent
-authorization-code redemption and full native-client acceptance remain pending.
+identity and removes its native tokens/sessions afterward. A separate race
+starts with approved synthetic consent and redeems the same code on two physical
+connections, requiring exactly one session and one rejected replay. Browser
+consent itself is covered by the earlier HTTP/database flow, not this seeded
+race. Full native-client acceptance remains pending.
 
 The internal native token HTTP adapter accepts bounded form-encoded
 authorization-code and refresh grants at `/auth/v1/oauth/token`. It rejects

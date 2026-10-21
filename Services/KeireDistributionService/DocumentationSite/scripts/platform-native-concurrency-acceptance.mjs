@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { generateKeyPairSync } from "node:crypto";
 import { createNativeIdentitySigner } from "../Source/lib/platform-native-identity.mjs";
-import { nativeAccountBinding } from "../Source/lib/platform-native-authorization.mjs";
-import { issueNativeSession, refreshNativeSession, withNativeSessionTransaction } from "../Source/lib/platform-native-sessions.mjs";
+import { refreshNativeSession, withNativeSessionTransaction } from "../Source/lib/platform-native-sessions.mjs";
 import { platformTransaction } from "../Source/lib/platform-mysql.mjs";
+import { redeemNativeCodeConcurrently } from "./platform-native-code-concurrency.mjs";
 
 /** Shared native tables, but only the harness-created synthetic identity; never customer sessions. */
 export async function verifyNativeRefreshConcurrency(pool, userId) {
@@ -15,10 +15,7 @@ export async function verifyNativeRefreshConcurrency(pool, userId) {
     const signer = createNativeIdentitySigner({ siteOrigin: "https://concurrency.invalid", clientId: "keire-hub-desktop",
         privateKey: generateKeyPairSync("ed25519").privateKey });
     try {
-        const tokens = await platformTransaction(pool, (connection) => issueNativeSession(connection, signer, {
-            account, request: { client_id: signer.clientId, scope: "openid email profile", nonce: "n".repeat(43),
-                account_binding: nativeAccountBinding(account, factors), assurance: 1 }, now: Date.now(),
-        }));
+        const tokens = await redeemNativeCodeConcurrently(pool, signer, account, factors);
         // Hold both physical connections before starting either transaction, proving cross-connection contention.
         const connections = [await pool.getConnection()];
         try {
@@ -43,7 +40,7 @@ export async function verifyNativeRefreshConcurrency(pool, userId) {
             { code: "invalid_grant" });
         const [[session]] = await pool.execute("SELECT revoked_ms FROM platform_native_sessions WHERE user_id=?", [userId]);
         assert.notEqual(session.revoked_ms, null);
-        return 7;
+        return 12;
     } finally {
         signer.close();
         await platformTransaction(pool, async (connection) => {
