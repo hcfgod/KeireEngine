@@ -878,3 +878,7 @@ Imported animated models retain their root bind orientation and origin during ro
 including models with an authored axis correction. No compensating entity rotation is required.
 
 Animator warnings reflect the current evaluated setup and clear when the reported problem is resolved.
+
+Staged account migration: Hub account configuration schema 3 selects the MySQL website OAuth provider without a
+Supabase API key. Existing schemas 1 and 2 remain supported. This configuration is not yet release-ready: native
+identity verification and end-to-end migration acceptance remain required; keep published account configuration unchanged.

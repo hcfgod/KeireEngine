@@ -1807,7 +1807,12 @@ their versioned application APIs route to Astro. A website-only release swaps th
 transactionally, verifies the exact Node executable and entry point that owns port 4321, retains a rollback directory,
 and passes public readiness before completion. The router still exposes only ordinary public HTTP/HTTPS through Caddy.
 
-Supabase is the identity and marketplace data authority. Browser sessions and Hub OAuth sessions remain independently
+The published deployment still uses Supabase as the identity and marketplace data authority. The staged MySQL
+migration has an independent native authorization/session service; it is not a live cutover. Hub account configuration
+schemas 1 and 2 retain Supabase semantics. Schema 3 explicitly selects `provider: "mysql"`, a canonical HTTPS
+`projectUrl`, and `hubOAuthClientId`; callback routing is derived from that same origin, and account requests omit
+the Supabase API-key header. Do not ship the new configuration before native signature verification, device/download
+integration and end-to-end acceptance pass. Browser sessions and Hub OAuth sessions remain independently
 revocable. Authenticated marketplace writes cross JWT-verifying Edge Functions into service-role-only transaction
 adapters; they never expose the service credential to Astro or Hub. The adapters bind the already verified actor into
 the transaction so existing RLS membership and entitlement helpers remain authoritative. Publisher submission also

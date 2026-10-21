@@ -98,6 +98,50 @@ TEST_CASE("Supabase account configuration is explicit, HTTPS-only, and publishab
     CHECK(unsafe.Error().Code == HubErrorCode::AccountConfigurationInvalid);
 }
 
+TEST_CASE("Local account configuration uses registered website OAuth without a Supabase key")
+{
+    KeireHubTests::TemporaryDirectory temporary;
+    const auto path = temporary.Path() / "Config" / "Supabase.json";
+    KeireHubTests::WriteText(
+        path,
+        R"({"schemaVersion":3,"enabled":true,"provider":"mysql","projectUrl":"https://platform.example","hubOAuthClientId":"keire-hub-desktop"})");
+    const auto configuration = LoadSupabaseConfiguration(path);
+    REQUIRE(configuration);
+    CHECK(configuration.Value().LocalPlatform);
+    CHECK(configuration.Value().HubOAuthEnabled);
+    CHECK(configuration.Value().PublishableKey.empty());
+    CHECK(configuration.Value().HubOAuthWebsiteCallbackUrl == "https://platform.example/oauth/hub/callback/");
+    auto client = SupabaseAccountClient::Create(
+        configuration.Value(),
+        [](const NativeHttpRequest& request)
+        {
+            CHECK_FALSE(Header(request, "apikey"));
+            CHECK(Header(request, "Authorization") == "Bearer native-access-token");
+            CHECK(request.Url == "https://platform.example/auth/v1/user");
+            return HubResult<NativeHttpResponse>::Success(JsonResponse(
+                200,
+                R"({"id":"00112233-4455-6677-8899-aabbccddeeff","email":"user@example.com","email_confirmed_at":"2026-10-01"})"));
+        });
+    REQUIRE(client);
+    CHECK(client.Value().FetchUser("native-access-token"));
+}
+
+TEST_CASE("Local account configuration rejects extra secrets and insecure origins")
+{
+    KeireHubTests::TemporaryDirectory temporary;
+    const auto path = temporary.Path() / "Config" / "Supabase.json";
+    for (
+        const auto* text :
+        {R"({"schemaVersion":3,"enabled":true,"provider":"mysql","projectUrl":"http://platform.example","hubOAuthClientId":"keire-hub-desktop"})",
+         R"({"schemaVersion":3,"enabled":true,"provider":"mysql","projectUrl":"https://platform.example/path","hubOAuthClientId":"keire-hub-desktop"})",
+         R"({"schemaVersion":3,"enabled":true,"provider":"mysql","projectUrl":"https://platform.example","hubOAuthClientId":"client with spaces"})",
+         R"({"schemaVersion":3,"enabled":true,"provider":"mysql","projectUrl":"https://platform.example","hubOAuthClientId":"keire-hub-desktop","publishableKey":"unexpected"})"})
+    {
+        KeireHubTests::WriteText(path, text);
+        CHECK_FALSE(LoadSupabaseConfiguration(path));
+    }
+}
+
 TEST_CASE("Supabase password sign-in sends bounded JSON and parses the rotated session")
 {
     NativeHttpRequest captured;

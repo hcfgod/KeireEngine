@@ -239,12 +239,15 @@ namespace KeireHub
                                                 const std::optional<std::string_view> accessToken,
                                                 std::vector<std::byte> body = {})
         {
-            NativeHttpRequest result{
-                .Method = method,
-                .Url = configuration.ProjectUrl + std::string(path),
-                .Headers = {{"apikey", configuration.PublishableKey}, {"Accept", "application/json"}},
-                .Body = std::move(body),
-                .MaximumResponseBytes = MaximumResponseBytes};
+            NativeHttpRequest result{.Method = method,
+                                     .Url = configuration.ProjectUrl + std::string(path),
+                                     .Headers = {{"Accept", "application/json"}},
+                                     .Body = std::move(body),
+                                     .MaximumResponseBytes = MaximumResponseBytes};
+            if (!configuration.LocalPlatform)
+            {
+                result.Headers.push_back({"apikey", configuration.PublishableKey});
+            }
             if (method == NativeHttpMethod::Post || method == NativeHttpMethod::Patch)
                 result.Headers.push_back({"Content-Type", "application/json"});
             if (accessToken)
@@ -300,6 +303,46 @@ namespace KeireHub
             }
             SupabaseConfiguration result;
             result.Enabled = value.Value().at("enabled").get<bool>();
+            if (schemaVersion == 3U)
+            {
+                if (value.Value().at("provider").get<std::string>() != "mysql")
+                {
+                    throw std::invalid_argument("unsupported local account provider");
+                }
+                result.LocalPlatform = true;
+                if (!result.Enabled)
+                {
+                    if (value.Value().size() != 3U)
+                    {
+                        throw std::invalid_argument("disabled local account configuration contains account fields");
+                    }
+                    return HubResult<SupabaseConfiguration>::Success(std::move(result));
+                }
+                if (value.Value().size() != 5U)
+                {
+                    throw std::invalid_argument("local account configuration contains unsupported fields");
+                }
+                result.ProjectUrl = value.Value().at("projectUrl").get<std::string>();
+                result.HubOAuthClientId = value.Value().at("hubOAuthClientId").get<std::string>();
+                const auto origin = Detail::ParseHttpUrl(result.ProjectUrl, false);
+                if (!origin || !origin.Value().Secure || origin.Value().Target != "/" ||
+                    result.ProjectUrl.ends_with('/') || (origin.Value().Port && *origin.Value().Port != 443U) ||
+                    !IsBoundedAscii(result.HubOAuthClientId, 128U) || result.HubOAuthClientId.size() < 8U ||
+                    !std::ranges::all_of(result.HubOAuthClientId,
+                                         [](const unsigned char character)
+                                         {
+                                             return (character >= 'A' && character <= 'Z') ||
+                                                    (character >= 'a' && character <= 'z') ||
+                                                    (character >= '0' && character <= '9') || character == '.' ||
+                                                    character == '_' || character == '~' || character == '-';
+                                         }))
+                {
+                    throw std::invalid_argument("invalid local account origin or registered client");
+                }
+                result.HubOAuthEnabled = true;
+                result.HubOAuthWebsiteCallbackUrl = result.ProjectUrl + "/oauth/hub/callback/";
+                return HubResult<SupabaseConfiguration>::Success(std::move(result));
+            }
             if (!result.Enabled)
             {
                 if (value.Value().size() != 2U && !(schemaVersion == 2U && value.Value().size() == 3U &&
@@ -364,8 +407,8 @@ namespace KeireHub
     HubResult<SupabaseAccountClient> SupabaseAccountClient::Create(SupabaseConfiguration configuration,
                                                                    AccountTransport transport)
     {
-        if (!configuration.Enabled || configuration.ProjectUrl.empty() || configuration.PublishableKey.empty() ||
-            !transport)
+        if (!configuration.Enabled || configuration.ProjectUrl.empty() ||
+            (!configuration.LocalPlatform && configuration.PublishableKey.empty()) || !transport)
         {
             return HubResult<SupabaseAccountClient>::Failure(
                 ConfigurationError("Accounts are not configured in this Hub package."));

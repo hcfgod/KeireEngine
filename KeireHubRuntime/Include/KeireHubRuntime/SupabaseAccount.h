@@ -20,7 +20,7 @@ namespace KeireHub
     struct SupabaseConfiguration final
     {
         static constexpr std::uint32_t MinimumSchemaVersion = 1;
-        static constexpr std::uint32_t CurrentSchemaVersion = 2;
+        static constexpr std::uint32_t CurrentSchemaVersion = 3;
 
         bool Enabled = false;
         bool HubOAuthEnabled = false;
@@ -28,6 +28,7 @@ namespace KeireHub
         std::string PublishableKey;
         std::string HubOAuthClientId;
         std::string HubOAuthWebsiteCallbackUrl;
+        bool LocalPlatform = false;
     };
 
     struct AccountUser final

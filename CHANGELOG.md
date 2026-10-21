@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Added staged Hub account configuration schema 3 for MySQL website OAuth without a Supabase API key; schemas 1 and 2 remain supported. Release activation awaits full native identity verification and sign-in acceptance.
+
 - Added internal MySQL validator leasing and renewal with expired-worker recovery, bounded retries, and transactional audit records; HTTP integration remains pending.
 
 - Added staged MySQL endpoint selection to the marketplace validator broker while retaining Supabase defaults and rejecting redirected queue requests.
