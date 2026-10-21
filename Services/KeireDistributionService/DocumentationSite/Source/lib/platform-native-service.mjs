@@ -3,10 +3,12 @@ import { createNativeOAuthPolicy } from "./platform-native-oauth-policy.mjs";
 import { createNativeTokenHttp } from "./platform-native-token-http.mjs";
 import { createNativeBrowserHttp } from "./platform-native-browser.mjs";
 import { createNativeAccountHttp } from "./platform-native-account-http.mjs";
+import { createNativeMarketplaceHttp } from "./platform-native-marketplace-http.mjs";
 
 export function isNativeAuthorizationPath(pathname) {
     return pathname.startsWith("/auth/v1/oauth/") || pathname.startsWith("/auth/v1/.well-known/")
-        || ["/oauth/consent", "/oauth/decision", "/oauth/hub/callback", "/auth/v1/user", "/auth/v1/logout", "/rest/v1/profiles"]
+        || ["/oauth/consent", "/oauth/decision", "/oauth/hub/callback", "/auth/v1/user", "/auth/v1/logout", "/rest/v1/profiles",
+            "/functions/v1/marketplace-hub"]
             .includes(pathname.replace(/\/+$/, ""));
 }
 
@@ -17,10 +19,12 @@ export function createLocalNativeService({ pool, authentication, siteOrigin, cli
     let token;
     let browser;
     let account;
+    let marketplace;
     try {
         token = createNativeTokenHttp({ pool, policy, signer });
         browser = createNativeBrowserHttp({ pool, authentication, policy, siteOrigin });
         account = createNativeAccountHttp({ pool, siteOrigin, clientId });
+        marketplace = createNativeMarketplaceHttp({ pool, siteOrigin, clientId });
     } catch (error) {
         signer.close();
         throw error;
@@ -66,6 +70,7 @@ export function createLocalNativeService({ pool, authentication, siteOrigin, cli
                     return new Response(null, { status: 404 });
                 }
                 return await token(request, clientIdentity) ?? await account(request)
+                    ?? await marketplace(request)
                     ?? await browser(request, clientIdentity, render)
                     ?? new Response(null, { status: 404, headers: { "cache-control": "private, no-store" } });
             } finally {

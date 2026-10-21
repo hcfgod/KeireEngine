@@ -17,7 +17,8 @@ export async function verifyNativeSessions(pool, userId) {
     });
     const tables = ["platform_native_sessions", "platform_native_access_tokens", "platform_native_refresh_tokens",
         "platform_accounts", "platform_mfa_factors", "platform_audit_events",
-        "platform_native_authorizations", "platform_auth_sessions", "platform_auth_limits", "profiles", "platform_profiles"];
+        "platform_native_authorizations", "platform_auth_sessions", "platform_auth_limits", "profiles", "platform_profiles",
+        "oauth_device_sessions", "platform_feature_flags"];
     const names = new RegExp(`\\b(${tables.join("|")})\\b`, "g");
     const connection = {
         execute: (sql, values) => raw.execute(sql.replace(names, (table) => `${table}_qa_native`), values),
@@ -30,10 +31,12 @@ export async function verifyNativeSessions(pool, userId) {
             await connection.execute(schema.replace("CREATE TABLE", "CREATE TEMPORARY TABLE"));
         }
         for (const table of ["platform_accounts", "platform_mfa_factors", "platform_audit_events",
-            "platform_auth_sessions", "platform_auth_limits", "profiles", "platform_profiles"]) {
+            "platform_auth_sessions", "platform_auth_limits", "profiles", "platform_profiles", "oauth_device_sessions", "platform_feature_flags"]) {
             await raw.execute(`CREATE TEMPORARY TABLE ${table}_qa_native LIKE ${table}`);
         }
         // Copy only the harness-owned synthetic identity, never customer accounts.
+        await connection.execute("INSERT INTO platform_feature_flags (`key`,enabled,description,updated_at) "
+            + "VALUES ('hub_oauth_sso_enabled',TRUE,'Native device fixture',UTC_TIMESTAMP(6))");
         await raw.execute("INSERT INTO platform_accounts_qa_native SELECT * FROM platform_accounts WHERE id=?", [userId]);
         await raw.execute("INSERT INTO platform_mfa_factors_qa_native SELECT * FROM platform_mfa_factors WHERE user_id=?", [userId]);
         await connection.execute(`INSERT INTO profiles

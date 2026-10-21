@@ -9,6 +9,7 @@ import { createNativeTokenHttp } from "../Source/lib/platform-native-token-http.
 import { reserveNativeRequest } from "../Source/lib/platform-native-limits.mjs";
 import { createNativeBrowserHttp } from "../Source/lib/platform-native-browser.mjs";
 import { createNativeAccountHttp } from "../Source/lib/platform-native-account-http.mjs";
+import { createNativeMarketplaceHttp } from "../Source/lib/platform-native-marketplace-http.mjs";
 
 /** Reuses the caller's connection-local identity and native tables, never the real account/session tables. */
 export async function verifyNativeAuthorization(pool, connection, signer, userId) {
@@ -98,6 +99,20 @@ export async function verifyNativeAuthorization(pool, connection, signer, userId
         const exchanged = await post(form);
         assert.equal(exchanged.status, 200);
         const httpTokens = await exchanged.json();
+        const marketplaceHttp = createNativeMarketplaceHttp({ pool, siteOrigin: "https://qa.invalid", clientId: policy.clientId });
+        const registerDevice = (deviceName) => marketplaceHttp(new Request("https://qa.invalid/functions/v1/marketplace-hub", {
+            method: "POST", headers: { authorization: `Bearer ${httpTokens.access_token}`, "content-type": "application/json" },
+            body: JSON.stringify({ operation: "session.register", deviceName }),
+        }));
+        const registered = await registerDevice("Fixture desktop");
+        assert.equal(registered.status, 201);
+        const device = (await registered.json()).data;
+        assert.deepEqual((await (await registerDevice("Renamed fixture")).json()).data, device);
+        const [[storedDevice]] = await connection.execute("SELECT * FROM oauth_device_sessions WHERE id=?", [device.deviceSessionId]);
+        assert.equal(storedDevice.oauth_session_id, `mysql:${device.oauthSessionId}`);
+        assert.equal(storedDevice.device_name, "Renamed fixture");
+        await connection.execute("UPDATE oauth_device_sessions SET revoked_at=UTC_TIMESTAMP(6) WHERE id=?", [device.deviceSessionId]);
+        assert.equal((await registerDevice("Cannot revive")).status, 403);
         const accountHttp = createNativeAccountHttp({ pool, siteOrigin: "https://qa.invalid", clientId: policy.clientId });
         const accountRequest = (accessToken, logout = false) => accountHttp(new Request(
             `https://qa.invalid/auth/v1/${logout ? "logout?scope=local" : "user"}`, {
@@ -152,7 +167,7 @@ export async function verifyNativeAuthorization(pool, connection, signer, userId
         assert.equal((await accountRequest(tokens.access_token, true)).status, 204);
         assert.equal((await accountRequest(tokens.access_token)).status, 401);
         assert.equal(await readNative(tokens.access_token), null);
-        return 42;
+        return 47;
     } finally {
         authentication.close();
     }

@@ -183,8 +183,13 @@ authorization and native client provider configuration remain migration gates.
 It requires a live native session, the registered client and the Hub OAuth
 feature flag. Stored bindings use a `mysql:` prefix so imported Supabase device
 identifiers are not reused. Repeated registration updates the name/last-used
-time but cannot reactivate a revoked row. HTTP wiring and real-database device
-acceptance are still pending; this helper alone does not enable downloads.
+time but cannot reactivate a revoked row. The native service routes bearer-only
+`POST /functions/v1/marketplace-hub` with the exact `session.register` request
+and response contract. Bounded JSON rejects extra actor fields, browser
+credentials and unsupported operations. Isolated MySQL acceptance covers
+registration, stable repeated registration, renaming, the provider binding and
+rejection after revocation. Download issuance is not enabled by this endpoint
+yet; it remains a separate integration and storage-verification gate.
 
 `scripts/test-native-protected-settings.mjs` exercises actual Windows protection,
 stable reload, overwrite refusal and mismatched-host rejection. Set
