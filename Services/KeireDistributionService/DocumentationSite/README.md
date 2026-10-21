@@ -160,8 +160,14 @@ account security binding and registered client. Account responses expose only
 the Hub's user ID, email and confirmation timestamp and require email scope.
 Local logout revokes the authenticated native session; browser sessions remain
 independent. Cookies, browser Origin and legacy API-key headers are rejected.
-Profile editing, device registration and download authorization remain separate
-migration gates, as does native client provider configuration.
+The exact Hub profile contract at `/rest/v1/profiles` supports reading the
+authenticated user's display name/avatar and updating their display name.
+Profile scope is required; arbitrary queries, other users and extra update
+fields are rejected. Names are bounded to the native client's 64 UTF-8 byte
+limit. Both local profile representations update in one transaction; missing
+records fail and roll back rather than reporting a partial success. This is
+not a general-purpose database REST endpoint. Device registration, download
+authorization and native client provider configuration remain migration gates.
 
 `scripts/test-native-protected-settings.mjs` exercises actual Windows protection,
 stable reload, overwrite refusal and mismatched-host rejection. Set

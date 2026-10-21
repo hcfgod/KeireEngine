@@ -31,7 +31,7 @@ export async function verifyNativeAuthorization(pool, connection, signer, userId
     const browserHttp = createNativeBrowserHttp({ pool, authentication, policy, siteOrigin: "https://qa.invalid" });
     const parameters = new URLSearchParams({
         response_type: "code", client_id: policy.clientId, redirect_uri: policy.redirectUri,
-        scope: "openid email", state: "s".repeat(43), nonce: "n".repeat(43),
+        scope: "openid email profile", state: "s".repeat(43), nonce: "n".repeat(43),
         code_challenge: "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM", code_challenge_method: "S256",
     });
     const issue = (transaction, context) => issueNativeSession(transaction, signer, context);
@@ -108,6 +108,24 @@ export async function verifyNativeAuthorization(pool, connection, signer, userId
         assert.deepEqual(await accountResponse.json(), {
             id: userId, email: account.email, email_confirmed_at: account.email_confirmed_at,
         });
+        const profileRead = (target) => accountHttp(new Request(
+            `https://qa.invalid/rest/v1/profiles?select=display_name,avatar_url&user_id=eq.${target}&limit=1`,
+            { headers: { authorization: `Bearer ${httpTokens.access_token}` } }));
+        const profileSave = (target, name) => accountHttp(new Request(
+            "https://qa.invalid/rest/v1/profiles?on_conflict=user_id", {
+                method: "POST", headers: { authorization: `Bearer ${httpTokens.access_token}`, "content-type": "application/json" },
+                body: JSON.stringify({ user_id: target, display_name: name }),
+            }));
+        assert.equal((await profileRead("other-user")).status, 403);
+        assert.equal((await profileSave("other-user", "Unauthorized")).status, 403);
+        assert.equal((await profileSave(userId, "Updated native fixture")).status, 204);
+        assert.deepEqual(await (await profileRead(userId)).json(), [{ display_name: "Updated native fixture", avatar_url: null }]);
+        const [[savedProfile]] = await connection.execute("SELECT display_name FROM platform_profiles WHERE user_id=?", [userId]);
+        assert.equal(savedProfile.display_name, "Updated native fixture");
+        assert.equal((await profileSave(userId, "é".repeat(33))).status, 400);
+        await connection.execute("DELETE FROM platform_profiles WHERE user_id=?", [userId]);
+        assert.equal((await profileSave(userId, "Must roll back")).status, 503);
+        assert.deepEqual(await (await profileRead(userId)).json(), [{ display_name: "Updated native fixture", avatar_url: null }]);
         assert.equal(await readNative(httpTokens.access_token), userId);
         assert.equal((await post(form)).status, 400);
         const refresh = new URLSearchParams({
@@ -134,7 +152,7 @@ export async function verifyNativeAuthorization(pool, connection, signer, userId
         assert.equal((await accountRequest(tokens.access_token, true)).status, 204);
         assert.equal((await accountRequest(tokens.access_token)).status, 401);
         assert.equal(await readNative(tokens.access_token), null);
-        return 34;
+        return 42;
     } finally {
         authentication.close();
     }

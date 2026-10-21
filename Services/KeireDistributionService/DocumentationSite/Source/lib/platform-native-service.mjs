@@ -6,7 +6,7 @@ import { createNativeAccountHttp } from "./platform-native-account-http.mjs";
 
 export function isNativeAuthorizationPath(pathname) {
     return pathname.startsWith("/auth/v1/oauth/") || pathname.startsWith("/auth/v1/.well-known/")
-        || ["/oauth/consent", "/oauth/decision", "/oauth/hub/callback", "/auth/v1/user", "/auth/v1/logout"]
+        || ["/oauth/consent", "/oauth/decision", "/oauth/hub/callback", "/auth/v1/user", "/auth/v1/logout", "/rest/v1/profiles"]
             .includes(pathname.replace(/\/+$/, ""));
 }
 

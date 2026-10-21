@@ -20,6 +20,28 @@ beforeEach(() => {
 });
 
 describe("native account HTTP", () => {
+    it("reads only the authenticated profile with the bounded Hub query", async () => {
+        execute.mockResolvedValue([[{ display_name: "Fixture", avatar_url: null }]]);
+        const response = await handle(request("/rest/v1/profiles?select=display_name,avatar_url&user_id=eq.user&limit=1"));
+        expect(await response.json()).toEqual([{ display_name: "Fixture", avatar_url: null }]);
+        expect(execute).toHaveBeenCalledWith("SELECT display_name,avatar_url FROM profiles WHERE user_id=?", ["user"]);
+        expect((await handle(request("/rest/v1/profiles?select=display_name,avatar_url&user_id=eq.other&limit=1"))).status).toBe(403);
+    });
+
+    it("updates both profile representations without accepting another account", async () => {
+        execute.mockResolvedValue([{ affectedRows: 1 }]);
+        const save = (userId, name) => handle(new Request(origin + "/rest/v1/profiles?on_conflict=user_id", {
+            method: "POST", headers: { authorization: `Bearer ${"a".repeat(43)}`, "content-type": "application/json" },
+            body: JSON.stringify({ user_id: userId, display_name: name }),
+        }));
+        expect((await save("other", "Fixture")).status).toBe(403);
+        expect(execute).not.toHaveBeenCalled();
+        expect((await save("user", "Fixture")).status).toBe(204);
+        expect(execute).toHaveBeenCalledTimes(2);
+        expect((await save("user", "\ninvalid")).status).toBe(400);
+        expect((await save("user", "é".repeat(33))).status).toBe(400);
+    });
+
     it("returns only the account fields consumed by the Hub", async () => {
         const response = await handle(request());
         expect(response.status).toBe(200);

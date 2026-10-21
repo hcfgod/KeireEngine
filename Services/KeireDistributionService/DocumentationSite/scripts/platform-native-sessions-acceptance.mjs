@@ -17,7 +17,7 @@ export async function verifyNativeSessions(pool, userId) {
     });
     const tables = ["platform_native_sessions", "platform_native_access_tokens", "platform_native_refresh_tokens",
         "platform_accounts", "platform_mfa_factors", "platform_audit_events",
-        "platform_native_authorizations", "platform_auth_sessions", "platform_auth_limits"];
+        "platform_native_authorizations", "platform_auth_sessions", "platform_auth_limits", "profiles", "platform_profiles"];
     const names = new RegExp(`\\b(${tables.join("|")})\\b`, "g");
     const connection = {
         execute: (sql, values) => raw.execute(sql.replace(names, (table) => `${table}_qa_native`), values),
@@ -30,12 +30,17 @@ export async function verifyNativeSessions(pool, userId) {
             await connection.execute(schema.replace("CREATE TABLE", "CREATE TEMPORARY TABLE"));
         }
         for (const table of ["platform_accounts", "platform_mfa_factors", "platform_audit_events",
-            "platform_auth_sessions", "platform_auth_limits"]) {
+            "platform_auth_sessions", "platform_auth_limits", "profiles", "platform_profiles"]) {
             await raw.execute(`CREATE TEMPORARY TABLE ${table}_qa_native LIKE ${table}`);
         }
         // Copy only the harness-owned synthetic identity, never customer accounts.
         await raw.execute("INSERT INTO platform_accounts_qa_native SELECT * FROM platform_accounts WHERE id=?", [userId]);
         await raw.execute("INSERT INTO platform_mfa_factors_qa_native SELECT * FROM platform_mfa_factors WHERE user_id=?", [userId]);
+        await connection.execute(`INSERT INTO profiles
+            (user_id,display_name,created_at,updated_at,notification_preferences,locale)
+            VALUES (?,'Native fixture',UTC_TIMESTAMP(6),UTC_TIMESTAMP(6),'{}','en')`, [userId]);
+        await connection.execute(`INSERT INTO platform_profiles (user_id,display_name,source_record)
+            VALUES (?,'Native fixture','{}')`, [userId]);
         const [[account]] = await connection.execute("SELECT * FROM platform_accounts WHERE id=?", [userId]);
         const [factors] = await connection.execute("SELECT * FROM platform_mfa_factors WHERE user_id=? AND status='verified'", [userId]);
         let now = Date.now();
