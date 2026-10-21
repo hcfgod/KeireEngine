@@ -112,6 +112,13 @@ OAuth service: production schema/key provisioning, host configuration,
 concurrent-session acceptance, and native client acceptance remain
 activation gates.
 
+Native refresh acceptance now also holds two distinct physical MySQL
+connections and races the same refresh credential. Exactly one rotation may
+succeed; the replay must revoke that session, including the returned replacement
+access and refresh credentials. This test uses only the harness-owned synthetic
+identity and removes its native tokens/sessions afterward. Concurrent
+authorization-code redemption and full native-client acceptance remain pending.
+
 The internal native token HTTP adapter accepts bounded form-encoded
 authorization-code and refresh grants at `/auth/v1/oauth/token`. It rejects
 browser cookies, Origin, bearer/API-key headers, duplicate fields and query

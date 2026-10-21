@@ -16,6 +16,7 @@ import { verifyUploadConcurrency } from "./platform-upload-concurrency-acceptanc
 import { verifyPublicationSequence } from "./platform-publication-sequence-acceptance.mjs";
 import { verifyPublicationConcurrency } from "./platform-publication-concurrency-acceptance.mjs";
 import { verifyNativeSessions } from "./platform-native-sessions-acceptance.mjs";
+import { verifyNativeRefreshConcurrency } from "./platform-native-concurrency-acceptance.mjs";
 import { createNativeSchema } from "../Source/lib/platform-native-provision.mjs";
 import { allocatePublicationSequence, publicationSequenceSchema } from "../Source/lib/platform-publication-sequence.mjs";
 import { verifyLocalDataRequests } from "./platform-data-requests-acceptance.mjs";
@@ -313,6 +314,8 @@ try {
 
     stage = "native-sessions";
     checks += await verifyNativeSessions(migration, userId);
+    stage = "native-refresh-concurrency";
+    checks += await verifyNativeRefreshConcurrency(migration, userId);
 
     stage = "backend-lifecycle";
     const transferredKey = Buffer.from(encryptionKey);
