@@ -12,6 +12,7 @@ import { loadWindowsPlatformSecrets } from "../Source/lib/platform-secrets.mjs";
 import { emailSendLimits } from "../Source/lib/platform-email-limits.mjs";
 import { verifyUploadHttp } from "./platform-upload-http-acceptance.mjs";
 import { createPublisherPreview } from "./qa-publisher-preview.mjs";
+import { verifyNativeHttp } from "./platform-native-http-acceptance.mjs";
 
 const userId = randomUUID();
 const factorId = randomUUID();
@@ -136,7 +137,8 @@ try {
         const response = await fetch(base + route, {
             method, redirect: "manual", signal: AbortSignal.timeout(10000),
             headers: { origin, "content-type": "application/json", cookie: [...cookies].map(([key, value]) => `${key}=${value}`).join("; "), ...extraHeaders },
-            body: body === undefined ? undefined : body instanceof Uint8Array ? body : JSON.stringify(body),
+            body: body === undefined ? undefined : body instanceof URLSearchParams ? body.toString()
+                : body instanceof Uint8Array ? body : JSON.stringify(body),
         });
         for (const value of response.headers.getSetCookie()) {
             assert.ok(value.includes("HttpOnly; Secure; SameSite=Lax"));
@@ -383,6 +385,11 @@ try {
         checks += 3;
 
         stage = "account-overview";
+        if (process.env.KEIRE_QA_NATIVE_SETTINGS_DIRECTORY) {
+            checks += await verifyNativeHttp({ pool, userId, origin, clientIdentity, browserRequest: request,
+                setStage: (phase) => { stage = `native-${phase}`; } });
+            stage = "account-overview";
+        }
         const securityPage = await request("/account/mfa/");
         assert.equal(securityPage.status, 200);
         const securityHtml = await securityPage.text();

@@ -233,6 +233,11 @@ retain their trailing slashes. The QA host sends native routes directly to the
 application handler, while hidden static files remain denied. With native settings,
 `start-local-platform-qa.mjs --smoke` checks trusted HTTPS discovery, public-only
 keys, anonymous account/profile/marketplace denial, and hidden-file protection.
+The full `test-platform-http-live.mjs` run also exercises native authorization when
+`KEIRE_QA_NATIVE_SETTINGS_DIRECTORY` is set: rendered consent, PKCE exchange,
+signed identity and access-token binding, profile reads, idempotent device
+registration, refresh, and logout revocation. It uses the harness's disposable
+account and removes only that fixture's native sessions, devices, and requests.
 Production host key provisioning and storage configuration remain pending; this
 does not enable live downloads or establish complete Hub migration readiness.
 
