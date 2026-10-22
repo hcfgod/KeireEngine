@@ -196,10 +196,14 @@ device binding, published/withdrawn version publication metadata, and personal
 or current organization-member entitlements under transaction locks. Grant
 issuance verifies immutable package bytes first, then rechecks session expiry
 before inserting a ten-minute grant. Missing/damaged files produce an explicit
-unavailable response. These helpers have focused unit coverage but still need
-real-database acceptance and an authorized delivery handler; `download.issue`
-is not publicly wired yet. Delivery must recheck revocation rather than treating
-a grant ID as permanent access.
+unavailable response. Isolated MySQL acceptance uses copies of the actual table
+schemas and a real temporary `LocalBlobStore`: missing/damaged bytes, revoked
+ownership, security revocation, owned withdrawn versions, and expiry during
+hashing are covered. Failed verification leaves no grant; the injected expiry
+mutation also rolls back. The fixture's publication text is synthetic; signature
+interoperability is tested separately by the publication pipeline. An authorized
+delivery handler and `download.issue` HTTP wiring remain pending. Delivery must
+recheck revocation rather than treating a grant ID as permanent access.
 
 `scripts/test-native-protected-settings.mjs` exercises actual Windows protection,
 stable reload, overwrite refusal and mismatched-host rejection. Set

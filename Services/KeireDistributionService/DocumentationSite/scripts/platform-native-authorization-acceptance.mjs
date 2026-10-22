@@ -10,6 +10,7 @@ import { reserveNativeRequest } from "../Source/lib/platform-native-limits.mjs";
 import { createNativeBrowserHttp } from "../Source/lib/platform-native-browser.mjs";
 import { createNativeAccountHttp } from "../Source/lib/platform-native-account-http.mjs";
 import { createNativeMarketplaceHttp } from "../Source/lib/platform-native-marketplace-http.mjs";
+import { verifyNativeDownloadGrants } from "./platform-native-download-acceptance.mjs";
 
 /** Reuses the caller's connection-local identity and native tables, never the real account/session tables. */
 export async function verifyNativeAuthorization(pool, connection, signer, userId) {
@@ -111,6 +112,8 @@ export async function verifyNativeAuthorization(pool, connection, signer, userId
         const [[storedDevice]] = await connection.execute("SELECT * FROM oauth_device_sessions WHERE id=?", [device.deviceSessionId]);
         assert.equal(storedDevice.oauth_session_id, `mysql:${device.oauthSessionId}`);
         assert.equal(storedDevice.device_name, "Renamed fixture");
+        const downloadChecks = await verifyNativeDownloadGrants(pool, connection, httpTokens.access_token,
+            policy.clientId, userId, device.deviceSessionId);
         await connection.execute("UPDATE oauth_device_sessions SET revoked_at=UTC_TIMESTAMP(6) WHERE id=?", [device.deviceSessionId]);
         assert.equal((await registerDevice("Cannot revive")).status, 403);
         const accountHttp = createNativeAccountHttp({ pool, siteOrigin: "https://qa.invalid", clientId: policy.clientId });
@@ -167,7 +170,7 @@ export async function verifyNativeAuthorization(pool, connection, signer, userId
         assert.equal((await accountRequest(tokens.access_token, true)).status, 204);
         assert.equal((await accountRequest(tokens.access_token)).status, 401);
         assert.equal(await readNative(tokens.access_token), null);
-        return 47;
+        return 47 + downloadChecks;
     } finally {
         authentication.close();
     }
