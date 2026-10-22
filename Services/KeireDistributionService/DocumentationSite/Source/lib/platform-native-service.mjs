@@ -4,28 +4,41 @@ import { createNativeTokenHttp } from "./platform-native-token-http.mjs";
 import { createNativeBrowserHttp } from "./platform-native-browser.mjs";
 import { createNativeAccountHttp } from "./platform-native-account-http.mjs";
 import { createNativeMarketplaceHttp } from "./platform-native-marketplace-http.mjs";
+import { createDownloadCapabilities } from "./platform-download-capabilities.mjs";
+import { createNativeDownloadHttp } from "./platform-native-download-http.mjs";
 
 export function isNativeAuthorizationPath(pathname) {
     return pathname.startsWith("/auth/v1/oauth/") || pathname.startsWith("/auth/v1/.well-known/")
+        || pathname.startsWith("/marketplace/v1/downloads/")
         || ["/oauth/consent", "/oauth/decision", "/oauth/hub/callback", "/auth/v1/user", "/auth/v1/logout", "/rest/v1/profiles",
             "/functions/v1/marketplace-hub"]
             .includes(pathname.replace(/\/+$/, ""));
 }
 
 /** Owns the identity signer; borrows the host's database and browser authentication service. */
-export function createLocalNativeService({ pool, authentication, siteOrigin, clientId, privateKey }) {
+export function createLocalNativeService({ pool, authentication, siteOrigin, clientId, privateKey, downloadKey, packageStore }) {
     const policy = createNativeOAuthPolicy({ siteOrigin, clientId });
     const signer = createNativeIdentitySigner({ siteOrigin, clientId, privateKey });
     let token;
     let browser;
     let account;
     let marketplace;
+    let capabilities;
+    let downloads;
     try {
+        if (downloadKey !== undefined || packageStore !== undefined) {
+            if (!packageStore || typeof packageStore.read !== "function" || typeof packageStore.verify !== "function") {
+                throw new Error("Native downloads require a verified private package store.");
+            }
+            capabilities = createDownloadCapabilities({ siteOrigin, key: downloadKey });
+            downloads = createNativeDownloadHttp({ pool, clientId, capabilities, packageStore });
+        }
         token = createNativeTokenHttp({ pool, policy, signer });
         browser = createNativeBrowserHttp({ pool, authentication, policy, siteOrigin });
         account = createNativeAccountHttp({ pool, siteOrigin, clientId });
-        marketplace = createNativeMarketplaceHttp({ pool, siteOrigin, clientId });
+        marketplace = createNativeMarketplaceHttp({ pool, siteOrigin, clientId, capabilities, packageStore });
     } catch (error) {
+        capabilities?.close();
         signer.close();
         throw error;
     }
@@ -46,6 +59,11 @@ export function createLocalNativeService({ pool, authentication, siteOrigin, cli
             }
             active++;
             try {
+                if (url.pathname.startsWith("/marketplace/v1/downloads/")) {
+                    return downloads ? await downloads(request) : new Response(null, {
+                        status: 503, headers: { "cache-control": "private, no-store" },
+                    });
+                }
                 if (url.pathname.startsWith("/auth/v1/.well-known/")) {
                     const headers = { "cache-control": "public, max-age=300", "x-content-type-options": "nosniff" };
                     if (url.origin !== siteOrigin || url.search) {
@@ -86,7 +104,12 @@ export function createLocalNativeService({ pool, authentication, siteOrigin, cli
                 if (active !== 0) {
                     await new Promise((resolve) => { drained = resolve; });
                 }
-                signer.close();
+                try {
+                    await downloads?.close();
+                } finally {
+                    capabilities?.close();
+                    signer.close();
+                }
             })();
             return shutdown;
         },

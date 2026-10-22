@@ -188,8 +188,8 @@ time but cannot reactivate a revoked row. The native service routes bearer-only
 and response contract. Bounded JSON rejects extra actor fields, browser
 credentials and unsupported operations. Isolated MySQL acceptance covers
 registration, stable repeated registration, renaming, the provider binding and
-rejection after revocation. Download issuance is not enabled by this endpoint
-yet; it remains a separate integration and storage-verification gate.
+rejection after revocation. The endpoint also supports `download.issue` when
+the native service receives both a private package store and a dedicated download key.
 
 The internal native download helpers now check feature flags, the authenticated
 device binding, published/withdrawn version publication metadata, and personal
@@ -202,8 +202,17 @@ ownership, security revocation, owned withdrawn versions, and expiry during
 hashing are covered. Failed verification leaves no grant; the injected expiry
 mutation also rolls back. The fixture's publication text is synthetic; signature
 interoperability is tested separately by the publication pipeline. An authorized
-delivery handler and `download.issue` HTTP wiring remain pending. Delivery must
-recheck revocation rather than treating a grant ID as permanent access.
+delivery handler rechecks session, account, device, entitlement and version
+access before and after verifying the file. Signed links expire within ten minutes
+and never outlive the database grant. Their query strings are credentials and must
+be redacted from proxy and application logs. The stream retains the verified file
+handle; cancellation and service shutdown close it. The native service owns its
+copied capability key and drains downloads before clearing it, while borrowing the
+immutable package store. Private directory permissions must prevent external writers.
+Isolated acceptance exercises issuance and delivery through the native service,
+including exact returned bytes, altered links, revocation and damaged files.
+Production host key provisioning and storage configuration remain pending; this
+does not enable live downloads or establish complete Hub migration readiness.
 
 `scripts/test-native-protected-settings.mjs` exercises actual Windows protection,
 stable reload, overwrite refusal and mismatched-host rejection. Set

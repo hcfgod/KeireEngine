@@ -1,8 +1,9 @@
 import { readObject } from "./platform-auth-http.mjs";
 import { LocalClaimError } from "./platform-claims.mjs";
 import { registerNativeDevice } from "./platform-native-devices.mjs";
+import { issueNativeDownloadGrant } from "./platform-native-download-grants.mjs";
 
-export function createNativeMarketplaceHttp({ pool, siteOrigin, clientId }) {
+export function createNativeMarketplaceHttp({ pool, siteOrigin, clientId, capabilities, packageStore }) {
     return async (request) => {
         const url = new URL(request.url);
         if (url.pathname.replace(/\/+$/, "") !== "/functions/v1/marketplace-hub") {
@@ -27,10 +28,25 @@ export function createNativeMarketplaceHttp({ pool, siteOrigin, clientId }) {
         } catch {
             return fail(400, "request.invalid", "The marketplace request is invalid or too large.");
         }
-        if (input.operation !== "session.register" || Object.keys(input).sort().join(",") !== "deviceName,operation") {
+        const keys = Object.keys(input).sort().join(",");
+        const registration = input.operation === "session.register" && keys === "deviceName,operation";
+        const download = input.operation === "download.issue"
+            && ["deviceSessionId,operation,versionId", "deviceSessionId,operation,organizationId,versionId"].includes(keys);
+        if (!registration && !download) {
             return fail(400, "request.operation_invalid", "This marketplace operation is not supported.");
         }
         try {
+            if (download) {
+                if (!capabilities || !packageStore) {
+                    return fail(503, "marketplace.unavailable", "Asset downloads are temporarily unavailable.");
+                }
+                const grant = await issueNativeDownloadGrant(pool, packageStore, token, clientId, {
+                    versionId: input.versionId, deviceSessionId: input.deviceSessionId,
+                    organizationId: input.organizationId ?? null,
+                });
+                const url = capabilities.issue(grant.grant_id, grant.expires_at);
+                return Response.json({ data: { ...grant, url } }, { status: 201, headers });
+            }
             const data = await registerNativeDevice(pool, token, clientId, input.deviceName);
             return Response.json({ data }, { status: 201, headers });
         } catch (error) {

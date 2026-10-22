@@ -1,6 +1,8 @@
 import { beforeEach, expect, it, vi } from "vitest";
 import { registerNativeDevice } from "./platform-native-devices.mjs";
 import { createNativeMarketplaceHttp } from "./platform-native-marketplace-http.mjs";
+import { issueNativeDownloadGrant } from "./platform-native-download-grants.mjs";
+vi.mock("./platform-native-download-grants.mjs", () => ({ issueNativeDownloadGrant: vi.fn() }));
 vi.mock("./platform-native-devices.mjs", () => ({ registerNativeDevice: vi.fn() }));
 const origin = "https://platform.invalid";
 const handle = createNativeMarketplaceHttp({ pool: {}, siteOrigin: origin, clientId: "keire-hub-desktop" });
@@ -31,4 +33,26 @@ it("rejects extra actor fields and redacts internal failures", async () => {
     const response = await handle(request());
     expect(response.status).toBe(503);
     expect(await response.text()).not.toContain("private database");
+});
+
+it("returns the existing download grant contract with a signed delivery URL", async () => {
+    const issue = vi.fn().mockReturnValue("https://platform.invalid/marketplace/v1/downloads/signed");
+    const store = {};
+    const service = createNativeMarketplaceHttp({ pool: {}, siteOrigin: origin, clientId: "hub",
+        capabilities: { issue }, packageStore: store });
+    const grant = { grant_id: "grant", expires_at: "expiry", archive_sha256: "hash", signed_publication: "publication" };
+    vi.mocked(issueNativeDownloadGrant).mockResolvedValue(grant);
+    const response = await service(request({ operation: "download.issue", versionId: "version", deviceSessionId: "device" } as any));
+    expect(response.status).toBe(201);
+    expect((await response.json()).data).toEqual({ ...grant, url: issue.mock.results[0].value });
+    expect(issue).toHaveBeenCalledWith("grant", "expiry");
+    expect(issueNativeDownloadGrant).toHaveBeenCalledWith({}, store, "a".repeat(43), "hub", {
+        versionId: "version", deviceSessionId: "device", organizationId: null,
+    });
+});
+
+it("fails closed when download storage is not configured", async () => {
+    const response = await handle(request({ operation: "download.issue", versionId: "version", deviceSessionId: "device" } as any));
+    expect(response.status).toBe(503);
+    expect(issueNativeDownloadGrant).not.toHaveBeenCalled();
 });

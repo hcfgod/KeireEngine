@@ -4,18 +4,36 @@ import { createLocalNativeService } from "./platform-native-service.mjs";
 
 const origin = "https://platform.invalid";
 
-function fixture() {
+function fixture(options = {}) {
     const pool = { getConnection: vi.fn(), execute: vi.fn(async () => [[{
         client_id: "keire-hub-desktop", redirect_uri: `${origin}/oauth/hub/callback/`, scope: "openid email",
     }]]), end: vi.fn() };
     const authentication = { session: vi.fn(async () => ({ userId: "fixture", assurance: 1 })),
         withSessionTransaction: vi.fn(), pendingChallenge: vi.fn(), close: vi.fn() };
     const service = createLocalNativeService({ pool, authentication, siteOrigin: origin,
-        clientId: "keire-hub-desktop", privateKey: generateKeyPairSync("ed25519").privateKey });
+        clientId: "keire-hub-desktop", privateKey: generateKeyPairSync("ed25519").privateKey, ...options });
     return { pool, authentication, service };
 }
 
 describe("owned native authorization service", () => {
+    it("reserves downloads and fails closed until protected storage is configured", async () => {
+        const { service } = fixture();
+        expect((await service.handle(new Request(`${origin}/marketplace/v1/downloads/grant`))).status).toBe(503);
+        await service.close();
+    });
+
+    it("routes configured downloads through capability verification before database access", async () => {
+        const { service, pool } = fixture({ downloadKey: Buffer.alloc(32, 1), packageStore: { read: vi.fn(), verify: vi.fn() } });
+        expect((await service.handle(new Request(`${origin}/marketplace/v1/downloads/grant`))).status).toBe(403);
+        expect(pool.getConnection).not.toHaveBeenCalled();
+        await service.close();
+    });
+
+    it("rejects incomplete download configuration", () => {
+        expect(() => fixture({ downloadKey: Buffer.alloc(32, 1) })).toThrow("package store");
+        expect(() => fixture({ packageStore: { read: vi.fn(), verify: vi.fn() } })).toThrow("32-byte key");
+    });
+
     it("publishes issuer discovery and public keys without accessing private accounts", async () => {
         const { service, pool, authentication } = fixture();
         try {
