@@ -14,6 +14,7 @@ import { LocalPasswordAuthentication } from "../Source/lib/platform-local-auth.m
 import { openAccountRecord } from "../Source/lib/platform-account-import.mjs";
 import { createQaUploadService } from "./qa-upload-service.mjs";
 import { windowsNativeServiceFactory } from "../Source/lib/platform-native-factory.mjs";
+import { isNativeAuthorizationPath } from "../Source/lib/platform-native-service.mjs";
 import { LocalBlobStore } from "../Source/lib/local-blob-store.ts";
 import { lstat } from "node:fs/promises";
 
@@ -195,6 +196,11 @@ const listener = (request, response) => {
         response.end("Invalid request.");
         return;
     }
+    // Identity discovery and private downloads are service routes, including .well-known paths.
+    if (isNativeAuthorizationPath(pathname)) {
+        void serveApplication();
+        return;
+    }
     send(request, pathname, { root: path.join(root, "dist/client"), dotfiles: "deny", index: ["index.html"] })
         .on("error", (error) => {
             if (error.status === 404) {
@@ -246,6 +252,7 @@ server.listen(port, "127.0.0.1", async () => {
     process.send?.({ type: "qa-host-ready" });
     if (process.argv.includes("--smoke")) {
         let stage = "sign-in";
+        let checks = 6;
         try {
             const base = tlsThumbprint ? `https://localhost:${port}` : `http://127.0.0.1:${port}`;
             const signIn = await fetch(`${base}/account/sign-in/`);
@@ -264,15 +271,56 @@ server.listen(port, "127.0.0.1", async () => {
                 headers: { origin: "https://other.invalid", "content-type": "application/json" }, body: "{}" });
             assert.equal(csrf.status, 403);
             await csrf.arrayBuffer();
-            stage = "unported";
-            const unported = await fetch(`${base}/marketplace/v1/library/`);
-            assert.equal(unported.status, 503);
-            await unported.arrayBuffer();
+            stage = "anonymous-library";
+            const library = await fetch(`${base}/marketplace/v1/library/`);
+            assert.equal(library.status, 401);
+            await library.arrayBuffer();
+            if (process.env.KEIRE_QA_NATIVE_SETTINGS_DIRECTORY) {
+                stage = "native-identity-keys";
+                const keys = await fetch(`${base}/auth/v1/.well-known/jwks.json`, { redirect: "manual" });
+                stage = `native-identity-keys-status-${keys.status}`;
+                assert.equal(keys.status, 200);
+                const jwks = await keys.json();
+                assert.equal(jwks.keys.length, 1);
+                assert.equal(jwks.keys[0].alg, "EdDSA");
+                assert.equal(jwks.keys[0].crv, "Ed25519");
+                assert.equal("d" in jwks.keys[0], false);
+                stage = "native-discovery";
+                const discovery = await fetch(`${base}/auth/v1/.well-known/openid-configuration`, { redirect: "error" });
+                assert.equal(discovery.status, 200);
+                const configuration = await discovery.json();
+                assert.equal(configuration.issuer, `${base}/auth/v1`);
+                assert.equal(configuration.jwks_uri, `${base}/auth/v1/.well-known/jwks.json`);
+                stage = "private-static-files";
+                const hidden = await fetch(`${base}/.env`, { redirect: "error" });
+                assert.equal(hidden.status, 403);
+                await hidden.arrayBuffer();
+                stage = "native-anonymous-account";
+                const account = await fetch(`${base}/auth/v1/user`, { redirect: "error" });
+                assert.equal(account.status, 401);
+                await account.arrayBuffer();
+                stage = "native-anonymous-profile";
+                const profile = await fetch(`${base}/rest/v1/profiles`, { redirect: "error" });
+                assert.equal(profile.status, 401);
+                await profile.arrayBuffer();
+                stage = "native-anonymous-marketplace";
+                const marketplace = await fetch(`${base}/functions/v1/marketplace-hub`, {
+                    method: "POST", redirect: "error", headers: { "content-type": "application/json" },
+                    body: JSON.stringify({ operation: "session.register", deviceName: "Anonymous QA" }),
+                });
+                assert.equal(marketplace.status, 401);
+                await marketplace.arrayBuffer();
+                stage = "native-unknown-discovery";
+                const unknown = await fetch(`${base}/auth/v1/.well-known/unknown.json`, { redirect: "error" });
+                assert.equal(unknown.status, 404);
+                await unknown.arrayBuffer();
+                checks += 7;
+            }
             stage = "homepage";
             const homepage = await fetch(`${base}/`);
             assert.equal(homepage.status, 200);
             assert.match(await homepage.text(), /Kéire/);
-            console.log(JSON.stringify({ status: "local-platform-http-smoke-passed", checks: 6,
+            console.log(JSON.stringify({ status: "local-platform-http-smoke-passed", checks,
                 realAccountUsed: false, liveWebsiteChanged: false }));
         } catch {
             console.error(JSON.stringify({ status: "isolated-http-smoke-failed", stage }));

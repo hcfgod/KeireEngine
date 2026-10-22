@@ -227,6 +227,12 @@ must match that QA host's origin. The package directory must already exist and
 have private permissions; the host does not create, populate or alter its ACLs.
 Incomplete configuration or a symlink root prevents startup. Omit both download
 variables to leave delivery disabled.
+Native account and private-download endpoints have explicit dynamic Astro routes.
+Routing accepts slashless API URLs without credential redirects; authored page links
+retain their trailing slashes. The QA host sends native routes directly to the
+application handler, while hidden static files remain denied. With native settings,
+`start-local-platform-qa.mjs --smoke` checks trusted HTTPS discovery, public-only
+keys, anonymous account/profile/marketplace denial, and hidden-file protection.
 Production host key provisioning and storage configuration remain pending; this
 does not enable live downloads or establish complete Hub migration readiness.
 

@@ -21,7 +21,9 @@ export default defineConfig({
     srcDir: "./Source",
     output: "server",
     adapter: node({ mode: adapterMode }),
-    trailingSlash: "always",
+    // Native OAuth uses exact slashless endpoints; accept them without redirecting credentials.
+    // Authored website and documentation links retain their existing trailing slashes.
+    trailingSlash: "ignore",
     security: {
         // Astro compares Origin with the loopback request URL before middleware can
         // account for Caddy's trusted forwarding headers. Every mutation is instead
