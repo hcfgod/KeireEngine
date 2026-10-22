@@ -191,6 +191,16 @@ registration, stable repeated registration, renaming, the provider binding and
 rejection after revocation. Download issuance is not enabled by this endpoint
 yet; it remains a separate integration and storage-verification gate.
 
+The internal native download helpers now check feature flags, the authenticated
+device binding, published/withdrawn version publication metadata, and personal
+or current organization-member entitlements under transaction locks. Grant
+issuance verifies immutable package bytes first, then rechecks session expiry
+before inserting a ten-minute grant. Missing/damaged files produce an explicit
+unavailable response. These helpers have focused unit coverage but still need
+real-database acceptance and an authorized delivery handler; `download.issue`
+is not publicly wired yet. Delivery must recheck revocation rather than treating
+a grant ID as permanent access.
+
 `scripts/test-native-protected-settings.mjs` exercises actual Windows protection,
 stable reload, overwrite refusal and mismatched-host rejection. Set
 `KEIRE_QA_POWERSHELL` to the absolute PowerShell 7 executable. It retains only
