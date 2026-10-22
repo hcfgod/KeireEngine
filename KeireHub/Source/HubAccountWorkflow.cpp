@@ -535,6 +535,7 @@ namespace KeireHub
         if (m_ClientFactory)
             return m_ClientFactory(configuration, settings);
         NativeHttpTransportOptions options;
+        options.MaximumRedirects = 0;
         if (settings.NetworkProxyMode == ProxyMode::Custom && !settings.CustomProxyUrl.empty())
             options.CustomProxyUrl = settings.CustomProxyUrl;
         auto transport = NativeHttpTransport::Create(std::move(options));
@@ -572,6 +573,7 @@ namespace KeireHub
         if (m_OAuthClientFactory)
             return m_OAuthClientFactory(configuration, settings);
         NativeHttpTransportOptions options;
+        options.MaximumRedirects = 0;
         if (settings.NetworkProxyMode == ProxyMode::Custom && !settings.CustomProxyUrl.empty())
             options.CustomProxyUrl = settings.CustomProxyUrl;
         auto transport = NativeHttpTransport::Create(std::move(options));
@@ -580,7 +582,8 @@ namespace KeireHub
         auto sharedTransport = std::make_shared<NativeHttpTransport>(std::move(transport).Value());
         return DesktopOAuthClient::Create({.SupabaseProjectUrl = configuration.ProjectUrl,
                                            .ClientId = configuration.HubOAuthClientId,
-                                           .WebsiteCallbackUrl = configuration.HubOAuthWebsiteCallbackUrl},
+                                           .WebsiteCallbackUrl = configuration.HubOAuthWebsiteCallbackUrl,
+                                           .NativePlatform = configuration.LocalPlatform},
                                           [sharedTransport](const NativeHttpRequest& request)
                                           { return sharedTransport->Send(request); });
     }

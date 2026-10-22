@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Added staged native Hub OAuth signature, issuer, audience, time, nonce, and access-token binding checks for sign-in and refresh, with bounded issuer-key retrieval before credential exchange. Live activation remains gated on migration acceptance.
+
 - Bound protected Hub logins to their account provider, server, and client ID. Changed backends and older unbound saved logins require a fresh sign-in before token refresh.
 
 - Added staged Hub account configuration schema 3 for MySQL website OAuth without a Supabase API key; schemas 1 and 2 remain supported. Release activation awaits full native identity verification and sign-in acceptance.

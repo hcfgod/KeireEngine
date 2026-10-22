@@ -1,17 +1,23 @@
 #include "KeireHubRuntime/DesktopOAuth.h"
 
+#include <KeireHubRuntimeInternal/DistributionEncoding.h>
+#include <KeireHubRuntimeInternal/NativeHttpTransportPolicy.h>
 #include <KeireHubRuntimeInternal/Persistence.h>
 #include <KeireHubRuntimeInternal/Sha256.h>
+#include <KeireHubRuntimeInternal/SodiumVerifier.h>
 
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <chrono>
 #include <exception>
+#include <memory>
 #include <optional>
 #include <ranges>
 #include <span>
 #include <stdexcept>
 #include <utility>
+#include <vector>
 
 namespace KeireHub
 {
@@ -46,6 +52,13 @@ namespace KeireHub
             return value.size() >= minimum && value.size() <= maximum &&
                    std::ranges::all_of(value, [](const unsigned char character)
                                        { return character >= 0x21U && character <= 0x7eU; });
+        }
+
+        [[nodiscard]] bool IsNativeOrigin(const std::string_view value)
+        {
+            const auto parsed = Detail::ParseHttpUrl(value, false);
+            return parsed && parsed.Value().Secure && parsed.Value().Target == "/" &&
+                   value.find_first_of("/@?#\\ \t\r\n", 8U) == std::string_view::npos;
         }
 
         [[nodiscard]] std::string FormEncode(const std::string_view value)
@@ -225,12 +238,23 @@ namespace KeireHub
             return {bytes.begin(), bytes.end()};
         }
 
+        [[nodiscard]] Detail::Json ParseIdentityJson(const std::string_view text)
+        {
+            auto parsed = Detail::ParseStrictJson(text, 8U, HubErrorCode::AccountSessionInvalid,
+                                                  "The authorization response is invalid.");
+            if (!parsed)
+            {
+                throw std::invalid_argument("Invalid authorization JSON.");
+            }
+            return std::move(parsed).Value();
+        }
+
         [[nodiscard]] HubResult<DesktopOAuthTokens> ParseTokens(const NativeHttpResponse& response)
         {
             try
             {
                 const auto* data = reinterpret_cast<const char*>(response.Body.data());
-                const auto document = Detail::Json::parse(std::string_view(data, response.Body.size()));
+                const auto document = ParseIdentityJson(std::string_view(data, response.Body.size()));
                 if (response.StatusCode < 200U || response.StatusCode >= 300U)
                 {
                     return HubResult<DesktopOAuthTokens>::Failure(
@@ -259,17 +283,17 @@ namespace KeireHub
                 result.TokenType = "bearer";
                 return HubResult<DesktopOAuthTokens>::Success(std::move(result));
             }
-            catch (const std::exception& error)
+            catch (const std::exception&)
             {
-                return HubResult<DesktopOAuthTokens>::Failure(
-                    OAuthError(HubErrorCode::AccountSessionInvalid,
-                               "The authorization service returned invalid tokens.", error.what()));
+                return HubResult<DesktopOAuthTokens>::Failure(OAuthError(
+                    HubErrorCode::AccountSessionInvalid, "The authorization service returned invalid tokens."));
             }
         }
 
         [[nodiscard]] HubResult<DesktopOAuthTokens> SendTokenRequest(const DesktopOAuthTransport& transport,
                                                                      const std::string& tokenEndpoint,
-                                                                     const std::string_view form)
+                                                                     const std::string_view form,
+                                                                     const bool requireExactEndpoint = false)
         {
             auto response = transport(
                 {.Method = NativeHttpMethod::Post,
@@ -285,7 +309,208 @@ namespace KeireHub
                 error.AffectedItem = "hub-oauth";
                 return HubResult<DesktopOAuthTokens>::Failure(std::move(error));
             }
+            if (response.Value().Body.size() > MaximumResponseBytes ||
+                (requireExactEndpoint && response.Value().EffectiveUrl != tokenEndpoint))
+            {
+                return HubResult<DesktopOAuthTokens>::Failure(
+                    OAuthError(HubErrorCode::AccountAuthenticationFailed,
+                               "The Hub authorization endpoint could not be verified."));
+            }
             return ParseTokens(response.Value());
+        }
+
+        struct NativeIdentityVerifier final
+        {
+            Detail::Json Keys;
+            std::shared_ptr<const Detail::SodiumVerifier> Crypto;
+        };
+
+        [[nodiscard]] HubResult<NativeIdentityVerifier>
+        LoadNativeIdentityVerifier(const DesktopOAuthOptions& options, const DesktopOAuthTransport& transport)
+        {
+            auto crypto = Detail::SodiumVerifier::Load(options.VerificationLibraryPath);
+            if (!crypto)
+            {
+                return HubResult<NativeIdentityVerifier>::Failure(crypto.Error());
+            }
+            std::array<std::byte, 64> digest{};
+            if (!crypto.Value()->Sha512({}, digest))
+            {
+                return HubResult<NativeIdentityVerifier>::Failure(
+                    OAuthError(HubErrorCode::AccountConfigurationInvalid, "The Hub sign-in verifier is unavailable."));
+            }
+            const auto endpoint = options.SupabaseProjectUrl + "/auth/v1/.well-known/jwks.json";
+            constexpr std::size_t MaximumKeysBytes = 16U * 1024U;
+            auto response = transport({.Url = endpoint,
+                                       .Headers = {{"Accept", "application/json"}},
+                                       .MaximumResponseBytes = MaximumKeysBytes});
+            if (!response)
+            {
+                return HubResult<NativeIdentityVerifier>::Failure(response.Error());
+            }
+            if (response.Value().StatusCode == 429U || response.Value().StatusCode >= 500U)
+            {
+                return HubResult<NativeIdentityVerifier>::Failure(
+                    OAuthError(HubErrorCode::AccountTransportFailed,
+                               "The Hub sign-in verification service is temporarily unavailable.", {}, true));
+            }
+            try
+            {
+                if (response.Value().StatusCode != 200U || response.Value().EffectiveUrl != endpoint ||
+                    response.Value().Body.size() > MaximumKeysBytes)
+                {
+                    throw std::invalid_argument("Invalid identity key response.");
+                }
+                const auto& body = response.Value().Body;
+                auto document =
+                    ParseIdentityJson(std::string_view(reinterpret_cast<const char*>(body.data()), body.size()));
+                const auto& keys = document.at("keys");
+                if (!keys.is_array() || keys.empty() || keys.size() > 8U)
+                {
+                    throw std::invalid_argument("Invalid identity key set.");
+                }
+                return HubResult<NativeIdentityVerifier>::Success(
+                    {.Keys = std::move(document), .Crypto = std::move(crypto).Value()});
+            }
+            catch (const std::exception&)
+            {
+                return HubResult<NativeIdentityVerifier>::Failure(OAuthError(
+                    HubErrorCode::AccountAuthenticationFailed, "The Hub sign-in verification keys are invalid."));
+            }
+        }
+
+        [[nodiscard]] bool IsUuid(const std::string_view value)
+        {
+            if (value.size() != 36U)
+            {
+                return false;
+            }
+            for (std::size_t index = 0; index < value.size(); ++index)
+            {
+                if (index == 8U || index == 13U || index == 18U || index == 23U)
+                {
+                    if (value[index] != '-')
+                    {
+                        return false;
+                    }
+                }
+                else if (!HexValue(value[index]))
+                {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        [[nodiscard]] HubStatus ValidateNativeIdentity(const NativeIdentityVerifier& verifier,
+                                                       const DesktopOAuthOptions& options,
+                                                       const DesktopOAuthTokens& tokens,
+                                                       const std::string_view expectedNonce)
+        {
+            try
+            {
+                const std::string_view token = tokens.IdToken;
+                const auto first = token.find('.');
+                const auto second = first == token.npos ? token.npos : token.find('.', first + 1U);
+                if (first == token.npos || second == token.npos || token.find('.', second + 1U) != token.npos)
+                {
+                    throw std::invalid_argument("Invalid JWT structure.");
+                }
+                const auto headerBytes = DecodeBase64Url(token.substr(0, first));
+                const auto claimsBytes = DecodeBase64Url(token.substr(first + 1U, second - first - 1U));
+                const auto signature = DecodeBase64Url(token.substr(second + 1U));
+                if (!headerBytes || !claimsBytes || !signature || signature->size() != 64U)
+                {
+                    throw std::invalid_argument("Invalid JWT encoding.");
+                }
+                const auto parse = [](const std::vector<std::byte>& bytes)
+                {
+                    return ParseIdentityJson(
+                        std::string_view(reinterpret_cast<const char*>(bytes.data()), bytes.size()));
+                };
+                const auto header = parse(*headerBytes);
+                if (!header.is_object() || header.size() != 3U || header.at("alg") != "EdDSA" ||
+                    header.at("typ") != "JWT")
+                {
+                    throw std::invalid_argument("Invalid JWT algorithm or header.");
+                }
+                const auto keyId = header.at("kid").get<std::string>();
+                if (!IsSafeToken(keyId, 1U, 128U))
+                {
+                    throw std::invalid_argument("Invalid identity key identifier.");
+                }
+                std::optional<std::vector<std::byte>> publicKey;
+                for (const auto& key : verifier.Keys.at("keys"))
+                {
+                    if (key.at("kid") != keyId)
+                    {
+                        continue;
+                    }
+                    if (publicKey || key.at("kty") != "OKP" || key.at("crv") != "Ed25519" || key.at("alg") != "EdDSA" ||
+                        key.at("use") != "sig" || key.contains("d"))
+                    {
+                        throw std::invalid_argument("Ambiguous or invalid identity key.");
+                    }
+                    publicKey = DecodeBase64Url(key.at("x").get<std::string>());
+                    if (!publicKey || publicKey->size() != 32U)
+                    {
+                        throw std::invalid_argument("Invalid public key encoding.");
+                    }
+                }
+                const auto signedBytes = std::as_bytes(std::span(token.data(), second));
+                if (!publicKey || !verifier.Crypto->Verify(*signature, signedBytes, *publicKey))
+                {
+                    throw std::invalid_argument("Invalid identity signature.");
+                }
+                const auto claims = parse(*claimsBytes);
+                const auto timestamp = [&claims](const char* name)
+                {
+                    const auto& value = claims.at(name);
+                    if (!value.is_number_unsigned() || value.get<std::uint64_t>() > 253402300799ULL)
+                    {
+                        throw std::invalid_argument("Invalid identity timestamp.");
+                    }
+                    return value.get<std::uint64_t>();
+                };
+                const auto issued = timestamp("iat");
+                const auto expiry = timestamp("exp");
+                const auto authenticated = timestamp("auth_time");
+                const auto now = std::chrono::duration_cast<std::chrono::seconds>(
+                                     std::chrono::system_clock::now().time_since_epoch())
+                                     .count();
+                if (now < 0 || issued > static_cast<std::uint64_t>(now) + 30U ||
+                    expiry <= static_cast<std::uint64_t>(now) || expiry <= issued || expiry - issued > 300U ||
+                    authenticated > issued || claims.at("iss") != options.SupabaseProjectUrl + "/auth/v1" ||
+                    (claims.contains("azp") && claims.at("azp") != options.ClientId) ||
+                    (claims.contains("nbf") && timestamp("nbf") > static_cast<std::uint64_t>(now)) ||
+                    claims.at("aud") != options.ClientId || !IsUuid(claims.at("sub").get<std::string>()) ||
+                    !IsUuid(claims.at("sid").get<std::string>()) ||
+                    (claims.at("acr") != "urn:keire:assurance:1" && claims.at("acr") != "urn:keire:assurance:2"))
+                {
+                    throw std::invalid_argument("Invalid identity claims.");
+                }
+                const auto nonce = claims.at("nonce").get<std::string>();
+                if (!IsSafeToken(nonce, 32U, 128U) ||
+                    (!expectedNonce.empty() && !ConstantTimeEqual(nonce, expectedNonce)))
+                {
+                    throw std::invalid_argument("Invalid identity nonce.");
+                }
+                std::array<std::byte, 64> digest{};
+                if (!verifier.Crypto->Sha512(
+                        std::as_bytes(std::span(tokens.AccessToken.data(), tokens.AccessToken.size())), digest) ||
+                    !ConstantTimeEqual(claims.at("at_hash").get<std::string>(),
+                                       Base64Url(std::span(digest).first(32U))))
+                {
+                    throw std::invalid_argument("Invalid access token binding.");
+                }
+                return HubStatus::Success();
+            }
+            catch (const std::exception&)
+            {
+                return HubStatus::Failure(
+                    OAuthError(HubErrorCode::AccountAuthenticationFailed,
+                               "The Hub authorization response could not be verified. Sign in again."));
+            }
         }
 
         [[nodiscard]] HubStatus ValidateIdTokenNonce(const std::string_view idToken,
@@ -326,7 +551,10 @@ namespace KeireHub
     {
         if (!IsSafeHttpsUrl(options.SupabaseProjectUrl) || options.SupabaseProjectUrl.ends_with('/') ||
             !IsSafeHttpsUrl(options.WebsiteCallbackUrl, true) || !IsSafeToken(options.ClientId, 8U, 128U) ||
-            options.Scope.empty() || options.Scope.size() > 128U || !transport)
+            options.Scope.empty() || options.Scope.size() > 128U || !transport ||
+            (options.NativePlatform &&
+             (!IsNativeOrigin(options.SupabaseProjectUrl) ||
+              options.WebsiteCallbackUrl != options.SupabaseProjectUrl + "/oauth/hub/callback/")))
         {
             return HubResult<DesktopOAuthClient>::Failure(
                 OAuthError(HubErrorCode::AccountConfigurationInvalid, "The Hub OAuth configuration is invalid."));
@@ -389,7 +617,8 @@ namespace KeireHub
                                                                const DesktopOAuthCallback& callback) const
     {
         if (!ConstantTimeEqual(authorization.State, callback.State) ||
-            !IsSafeToken(authorization.CodeVerifier, 43U, 128U) || !IsSafeToken(callback.Code, 16U, 2048U))
+            !IsSafeToken(authorization.CodeVerifier, 43U, 128U) || !IsSafeToken(callback.Code, 16U, 2048U) ||
+            !IsSafeToken(authorization.Nonce, 32U, 128U))
         {
             return HubResult<DesktopOAuthTokens>::Failure(
                 OAuthError(HubErrorCode::AccountAuthenticationFailed, "The Hub OAuth exchange request is invalid."));
@@ -398,9 +627,29 @@ namespace KeireHub
                           "&client_id=" + FormEncode(m_Options.ClientId) +
                           "&redirect_uri=" + FormEncode(m_Options.WebsiteCallbackUrl) +
                           "&code_verifier=" + FormEncode(authorization.CodeVerifier);
-        auto tokens = SendTokenRequest(m_Transport, m_Options.SupabaseProjectUrl + "/auth/v1/oauth/token", form);
+        std::optional<NativeIdentityVerifier> verifier;
+        if (m_Options.NativePlatform)
+        {
+            auto loaded = LoadNativeIdentityVerifier(m_Options, m_Transport);
+            if (!loaded)
+            {
+                return HubResult<DesktopOAuthTokens>::Failure(loaded.Error());
+            }
+            verifier = std::move(loaded).Value();
+        }
+        auto tokens = SendTokenRequest(m_Transport, m_Options.SupabaseProjectUrl + "/auth/v1/oauth/token", form,
+                                       m_Options.NativePlatform);
         if (!tokens)
             return tokens;
+        if (verifier)
+        {
+            const auto verified = ValidateNativeIdentity(*verifier, m_Options, tokens.Value(), authorization.Nonce);
+            if (!verified)
+            {
+                return HubResult<DesktopOAuthTokens>::Failure(verified.Error());
+            }
+            return tokens;
+        }
         if (const auto nonce = ValidateIdTokenNonce(tokens.Value().IdToken, authorization.Nonce); !nonce)
             return HubResult<DesktopOAuthTokens>::Failure(nonce.Error());
         return tokens;
@@ -415,6 +664,27 @@ namespace KeireHub
         }
         const auto form = "grant_type=refresh_token&refresh_token=" + FormEncode(refreshToken) +
                           "&client_id=" + FormEncode(m_Options.ClientId);
-        return SendTokenRequest(m_Transport, m_Options.SupabaseProjectUrl + "/auth/v1/oauth/token", form);
+        std::optional<NativeIdentityVerifier> verifier;
+        if (m_Options.NativePlatform)
+        {
+            auto loaded = LoadNativeIdentityVerifier(m_Options, m_Transport);
+            if (!loaded)
+            {
+                return HubResult<DesktopOAuthTokens>::Failure(loaded.Error());
+            }
+            verifier = std::move(loaded).Value();
+        }
+        auto tokens = SendTokenRequest(m_Transport, m_Options.SupabaseProjectUrl + "/auth/v1/oauth/token", form,
+                                       m_Options.NativePlatform);
+        if (!tokens || !verifier)
+        {
+            return tokens;
+        }
+        const auto verified = ValidateNativeIdentity(*verifier, m_Options, tokens.Value(), {});
+        if (!verified)
+        {
+            return HubResult<DesktopOAuthTokens>::Failure(verified.Error());
+        }
+        return tokens;
     }
 } // namespace KeireHub

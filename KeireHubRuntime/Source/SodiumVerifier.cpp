@@ -182,8 +182,12 @@ namespace KeireHub::Detail
             return HubResult<std::shared_ptr<const SodiumVerifier>>::Failure(
                 LoadError("The loaded libsodium runtime does not provide the required Ed25519 ABI."));
         }
+        const auto hash = LoadSymbol<HashFunction>(library, "crypto_hash_sha512");
+        const auto hashBytes = LoadSymbol<SizeFunction>(library, "crypto_hash_sha512_bytes");
+        // Catalog verification remains available when the optional token-hash ABI is absent.
+        const auto supportedHash = hash && hashBytes && hashBytes() == 64U ? hash : nullptr;
         return HubResult<std::shared_ptr<const SodiumVerifier>>::Success(
-            std::shared_ptr<const SodiumVerifier>(new SodiumVerifier(library, verify)));
+            std::shared_ptr<const SodiumVerifier>(new SodiumVerifier(library, verify, supportedHash)));
     }
 
     SodiumVerifier::~SodiumVerifier() { CloseLibrary(m_Library); }
@@ -199,8 +203,20 @@ namespace KeireHub::Detail
                         reinterpret_cast<const unsigned char*>(publicKey.data())) == 0;
     }
 
-    SodiumVerifier::SodiumVerifier(void* library, const VerifyFunction verify) noexcept
-        : m_Library(library), m_Verify(verify)
+    bool SodiumVerifier::Sha512(const std::span<const std::byte> message,
+                                const std::span<std::byte> digest) const noexcept
+    {
+        if (!m_Hash || digest.size() != 64U)
+        {
+            return false;
+        }
+        return m_Hash(reinterpret_cast<unsigned char*>(digest.data()),
+                      reinterpret_cast<const unsigned char*>(message.data()),
+                      static_cast<unsigned long long>(message.size())) == 0;
+    }
+
+    SodiumVerifier::SodiumVerifier(void* library, const VerifyFunction verify, const HashFunction hash) noexcept
+        : m_Library(library), m_Verify(verify), m_Hash(hash)
     {
     }
 } // namespace KeireHub::Detail

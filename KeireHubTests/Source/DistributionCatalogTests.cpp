@@ -2,13 +2,17 @@
 #include <KeireHubTests/TestSupport.h>
 
 #include "KeireHubRuntime/DistributionCatalog.h"
+#include <KeireHubRuntimeInternal/SodiumVerifier.h>
 
 #include <doctest/doctest.h>
 
+#include <array>
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <memory>
+#include <span>
 #include <string>
 #include <string_view>
 #include <type_traits>
@@ -16,6 +20,28 @@
 #include <vector>
 
 using namespace KeireHub;
+
+TEST_CASE("Native account SHA512 uses the pinned crypto runtime")
+{
+    KeireHubTests::TestSodiumSigner signer;
+    auto verifier = Detail::SodiumVerifier::Load(signer.LibraryPath());
+    REQUIRE(verifier);
+    std::array<std::byte, 64> digest{};
+    const auto message = KeireHubTests::Bytes("abc");
+    REQUIRE(verifier.Value()->Sha512(message, digest));
+    constexpr std::string_view expected = "ddaf35a193617abacc417349ae20413112e6fa4e89a97ea20a9eeee64b55d39a"
+                                          "2192992a274fc1a836ba3c23a3feebbd454d4423643ce80e2a9ac94fa54ca49f";
+    constexpr std::string_view hex = "0123456789abcdef";
+    std::string actual;
+    for (const auto value : digest)
+    {
+        const auto byte = std::to_integer<unsigned int>(value);
+        actual.push_back(hex[byte >> 4U]);
+        actual.push_back(hex[byte & 15U]);
+    }
+    CHECK(actual == expected);
+    CHECK_FALSE(verifier.Value()->Sha512(message, std::span(digest).first(63U)));
+}
 
 namespace
 {

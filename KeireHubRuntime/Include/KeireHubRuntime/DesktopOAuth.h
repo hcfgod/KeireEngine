@@ -5,6 +5,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
 #include <functional>
 #include <span>
 #include <string>
@@ -18,6 +19,8 @@ namespace KeireHub
         std::string ClientId;
         std::string WebsiteCallbackUrl;
         std::string Scope = "openid email profile";
+        bool NativePlatform = false;
+        std::filesystem::path VerificationLibraryPath;
     };
 
     struct DesktopOAuthAuthorization final
