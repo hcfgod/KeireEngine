@@ -14,6 +14,8 @@ import { LocalPasswordAuthentication } from "../Source/lib/platform-local-auth.m
 import { openAccountRecord } from "../Source/lib/platform-account-import.mjs";
 import { createQaUploadService } from "./qa-upload-service.mjs";
 import { windowsNativeServiceFactory } from "../Source/lib/platform-native-factory.mjs";
+import { LocalBlobStore } from "../Source/lib/local-blob-store.ts";
+import { lstat } from "node:fs/promises";
 
 // Isolated loopback acceptance host. Production reverse-proxy trust and deployment remain separate gates.
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -118,6 +120,25 @@ async function createQaAuthentication(pool, key) {
     return authentication;
 }
 
+let nativeDownloads;
+const downloadSettings = process.env.KEIRE_QA_DOWNLOAD_SETTINGS_DIRECTORY;
+const packageRoot = process.env.KEIRE_QA_PACKAGE_ROOT;
+if (downloadSettings !== undefined || packageRoot !== undefined) {
+    if (!process.env.KEIRE_QA_NATIVE_SETTINGS_DIRECTORY || !tlsThumbprint
+        || !path.isAbsolute(downloadSettings ?? "") || !path.isAbsolute(packageRoot ?? "")) {
+        throw new Error("QA downloads require HTTPS, native identity settings and explicit absolute key/storage directories.");
+    }
+    const information = await lstat(packageRoot);
+    if (!information.isDirectory() || information.isSymbolicLink()) {
+        throw new Error("QA downloads require an existing ordinary private package directory.");
+    }
+    nativeDownloads = {
+        settingsDirectory: downloadSettings,
+        decryptScriptPath: path.resolve(root, "../scripts/read-local-platform-downloads.ps1"),
+        packageStore: new LocalBlobStore(packageRoot),
+    };
+}
+
 const backend = new PlatformBackend({ provider: "mysql", createMailer, createAuthentication: createQaAuthentication,
     createNative: process.env.KEIRE_QA_NATIVE_SETTINGS_DIRECTORY ? windowsNativeServiceFactory({
         powerShellExecutable: process.env.KEIRE_QA_POWERSHELL,
@@ -125,6 +146,7 @@ const backend = new PlatformBackend({ provider: "mysql", createMailer, createAut
         settingsDirectory: process.env.KEIRE_QA_NATIVE_SETTINGS_DIRECTORY,
         siteOrigin: process.env.PUBLIC_SITE_URL,
         clientId: "keire-hub-desktop",
+        downloads: nativeDownloads,
     }) : null,
     createUploads: process.send && process.env.KEIRE_QA_UPLOADS === "isolated"
         ? ({ authentication }) => createQaUploadService(authentication, process.env.PUBLIC_SITE_URL, process.env.KEIRE_QA_POWERSHELL)

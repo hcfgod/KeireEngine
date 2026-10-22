@@ -221,6 +221,12 @@ the identity's origin and clears the temporary buffer after service construction
 `scripts/test-download-protected-settings.mjs` tests actual Windows protection,
 reload, overwrite refusal and host mismatch. The native protected-settings fixture
 also tests both protected keys together through service startup and shutdown.
+The isolated HTTPS QA host accepts `KEIRE_QA_DOWNLOAD_SETTINGS_DIRECTORY` together
+with `KEIRE_QA_PACKAGE_ROOT` and `KEIRE_QA_NATIVE_SETTINGS_DIRECTORY`. Both keys
+must match that QA host's origin. The package directory must already exist and
+have private permissions; the host does not create, populate or alter its ACLs.
+Incomplete configuration or a symlink root prevents startup. Omit both download
+variables to leave delivery disabled.
 Production host key provisioning and storage configuration remain pending; this
 does not enable live downloads or establish complete Hub migration readiness.
 
