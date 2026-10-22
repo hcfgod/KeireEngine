@@ -248,7 +248,10 @@ cookies, passwords, browser refresh tokens, and service-role credentials never e
 is configuration- and feature-gated, with the existing email flow retained as a staged fallback. Only publishable
 desktop configuration enters packages.
 Refresh-token persistence records whether the session came from browser OAuth or direct Supabase Auth inside the
-protected payload. Rotation therefore returns browser sessions to the public-client OAuth token endpoint with the
+protected payload. KHS3 payloads also bind the token to provider, origin, and client ID. The workflow checks that binding
+before constructing a refresh client; mismatched or legacy unbound records require a new sign-in. KHS1/KHS2 storage
+remains readable for migration, but reading a legacy token does not authorize sending it to the configured server.
+Rotation therefore returns browser sessions to the public-client OAuth token endpoint with the
 configured `client_id`, while direct email sessions retain the Auth endpoint. Persistence is delegated to DPAPI on
 Windows, Secret Service on Linux, and Keychain on macOS; an unavailable Linux secret store produces a visible
 memory-only session instead of plaintext disk storage. No account state participates in package trust, editor

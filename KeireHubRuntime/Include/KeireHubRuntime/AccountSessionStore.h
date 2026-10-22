@@ -9,10 +9,20 @@
 
 namespace KeireHub
 {
+    struct AccountSessionBinding final
+    {
+        std::string Provider;
+        std::string Origin;
+        std::string ClientId;
+
+        bool operator==(const AccountSessionBinding&) const = default;
+    };
+
     struct StoredAccountSession final
     {
         std::string RefreshToken;
         std::optional<AccountSessionKind> Kind;
+        std::optional<AccountSessionBinding> Binding;
     };
 
     class AccountSessionStore final
@@ -23,6 +33,8 @@ namespace KeireHub
         [[nodiscard]] bool PersistentStorageAvailable() const noexcept;
         [[nodiscard]] HubResult<std::optional<StoredAccountSession>> LoadSession() const;
         [[nodiscard]] HubStatus SaveSession(AccountSessionKind kind, std::string_view refreshToken) const;
+        [[nodiscard]] HubStatus SaveSession(AccountSessionKind kind, std::string_view refreshToken,
+                                            const AccountSessionBinding& binding) const;
         [[nodiscard]] HubResult<std::optional<std::string>> LoadRefreshToken() const;
         [[nodiscard]] HubStatus SaveRefreshToken(std::string_view refreshToken) const;
         [[nodiscard]] HubStatus Clear() const;

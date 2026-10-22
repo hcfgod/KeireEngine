@@ -145,6 +145,53 @@ namespace
     }
 } // namespace
 
+TEST_CASE("Hub account workflow rejects saved credentials for another backend before network access")
+{
+#if defined(_WIN32)
+    KeireHubTests::TemporaryDirectory temporary;
+    const auto configuration = temporary.Path() / "Config" / "Supabase.json";
+    KeireHubTests::WriteText(
+        configuration,
+        R"({"schemaVersion":3,"enabled":true,"provider":"mysql","projectUrl":"https://platform.invalid","hubOAuthClientId":"keire-hub-desktop"})");
+    const auto sessionPath = temporary.Path() / "Account" / "bound-session.dat";
+    AccountSessionStore store(sessionPath);
+    AccountSessionBinding binding{
+        .Provider = "mysql", .Origin = "https://platform.invalid", .ClientId = "keire-hub-desktop"};
+    SUBCASE("different provider") { binding.Provider = "supabase"; }
+    SUBCASE("different origin") { binding.Origin = "https://previous.invalid"; }
+    SUBCASE("different client") { binding.ClientId = "previous-client"; }
+    SUBCASE("legacy session has no binding") { binding.Provider.clear(); }
+    if (binding.Provider.empty())
+    {
+        REQUIRE(store.SaveSession(AccountSessionKind::DesktopOAuth, "private-refresh-token"));
+    }
+    else
+    {
+        REQUIRE(store.SaveSession(AccountSessionKind::DesktopOAuth, "private-refresh-token", binding));
+    }
+    std::atomic_uint32_t clientCreations = 0;
+    HubAccountWorkflow workflow(
+        [&clientCreations](const SupabaseConfiguration&, const HubSettings&) -> HubResult<SupabaseAccountClient>
+        {
+            ++clientCreations;
+            return HubResult<SupabaseAccountClient>::Failure({.Code = HubErrorCode::AccountTransportFailed});
+        },
+        [&clientCreations](const SupabaseConfiguration&, const HubSettings&) -> HubResult<DesktopOAuthClient>
+        {
+            ++clientCreations;
+            return HubResult<DesktopOAuthClient>::Failure({.Code = HubErrorCode::AccountTransportFailed});
+        });
+    REQUIRE(workflow.Start(configuration, sessionPath, {}));
+    const auto result =
+        WaitFor(workflow, [](const auto& snapshot) { return !snapshot.Busy && snapshot.Failure.has_value(); });
+    REQUIRE(result->Failure);
+    CHECK(result->Message.find("Sign in again") != std::string::npos);
+    CHECK_FALSE(result->SignedIn);
+    CHECK(clientCreations.load() == 0U);
+    workflow.Stop();
+#endif
+}
+
 TEST_CASE("Hub account workflow preserves signed-in state and backs off retryable refresh failures")
 {
     KeireHubTests::TemporaryDirectory temporary;

@@ -13,6 +13,7 @@
 #include <limits>
 #include <optional>
 #include <span>
+#include <stdexcept>
 #include <string_view>
 #include <system_error>
 #include <utility>
@@ -45,7 +46,7 @@ namespace KeireHub
                                                                std::byte{'1'}};
         constexpr std::array<char, 4> SessionPayloadHeader{'K', 'H', 'S', '2'};
         constexpr std::size_t MaximumRefreshTokenBytes = 4096U;
-        constexpr std::size_t MaximumSessionPayloadBytes = MaximumRefreshTokenBytes + SessionPayloadHeader.size() + 1U;
+        constexpr std::size_t MaximumSessionPayloadBytes = 32U * 1024U;
         constexpr std::size_t MaximumStoredBytes = std::size_t{64U} * 1024U;
 
         [[nodiscard]] HubError StorageError(const HubErrorCode code, const std::filesystem::path& path,
@@ -75,6 +76,20 @@ namespace KeireHub
             return HubStatus::Success();
         }
 
+        [[nodiscard]] bool ValidBinding(const AccountSessionBinding& binding)
+        {
+            const auto safe = [](const std::string& value, const std::size_t maximum)
+            {
+                return value.size() <= maximum &&
+                       std::none_of(value.begin(), value.end(),
+                                    [](const unsigned char character) { return character < 32U || character == 127U; });
+            };
+            return (binding.Provider == "mysql" || binding.Provider == "supabase") &&
+                   binding.Origin.starts_with("https://") && binding.Origin.size() > 8U &&
+                   binding.Origin.find_first_of("/@?#\\ ", 8U) == std::string::npos && safe(binding.Origin, 2048U) &&
+                   safe(binding.ClientId, 128U);
+        }
+
         [[nodiscard]] std::string EncodeSession(const AccountSessionKind kind, const std::string_view refreshToken)
         {
             std::string encoded;
@@ -88,10 +103,43 @@ namespace KeireHub
         [[nodiscard]] HubResult<StoredAccountSession> DecodeSession(std::string encoded,
                                                                     const std::filesystem::path& path)
         {
+            if (encoded.starts_with("KHS3"))
+            {
+                try
+                {
+                    const auto document = Detail::Json::parse(encoded.substr(4U));
+                    if (!document.is_object() || document.size() != 5U)
+                    {
+                        throw std::invalid_argument("Invalid bound session fields.");
+                    }
+                    AccountSessionBinding binding{document.at("provider").get<std::string>(),
+                                                  document.at("origin").get<std::string>(),
+                                                  document.at("clientId").get<std::string>()};
+                    auto token = document.at("refreshToken").get<std::string>();
+                    const auto kind = document.at("kind").get<std::string>();
+                    if (!ValidBinding(binding) || token.empty() || token.size() > MaximumRefreshTokenBytes ||
+                        (kind != "oauth" && kind != "password"))
+                    {
+                        throw std::invalid_argument("Invalid bound session values.");
+                    }
+                    std::fill(encoded.begin(), encoded.end(), '\0');
+                    return HubResult<StoredAccountSession>::Success(
+                        {.RefreshToken = std::move(token),
+                         .Kind = kind == "oauth" ? AccountSessionKind::DesktopOAuth : AccountSessionKind::SupabaseAuth,
+                         .Binding = std::move(binding)});
+                }
+                catch (const std::exception&)
+                {
+                    std::fill(encoded.begin(), encoded.end(), '\0');
+                    return HubResult<StoredAccountSession>::Failure(
+                        StorageError(HubErrorCode::InvalidData, path, "The saved account session is invalid."));
+                }
+            }
             if (encoded.size() >= SessionPayloadHeader.size() &&
                 std::memcmp(encoded.data(), SessionPayloadHeader.data(), SessionPayloadHeader.size()) == 0)
             {
-                if (encoded.size() <= SessionPayloadHeader.size() + 1U || encoded.size() > MaximumSessionPayloadBytes)
+                if (encoded.size() <= SessionPayloadHeader.size() + 1U ||
+                    encoded.size() > MaximumRefreshTokenBytes + SessionPayloadHeader.size() + 1U)
                 {
                     return HubResult<StoredAccountSession>::Failure(
                         StorageError(HubErrorCode::InvalidData, path, "The saved account session is invalid.",
@@ -362,6 +410,26 @@ namespace KeireHub
                                                    "Invalid refresh-token length."));
         }
         auto encoded = EncodeSession(kind, refreshToken);
+        auto status = SaveStoredPayload(encoded);
+        std::fill(encoded.begin(), encoded.end(), '\0');
+        return status;
+    }
+
+    HubStatus AccountSessionStore::SaveSession(const AccountSessionKind kind, const std::string_view refreshToken,
+                                               const AccountSessionBinding& binding) const
+    {
+        if (!ValidBinding(binding) || refreshToken.empty() || refreshToken.size() > MaximumRefreshTokenBytes)
+        {
+            return HubStatus::Failure(
+                StorageError(HubErrorCode::InvalidArgument, m_Path, "The account session binding cannot be saved."));
+        }
+        auto encoded = std::string("KHS3") +
+                       Detail::Json{{"provider", binding.Provider},
+                                    {"origin", binding.Origin},
+                                    {"clientId", binding.ClientId},
+                                    {"kind", kind == AccountSessionKind::DesktopOAuth ? "oauth" : "password"},
+                                    {"refreshToken", refreshToken}}
+                           .dump();
         auto status = SaveStoredPayload(encoded);
         std::fill(encoded.begin(), encoded.end(), '\0');
         return status;

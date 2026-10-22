@@ -882,3 +882,6 @@ Animator warnings reflect the current evaluated setup and clear when the reporte
 Staged account migration: Hub account configuration schema 3 selects the MySQL website OAuth provider without a
 Supabase API key. Existing schemas 1 and 2 remain supported. This configuration is not yet release-ready: native
 identity verification and end-to-end migration acceptance remain required; keep published account configuration unchanged.
+Saved Hub logins now record the account provider, server origin, and OAuth client inside protected storage.
+Changing those settings requires signing in again before a refresh token is sent. Older saved logins without this
+binding also require one fresh sign-in; user projects and installed packages are unaffected.

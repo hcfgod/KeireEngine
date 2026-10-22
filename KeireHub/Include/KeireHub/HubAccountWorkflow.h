@@ -68,6 +68,7 @@ namespace KeireHub
         [[nodiscard]] HubStatus Begin(std::function<void()> operation);
         [[nodiscard]] HubResult<SupabaseAccountClient> CreateClient() const;
         [[nodiscard]] HubResult<DesktopOAuthClient> CreateOAuthClient() const;
+        [[nodiscard]] AccountSessionBinding CurrentSessionBinding() const;
         [[nodiscard]] HubResult<AccountSession> RefreshSession(const StoredAccountSession& stored,
                                                                std::optional<AccountUser> existingUser = {}) const;
         void Publish(HubAccountWorkflowSnapshot snapshot);
