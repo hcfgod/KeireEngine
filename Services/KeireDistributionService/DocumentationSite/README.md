@@ -211,6 +211,16 @@ copied capability key and drains downloads before clearing it, while borrowing t
 immutable package store. Private directory permissions must prevent external writers.
 Isolated acceptance exercises issuance and delivery through the native service,
 including exact returned bytes, altered links, revocation and damaged files.
+`configure-local-platform-downloads.ps1` creates a separate host-bound download
+key in a new restricted directory, protected with Windows CurrentUser DPAPI.
+It refuses to overwrite an existing directory. The private reader must only run
+through `loadWindowsDownloadSecrets`, which captures its output without logging.
+`windowsNativeServiceFactory` accepts optional `downloads` configuration containing
+`settingsDirectory`, `decryptScriptPath`, and `packageStore`; it loads the key for
+the identity's origin and clears the temporary buffer after service construction.
+`scripts/test-download-protected-settings.mjs` tests actual Windows protection,
+reload, overwrite refusal and host mismatch. The native protected-settings fixture
+also tests both protected keys together through service startup and shutdown.
 Production host key provisioning and storage configuration remain pending; this
 does not enable live downloads or establish complete Hub migration readiness.
 

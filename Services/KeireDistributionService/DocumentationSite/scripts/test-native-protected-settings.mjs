@@ -32,7 +32,17 @@ try {
     assert.deepEqual(await readFile(path.join(settingsDirectory, "native-settings.dpapi")), encrypted);
     await assert.rejects(loadWindowsNativeSecrets({ ...loader, siteOrigin: "https://wrong.invalid" }),
         { message: "Protected native identity settings are unavailable." });
-    const native = await windowsNativeServiceFactory(loader)({
+    const downloadDirectory = `${settingsDirectory}-downloads`;
+    await execute(powerShellExecutable, ["-NoProfile", "-NonInteractive", "-File",
+        path.join(scripts, "configure-local-platform-downloads.ps1"), "-SettingsDirectory", downloadDirectory,
+        "-SiteOrigin", siteOrigin], options);
+    const native = await windowsNativeServiceFactory({ ...loader, downloads: {
+        settingsDirectory: downloadDirectory, decryptScriptPath: path.join(scripts, "read-local-platform-downloads.ps1"),
+        packageStore: {
+            read() { throw new Error("Invalid capabilities must not read storage."); },
+            verify() { throw new Error("Discovery must not read storage."); },
+        },
+    } })({
         pool: { getConnection() { throw new Error("Discovery must not access the database."); } },
         authentication: { session() {}, withSessionTransaction() {} },
     });
@@ -42,6 +52,8 @@ try {
         const publicDocument = await response.json();
         assert.equal(publicDocument.keys[0].kid, configured.keyId);
         assert.equal(Object.hasOwn(publicDocument.keys[0], "d"), false);
+        const download = await native.handle(new Request(`${siteOrigin}/marketplace/v1/downloads/invalid`));
+        assert.equal(download.status, 403);
     } finally {
         await native.close();
     }
