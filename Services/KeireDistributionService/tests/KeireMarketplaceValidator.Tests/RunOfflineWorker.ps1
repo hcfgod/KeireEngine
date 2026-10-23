@@ -9,6 +9,12 @@ param(
     [Parameter(Mandatory)] [string] $ProtectedAttestationKey,
     [Parameter(Mandatory)] [string] $AttestationPublicKey,
     [Parameter(Mandatory)] [string] $OutputDirectory,
+    [ValidatePattern('^[A-Za-z0-9][A-Za-z0-9 _.-]{0,79}$')]
+    [string]$FirewallRulePrefix = 'Keire Marketplace Validator',
+
+    [ValidatePattern('^$|^[A-Za-z0-9][A-Za-z0-9 _.-]{0,79}$')]
+    [string]$FirewallRuleGroup = '',
+
     [string] $FirewallAttestation,
     [ValidateSet('clean', 'blocked')] [string] $ExpectedOutcome = 'clean',
     [ValidateRange(30, 1800)] [int] $TimeoutSeconds = 900,
@@ -57,7 +63,8 @@ $launcher = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../../Deployment/st
 $arguments = @('-NoProfile', '-NonInteractive', '-File', $launcher, '-Validator', $Validator,
     '-ExchangeRoot', $exchange, '-WorkRoot', $work, '-AssetTool', $AssetTool,
     '-MalwareScanner', $MalwareScanner, '-Dotnet', $Dotnet, '-ManagedApi', $ManagedApi,
-    '-ProtectedAttestationKey', $ProtectedAttestationKey)
+    '-ProtectedAttestationKey', $ProtectedAttestationKey,
+    '-FirewallRulePrefix', $FirewallRulePrefix, '-FirewallRuleGroup', $FirewallRuleGroup)
 if ($FirewallAttestation)
 {
     $arguments += @('-FirewallAttestation', $FirewallAttestation)

@@ -12,6 +12,12 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$Dotnet,
 
+    [ValidatePattern('^[A-Za-z0-9][A-Za-z0-9 _.-]{0,79}$')]
+    [string]$FirewallRulePrefix = 'Keire Marketplace Validator',
+
+    [ValidatePattern('^$|^[A-Za-z0-9][A-Za-z0-9 _.-]{0,79}$')]
+    [string]$FirewallRuleGroup = '',
+
     [string]$Attestation
 )
 
@@ -24,27 +30,71 @@ if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administra
 }
 
 $programs = [ordered]@{
-    "Keire Marketplace Validator - Offline Worker" = $Validator
-    "Keire Marketplace Validator - Asset Tool" = $AssetTool
-    "Keire Marketplace Validator - Malware Scanner" = $MalwareScanner
-    "Keire Marketplace Validator - Managed Compiler" = $Dotnet
+    "$FirewallRulePrefix - Offline Worker" = $Validator
+    "$FirewallRulePrefix - Asset Tool" = $AssetTool
+    "$FirewallRulePrefix - Malware Scanner" = $MalwareScanner
+    "$FirewallRulePrefix - Managed Compiler" = $Dotnet
 }
 $attestedPrograms = @()
+$resolvedPrograms = [ordered]@{}
 
-foreach ($entry in $programs.GetEnumerator()) {
+# Inspect every target and existing rule before making any changes. A collision
+# must never repoint another installed worker's outbound-deny rule.
+foreach ($entry in $programs.GetEnumerator())
+{
     $resolved = (Resolve-Path -LiteralPath $entry.Value -ErrorAction Stop).Path
-    if (-not (Test-Path -LiteralPath $resolved -PathType Leaf)) {
+    if (-not (Test-Path -LiteralPath $resolved -PathType Leaf))
+    {
         throw "Validator firewall target is not a file: $resolved"
     }
-
-    $existing = Get-NetFirewallRule -DisplayName $entry.Key -ErrorAction SilentlyContinue
-    if ($null -eq $existing) {
-        New-NetFirewallRule -DisplayName $entry.Key -Direction Outbound -Action Block -Enabled True `
-            -Profile Any -Program $resolved | Out-Null
+    $existing = @(Get-NetFirewallRule -DisplayName $entry.Key -ErrorAction SilentlyContinue)
+    if ($existing.Count -gt 1)
+    {
+        throw "Validator firewall rule name is ambiguous: $($entry.Key)"
     }
-    else {
+    if ($existing.Count -eq 1)
+    {
+        $applications = @($existing[0] | Get-NetFirewallApplicationFilter)
+        if ($applications.Count -ne 1 -or
+            -not [string]::Equals($applications[0].Program, $resolved, [StringComparison]::OrdinalIgnoreCase) -or
+            [string]$existing[0].Group -cne $FirewallRuleGroup)
+        {
+            throw "Existing validator firewall rule belongs to a different target or group; use an isolated prefix: $($entry.Key)"
+        }
+    }
+    $resolvedPrograms[$entry.Key] = $resolved
+}
+
+foreach ($entry in $resolvedPrograms.GetEnumerator())
+{
+    $resolved = $entry.Value
+    $existing = @(Get-NetFirewallRule -DisplayName $entry.Key -ErrorAction SilentlyContinue)
+    if ($existing.Count -eq 0)
+    {
+        $newRule = @{
+            DisplayName = $entry.Key
+            Direction = 'Outbound'
+            Action = 'Block'
+            Enabled = 'True'
+            Profile = 'Any'
+            Program = $resolved
+        }
+        if ($FirewallRuleGroup)
+        {
+            $newRule.Group = $FirewallRuleGroup
+        }
+        New-NetFirewallRule @newRule | Out-Null
+    }
+    else
+    {
+        $applications = @($existing | Get-NetFirewallApplicationFilter)
+        if ($existing.Count -ne 1 -or $applications.Count -ne 1 -or
+            -not [string]::Equals($applications[0].Program, $resolved, [StringComparison]::OrdinalIgnoreCase) -or
+            [string]$existing[0].Group -cne $FirewallRuleGroup)
+        {
+            throw 'Validator firewall rules changed during configuration; no existing target was replaced.'
+        }
         $existing | Set-NetFirewallRule -Direction Outbound -Action Block -Enabled True -Profile Any | Out-Null
-        $existing | Get-NetFirewallApplicationFilter | Set-NetFirewallApplicationFilter -Program $resolved | Out-Null
     }
 
     $rules = @(Get-NetFirewallRule -DisplayName $entry.Key -ErrorAction Stop)
@@ -53,7 +103,8 @@ foreach ($entry in $programs.GetEnumerator()) {
     }
     $rule = $rules[0]
     $application = $rule | Get-NetFirewallApplicationFilter
-    if ($rule.Enabled -ne "True" -or $rule.Direction -ne "Outbound" -or $rule.Action -ne "Block" -or
+    if ($rule.Enabled -ne "True" -or $rule.Direction -ne "Outbound" -or $rule.Action -ne "Block" -or $rule.Profile -ne "Any" -or
+        [string]$rule.Group -cne $FirewallRuleGroup -or
         -not [string]::Equals($application.Program, $resolved, [StringComparison]::OrdinalIgnoreCase)) {
         throw "Validator firewall rule failed post-configuration verification: $($entry.Key)"
     }
@@ -74,6 +125,8 @@ if (-not [string]::IsNullOrWhiteSpace($Attestation)) {
 
     $document = [ordered]@{
         schemaVersion = 1
+        rulePrefix = $FirewallRulePrefix
+        ruleGroup = $FirewallRuleGroup
         generatedAtUtc = [DateTimeOffset]::UtcNow.ToString("O", [Globalization.CultureInfo]::InvariantCulture)
         programs = $attestedPrograms
     }

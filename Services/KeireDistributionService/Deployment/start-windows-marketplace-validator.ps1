@@ -24,6 +24,12 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$ProtectedAttestationKey,
 
+    [ValidatePattern('^[A-Za-z0-9][A-Za-z0-9 _.-]{0,79}$')]
+    [string]$FirewallRulePrefix = 'Keire Marketplace Validator',
+
+    [ValidatePattern('^$|^[A-Za-z0-9][A-Za-z0-9 _.-]{0,79}$')]
+    [string]$FirewallRuleGroup = '',
+
     [string]$FirewallAttestation,
 
     [switch]$ValidateOnly
@@ -81,10 +87,10 @@ foreach ($path in @($ExchangeRoot, $WorkRoot)) {
 }
 
 $requiredRules = [ordered]@{
-    "Keire Marketplace Validator - Offline Worker" = (Resolve-Path -LiteralPath $Validator).Path
-    "Keire Marketplace Validator - Asset Tool" = (Resolve-Path -LiteralPath $AssetTool).Path
-    "Keire Marketplace Validator - Malware Scanner" = (Resolve-Path -LiteralPath $MalwareScanner).Path
-    "Keire Marketplace Validator - Managed Compiler" = (Resolve-Path -LiteralPath $Dotnet).Path
+    "$FirewallRulePrefix - Offline Worker" = (Resolve-Path -LiteralPath $Validator).Path
+    "$FirewallRulePrefix - Asset Tool" = (Resolve-Path -LiteralPath $AssetTool).Path
+    "$FirewallRulePrefix - Malware Scanner" = (Resolve-Path -LiteralPath $MalwareScanner).Path
+    "$FirewallRulePrefix - Managed Compiler" = (Resolve-Path -LiteralPath $Dotnet).Path
 }
 $firewall = Get-Service -Name "MpsSvc" -ErrorAction Stop
 if ($firewall.Status -ne [System.ServiceProcess.ServiceControllerStatus]::Running) {
@@ -99,7 +105,8 @@ if ([string]::IsNullOrWhiteSpace($FirewallAttestation)) {
         }
         $rule = $rules[0]
         $application = $rule | Get-NetFirewallApplicationFilter
-        if ($rule.Enabled -ne "True" -or $rule.Direction -ne "Outbound" -or $rule.Action -ne "Block" -or
+        if ($rule.Enabled -ne "True" -or $rule.Direction -ne "Outbound" -or $rule.Action -ne "Block" -or $rule.Profile -ne "Any" -or
+            [string]$rule.Group -cne $FirewallRuleGroup -or
             -not [string]::Equals($application.Program, $entry.Value, [StringComparison]::OrdinalIgnoreCase)) {
             throw "Required outbound-deny firewall rule is misconfigured: $($entry.Key)"
         }
@@ -148,6 +155,13 @@ else {
     $attestation = Get-Content -LiteralPath $attestationPath -Raw | ConvertFrom-Json
     if ($attestation.schemaVersion -ne 1 -or @($attestation.programs).Count -ne $requiredRules.Count) {
         throw "The firewall attestation has an unsupported schema or program count."
+    }
+    # Legacy attestations remain valid only for the original unnamed group.
+    if (($FirewallRuleGroup -and $attestation.ruleGroup -cne $FirewallRuleGroup) -or
+        ($attestation.ruleGroup -and $attestation.ruleGroup -cne $FirewallRuleGroup) -or
+        ($attestation.rulePrefix -and $attestation.rulePrefix -cne $FirewallRulePrefix))
+    {
+        throw 'The firewall attestation belongs to a different rule namespace.'
     }
     foreach ($entry in $requiredRules.GetEnumerator()) {
         $matches = @($attestation.programs | Where-Object { $_.displayName -ceq $entry.Key })
