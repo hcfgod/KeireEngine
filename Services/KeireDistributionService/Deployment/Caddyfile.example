@@ -51,6 +51,11 @@
 
 	handle {
 		reverse_proxy 127.0.0.1:4321 {
+			# Replace untrusted client forwarding metadata at the only public ingress.
+			header_up Host {$KEIRE_DISTRIBUTION_HOST:distribution.example.invalid}
+			header_up X-Forwarded-Host {$KEIRE_DISTRIBUTION_HOST:distribution.example.invalid}
+			header_up X-Forwarded-Proto https
+			header_up X-Keire-Client-IP {remote_host}
 			health_uri /health/
 			health_method HEAD
 			health_status 2xx
@@ -69,6 +74,14 @@
 			roll_keep 10
 			roll_keep_for 720h
 		}
-		format json
+		# URLs and headers can contain OAuth codes, private links, or recovery tokens.
+		format filter {
+			wrap json
+			fields {
+				request>uri delete
+				request>headers delete
+				resp_headers delete
+			}
+		}
 	}
 }

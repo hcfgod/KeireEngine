@@ -26,6 +26,34 @@ Unit, protected-settings, and MySQL acceptance checks do not prove external GitH
 consent works. Production credentials, callback registration, and a real provider
 sign-in must pass before live activation.
 
+## Staged production MySQL host
+
+Windows host settings schema 3 selects `platformBackend: "mysql"` and an absolute
+`platformConfigurationPath`; schemas 1/2 and explicit `supabase` retain their
+existing behavior. The MySQL configuration must match the website root, canonical
+HTTPS origin (without trailing slash), and loopback port 4321. Its schema is
+validated by `scripts/platform-production-backend.mjs`.
+
+Build the website in middleware mode and deploy its `Source/lib` and `scripts`
+dependencies along with `dist`, plus the protected-settings PowerShell readers.
+The production entry is `scripts/platform-production-start.mjs`. Run it under
+the same Windows identity that provisioned the CurrentUser DPAPI settings.
+Provision worker credentials using `../scripts/configure-local-platform-workers.ps1`;
+credentials remain separate from public JSON configuration and environment variables.
+
+The host requires separate private spool, package and evidence directories, all
+provider settings, and a single-writer marker. Inspect a marker left after a crash
+before recovery; it is not automatically removed. The Caddy template replaces
+forwarded client identity and omits URLs/headers from access logs. Existing live
+proxy configuration is not modified by editing the template.
+
+Staff operations require current MFA and staff membership. Evidence reads verify
+the trusted signature and stored content hash and recheck access on each request.
+`KEIRE_QA_EVIDENCE_ROOT` enables isolated signed-evidence HTTP acceptance alongside
+the QA package root. Passing these fixtures does not establish external GitHub
+consent, production email delivery, real worker process supervision, or live
+cutover readiness; those remain separate acceptance gates.
+
 ## Showcase media
 
 `Source/media/outpost` contains rendered output only. The private project generator

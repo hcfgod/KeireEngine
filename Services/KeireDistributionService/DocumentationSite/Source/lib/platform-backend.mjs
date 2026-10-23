@@ -19,7 +19,8 @@ export function selectPlatformBackend(value) {
 export class PlatformBackend {
     constructor({ provider, loadLocalSecrets, createPool = createPlatformPool,
         createAuthentication = LocalPasswordAuthentication.create, createMailer = null, createUploads = null,
-        createValidator = null, createPublication = null, createNative = null,
+        createValidator = null, createPublication = null, createNative = null, createGitHub = null,
+        createAdminEvidenceStore = null,
         createRecoveryWorker = (processNext) => new RecoveryDeliveryWorker(processNext),
         createRegistrationWorker = (processNext) => new RecoveryDeliveryWorker(processNext) }) {
         this.provider = selectPlatformBackend(provider);
@@ -49,6 +50,14 @@ export class PlatformBackend {
             throw new Error("Native authorization requires an application-owned factory.");
         }
         this.createNative = createNative;
+        if (createGitHub !== null && typeof createGitHub !== "function") {
+            throw new Error("GitHub authorization requires an application-owned factory.");
+        }
+        this.createGitHub = createGitHub;
+        if (createAdminEvidenceStore !== null && typeof createAdminEvidenceStore !== "function") {
+            throw new Error("Staff evidence requires an application-owned store factory.");
+        }
+        this.createAdminEvidenceStore = createAdminEvidenceStore;
         this.createRecoveryWorker = createRecoveryWorker;
         this.createRegistrationWorker = createRegistrationWorker;
         this.activeRequests = 0;
@@ -71,6 +80,8 @@ export class PlatformBackend {
         let validator;
         let publication;
         let native;
+        let github;
+        let adminEvidenceStore;
         let secrets;
         try {
             // Loader transfers ownership of its fresh key buffer to this initialization operation.
@@ -81,6 +92,18 @@ export class PlatformBackend {
             pool = await this.createPool(secrets.settings, "runtime");
             await pool.query("SELECT 1");
             authentication = await this.createAuthentication(pool, secrets.accountEncryptionKey);
+            if (this.createAdminEvidenceStore) {
+                adminEvidenceStore = await this.createAdminEvidenceStore({ pool, authentication });
+                if (!adminEvidenceStore || typeof adminEvidenceStore.read !== "function") {
+                    throw new Error("Staff evidence factory returned an invalid store.");
+                }
+            }
+            if (this.createGitHub) {
+                github = await this.createGitHub({ pool, authentication });
+                if (!github || typeof github.handle !== "function" || typeof github.close !== "function") {
+                    throw new Error("GitHub authorization factory returned an invalid service.");
+                }
+            }
             if (this.createNative) {
                 native = await this.createNative({ pool, authentication });
                 if (!native || typeof native.handle !== "function" || typeof native.close !== "function") {
@@ -129,10 +152,16 @@ export class PlatformBackend {
                 registrationWorker.start();
             }
             return Object.freeze({ provider: "mysql", pool, authentication, mailer, emailAuthentication, uploads: uploads ?? null,
-                validator: validator ?? null, publication: publication ?? null, native: native ?? null,
+                validator: validator ?? null, publication: publication ?? null, native: native ?? null, github: github ?? null,
+                adminEvidenceStore: adminEvidenceStore ?? null,
                 registrationWorker: registrationWorker ?? null,
                 recoveryWorker: recoveryWorker ?? null });
         } catch (error) {
+            try {
+                await github?.close?.();
+            } catch {
+                // Preserve startup failure while disposing borrowed authentication and storage.
+            }
             try {
                 await native?.close?.();
             } catch {
@@ -232,7 +261,11 @@ export class PlatformBackend {
                     try {
                         try {
                             try {
-                                await backend?.native?.close();
+                                try {
+                                    await backend?.github?.close();
+                                } finally {
+                                    await backend?.native?.close();
+                                }
                             } finally {
                                 await backend?.publication?.close();
                             }

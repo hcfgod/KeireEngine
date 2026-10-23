@@ -12,7 +12,10 @@ import { handleLocalPublisherApplicationRequest } from "./platform-publisher-app
 import { handleLocalUploadStatusRequest } from "./platform-upload-status-http.mjs";
 import { handleLocalUploadRequest } from "./platform-uploads-http.mjs";
 import { handleLocalVersionSubmit } from "./platform-version-submit-http.mjs";
-import { handleLocalReviewRequest } from "./platform-review-http.mjs";
+import { handleLocalAdminRequest } from "./platform-admin-http.mjs";
+import { handleLocalAdminActionsRequest } from "./platform-admin-actions-http.mjs";
+import { handleLocalAdminEvidenceRequest } from "./platform-admin-evidence-http.mjs";
+import { isGitHubPath } from "./platform-github-http.mjs";
 import { isNativeAuthorizationPath } from "./platform-native-service.mjs";
 
 /** A staged provider adapter. Unported routes fail closed instead of using Supabase identities or data. */
@@ -29,6 +32,27 @@ export async function handleLocalPlatformRequest({ backend, request, siteOrigin,
     }
     try {
         return await backend.withBackend(async (service) => {
+            if (isGitHubPath(new URL(request.url).pathname)) {
+                if (!service.github) {
+                    return new Response("GitHub sign-in is temporarily unavailable. Use another sign-in method.", {
+                        status: 503, headers: { "cache-control": "private, no-store", "content-type": "text/plain; charset=utf-8" },
+                    });
+                }
+                return service.github.handle(request, clientIdentity);
+            }
+            const adminResponse = await handleLocalAdminRequest(service, request, render);
+            if (adminResponse) {
+                return adminResponse;
+            }
+            const adminActionResponse = await handleLocalAdminActionsRequest(
+                service.authentication, request, siteOrigin, correlationId, service.adminEvidenceStore);
+            if (adminActionResponse) {
+                return adminActionResponse;
+            }
+            const adminEvidenceResponse = await handleLocalAdminEvidenceRequest(service, request);
+            if (adminEvidenceResponse) {
+                return adminEvidenceResponse;
+            }
             if (isNativeAuthorizationPath(new URL(request.url).pathname)) {
                 if (!service.native) {
                     return unavailable("Desktop sign-in is not configured. Please try again later.");
@@ -53,10 +77,6 @@ export async function handleLocalPlatformRequest({ backend, request, siteOrigin,
                 return response ?? new Response(null, {
                     status: 404, headers: { "cache-control": "private, no-store" },
                 });
-            }
-            const reviewResponse = await handleLocalReviewRequest(service.authentication, request, siteOrigin, correlationId);
-            if (reviewResponse) {
-                return reviewResponse;
             }
             const submissionResponse = await handleLocalVersionSubmit(service.authentication, request, siteOrigin, correlationId);
             if (submissionResponse) {

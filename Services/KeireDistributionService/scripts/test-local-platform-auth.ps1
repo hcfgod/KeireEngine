@@ -8,7 +8,8 @@ param
     [switch] $CreateRecoveryDeliverySchema,
     [switch] $CreateRegistrationSchema,
     [switch] $CreatePublicationSequenceSchema,
-    [switch] $CreateNativeSchema
+    [switch] $CreateNativeSchema,
+    [switch] $CreateGitHubSchema
 )
 
 $ErrorActionPreference = 'Stop'
@@ -58,6 +59,10 @@ try
     if ($CreateNativeSchema)
     {
         $start.ArgumentList.Add('--create-native-schema')
+    }
+    if ($CreateGitHubSchema)
+    {
+        $start.ArgumentList.Add('--create-github-schema')
     }
     $start.CreateNoWindow = $true
     $start.RedirectStandardInput = $true

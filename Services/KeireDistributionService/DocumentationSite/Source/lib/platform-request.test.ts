@@ -13,6 +13,18 @@ function fixture(pathname = "/account/sign-in/") {
 }
 
 describe("staged local platform request routing", () => {
+    it.each(["/account/github/", "/account/github/callback/"])("routes GitHub %s only to its owned service", async (pathname) => {
+        const { options, authentication } = fixture(pathname);
+        expect((await handleLocalPlatformRequest(options)).status).toBe(503);
+        const expected = new Response("github");
+        const handle = vi.fn(async () => expected);
+        options.backend.withBackend = async (action) => action({ authentication, github: { handle } });
+        expect(await handleLocalPlatformRequest(options)).toBe(expected);
+        expect(handle).toHaveBeenCalledWith(options.request, options.clientIdentity);
+        expect(authentication.session).not.toHaveBeenCalled();
+        expect(options.render).not.toHaveBeenCalled();
+    });
+
     it.each(["/auth/v1/oauth/token", "/oauth/consent/", "/auth/v1/.well-known/jwks.json"])(
         "routes native authorization %s exclusively to its owned service", async (pathname) => {
             const { options, authentication } = fixture(pathname);

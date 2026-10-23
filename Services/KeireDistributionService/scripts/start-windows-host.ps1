@@ -256,7 +256,7 @@ if (-not (Test-Path -LiteralPath $SettingsPath -PathType Leaf)) {
 $settingsDirectory = Split-Path -Parent $SettingsPath
 $settings = Get-Content -LiteralPath $SettingsPath -Raw | ConvertFrom-Json
 $schemaVersion = [int] (Get-RequiredSetting $settings 'schemaVersion')
-if ($schemaVersion -notin @(1, 2)) {
+if ($schemaVersion -notin @(1, 2, 3)) {
     throw "Unsupported Windows distribution host settings schema '$schemaVersion'."
 }
 
@@ -291,18 +291,39 @@ $nodeExecutable = ''
 $webEntry = ''
 $supabaseUrl = ''
 $supabasePublishableKey = ''
+$platformBackend = 'supabase'
+$platformConfigurationPath = ''
+if ($schemaVersion -eq 3) {
+    $platformBackend = [string] (Get-RequiredSetting $settings 'platformBackend')
+    if ($platformBackend -notin @('supabase', 'mysql')) {
+        throw 'The platform backend must be supabase or mysql.'
+    }
+}
 if ($schemaVersion -ge 2) {
     $webRoot = Resolve-ConfiguredPath ([string] (Get-RequiredSetting $settings 'webRoot')) $settingsDirectory
     $nodeExecutable = Resolve-ConfiguredPath `
         ([string] (Get-RequiredSetting $settings 'nodeExecutable')) $settingsDirectory
     $webEntry = Join-Path $webRoot 'dist\server\entry.mjs'
-    $supabaseUrl = [string] (Get-RequiredSetting $settings 'supabaseUrl')
-    $supabasePublishableKey = [string] (Get-RequiredSetting $settings 'supabasePublishableKey')
-    if ($supabaseUrl -notmatch '^https://[A-Za-z0-9.-]+/?$') {
-        throw "The configured Supabase URL must be an HTTPS origin: '$supabaseUrl'."
+    if ($platformBackend -eq 'mysql') {
+        $webEntry = Join-Path $webRoot 'scripts\platform-production-start.mjs'
+        $platformConfigurationPath = Resolve-ConfiguredPath `
+            ([string] (Get-RequiredSetting $settings 'platformConfigurationPath')) $settingsDirectory
+        $platformConfiguration = Get-Content -LiteralPath $platformConfigurationPath -Raw | ConvertFrom-Json
+        if ($platformConfiguration.schemaVersion -ne 1 -or $platformConfiguration.siteOrigin -cne "https://$hostName" -or
+            $platformConfiguration.port -ne 4321 -or
+            [IO.Path]::GetFullPath($platformConfiguration.webRoot) -ne $webRoot) {
+            throw 'MySQL platform configuration must match this deployment root, HTTPS origin and loopback port.'
+        }
     }
-    if ($supabasePublishableKey -notmatch '^sb_publishable_[A-Za-z0-9_-]{16,}$') {
-        throw 'The configured Supabase publishable key is invalid.'
+    else {
+        $supabaseUrl = [string] (Get-RequiredSetting $settings 'supabaseUrl')
+        $supabasePublishableKey = [string] (Get-RequiredSetting $settings 'supabasePublishableKey')
+        if ($supabaseUrl -notmatch '^https://[A-Za-z0-9.-]+/?$') {
+            throw "The configured Supabase URL must be an HTTPS origin: '$supabaseUrl'."
+        }
+        if ($supabasePublishableKey -notmatch '^sb_publishable_[A-Za-z0-9_-]{16,}$') {
+            throw 'The configured Supabase publishable key is invalid.'
+        }
     }
 }
 
@@ -391,7 +412,12 @@ function Start-WebPlatform {
     $env:PUBLIC_SUPABASE_URL = $supabaseUrl.TrimEnd('/')
     $env:PUBLIC_SUPABASE_PUBLISHABLE_KEY = $supabasePublishableKey
     $env:PUBLIC_SITE_URL = "https://$hostName/"
+    $env:KEIRE_PLATFORM_BACKEND = $platformBackend
     $nodeArguments = "`"$webEntry`""
+    if ($platformBackend -eq 'mysql') {
+        $env:PUBLIC_SITE_URL = "https://$hostName"
+        $nodeArguments += " `"$platformConfigurationPath`""
+    }
     $process = Start-Process -FilePath $nodeExecutable -ArgumentList $nodeArguments `
         -WorkingDirectory $webRoot -WindowStyle Hidden -PassThru `
         -RedirectStandardOutput (Join-Path $logDirectory 'web-stdout.log') `

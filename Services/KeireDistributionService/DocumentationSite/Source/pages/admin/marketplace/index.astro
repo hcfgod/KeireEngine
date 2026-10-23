@@ -8,7 +8,8 @@ export const prerender = false;
 
 const supabase = Astro.locals.supabase;
 const user = Astro.locals.user;
-let staffRole: "moderator" | "administrator" | null = null;
+const localAdmin = (Astro.locals as any).localAdminView;
+let staffRole: "moderator" | "administrator" | null = localAdmin?.role ?? null;
 if (supabase && user) {
     const staffResult = await supabase.from("platform_staff_members")
         .select("role,active").eq("user_id", user.id).eq("active", true).maybeSingle();
@@ -16,7 +17,7 @@ if (supabase && user) {
         staffRole = staffResult.data.role;
     }
 }
-const allowed = Boolean(user && staffRole);
+const allowed = Boolean(localAdmin || (user && staffRole));
 if (!allowed) Astro.response.status = 404;
 if (allowed && Astro.locals.assurance.currentLevel !== "aal2") {
     return Astro.redirect(mfaChallengePath(Astro.url.pathname), 303);
@@ -118,6 +119,11 @@ if (allowed && supabase) {
     }
 }
 
+if (localAdmin) {
+    ({ applications, activeSubmissions, signingSubmissions, submissionHistory, reports, staff, flags,
+        audits, versions, products, validationReports, publicationJobs, officialProducts, officialVersions } = localAdmin);
+}
+
 const versionById = new Map(versions.map((version: any) => [version.id, version]));
 const productById = new Map(products.map((product: any) => [product.id, product]));
 const validationById = new Map(validationReports.map((report: any) => [report.id, report]));
@@ -137,6 +143,8 @@ const actionableSubmissionCount = activeSubmissions.length + signingSubmissions.
     {allowed ? (
         <section class="platform-section staff-console">
             <div class="platform-shell">
+                {localAdmin && <p class="notice-panel">Local database staff operations are active. Decisions, staff assignments and feature gates are audited. {!localAdmin.evidenceAvailable && "Signed evidence downloads are not configured yet."}</p>}
+                {localAdmin?.limitedQueues.length > 0 && <p class="notice-panel">Some queues show their first {localAdmin.queueLimit} records. Additional records remain in the database. Limited queues: {localAdmin.limitedQueues.join(", ")}.</p>}
                 <div class="section-heading staff-console__heading">
                     <div>
                         <p class="eyebrow">Staff · MFA verified · audited</p>
@@ -234,7 +242,7 @@ const actionableSubmissionCount = activeSubmissions.length + signingSubmissions.
                                                 <span class="status-badge status-badge--ready">verified metadata</span>
                                             </div>
                                             <p>Load the validator’s bounded report to inspect the exact manifest inventory without receiving the publisher’s private package archive.</p>
-                                            <button class="button button--secondary" type="button" data-evidence-button data-report-id={validation.id}>Load verified report</button>
+                                            <button class="button button--secondary" type="button" data-evidence-button disabled={Boolean(localAdmin) && !localAdmin.evidenceAvailable} data-report-id={validation.id}>Load verified report</button>
                                             <div class="staff-evidence__panel" data-evidence-panel hidden aria-live="polite"></div>
                                         </section> : <p class="notice-panel">Signed review evidence is unavailable for this legacy validation report.</p>}
                                         <form class="staff-action-form" data-moderation-form>
@@ -534,7 +542,7 @@ const actionableSubmissionCount = activeSubmissions.length + signingSubmissions.
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({ operation: "evidence.issue", reportId }),
                 }));
-                const response = await fetch(grant.url, { credentials: "omit", cache: "no-store" });
+                const response = await fetch(grant.url, { credentials: "same-origin", cache: "no-store" });
                 if (!response.ok) throw new Error("The signed evidence download expired or was rejected.");
                 const bytes = new Uint8Array(await response.arrayBuffer());
                 const digest = hex(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)));

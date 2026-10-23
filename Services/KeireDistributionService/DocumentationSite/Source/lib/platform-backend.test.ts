@@ -19,7 +19,21 @@ function fixture() {
 }
 
 describe("application-owned backend lifecycle", () => {
-    it.each(["Validator", "Publication", "Native"])("drains %s before closing its borrowed database", async (kind) => {
+    it("exposes only a read-capable staff evidence store", async () => {
+        const data = fixture();
+        const store = { read: vi.fn() };
+        data.backend.createAdminEvidenceStore = async () => store;
+        expect(await data.backend.withBackend((services) => services.adminEvidenceStore)).toBe(store);
+        await data.backend.close();
+        expect(data.authentication.close).toHaveBeenCalledOnce();
+        const invalid = fixture();
+        invalid.backend.createAdminEvidenceStore = async () => ({});
+        await expect(invalid.backend.withBackend(() => {})).rejects.toThrow("invalid store");
+        expect(invalid.authentication.close).toHaveBeenCalledOnce();
+        expect(invalid.pool.end).toHaveBeenCalledOnce();
+    });
+
+    it.each(["Validator", "Publication", "Native", "GitHub"])("drains %s before closing its borrowed database", async (kind) => {
         const data = fixture();
         const drain = deferred();
         const validator = { handle: vi.fn(), close: vi.fn(() => drain.promise) };
@@ -39,7 +53,7 @@ describe("application-owned backend lifecycle", () => {
         expect(data.pool.end).toHaveBeenCalledOnce();
     });
 
-    it.each(["Validator", "Publication", "Native"])("cleans up %s after later startup failure", async (kind) => {
+    it.each(["Validator", "Publication", "Native", "GitHub"])("cleans up %s after later startup failure", async (kind) => {
         const data = fixture();
         const validator = { handle: vi.fn(), close: vi.fn() };
         const backend = new PlatformBackend({ provider: "mysql", loadLocalSecrets: data.loadLocalSecrets,
@@ -51,7 +65,7 @@ describe("application-owned backend lifecycle", () => {
         expect(data.pool.end).toHaveBeenCalledOnce();
     });
 
-    it.each(["Validator", "Publication", "Native"])("disposes the database even when %s shutdown fails", async (kind) => {
+    it.each(["Validator", "Publication", "Native", "GitHub"])("disposes the database even when %s shutdown fails", async (kind) => {
         const data = fixture();
         const backend = new PlatformBackend({ provider: "mysql", loadLocalSecrets: data.loadLocalSecrets,
             createPool: data.createPool, createAuthentication: data.createAuthentication,

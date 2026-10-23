@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Added staged MySQL staff queues, publisher/report decisions, staff and feature management, last-administrator protection, and authenticated signed-evidence downloads.
+- Added explicit MySQL Windows-host selection, protected worker credentials, private storage checks, and reverse-proxy identity validation. Production activation remains gated on deployment and external-provider acceptance.
+
 - Added staged MySQL GitHub sign-in and explicit account linking with protected credentials, browser-bound PKCE state, existing MFA enforcement, and audited identity changes. External provider acceptance remains a release gate.
 
 - Added staged native Hub OAuth signature, issuer, audience, time, nonce, and access-token binding checks for sign-in and refresh, with bounded issuer-key retrieval before credential exchange. Live activation remains gated on migration acceptance.

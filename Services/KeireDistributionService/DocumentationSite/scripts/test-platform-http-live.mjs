@@ -13,6 +13,8 @@ import { emailSendLimits } from "../Source/lib/platform-email-limits.mjs";
 import { verifyUploadHttp } from "./platform-upload-http-acceptance.mjs";
 import { createPublisherPreview } from "./qa-publisher-preview.mjs";
 import { verifyNativeHttp } from "./platform-native-http-acceptance.mjs";
+import { verifyAdminHttp } from "./platform-admin-http-acceptance.mjs";
+import { verifyAdminEvidenceHttp } from "./platform-admin-evidence-http-acceptance.mjs";
 
 const userId = randomUUID();
 const factorId = randomUUID();
@@ -385,6 +387,12 @@ try {
         checks += 3;
 
         stage = "account-overview";
+        checks += await verifyAdminHttp({ pool, userId, request, setStage: (phase) => { stage = phase; } });
+        if (process.env.KEIRE_QA_EVIDENCE_ROOT && process.env.KEIRE_QA_PACKAGE_ROOT) {
+            checks += await verifyAdminEvidenceHttp({ pool, userId, request,
+                packageRoot: process.env.KEIRE_QA_PACKAGE_ROOT, evidenceRoot: process.env.KEIRE_QA_EVIDENCE_ROOT,
+                setStage: (phase) => { stage = phase; } });
+        }
         if (process.env.KEIRE_QA_NATIVE_SETTINGS_DIRECTORY) {
             checks += await verifyNativeHttp({ pool, userId, origin, clientIdentity, browserRequest: request,
                 setStage: (phase) => { stage = `native-${phase}`; } });

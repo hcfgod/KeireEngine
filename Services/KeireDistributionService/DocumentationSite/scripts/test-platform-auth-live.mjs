@@ -18,6 +18,9 @@ import { verifyPublicationConcurrency } from "./platform-publication-concurrency
 import { verifyNativeSessions } from "./platform-native-sessions-acceptance.mjs";
 import { verifyNativeRefreshConcurrency } from "./platform-native-concurrency-acceptance.mjs";
 import { createNativeSchema } from "../Source/lib/platform-native-provision.mjs";
+import { githubAuthorizationSchema } from "../Source/lib/platform-github-authorization.mjs";
+import { verifyGitHubAuthentication } from "./platform-github-acceptance.mjs";
+import { verifyAdminActions } from "./platform-admin-actions-acceptance.mjs";
 import { allocatePublicationSequence, publicationSequenceSchema } from "../Source/lib/platform-publication-sequence.mjs";
 import { verifyLocalDataRequests } from "./platform-data-requests-acceptance.mjs";
 import { verifyAuthenticatorEnrollment } from "./platform-mfa-management-acceptance.mjs";
@@ -95,6 +98,13 @@ try {
             assert.equal(Number(row.count), 0);
             checks++;
         }
+    }
+    if (process.argv.includes("--create-github-schema")) {
+        stage = "github-schema-provisioning";
+        await migration.execute(githubAuthorizationSchema);
+        const [[row]] = await runtime.execute("SELECT COUNT(*) AS count FROM platform_github_authorizations");
+        assert.equal(Number(row.count), 0);
+        checks++;
     }
     stage = "fixture";
     const passwordHash = await bcrypt.hash(password, 4);
@@ -316,6 +326,13 @@ try {
     checks += await verifyNativeSessions(migration, userId);
     stage = "native-refresh-concurrency";
     checks += await verifyNativeRefreshConcurrency(migration, userId);
+    stage = "github-authentication";
+    checks += await verifyGitHubAuthentication(runtime, encryptionKey);
+    stage = "admin-actions";
+    const adminAcceptance = await verifyAdminActions(migration);
+    assert.equal(adminAcceptance.temporaryTablesOnly, true);
+    assert.ok(Number.isSafeInteger(adminAcceptance.checks) && adminAcceptance.checks > 0);
+    checks += adminAcceptance.checks;
 
     stage = "backend-lifecycle";
     const transferredKey = Buffer.from(encryptionKey);

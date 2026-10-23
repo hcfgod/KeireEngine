@@ -14,6 +14,7 @@ import { LocalPasswordAuthentication } from "../Source/lib/platform-local-auth.m
 import { openAccountRecord } from "../Source/lib/platform-account-import.mjs";
 import { createQaUploadService } from "./qa-upload-service.mjs";
 import { windowsNativeServiceFactory } from "../Source/lib/platform-native-factory.mjs";
+import { windowsGitHubServiceFactory } from "../Source/lib/platform-github-factory.mjs";
 import { isNativeAuthorizationPath } from "../Source/lib/platform-native-service.mjs";
 import { LocalBlobStore } from "../Source/lib/local-blob-store.ts";
 import { lstat } from "node:fs/promises";
@@ -140,7 +141,26 @@ if (downloadSettings !== undefined || packageRoot !== undefined) {
     };
 }
 
+let adminEvidenceStore = null;
+if (process.env.KEIRE_QA_EVIDENCE_ROOT) {
+    const evidenceRoot = process.env.KEIRE_QA_EVIDENCE_ROOT;
+    if (!tlsThumbprint || !path.isAbsolute(evidenceRoot)) {
+        throw new Error("QA evidence requires HTTPS and an absolute private storage root.");
+    }
+    const information = await lstat(evidenceRoot);
+    if (!information.isDirectory() || information.isSymbolicLink()) {
+        throw new Error("QA evidence requires an existing ordinary private directory.");
+    }
+    adminEvidenceStore = new LocalBlobStore(evidenceRoot);
+}
 const backend = new PlatformBackend({ provider: "mysql", createMailer, createAuthentication: createQaAuthentication,
+    createAdminEvidenceStore: adminEvidenceStore ? () => adminEvidenceStore : null,
+    createGitHub: process.env.KEIRE_QA_GITHUB_SETTINGS_DIRECTORY ? windowsGitHubServiceFactory({
+        powerShellExecutable: process.env.KEIRE_QA_POWERSHELL,
+        decryptScriptPath: path.resolve(root, "../scripts/read-local-platform-github.ps1"),
+        settingsDirectory: process.env.KEIRE_QA_GITHUB_SETTINGS_DIRECTORY,
+        siteOrigin: process.env.PUBLIC_SITE_URL,
+    }) : null,
     createNative: process.env.KEIRE_QA_NATIVE_SETTINGS_DIRECTORY ? windowsNativeServiceFactory({
         powerShellExecutable: process.env.KEIRE_QA_POWERSHELL,
         decryptScriptPath: path.resolve(root, "../scripts/read-local-platform-native.ps1"),
