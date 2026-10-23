@@ -19,6 +19,8 @@ $global:KeireWebDeploymentTestState = [pscustomobject]@{
     StartCount = 0
     ProbeErrors = [Collections.Generic.Queue[string]]::new()
     ProbeCount = 0
+    PublicProbeCount = 0
+    PublicProbeFailures = 0
     MoveFailureAt = 0
     MoveCount = 0
     ProcessListening = $false
@@ -35,6 +37,20 @@ function Assert-True([bool] $Condition, [string] $Message) {
     if (-not $Condition) {
         throw $Message
     }
+}
+
+function Invoke-WebRequest {
+    [CmdletBinding()]
+    param($Uri, $Method, [switch] $UseBasicParsing, $MaximumRedirection, $TimeoutSec)
+
+    Assert-True ($Uri -eq 'https://platform.invalid/account/sign-in/') 'Unexpected public readiness endpoint.'
+    Assert-True ($Method -eq 'Head' -and $MaximumRedirection -eq 0) 'Public readiness must not follow redirects.'
+    $global:KeireWebDeploymentTestState.PublicProbeCount++
+    if ($global:KeireWebDeploymentTestState.PublicProbeFailures -gt 0) {
+        $global:KeireWebDeploymentTestState.PublicProbeFailures--
+        throw 'injected public proxy 503'
+    }
+    return [pscustomobject]@{ StatusCode = 200 }
 }
 
 function Set-Utf8NoBomFile([string] $Path, [string] $Contents) {
@@ -218,6 +234,7 @@ if ($global:KeireWebDeploymentTestState.ProbeErrors.Count -ne 0) {
     $settingsPath = Join-Path $hostRoot "host-settings.json"
     $settingsContents = [pscustomobject]@{
         schemaVersion = 2
+        host = 'platform.invalid'
         webRoot = $webRoot
         nodeExecutable = $node
     } | ConvertTo-Json
@@ -247,6 +264,8 @@ function Reset-Mocks([object] $Fixture) {
     $global:KeireWebDeploymentTestState.StartCount = 0
     $global:KeireWebDeploymentTestState.ProbeErrors.Clear()
     $global:KeireWebDeploymentTestState.ProbeCount = 0
+    $global:KeireWebDeploymentTestState.PublicProbeCount = 0
+    $global:KeireWebDeploymentTestState.PublicProbeFailures = 0
     $global:KeireWebDeploymentTestState.MoveFailureAt = 0
     $global:KeireWebDeploymentTestState.MoveCount = 0
     $global:KeireWebDeploymentTestState.ProcessListening = $false
@@ -354,12 +373,15 @@ try {
     $probeRetry = New-DeploymentFixture "probe-retry" $false
     Reset-Mocks $probeRetry
     $global:KeireWebDeploymentTestState.ProbeErrors.Enqueue("injected transient local probe failure")
+    $global:KeireWebDeploymentTestState.PublicProbeFailures = 2
     & $Deployment -SourceWebRoot $probeRetry.SourceRoot -SettingsPath $probeRetry.SettingsPath
     $deployedEntry = Get-Content -LiteralPath $probeRetry.DestinationEntry -Raw
     Assert-True ($deployedEntry.Contains("source entry")) `
         "A transient local readiness failure rolled back a healthy web deployment."
-    Assert-True ($global:KeireWebDeploymentTestState.ProbeCount -eq 2) `
+    Assert-True ($global:KeireWebDeploymentTestState.ProbeCount -eq 4) `
         "The web deployment did not retry its bounded local readiness probe."
+    Assert-True ($global:KeireWebDeploymentTestState.PublicProbeCount -eq 3) `
+        "Deployment returned before the public proxy recovered from transient 503 responses."
     Assert-True ($global:KeireWebDeploymentTestState.StartCount -eq 1) `
         "The successful web deployment restarted the host task an unexpected number of times."
     Assert-True ($global:KeireWebDeploymentTestState.TaskState -eq "Running") `
@@ -443,7 +465,7 @@ try {
 
     $mysqlSettings.schemaVersion = 2
     $mysqlSettings.PSObject.Properties.Remove('platformBackend')
-    $mysqlSettings | Add-Member host 'platform.invalid'
+    $mysqlSettings.host = 'platform.invalid'
     Set-Utf8NoBomFile $mysql.SettingsPath ($mysqlSettings | ConvertTo-Json)
     $priorSettings = [IO.File]::ReadAllText($mysql.SettingsPath)
     $supervisorPath = Join-Path (Split-Path $mysql.SettingsPath) 'scripts/start-windows-host.ps1'

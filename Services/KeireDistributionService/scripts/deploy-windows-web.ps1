@@ -225,7 +225,12 @@ function Wait-ForDeployment([int] $TimeoutSeconds) {
         try {
             & $supervisor -SettingsPath $SettingsPath -ProbeOnly
             if ($LASTEXITCODE -eq 0) {
-                return
+                # Caddy may still be waiting for consecutive health passes after Node is ready.
+                $publicResponse = Invoke-WebRequest -Uri ("https://" + $settings.host + "/account/sign-in/") `
+                    -Method Head -UseBasicParsing -MaximumRedirection 0 -TimeoutSec 10 -ErrorAction Stop
+                if ([int] $publicResponse.StatusCode -eq 200) {
+                    return
+                }
             }
         }
         catch {

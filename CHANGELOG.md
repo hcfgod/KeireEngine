@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Wait for the public HTTPS sign-in page as well as local host readiness before reporting a website deployment successful, covering reverse-proxy health recovery delays.
+
 - Added operator-only storage recovery that verifies original package hashes and sizes before recording recovery, preserving published identities and existing immutable files.
 
 - Accept GitHub OAuth callback issuer metadata only for the exact GitHub issuer, rejecting foreign, empty, and duplicate issuer values before token exchange.
