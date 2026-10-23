@@ -17,6 +17,7 @@ param(
 
     [string] $FirewallAttestation,
     [ValidateSet('clean', 'blocked')] [string] $ExpectedOutcome = 'clean',
+    [switch] $RequireManagedCompilation,
     [ValidateRange(30, 1800)] [int] $TimeoutSeconds = 900,
     [ValidateRange(1, 30)] [int] $MaximumDefinitionAgeDays = 7
 )
@@ -177,6 +178,7 @@ try
         evidence = $evidence
         publicKey = $AttestationPublicKey
         expectedOutcome = $ExpectedOutcome
+        requireManagedCompilation = [bool] $RequireManagedCompilation
         workerSha256 = $workerHash
         upload = @{
             id = $uploadId

@@ -33,6 +33,10 @@ if (configuration.expectedOutcome === "clean") {
     assert.equal(report.malwareScanResult, "clean");
     assert.equal(report.secretScanResult, "clean");
     assert.ok(["passed", "not_applicable"].includes(report.managedValidationResult));
+    if (configuration.requireManagedCompilation === true) {
+        assert.equal(report.managedValidationResult, "passed");
+        assert.match(report.codeFingerprintSha256, /^[0-9a-f]{64}$/);
+    }
 } else {
     assert.equal(report.malwareScanResult, "infected");
     assert.ok(report.diagnostics.some((diagnostic) => diagnostic.code === "MALWARE_DETECTED"));
