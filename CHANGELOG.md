@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Fixed Windows website updates leaving an upload-writer marker after terminating the owned Node process; the updater archives only that exited process's marker while the supervisor is stopped.
+
 - Fixed GitHub and account request origins behind the verified HTTPS proxy with Astro's HTTP middleware adapter, preserving CSRF headers and request bodies.
 
 - Added an explicit Windows Supabase-to-MySQL deployment transition with configuration preflight and restoration of host settings and supervisor on startup failure.

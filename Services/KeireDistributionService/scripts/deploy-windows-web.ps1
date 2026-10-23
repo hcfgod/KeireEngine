@@ -200,6 +200,17 @@ function Stop-ExpectedWebProcess {
             if (-not $ownedProcess.WaitForExit(15000)) {
                 throw "The configured web process $($process.ProcessId) did not exit before the deployment deadline."
             }
+            $writerSettings = $originalSettings
+            if ($script:transitionInstalled) {
+                $writerSettings = $settings
+            }
+            $configurationProperty = $writerSettings.PSObject.Properties['platformConfigurationPath']
+            if ($null -ne $configurationProperty -and $writerSettings.platformBackend -eq 'mysql') {
+                $runtimeConfigurationPath = Resolve-ConfiguredPath ([string] $configurationProperty.Value) $settingsDirectory
+                $runtimeConfiguration = Get-Content -LiteralPath $runtimeConfigurationPath -Raw | ConvertFrom-Json
+                & (Join-Path $PSScriptRoot 'retire-platform-writer.ps1') `
+                    -SpoolDirectory $runtimeConfiguration.spoolDirectory -StoppedProcessId $process.ProcessId
+            }
         }
         finally {
             $ownedProcess.Dispose()

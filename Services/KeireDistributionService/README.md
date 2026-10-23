@@ -512,6 +512,9 @@ The Supabase value in this file is the intentionally public browser key. Never p
 OAuth provider secret, SMTP credential, or signing private key in host settings.
 
 For a verified website update, use `scripts/deploy-windows-web.ps1`. With an unchanged lockfile it verifies exact Node
+process ownership. After confirmed process exit, MySQL updates archive that process's writer marker while the
+supervisor remains stopped. A live, mismatched, or malformed marker fails closed; do not delete it blindly.
+The deployment verifies exact Node
 process ownership and swaps only `Web/dist`. When reviewed runtime dependencies change, pass `-AllowRuntimeUpdate`; the
 script performs a locked production-only install in sibling staging, swaps the complete `Web` root transactionally,
 waits for the scheduled supervisor and owned Node process to stop before swapping, retains a timestamped rollback, and
