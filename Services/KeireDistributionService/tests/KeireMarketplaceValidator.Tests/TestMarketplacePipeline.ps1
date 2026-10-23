@@ -77,4 +77,27 @@ Stop-OwnedProcess $owned
 $checks++
 Stop-OwnedProcess $null
 $checks++
+$owned = $null
+$syntheticSettings = [Text.Encoding]::UTF8.GetBytes('{"synthetic":true}')
+try
+{
+    $owned = Start-OwnedProcess $executable @('-NoProfile', '-NonInteractive', '-Command',
+        '$inputText = [Console]::In.ReadToEnd(); Write-Output $inputText.Length') -PrivateInput
+    Write-PrivateSettings $owned $syntheticSettings
+    if (-not $owned.Process.WaitForExit(10000) -or
+        [int]$owned.Output.Result.Trim() -ne $syntheticSettings.Length)
+    {
+        throw 'Private settings pipe delivery failed.'
+    }
+}
+finally
+{
+    [Array]::Clear($syntheticSettings, 0, $syntheticSettings.Length)
+    Stop-OwnedProcess $owned
+}
+$checks++
+Assert-Rejected { Write-PrivateSettings $null ([byte[]]::new(1)) }
+$checks++
+Assert-Rejected { Write-PrivateSettings $null ([byte[]]::new(65537)) }
+$checks++
 Write-Output "Passed $checks pipeline orchestration checks; only harmless owned child processes executed."

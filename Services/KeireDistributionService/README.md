@@ -476,6 +476,16 @@ The runner stops only its own process trees and preserves evidence. Its focused 
 Those checks exercise guards and cleanup; they do not prove database integration, production service identities,
 or successful asset publication. Record the actual pipeline result separately before enabling a live queue.
 
+The MySQL integration entrypoint is `DocumentationSite/scripts/run-actual-marketplace-workers.mjs`.
+Supply `--package`, `--dotnet`, `--broker`, and `--signer` as absolute paths through the runner's
+`-IntegrationArguments`, and provide the protected MySQL directory with `-SettingsDirectory`.
+Database settings travel only through private stdin. The test uses the migration account to create connection-local
+temporary tables; it does not grant additional permissions to the application account or mutate customer rows.
+Use the normal, network-capable SDK for the broker and signer, and the isolated firewall-blocked SDK for the worker.
+Configure the existing trusted localhost certificate through `KEIRE_QA_TLS_THUMBPRINT` and `KEIRE_QA_POWERSHELL`.
+A passing result requires managed compilation, a successful real worker report, review and publication transitions,
+and independent verification of the persisted publication signature and package identity.
+
 On Windows, an extracted self-contained package can be supervised at user sign-in without an administrator-owned
 service. Copy Caddy beside the service, copy `Deployment/Caddyfile.example` to `Caddyfile`, and create
 `host-settings.json` beside `scripts/start-windows-host.ps1`:

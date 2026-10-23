@@ -10,7 +10,8 @@ status: "passed" on success. Never pass credentials or capability URLs through
 IntegrationArguments; use protected settings paths. The helper creates no
 synthetic exchange requests, firewall rules, services, or scheduled tasks.
 An existing protected key and matching isolated firewall namespace are required.
-The output directory must be new. Failed evidence is retained.
+SettingsDirectory is read through CurrentUser DPAPI and delivered only through
+the private Node stdin pipe. The output directory must be new. Failed evidence is retained.
 #>
 [CmdletBinding()]
 param(
@@ -23,6 +24,7 @@ param(
     [Parameter(Mandatory)] [string] $AttestationPublicKey,
     [Parameter(Mandatory)] [string] $IntegrationScript,
     [Parameter(Mandatory)] [string] $Node,
+    [Parameter(Mandatory)] [string] $SettingsDirectory,
     [Parameter(Mandatory)] [string] $OutputDirectory,
     [string[]] $IntegrationArguments = @(),
     [ValidatePattern('^[A-Za-z0-9][A-Za-z0-9 _.-]{0,79}$')]
@@ -64,6 +66,11 @@ function Assert-IntegrationArguments([string[]] $Arguments)
 }
 
 Assert-IntegrationArguments $IntegrationArguments
+if (-not [IO.Path]::IsPathFullyQualified($SettingsDirectory) -or
+    -not (Test-Path -LiteralPath (Join-Path $SettingsDirectory 'mysql-settings.dpapi') -PathType Leaf))
+{
+    throw 'An existing absolute protected MySQL settings directory is required.'
+}
 $fixtureRoot = [IO.Path]::GetFullPath($OutputDirectory)
 $ancestor = Split-Path -Parent $fixtureRoot
 while ($ancestor)
@@ -93,13 +100,14 @@ foreach ($directory in @($exchange, $work, (Join-Path $exchange 'packages'),
     [IO.Directory]::CreateDirectory($directory) | Out-Null
 }
 
-function Start-OwnedProcess([string] $Executable, [string[]] $Arguments)
+function Start-OwnedProcess([string] $Executable, [string[]] $Arguments, [switch] $PrivateInput)
 {
     $start = [Diagnostics.ProcessStartInfo]::new($Executable)
     $start.UseShellExecute = $false
     $start.CreateNoWindow = $true
     $start.RedirectStandardOutput = $true
     $start.RedirectStandardError = $true
+    $start.RedirectStandardInput = [bool]$PrivateInput
     foreach ($argument in $Arguments)
     {
         $start.ArgumentList.Add($argument)
@@ -110,6 +118,20 @@ function Start-OwnedProcess([string] $Executable, [string[]] $Arguments)
         Output = $process.StandardOutput.ReadToEndAsync()
         Errors = $process.StandardError.ReadToEndAsync()
     }
+}
+
+function Write-PrivateSettings($Owned, [byte[]] $SettingsBytes)
+{
+    if ($SettingsBytes.Length -lt 2 -or $SettingsBytes.Length -gt 65536)
+    {
+        throw 'Protected MySQL settings have an invalid size.'
+    }
+    $write = $Owned.Process.StandardInput.BaseStream.WriteAsync($SettingsBytes, 0, $SettingsBytes.Length)
+    if (-not $write.Wait(10000))
+    {
+        throw 'Private MySQL settings delivery timed out.'
+    }
+    $Owned.Process.StandardInput.Close()
 }
 
 function Stop-OwnedProcess($Owned)
@@ -169,6 +191,7 @@ $configuration = @{
     validatorFingerprint = (Get-FileHash -LiteralPath $Validator -Algorithm SHA256).Hash.ToLowerInvariant()
 }
 [IO.File]::WriteAllText($configurationPath, ($configuration | ConvertTo-Json), [Text.UTF8Encoding]::new($false))
+$settingsBytes = $null
 $scanner = $null
 $preflight = $null
 $worker = $null
@@ -194,10 +217,26 @@ try
     {
         throw 'Guarded offline worker preflight failed.'
     }
+    $stage = 'protected settings'
+    $encryptedSettings = [IO.File]::ReadAllBytes((Join-Path $SettingsDirectory 'mysql-settings.dpapi'))
+    try
+    {
+        $settingsBytes = [Security.Cryptography.ProtectedData]::Unprotect(
+            $encryptedSettings,
+            [Text.Encoding]::UTF8.GetBytes('Keire.Platform.MySql.v1'),
+            [Security.Cryptography.DataProtectionScope]::CurrentUser)
+    }
+    finally
+    {
+        [Array]::Clear($encryptedSettings, 0, $encryptedSettings.Length)
+    }
     $stage = 'integration'
     $worker = Start-OwnedProcess (Get-Process -Id $PID).Path $workerArguments
     $integration = Start-OwnedProcess $Node (@($IntegrationScript) + $IntegrationArguments +
-        @('--worker-config', $configurationPath, '--result', $resultPath))
+        @('--worker-config', $configurationPath, '--result', $resultPath)) -PrivateInput
+    Write-PrivateSettings $integration $settingsBytes
+    [Array]::Clear($settingsBytes, 0, $settingsBytes.Length)
+    $settingsBytes = $null
     $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
     while (-not $integration.Process.WaitForExit(250))
     {
@@ -230,6 +269,10 @@ catch
 }
 finally
 {
+    if ($null -ne $settingsBytes)
+    {
+        [Array]::Clear($settingsBytes, 0, $settingsBytes.Length)
+    }
     $cleanupFailed = $false
     foreach ($owned in @($integration, $worker, $preflight, $scanner))
     {
