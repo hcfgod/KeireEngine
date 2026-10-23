@@ -314,6 +314,9 @@ try {
             'Get-ScheduledTask',
             'requires -AllowRuntimeUpdate',
             'AllowRuntimeUpdate',
+            "from 'node:url'",
+            "ASTRO_NODE_AUTOSTART = 'disabled'",
+            "readFileSync(process.argv[2], 'utf8')",
             'npm.cmd',
             'locked web runtime deployment completed',
             '-ProbeOnly'
