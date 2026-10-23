@@ -416,6 +416,19 @@ try {
         'A failed MySQL import check moved the live runtime.'
     Assert-True (-not $global:KeireWebDeploymentTestState.TaskStopIssued) `
         'A failed MySQL import check stopped the live host.'
+    Set-Content -LiteralPath $mysql.NodeExecutable -Encoding ascii -Value @(
+        '@if not "%~1"=="--input-type" if not "%~1"=="--input-type=module" exit /b 0'
+        '@if exist "%~dp0adapter-check-seen" exit /b 1'
+        '@type nul > "%~dp0adapter-check-seen"'
+        '@exit /b 0'
+    )
+    Reset-Mocks $mysql
+    Invoke-ExpectedFailure $mysql 'not a valid MySQL middleware build'
+    Assert-PreviousDeployment $mysql
+    Assert-True ($global:KeireWebDeploymentTestState.MoveCount -eq 0) `
+        'An incompatible adapter moved the live runtime.'
+    Assert-True (-not $global:KeireWebDeploymentTestState.TaskStopIssued) `
+        'An incompatible adapter stopped the live host.'
     Set-Content -LiteralPath $mysql.NodeExecutable -Value '@exit /b 0' -Encoding ascii
     Reset-Mocks $mysql
     & $Deployment -SourceWebRoot $mysql.SourceRoot -SettingsPath $mysql.SettingsPath -AllowRuntimeUpdate

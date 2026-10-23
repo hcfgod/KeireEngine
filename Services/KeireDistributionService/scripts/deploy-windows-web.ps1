@@ -306,6 +306,12 @@ if ($runtimeUpdate) {
             if ($LASTEXITCODE -ne 0) {
                 throw 'The staged MySQL runtime could not load its production dependencies.'
             }
+            # Disable adapter autostart before importing: standalone builds must never bind a port during preflight.
+            $adapterCheck = 'process.env.ASTRO_NODE_AUTOSTART = "disabled"; const { pathToFileURL } = await import("node:url"); const entry = await import(pathToFileURL(process.argv[1]).href); if (entry.options?.mode !== "middleware" || typeof entry.handler !== "function") { console.error("MySQL deployment requires KEIRE_NODE_ADAPTER_MODE=middleware. Rebuild before deploying."); process.exit(1); }'
+            & $nodeExecutable --input-type=module -e $adapterCheck (Join-Path $stagedWeb 'dist/server/entry.mjs')
+            if ($LASTEXITCODE -ne 0) {
+                throw 'The staged website is not a valid MySQL middleware build; live host was not stopped.'
+            }
             if ($settingsTransition) {
                 $configurationCheck = 'import { readFileSync } from "node:fs"; import { pathToFileURL } from "node:url"; const { productionConfiguration } = await import(pathToFileURL(process.argv[1]).href); productionConfiguration(JSON.parse(readFileSync(process.argv[2], "utf8").replace(/^\uFEFF/, "")));'
                 & $nodeExecutable --input-type=module -e $configurationCheck `
