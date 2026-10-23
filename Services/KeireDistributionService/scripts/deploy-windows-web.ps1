@@ -37,6 +37,12 @@ $settings = Get-Content -LiteralPath $SettingsPath -Raw | ConvertFrom-Json
 if ([int] $settings.schemaVersion -notin @(2, 3)) {
     throw 'Transactional web deployment requires Windows host settings schema 2 or 3.'
 }
+if ([int] $settings.schemaVersion -eq 3) {
+    $backendProperty = $settings.PSObject.Properties['platformBackend']
+    if ($null -eq $backendProperty -or $backendProperty.Value -cnotin @('mysql', 'supabase')) {
+        throw 'Schema-3 deployment requires an explicit supported platform backend.'
+    }
+}
 $mysqlDeployment = [int] $settings.schemaVersion -eq 3 -and $settings.platformBackend -eq 'mysql'
 $destinationRoot = Resolve-ConfiguredPath ([string] $settings.webRoot) $settingsDirectory
 $nodeExecutable = Resolve-ConfiguredPath ([string] $settings.nodeExecutable) $settingsDirectory

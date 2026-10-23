@@ -378,6 +378,16 @@ try {
     $mysqlSettings = Get-Content -LiteralPath $mysql.SettingsPath -Raw | ConvertFrom-Json
     $mysqlSettings.schemaVersion = 3
     $mysqlSettings | Add-Member -NotePropertyName platformBackend -NotePropertyValue 'mysql'
+    foreach ($invalidBackend in @('unsupported', '', 'MYSQL')) {
+        $mysqlSettings.platformBackend = $invalidBackend
+        Set-Utf8NoBomFile $mysql.SettingsPath ($mysqlSettings | ConvertTo-Json)
+        Reset-Mocks $mysql
+        Invoke-ExpectedFailure $mysql 'explicit supported platform backend'
+        Assert-PreviousDeployment $mysql
+        Assert-True (-not $global:KeireWebDeploymentTestState.TaskStopIssued) `
+            'An invalid backend stopped the live host.'
+    }
+    $mysqlSettings.platformBackend = 'mysql'
     Set-Utf8NoBomFile $mysql.SettingsPath ($mysqlSettings | ConvertTo-Json)
     $mysqlScripts = Join-Path $mysql.SourceRoot 'scripts'
     $mysqlLibraries = Join-Path $mysql.SourceRoot 'Source/lib'
