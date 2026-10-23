@@ -521,6 +521,14 @@ with an unchanged lockfile: their production host imports runtime modules outsid
 includes the production entry scripts and application libraries, excludes unit tests, and retains the previous
 complete runtime for rollback. Supabase deployments retain the bundle-only path when dependencies are unchanged.
 
+For a reviewed Supabase-to-MySQL transition, pass `-CandidateSettingsPath` with a copy of the current host settings
+changing only `schemaVersion` to 3, `platformBackend` to `mysql`, and `platformConfigurationPath` to the verified
+production configuration. Shared proxy, storage, origin, and executable settings must remain identical. The deployment
+validates the candidate before stopping the host, installs the current supervisor with the new settings, and restores
+both with the old runtime on startup failure. Each replaced host file retains a `.rollback-*` recovery copy. Keep those
+copies and the old runtime until real OAuth, email delivery, and Hub acceptance pass. Transaction fixture tests do not
+replace production service-identity checks or a database backup before activation.
+
 Run `./scripts/install-web-runtime.ps1`, then validate the host with
 `./scripts/start-windows-host.ps1 -ValidateOnly`. The supervisor starts Kestrel and the shared Caddy proxy before it
 checks the optional loopback Astro Node service. This keeps unrelated hosted products available when the website is

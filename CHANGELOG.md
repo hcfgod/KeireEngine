@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Added an explicit Windows Supabase-to-MySQL deployment transition with configuration preflight and restoration of host settings and supervisor on startup failure.
+
 - Fixed a MySQL native-download lock-order conflict with concurrent Hub device registration while retaining grant, session, and entitlement revocation checks.
 
 - Fixed MySQL website deployment packaging to atomically include production host scripts and imported application modules alongside the generated website, with complete runtime rollback.

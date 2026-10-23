@@ -3,6 +3,7 @@ param(
     [Parameter(Mandatory = $true)]
     [string] $SourceWebRoot,
     [string] $SettingsPath = '',
+    [string] $CandidateSettingsPath = '',
     [switch] $AllowRuntimeUpdate,
     [switch] $ValidateOnly
 )
@@ -34,6 +35,31 @@ if (-not (Test-Path -LiteralPath $SettingsPath -PathType Leaf)) {
 }
 $settingsDirectory = Split-Path -Parent $SettingsPath
 $settings = Get-Content -LiteralPath $SettingsPath -Raw | ConvertFrom-Json
+$originalSettings = $settings
+$settingsTransition = -not [string]::IsNullOrWhiteSpace($CandidateSettingsPath)
+$originalSettingsBytes = [IO.File]::ReadAllBytes($SettingsPath)
+if ($settingsTransition) {
+    $candidate = Get-Content -LiteralPath $CandidateSettingsPath -Raw | ConvertFrom-Json
+    # A provider transition may not repoint shared services, ports, storage, or executable ownership.
+    $transitionFields = @('schemaVersion', 'platformBackend', 'platformConfigurationPath')
+    $names = @($settings.PSObject.Properties.Name) + @($candidate.PSObject.Properties.Name) | Sort-Object -Unique
+    foreach ($name in $names) {
+        if ($name -in $transitionFields) {
+            continue
+        }
+        $before = $settings.PSObject.Properties[$name]
+        $after = $candidate.PSObject.Properties[$name]
+        if ($null -eq $before -or $null -eq $after -or
+            (ConvertTo-Json $before.Value -Depth 20 -Compress) -cne (ConvertTo-Json $after.Value -Depth 20 -Compress)) {
+            throw "Provider transition may not change host setting '$name'."
+        }
+    }
+    if ($candidate.schemaVersion -ne 3 -or $candidate.platformBackend -cne 'mysql' -or
+        [string]::IsNullOrWhiteSpace($candidate.platformConfigurationPath)) {
+        throw 'Provider transition requires explicit schema-3 MySQL configuration.'
+    }
+    $settings = $candidate
+}
 if ([int] $settings.schemaVersion -notin @(2, 3)) {
     throw 'Transactional web deployment requires Windows host settings schema 2 or 3.'
 }
@@ -46,7 +72,18 @@ if ([int] $settings.schemaVersion -eq 3) {
 $mysqlDeployment = [int] $settings.schemaVersion -eq 3 -and $settings.platformBackend -eq 'mysql'
 $destinationRoot = Resolve-ConfiguredPath ([string] $settings.webRoot) $settingsDirectory
 $nodeExecutable = Resolve-ConfiguredPath ([string] $settings.nodeExecutable) $settingsDirectory
+if ($settingsTransition) {
+    $platformPath = Resolve-ConfiguredPath ([string] $settings.platformConfigurationPath) $settingsDirectory
+    $platform = Get-Content -LiteralPath $platformPath -Raw | ConvertFrom-Json
+    if ($platform.schemaVersion -ne 1 -or $platform.port -ne 4321 -or
+        $platform.siteOrigin -cne ('https://' + $settings.hostName) -or
+        [IO.Path]::GetFullPath($platform.webRoot) -ne $destinationRoot) {
+        throw 'Provider transition configuration must match the existing host origin, web root and port.'
+    }
+}
 $supervisor = Join-Path $settingsDirectory 'scripts\start-windows-host.ps1'
+$originalSupervisorBytes = [IO.File]::ReadAllBytes($supervisor)
+$script:transitionInstalled = $false
 $sourceDist = Join-Path $sourceRoot 'dist'
 $destinationDist = Join-Path $destinationRoot 'dist'
 $sourceLock = Join-Path $sourceRoot 'package-lock.json'
@@ -68,6 +105,34 @@ if ($mysqlDeployment) {
             throw "The MySQL deployment is missing runtime module '$requiredFile'."
         }
     }
+}
+function Replace-HostFile([string] $Path, [byte[]] $Contents) {
+    $suffix = [Guid]::NewGuid().ToString('N')
+    $temporary = $Path + '.staging-' + $suffix
+    $backup = $Path + '.rollback-' + $suffix
+    [IO.File]::WriteAllBytes($temporary, $Contents)
+    # Preserve the destination ACL and an on-disk recovery copy, including across a process interruption.
+    [IO.File]::Replace($temporary, $Path, $backup)
+}
+
+function Install-ProviderTransition {
+    if (-not $settingsTransition) {
+        return
+    }
+    $script:transitionInstalled = $true
+    Replace-HostFile $supervisor ([IO.File]::ReadAllBytes((Join-Path $PSScriptRoot 'start-windows-host.ps1')))
+    Replace-HostFile $SettingsPath ([Text.UTF8Encoding]::new($false).GetBytes(($settings | ConvertTo-Json -Depth 20)))
+    $script:destinationEntry = $newDestinationEntry
+}
+
+function Restore-ProviderTransition {
+    if (-not $script:transitionInstalled) {
+        return
+    }
+    Replace-HostFile $SettingsPath $originalSettingsBytes
+    Replace-HostFile $supervisor $originalSupervisorBytes
+    $script:destinationEntry = $oldDestinationEntry
+    $script:transitionInstalled = $false
 }
 if ((Get-NormalizedPrefix $sourceRoot).StartsWith((Get-NormalizedPrefix $destinationRoot),
         [StringComparison]::OrdinalIgnoreCase) -or
@@ -95,6 +160,11 @@ $destinationEntry = Join-Path $destinationDist 'server\entry.mjs'
 if ($mysqlDeployment) {
     $destinationEntry = Join-Path $destinationRoot 'scripts\platform-production-start.mjs'
 }
+$newDestinationEntry = $destinationEntry
+if ($settingsTransition -and ([int] $originalSettings.schemaVersion -eq 2 -or $originalSettings.platformBackend -eq 'supabase')) {
+    $destinationEntry = Join-Path $destinationDist 'server\entry.mjs'
+}
+$oldDestinationEntry = $destinationEntry
 $hostTasks = @(Get-ScheduledTask -ErrorAction SilentlyContinue | Where-Object {
         foreach ($action in $_.Actions) {
             $argumentsProperty = $action.PSObject.Properties['Arguments']
@@ -225,11 +295,20 @@ if ($runtimeUpdate) {
             if ($LASTEXITCODE -ne 0) {
                 throw 'The staged MySQL runtime could not load its production dependencies.'
             }
+            if ($settingsTransition) {
+                $configurationCheck = 'import { readFileSync } from "node:fs"; import { pathToFileURL } from "node:url"; const { productionConfiguration } = await import(pathToFileURL(process.argv[1]).href); productionConfiguration(JSON.parse(readFileSync(process.argv[2], "utf8").replace(/^\uFEFF/, "")));'
+                & $nodeExecutable --input-type=module -e $configurationCheck `
+                    (Join-Path $stagedWeb 'scripts/platform-production-backend.mjs') $platformPath
+                if ($LASTEXITCODE -ne 0) {
+                    throw 'The staged MySQL runtime rejected the provider configuration.'
+                }
+            }
         }
         Stop-ConfiguredHost
         Move-Item -LiteralPath $destinationRoot -Destination $backupWeb
         $backupCreated = $true
         Move-Item -LiteralPath $stagedWeb -Destination $destinationRoot
+        Install-ProviderTransition
         Start-AndVerifyConfiguredHost
         Write-Host "Windows locked web runtime deployment completed. Rollback retained at '$backupWeb'."
     }
@@ -244,6 +323,7 @@ if ($runtimeUpdate) {
                     Move-Item -LiteralPath $destinationRoot -Destination $failedWeb
                 }
                 Move-Item -LiteralPath $backupWeb -Destination $destinationRoot
+                Restore-ProviderTransition
                 $backupCreated = $false
             }
             catch {

@@ -428,6 +428,71 @@ try {
     Assert-True ($global:KeireWebDeploymentTestState.TaskState -eq 'Running') `
         'MySQL deployment did not restart the configured host.'
 
+    $mysqlSettings.schemaVersion = 2
+    $mysqlSettings.PSObject.Properties.Remove('platformBackend')
+    $mysqlSettings | Add-Member hostName 'platform.invalid'
+    Set-Utf8NoBomFile $mysql.SettingsPath ($mysqlSettings | ConvertTo-Json)
+    $priorSettings = [IO.File]::ReadAllText($mysql.SettingsPath)
+    $supervisorPath = Join-Path (Split-Path $mysql.SettingsPath) 'scripts/start-windows-host.ps1'
+    $priorSupervisor = [IO.File]::ReadAllText($supervisorPath)
+    $transition = $priorSettings | ConvertFrom-Json
+    $transition.schemaVersion = 3
+    $transition | Add-Member platformBackend 'mysql'
+    $transition | Add-Member platformConfigurationPath (Join-Path $FixtureRoot 'platform.json')
+    Set-Utf8NoBomFile $transition.platformConfigurationPath (@{
+        schemaVersion = 1; port = 4321; siteOrigin = 'https://wrong.invalid'; webRoot = $mysql.WebRoot
+    } | ConvertTo-Json)
+    $candidatePath = Join-Path $FixtureRoot 'candidate-host.json'
+    Set-Utf8NoBomFile $candidatePath ($transition | ConvertTo-Json)
+    Reset-Mocks $mysql
+    $preflightFailed = $false
+    try {
+        & $Deployment -SourceWebRoot $mysql.SourceRoot -SettingsPath $mysql.SettingsPath `
+            -CandidateSettingsPath $candidatePath -AllowRuntimeUpdate
+    }
+    catch {
+        $preflightFailed = $_.Exception.Message.Contains('must match the existing host')
+    }
+    Assert-True $preflightFailed 'Wrong-origin provider configuration was accepted.'
+    Assert-True (-not $global:KeireWebDeploymentTestState.TaskStopIssued) 'Invalid configuration stopped the host.'
+    Set-Utf8NoBomFile $transition.platformConfigurationPath (@{
+        schemaVersion = 1; port = 4321; siteOrigin = 'https://platform.invalid'; webRoot = $mysql.WebRoot
+    } | ConvertTo-Json)
+    Reset-Mocks $mysql
+    $global:KeireWebDeploymentTestState.StartErrors.Enqueue('injected provider startup failure')
+    $transitionFailed = $false
+    try {
+        & $Deployment -SourceWebRoot $mysql.SourceRoot -SettingsPath $mysql.SettingsPath `
+            -CandidateSettingsPath $candidatePath -AllowRuntimeUpdate
+    }
+    catch {
+        $transitionFailed = $_.Exception.Message.Contains('injected provider startup failure')
+    }
+    Assert-True $transitionFailed 'Provider startup failure did not reach rollback.'
+    Assert-True ([IO.File]::ReadAllText($mysql.SettingsPath) -ceq $priorSettings) 'Provider rollback changed original settings.'
+    Assert-True ([IO.File]::ReadAllText($supervisorPath) -ceq $priorSupervisor) 'Provider rollback changed original supervisor.'
+    Assert-True ($global:KeireWebDeploymentTestState.TaskState -eq 'Running') 'Provider rollback did not restart the original host.'
+
+    # Execute the real deployment script beside a synthetic supervisor so success tests never contact the live host.
+    $transitionTools = Join-Path $FixtureRoot 'transition-tools'
+    [IO.Directory]::CreateDirectory($transitionTools) | Out-Null
+    $isolatedDeployment = Join-Path $transitionTools 'deploy-windows-web.ps1'
+    Copy-Item -LiteralPath $Deployment -Destination $isolatedDeployment
+    $newSupervisor = $priorSupervisor + "`n# New provider supervisor fixture`n"
+    Set-Utf8NoBomFile (Join-Path $transitionTools 'start-windows-host.ps1') $newSupervisor
+    Reset-Mocks $mysql
+    & $isolatedDeployment -SourceWebRoot $mysql.SourceRoot -SettingsPath $mysql.SettingsPath `
+        -CandidateSettingsPath $candidatePath -AllowRuntimeUpdate
+    $installedSettings = Get-Content -LiteralPath $mysql.SettingsPath -Raw | ConvertFrom-Json
+    Assert-True ($installedSettings.schemaVersion -eq 3 -and $installedSettings.platformBackend -eq 'mysql') `
+        'Successful provider transition did not install MySQL settings.'
+    Assert-True ([IO.File]::ReadAllText($supervisorPath) -ceq $newSupervisor) 'New supervisor was not installed.'
+    Assert-True ($global:KeireWebDeploymentTestState.TaskState -eq 'Running') 'Successful transition left the host stopped.'
+    $settingsBackups = @(Get-ChildItem -LiteralPath (Split-Path $mysql.SettingsPath) -Filter 'host-settings.json.rollback-*')
+    Assert-True ($settingsBackups.Count -gt 0) 'Transition did not retain settings recovery files.'
+    Assert-True (@($settingsBackups | Where-Object { [IO.File]::ReadAllText($_.FullName) -ceq $priorSettings }).Count -gt 0) `
+        'No retained settings backup contains the original configuration.'
+
     Write-Host "Windows web deployment transaction checks passed."
 }
 finally {
