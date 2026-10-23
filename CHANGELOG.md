@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Fixed GitHub and account request origins behind the verified HTTPS proxy with Astro's HTTP middleware adapter, preserving CSRF headers and request bodies.
+
 - Added an explicit Windows Supabase-to-MySQL deployment transition with configuration preflight and restoration of host settings and supervisor on startup failure.
 
 - Fixed a MySQL native-download lock-order conflict with concurrent Hub device registration while retaining grant, session, and entitlement revocation checks.

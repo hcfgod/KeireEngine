@@ -44,6 +44,7 @@ export function createProductionListener({ backend, entry, configuration, serveS
                     });
                     await entry.handler(request, response, () => fail(404, "Not found."), {
                         platformBackend: backend, platformClientIdentity: clientIdentity,
+                        platformVerifiedOrigin: configuration.siteOrigin,
                     });
                     await finished;
                 });

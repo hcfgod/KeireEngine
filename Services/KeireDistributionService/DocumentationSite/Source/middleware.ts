@@ -5,6 +5,7 @@ import { getAssuranceState, isPasswordRecoveryRequestAllowed, isPasswordRecovery
 import { runtimeEnvironment } from "./lib/runtime-env";
 import { selectPlatformBackend } from "./lib/platform-backend.mjs";
 import { handleLocalPlatformRequest } from "./lib/platform-request.mjs";
+import { canonicalPlatformRequest } from "./lib/platform-proxy-request.mjs";
 
 const mutationMethods = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 
@@ -76,7 +77,7 @@ export const onRequest = defineMiddleware(async (context, next) => {
         context.locals.supabase = null;
         return handleLocalPlatformRequest({
             backend: context.locals.platformBackend,
-            request: context.request,
+            request: canonicalPlatformRequest(context.request, context.locals.platformVerifiedOrigin),
             siteOrigin: runtimeEnvironment("PUBLIC_SITE_URL"),
             clientIdentity: context.locals.platformClientIdentity,
             correlationId: context.locals.correlationId,

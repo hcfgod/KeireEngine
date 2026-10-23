@@ -12,6 +12,7 @@ declare namespace App {
         user: User | null;
         platformBackend?: import("./lib/platform-backend.mjs").PlatformBackend;
         platformClientIdentity?: string;
+        platformVerifiedOrigin?: string;
         localEmailAvailable?: boolean;
         localNativeConsent?: {
             authorization_id: string;
