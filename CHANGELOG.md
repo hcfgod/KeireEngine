@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Restored MySQL Marketplace download handoff for newly published packages whose immutable local package object is
+  available, while keeping migrated versions with missing historical bytes explicitly unavailable.
+
 - Allowed durable Windows marketplace validator tasks to retain an isolated firewall rule prefix and group, avoiding collisions with parallel QA validators.
 
 - Added a server-dispatched internal worker route so MySQL validator and publication queue requests reach their authenticated middleware instead of Astro's generic 404 response.

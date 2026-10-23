@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 import pathlib
+import re
 import shutil
 import subprocess
 import sys
@@ -291,7 +292,9 @@ def asset_inventory(payload: pathlib.Path) -> list[dict[str, object]]:
     return sorted(assets, key=lambda asset: str(asset["source"]))
 
 
-def create_manifest(payload: pathlib.Path) -> dict[str, object]:
+def create_manifest(
+    payload: pathlib.Path, package_version: str = PACKAGE_VERSION
+) -> dict[str, object]:
     files, installed_size = inventory(payload)
     assets = asset_inventory(payload)
     return {
@@ -330,7 +333,7 @@ def create_manifest(payload: pathlib.Path) -> dict[str, object]:
         "schemaVersion": 1,
         "signatureKeyId": "",
         "summary": "A compact mixed-content sample with VFX, Shader Graph, Material Graph, and managed C# assets.",
-        "version": PACKAGE_VERSION,
+        "version": package_version,
     }
 
 
@@ -339,6 +342,7 @@ def create_package(
     project: pathlib.Path,
     output_directory: pathlib.Path,
     asset_tool: pathlib.Path,
+    package_version: str = PACKAGE_VERSION,
 ) -> pathlib.Path:
     if output_directory.exists():
         raise FileExistsError(
@@ -349,7 +353,7 @@ def create_package(
         output_directory.parent / f".{output_directory.name}-{uuid.uuid4().hex}.tmp"
     )
     payload = staging / "Payload"
-    package = staging / f"neon-forge-creator-pack-{PACKAGE_VERSION}.keireassetpackage"
+    package = staging / f"neon-forge-creator-pack-{package_version}.keireassetpackage"
     manifest_path = staging / "manifest.json"
     try:
         payload.mkdir(parents=True)
@@ -366,7 +370,10 @@ def create_package(
             "and the NeonForgePulse runtime C# behaviour.\n",
         )
         shutil.copyfile(repository / "LICENSE.txt", payload / "LICENSE.txt")
-        write_utf8_lf(manifest_path, canonical_json(create_manifest(payload)))
+        write_utf8_lf(
+            manifest_path,
+            canonical_json(create_manifest(payload, package_version)),
+        )
         run(
             asset_tool,
             [
@@ -387,7 +394,7 @@ def create_package(
         archive = inspected.get("archive")
         if (
             inspected.get("packageId") != PACKAGE_ID
-            or inspected.get("version") != PACKAGE_VERSION
+            or inspected.get("version") != package_version
         ):
             raise RuntimeError(
                 "The generated package identity does not match the sample definition."
@@ -410,7 +417,7 @@ def create_package(
                     "manifestSha256": archive["manifestSha256"],
                     "packageId": PACKAGE_ID,
                     "signed": False,
-                    "version": PACKAGE_VERSION,
+                    "version": package_version,
                 },
                 indent=2,
                 sort_keys=True,
@@ -428,20 +435,31 @@ def parse_arguments() -> argparse.Namespace:
     repository = pathlib.Path(__file__).resolve().parents[2]
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--asset-tool", type=pathlib.Path)
+    parser.add_argument("--version", default=PACKAGE_VERSION)
     parser.add_argument(
         "--project", type=pathlib.Path, default=repository / "Samples" / "KeireSandbox"
     )
     parser.add_argument(
         "--output-directory",
         type=pathlib.Path,
-        default=repository
-        / "Build"
-        / "Marketplace"
-        / "UploadSamples"
-        / "NeonForgeCreatorPack"
-        / PACKAGE_VERSION,
+        default=None,
     )
-    return parser.parse_args()
+    arguments = parser.parse_args()
+    if not re.fullmatch(
+        r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:[-+][0-9A-Za-z.-]+)?",
+        arguments.version,
+    ):
+        parser.error("--version must be a semantic version")
+    if arguments.output_directory is None:
+        arguments.output_directory = (
+            repository
+            / "Build"
+            / "Marketplace"
+            / "UploadSamples"
+            / "NeonForgeCreatorPack"
+            / arguments.version
+        )
+    return arguments
 
 
 def main() -> int:
@@ -457,6 +475,7 @@ def main() -> int:
         arguments.project.resolve(),
         arguments.output_directory.resolve(),
         asset_tool,
+        arguments.version,
     )
     artifact = json.loads(
         (package.parent / "artifact.json").read_text(encoding="utf-8")

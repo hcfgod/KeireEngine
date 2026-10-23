@@ -38,7 +38,9 @@ export async function localProductDetail(pool, productId) {
 
         const [versions] = await connection.execute(`SELECT id,version,state,install_kind,
             minimum_engine_version,maximum_engine_version,platforms,architectures,
-            renderer_capabilities,managed_api_version,release_notes_markdown,published_at
+            renderer_capabilities,managed_api_version,release_notes_markdown,published_at,
+            (archive_storage_bucket='marketplace-packages' AND archive_storage_path IS NOT NULL)
+                AS download_available
             FROM marketplace_product_versions WHERE product_id=?
             AND state IN ('published','withdrawn','security_revoked')
             ORDER BY published_at DESC,id`, [productId]);
@@ -62,7 +64,10 @@ export async function localProductDetail(pool, productId) {
             enabled: true,
             product: {
                 ...catalog.values[0],
-                versions: versions.map((version) => ({ ...version, published_at: publicTimestamp(version.published_at) })),
+                versions: versions.map((version) => ({ ...version,
+                    download_available: Boolean(version.download_available),
+                    published_at: publicTimestamp(version.published_at),
+                })),
                 media,
                 reviews: reviews.map((review) => ({
                     ...review,

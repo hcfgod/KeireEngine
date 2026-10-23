@@ -70,7 +70,8 @@ describe("public MySQL product details", () => {
     it("projects public fields, preserves timestamps and normalizes pricing", async () => {
         const { connection, pool } = fixture([
             [{ enabled: 1 }], [{ id: productId, published_at: "2026-10-19 12:00:00.123456" }],
-            [{ id: "version", state: "published", published_at: "2026-10-19 12:00:00.123456", platforms: ["windows"] }],
+            [{ id: "version", state: "published", published_at: "2026-10-19 12:00:00.123456",
+                platforms: ["windows"], download_available: 1 }],
             [], [{ id: "review", created_at: "2026-10-19 12:00:00.123456", updated_at: null }],
             [{ amount_minor: "0", currency: "USD" }],
         ]);
@@ -78,8 +79,10 @@ describe("public MySQL product details", () => {
         expect(result.product.offer).toEqual({ amount_minor: 0, currency: "USD" });
         expect(result.product.versions[0].published_at).toBe("2026-10-19T12:00:00.123456Z");
         expect(result.product.versions[0].platforms).toEqual(["windows"]);
+        expect(result.product.versions[0].download_available).toBe(true);
         expect(result.product.reviews[0].updated_at).toBeNull();
-        expect(connection.execute.mock.calls[2][0]).not.toContain("archive_storage_path");
+        expect(connection.execute.mock.calls[2][0]).toContain("AS download_available");
+        expect(connection.execute.mock.calls[2][0]).not.toContain("archive_storage_path,");
         expect(connection.execute.mock.calls[3][0]).toContain("approved_at IS NOT NULL");
         expect(connection.execute.mock.calls[4][0]).toContain("hidden_at IS NULL");
         expect(connection.execute.mock.calls[4][0]).not.toContain("user_id");

@@ -49,6 +49,7 @@ const structuredData = listing ? {
     aggregateRating: listing.rating_count > 0 ? { "@type": "AggregateRating", ratingValue: listing.rating_average, reviewCount: listing.rating_count } : undefined,
 } : undefined;
 const currentVersion = versions.find((version) => version.state === "published");
+const downloadAvailable = Boolean(currentVersion) && (!localView || currentVersion.download_available === true);
 const acquisition = purchaseState(offer, ownsPersonalCopy, Boolean(currentVersion));
 const acceptedLicense = listing ? JSON.stringify({
     licenseSpdx: listing.license_spdx,
@@ -75,24 +76,28 @@ const licenseUrl = typeof listing?.license_canonical_url === "string" &&
                     <label><input type="checkbox" data-accept-license /> I accept this asset's license.</label>
                 </>}
                 <button class="button" type="button" data-claim-product={listing.id} data-claim-license={acceptedLicense}
-                    data-local-acquisition={Boolean(localView)} disabled>
+                    data-local-acquisition={Boolean(localView)} data-package-available={downloadAvailable} disabled>
                     {offerLoadFailed ? "Pricing unavailable" : acquisition.label}
                 </button>
                 <p class="form-message" aria-live="polite" data-claim-message>
                     {offerLoadFailed && !ownsPersonalCopy
                         ? "We couldn't load pricing. Refresh this page to try again. You have not been charged."
                         : localView && acquisition.canClaim
-                            ? "Add this free asset to your personal library. Downloads will be available after migration."
+                            ? downloadAvailable
+                                ? "Add this free asset to your personal library, then open it in Kéire Hub."
+                                : "Add this free asset to your personal library. This release is temporarily unavailable for download."
                             : acquisition.message}
                 </p>
                 <a class="button button--secondary" href="/account/#library" data-library-link hidden={!ownsPersonalCopy}>
                     View My Assets
                 </a>
-                {currentVersion && !localView
+                {currentVersion && downloadAvailable
                     ? <a class="button button--secondary" href={`keirehub://marketplace/product/${listing.id}`} data-open-product hidden={!ownsPersonalCopy}>{openActionLabel}</a>
                     : <span class="button button--secondary" aria-disabled="true">{currentVersion ? "Downloads temporarily unavailable" : "No published download"}</span>}
                 {currentVersion && <p class="form-message">{localView
-                    ? "Ownership is preserved while download delivery is migrated."
+                    ? downloadAvailable
+                        ? "Kéire Hub verifies the signed package before project installation or Editor import."
+                        : "Ownership is preserved while this package's download bytes are unavailable."
                     : "Kéire Hub securely prepares the signed package; project installation and import happen in the Editor Package Manager."}</p>}
             </aside>
         </section>
@@ -178,10 +183,12 @@ const licenseUrl = typeof listing?.license_canonical_url === "string" &&
             button.textContent = "In My Assets";
             message.dataset.kind = "success";
             message.textContent = button.dataset.localAcquisition === "true"
-                ? "Added to your personal library. Downloads are temporarily unavailable during the backend migration."
+                ? button.dataset.packageAvailable === "true"
+                    ? "Added to your personal library. Open it in Kéire Hub when you are ready."
+                    : "Added to your personal library. This release is temporarily unavailable for download."
                 : "Added to your personal library. Open it in the Editor when you are ready.";
             if (libraryLink instanceof HTMLAnchorElement) libraryLink.hidden = false;
-            if (openProduct instanceof HTMLAnchorElement && button.dataset.localAcquisition !== "true") openProduct.hidden = false;
+            if (openProduct instanceof HTMLAnchorElement && button.dataset.packageAvailable === "true") openProduct.hidden = false;
         } catch (error) {
             message.dataset.kind = "error";
             message.textContent = error instanceof DOMException && error.name === "AbortError"

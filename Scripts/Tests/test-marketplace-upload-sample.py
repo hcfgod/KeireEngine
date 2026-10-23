@@ -66,6 +66,7 @@ with tempfile.TemporaryDirectory(
     generator.write_utf8_lf(readme, "sample\n")
     generator.write_utf8_lf(payload / "LICENSE.txt", "MIT\n")
     manifest = generator.create_manifest(payload)
+    next_manifest = generator.create_manifest(payload, "1.0.1")
     encoded = generator.canonical_json(manifest)
     require(
         encoded
@@ -81,6 +82,11 @@ with tempfile.TemporaryDirectory(
     require(
         manifest["signatureKeyId"] == "",
         "The quarantine upload sample must remain unsigned.",
+    )
+    require(
+        manifest["version"] == generator.PACKAGE_VERSION
+        and next_manifest["version"] == "1.0.1",
+        "The sample generator must support immutable follow-up versions.",
     )
     require(
         manifest["installKind"] == "assetImport",
