@@ -387,6 +387,26 @@ try {
     Set-Utf8NoBomFile (Join-Path $mysqlLibraries 'platform-backend.mjs') 'export {};'
     Set-Utf8NoBomFile (Join-Path $mysqlLibraries 'local-blob-store.ts') 'export {};'
     Set-Utf8NoBomFile (Join-Path $mysqlLibraries 'platform-backend.test.ts') 'Do not deploy test fixture.'
+    Set-Content -LiteralPath $mysql.NodeExecutable -Encoding ascii -Value @(
+        '@if "%~1"=="--input-type=module" exit /b 1'
+        '@if "%~1"=="--input-type" exit /b 1'
+        '@exit /b 0'
+    )
+    Reset-Mocks $mysql
+    $importFailed = $false
+    try {
+        & $Deployment -SourceWebRoot $mysql.SourceRoot -SettingsPath $mysql.SettingsPath -AllowRuntimeUpdate
+    }
+    catch {
+        $importFailed = $_.Exception.Message.Contains('could not load its production dependencies')
+    }
+    Assert-True $importFailed 'A missing MySQL runtime dependency was not rejected before deployment.'
+    Assert-PreviousDeployment $mysql
+    Assert-True ($global:KeireWebDeploymentTestState.MoveCount -eq 0) `
+        'A failed MySQL import check moved the live runtime.'
+    Assert-True (-not $global:KeireWebDeploymentTestState.TaskStopIssued) `
+        'A failed MySQL import check stopped the live host.'
+    Set-Content -LiteralPath $mysql.NodeExecutable -Value '@exit /b 0' -Encoding ascii
     Reset-Mocks $mysql
     & $Deployment -SourceWebRoot $mysql.SourceRoot -SettingsPath $mysql.SettingsPath -AllowRuntimeUpdate
     Assert-True (Test-Path -LiteralPath (Join-Path $mysql.WebRoot 'scripts/platform-production-start.mjs')) `

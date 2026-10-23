@@ -211,6 +211,15 @@ if ($runtimeUpdate) {
         if ($LASTEXITCODE -ne 0) {
             throw 'The staged locked web runtime failed the Node.js syntax check.'
         }
+        if ($mysqlDeployment) {
+            $importCheck = 'import { pathToFileURL } from "node:url"; await import(pathToFileURL(process.argv[1]).href); await import(pathToFileURL(process.argv[2]).href);'
+            & $nodeExecutable --input-type=module -e $importCheck `
+                (Join-Path $stagedWeb 'scripts/platform-production-backend.mjs') `
+                (Join-Path $stagedWeb 'scripts/platform-production-server.mjs')
+            if ($LASTEXITCODE -ne 0) {
+                throw 'The staged MySQL runtime could not load its production dependencies.'
+            }
+        }
         Stop-ConfiguredHost
         Move-Item -LiteralPath $destinationRoot -Destination $backupWeb
         $backupCreated = $true
