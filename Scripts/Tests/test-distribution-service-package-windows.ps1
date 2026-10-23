@@ -145,10 +145,10 @@ foreach ($contract in @(
         'Get-FileHash -LiteralPath $entry.Value -Algorithm SHA256',
         'exact least-privilege contract',
         'Get-NetFirewallApplicationFilter',
-        'Keire Marketplace Validator - Offline Worker',
-        'Keire Marketplace Validator - Asset Tool',
-        'Keire Marketplace Validator - Malware Scanner',
-        'Keire Marketplace Validator - Managed Compiler'
+        '$FirewallRulePrefix - Offline Worker',
+        '$FirewallRulePrefix - Asset Tool',
+        '$FirewallRulePrefix - Malware Scanner',
+        '$FirewallRulePrefix - Managed Compiler'
     )) {
     if (-not $validatorLauncher.Contains($contract)) {
         throw "The Windows offline validator launcher is missing '$contract'."
@@ -312,7 +312,7 @@ try {
             'previous web deployment could not be restored',
             'previous web deployment could not be restarted',
             'Get-ScheduledTask',
-            'The dependency lock changed',
+            'requires -AllowRuntimeUpdate',
             'AllowRuntimeUpdate',
             'npm.cmd',
             'locked web runtime deployment completed',

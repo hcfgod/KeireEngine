@@ -198,7 +198,11 @@ function Stop-ExpectedWebProcess {
         try {
             Stop-Process -InputObject $ownedProcess -Force -ErrorAction Stop
             if (-not $ownedProcess.WaitForExit(15000)) {
-                throw "The configured web process $($process.ProcessId) did not exit before the deployment deadline."
+                $remainingProcess = Get-Process -Id $process.ProcessId -ErrorAction SilentlyContinue
+                if ($null -ne $remainingProcess) {
+                    $remainingProcess.Dispose()
+                    throw "The configured web process $($process.ProcessId) did not exit before the deployment deadline."
+                }
             }
             $writerSettings = $originalSettings
             if ($script:transitionInstalled) {

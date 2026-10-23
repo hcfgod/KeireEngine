@@ -24,6 +24,8 @@ $global:KeireWebDeploymentTestState = [pscustomobject]@{
     MoveFailureAt = 0
     MoveCount = 0
     ProcessListening = $false
+    ProcessExists = $true
+    ProcessDisappearsAfterWait = $false
     ProcessWaitResult = $true
     ProcessWaitCalls = 0
     ProcessWaitMilliseconds = 0
@@ -148,11 +150,18 @@ function Get-Process {
         [int] $Id
     )
 
+    if (-not $global:KeireWebDeploymentTestState.ProcessExists) {
+        return
+    }
+
     $process = [pscustomobject]@{ Id = $Id }
     $process | Add-Member -MemberType ScriptMethod -Name WaitForExit -Value {
         param([int] $Milliseconds)
         $global:KeireWebDeploymentTestState.ProcessWaitCalls++
         $global:KeireWebDeploymentTestState.ProcessWaitMilliseconds = $Milliseconds
+        if ($global:KeireWebDeploymentTestState.ProcessDisappearsAfterWait) {
+            $global:KeireWebDeploymentTestState.ProcessExists = $false
+        }
         return $global:KeireWebDeploymentTestState.ProcessWaitResult
     }
     $process | Add-Member -MemberType ScriptMethod -Name Dispose -Value {
@@ -269,6 +278,8 @@ function Reset-Mocks([object] $Fixture) {
     $global:KeireWebDeploymentTestState.MoveFailureAt = 0
     $global:KeireWebDeploymentTestState.MoveCount = 0
     $global:KeireWebDeploymentTestState.ProcessListening = $false
+    $global:KeireWebDeploymentTestState.ProcessExists = $true
+    $global:KeireWebDeploymentTestState.ProcessDisappearsAfterWait = $false
     $global:KeireWebDeploymentTestState.ProcessWaitResult = $true
     $global:KeireWebDeploymentTestState.ProcessWaitCalls = 0
     $global:KeireWebDeploymentTestState.ProcessWaitMilliseconds = 0
@@ -355,8 +366,23 @@ try {
         "A process-wait timeout left the previous host stopped."
     Assert-True ($global:KeireWebDeploymentTestState.ProcessWaitCalls -eq 1) `
         "The process-wait timeout path was not exercised."
+    Assert-True ($global:KeireWebDeploymentTestState.ProcessDisposeCount -eq 2) `
+        "The timed-out process handles were not disposed."
+
+    $waitRace = New-DeploymentFixture "process-wait-race" $false
+    Reset-Mocks $waitRace
+    $global:KeireWebDeploymentTestState.ProcessListening = $true
+    $global:KeireWebDeploymentTestState.ProcessWaitResult = $false
+    $global:KeireWebDeploymentTestState.ProcessDisappearsAfterWait = $true
+    $global:KeireWebDeploymentTestState.MoveFailureAt = 2
+    Invoke-ExpectedFailure $waitRace "injected second move failure"
+    Assert-PreviousDeployment $waitRace
+    Assert-True ($global:KeireWebDeploymentTestState.ProcessWaitCalls -eq 1) `
+        "The process-exit race did not exercise the timed wait."
+    Assert-True ($global:KeireWebDeploymentTestState.MoveCount -eq 3) `
+        "A process that exited at the wait deadline blocked the deployment swap."
     Assert-True ($global:KeireWebDeploymentTestState.ProcessDisposeCount -eq 1) `
-        "The timed-out process handle was not disposed."
+        "The process-exit race did not dispose the original process handle."
 
     $partialStop = New-DeploymentFixture "partial-stop" $false
     Reset-Mocks $partialStop

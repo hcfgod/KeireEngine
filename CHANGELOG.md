@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Fixed a Windows website deployment shutdown race where an exited Node process could be mistaken for a timeout, leaving the host stopped with a stale writer lease.
+
 - Restored MySQL Marketplace download handoff for newly published packages whose immutable local package object is
   available, while keeping migrated versions with missing historical bytes explicitly unavailable.
 
