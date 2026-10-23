@@ -19,6 +19,7 @@ describe("GitHub browser boundary", () => {
         const prompt = await handleGitHubRequest(f.auth, f.provider,
             request("/account/github/", "GET", { cookie: `__Host-keire-session=${f.sessionToken}` }), "loopback");
         expect(prompt.status).toBe(200);
+        expect(prompt.headers.get("content-security-policy")).toContain("form-action 'self' https://github.com;");
         expect(await prompt.text()).toContain("Link my GitHub identity");
         expect(f.records.size).toBe(0);
         for (const requestOrigin of ["https://evil.invalid", "null", ""]) {

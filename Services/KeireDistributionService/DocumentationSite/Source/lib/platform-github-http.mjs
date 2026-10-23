@@ -20,7 +20,7 @@ export async function handleGitHubRequest(authentication, provider, request, cli
     }
     const headers = new Headers({ "cache-control": "private, no-store", "vary": "Cookie, Authorization",
         "referrer-policy": "no-referrer", "x-content-type-options": "nosniff",
-        "content-security-policy": "default-src 'none'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'" });
+        "content-security-policy": "default-src 'none'; form-action 'self' https://github.com; frame-ancestors 'none'; base-uri 'none'" });
     const page = (message, status = 400, content = "") => {
         headers.set("content-type", "text/html; charset=utf-8");
         return new Response(`<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>GitHub sign-in — Kéire</title><body><main><h1>GitHub sign-in</h1><p>${escape(message)}</p>${content}<p><a href="/account/">Back to account</a> · <a href="/account/sign-in/">Other sign-in methods</a></p></main></body></html>`, { status, headers });

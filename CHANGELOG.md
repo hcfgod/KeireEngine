@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Allowed the explicit GitHub HTTPS origin in website form-navigation policies so the OAuth POST redirect can reach GitHub; same-origin CSRF checks remain enforced.
+
 - Fixed Windows website updates leaving an upload-writer marker after terminating the owned Node process; the updater archives only that exited process's marker while the supervisor is stopped.
 
 - Fixed GitHub and account request origins behind the verified HTTPS proxy with Astro's HTTP middleware adapter, preserving CSRF headers and request bodies.
