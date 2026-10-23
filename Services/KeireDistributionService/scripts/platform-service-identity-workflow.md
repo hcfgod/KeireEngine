@@ -86,7 +86,16 @@ a configuration JSON path and a new result JSON path. Configuration fields are `
 The paths point to the installed PowerShell, protected-settings reader scripts, transferred credential root,
 and private storage root containing `Spool`, `Packages`, and `Evidence`.
 
+To include GitHub credentials stored in a separate transferred directory, supply both `githubSettingsDirectory`
+(an absolute path) and `expectedGitHubClientId` (the public OAuth application ID). The runner verifies the
+application and site origin, then clears the loaded secret buffer. This checks protected credential loading;
+it does not contact GitHub or prove an OAuth sign-in succeeds.
+
 The runner verifies the actual service identity, storage permissions, MySQL TLS and read-only queries, native public
 key identity, local download signing, worker credential loading, and SMTP authentication. It sends no email, writes
-no database records, and starts no website. Results contain only check counts, the public key ID, or a failing stage.
+no database records, and starts no website. Results contain check counts, the public key ID, or a failing stage.
+MySQL failures also report an allowlisted error code and operation; raw driver messages and credentials are omitted.
+Ensure the configured MySQL CA certificate is accessible to SYSTEM independently of another application's user-profile
+setup directory. Keep certificate verification enabled. If transferred settings are subsequently updated, retain a
+backup and new acceptance evidence; the original transfer receipt no longer describes their current ciphertext.
 A passed result does not replace real email delivery, GitHub consent, worker execution, or end-to-end Hub acceptance.

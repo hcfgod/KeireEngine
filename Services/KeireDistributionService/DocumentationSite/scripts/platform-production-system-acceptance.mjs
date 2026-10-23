@@ -13,6 +13,7 @@ import { loadWindowsDownloadSecrets } from "../Source/lib/platform-download-secr
 import { createDownloadCapabilities } from "../Source/lib/platform-download-capabilities.mjs";
 import { loadProductionWorkerSecrets } from "./platform-production-worker-secrets.mjs";
 import { loadWindowsMailSecrets, createVerificationMailer } from "../Source/lib/platform-mail.mjs";
+import { loadWindowsGitHubSecrets } from "../Source/lib/platform-github-secrets.mjs";
 
 const execute = promisify(execFile);
 const requiredPaths = ["powerShellExecutable", "scriptsDirectory", "settingsRoot", "storageRoot"];
@@ -28,7 +29,7 @@ async function currentIdentity(powerShellExecutable) {
 export async function verifySystemPlatformRuntime(configuration, overrides = {}) {
     const dependencies = { currentIdentity, loadWindowsPlatformSecrets, createPlatformPool, loadWindowsNativeSecrets,
         createNativeIdentitySigner, loadWindowsDownloadSecrets, createDownloadCapabilities, loadProductionWorkerSecrets,
-        loadWindowsMailSecrets, createVerificationMailer, verifyPrivateUploadDirectory, ...overrides };
+        loadWindowsMailSecrets, createVerificationMailer, verifyPrivateUploadDirectory, loadWindowsGitHubSecrets, ...overrides };
     let stage = "configuration";
     let checks = 0;
     let pool;
@@ -39,19 +40,26 @@ export async function verifySystemPlatformRuntime(configuration, overrides = {})
     let workerSecrets;
     let mailSettings;
     let mailer;
+    let githubSettings;
     let passed = false;
     let publicKeyId;
     let failureStage;
     let failureCode;
     let mysqlOperation;
     try {
-        const allowed = ["schemaVersion", "siteOrigin", "expectedNativeKeyId", ...requiredPaths];
+        const allowed = ["schemaVersion", "siteOrigin", "expectedNativeKeyId", "githubSettingsDirectory", "expectedGitHubClientId", ...requiredPaths];
         if (!configuration || configuration.schemaVersion !== 1 || Object.keys(configuration).some((name) => !allowed.includes(name)) ||
             requiredPaths.some((name) => typeof configuration[name] !== "string" || !path.isAbsolute(configuration[name])) ||
             !/^native-ed25519-[a-f0-9]{32}$/.test(configuration.expectedNativeKeyId ?? "")) {
             throw new Error();
         }
         const origin = new URL(configuration.siteOrigin);
+        const checkGitHub = Object.hasOwn(configuration, "githubSettingsDirectory") || Object.hasOwn(configuration, "expectedGitHubClientId");
+        if (checkGitHub && (typeof configuration.githubSettingsDirectory !== "string" ||
+            !path.isAbsolute(configuration.githubSettingsDirectory) ||
+            !/^[A-Za-z0-9]{10,80}$/.test(configuration.expectedGitHubClientId ?? ""))) {
+            throw new Error();
+        }
         if (origin.protocol !== "https:" || origin.origin !== configuration.siteOrigin) {
             throw new Error();
         }
@@ -117,6 +125,16 @@ export async function verifySystemPlatformRuntime(configuration, overrides = {})
         stage = "smtp-verify-no-send";
         await mailer.verify();
         checks++;
+        if (checkGitHub) {
+            stage = "github-protected-loader";
+            githubSettings = await dependencies.loadWindowsGitHubSecrets({
+                ...options("PlatformGitHub", "read-local-platform-github.ps1"),
+                settingsDirectory: configuration.githubSettingsDirectory,
+            });
+            assert(githubSettings.clientId === configuration.expectedGitHubClientId);
+            assert(githubSettings.siteOrigin === configuration.siteOrigin && Buffer.isBuffer(githubSettings.clientSecret) &&
+                githubSettings.clientSecret.length >= 20);
+        }
         passed = true;
     } catch (error) {
         failureStage = stage;
@@ -138,6 +156,7 @@ export async function verifySystemPlatformRuntime(configuration, overrides = {})
             }
         }
         runtime?.accountEncryptionKey?.fill(0);
+        githubSettings?.clientSecret?.fill(0);
         if (runtime?.settings?.runtime) {
             runtime.settings.runtime.password = null;
         }

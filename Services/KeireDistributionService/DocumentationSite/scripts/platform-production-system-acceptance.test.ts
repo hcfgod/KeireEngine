@@ -24,6 +24,37 @@ function fixture() {
 }
 
 describe("SYSTEM read-only platform acceptance", () => {
+    it("checks the separately staged GitHub identity and clears its secret", async () => {
+        const f = fixture();
+        const secret = Buffer.alloc(40, 65);
+        Object.assign(f.configuration, { githubSettingsDirectory: os.tmpdir(), expectedGitHubClientId: "Ov23testclient12345" });
+        const result = await verifySystemPlatformRuntime(f.configuration, {
+            ...f.overrides,
+            loadWindowsGitHubSecrets: async () => ({ clientId: "Ov23testclient12345", siteOrigin: f.configuration.siteOrigin, clientSecret: secret }),
+        });
+        expect(result).toMatchObject({ status: "passed", checks: 16 });
+        expect(secret.every((byte) => byte === 0)).toBe(true);
+    });
+
+    it("rejects a different GitHub application and clears its secret", async () => {
+        const f = fixture();
+        const secret = Buffer.alloc(40, 65);
+        Object.assign(f.configuration, { githubSettingsDirectory: os.tmpdir(), expectedGitHubClientId: "Ov23testclient12345" });
+        const result = await verifySystemPlatformRuntime(f.configuration, {
+            ...f.overrides,
+            loadWindowsGitHubSecrets: async () => ({ clientId: "wrong-client", siteOrigin: f.configuration.siteOrigin, clientSecret: secret }),
+        });
+        expect(result).toMatchObject({ status: "failed", stage: "github-protected-loader" });
+        expect(secret.every((byte) => byte === 0)).toBe(true);
+    });
+
+    it("rejects incomplete GitHub check configuration before loading credentials", async () => {
+        const f = fixture();
+        Object.assign(f.configuration, { githubSettingsDirectory: os.tmpdir() });
+        expect(await verifySystemPlatformRuntime(f.configuration, f.overrides)).toMatchObject({ status: "failed", stage: "configuration" });
+        expect(f.overrides.loadWindowsPlatformSecrets).not.toHaveBeenCalled();
+    });
+
     it("reports allowlisted MySQL failure codes without driver messages", async () => {
         const f = fixture();
         f.pool.query.mockRejectedValue(Object.assign(new Error("private-password SQL"), { code: "ER_ACCESS_DENIED_ERROR" }));
