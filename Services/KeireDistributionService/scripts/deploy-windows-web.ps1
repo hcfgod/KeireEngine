@@ -76,7 +76,7 @@ if ($settingsTransition) {
     $platformPath = Resolve-ConfiguredPath ([string] $settings.platformConfigurationPath) $settingsDirectory
     $platform = Get-Content -LiteralPath $platformPath -Raw | ConvertFrom-Json
     if ($platform.schemaVersion -ne 1 -or $platform.port -ne 4321 -or
-        $platform.siteOrigin -cne ('https://' + $settings.hostName) -or
+        $platform.siteOrigin -cne ('https://' + $settings.host) -or
         [IO.Path]::GetFullPath($platform.webRoot) -ne $destinationRoot) {
         throw 'Provider transition configuration must match the existing host origin, web root and port.'
     }

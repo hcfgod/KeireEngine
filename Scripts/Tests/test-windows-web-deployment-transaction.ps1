@@ -430,7 +430,7 @@ try {
 
     $mysqlSettings.schemaVersion = 2
     $mysqlSettings.PSObject.Properties.Remove('platformBackend')
-    $mysqlSettings | Add-Member hostName 'platform.invalid'
+    $mysqlSettings | Add-Member host 'platform.invalid'
     Set-Utf8NoBomFile $mysql.SettingsPath ($mysqlSettings | ConvertTo-Json)
     $priorSettings = [IO.File]::ReadAllText($mysql.SettingsPath)
     $supervisorPath = Join-Path (Split-Path $mysql.SettingsPath) 'scripts/start-windows-host.ps1'
