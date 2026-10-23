@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { verifyNativeDeliveryConcurrency } from "./platform-native-delivery-concurrency.mjs";
 import { generateKeyPairSync } from "node:crypto";
 import { createNativeIdentitySigner } from "../Source/lib/platform-native-identity.mjs";
 import { refreshNativeSession, withNativeSessionTransaction } from "../Source/lib/platform-native-sessions.mjs";
@@ -16,6 +17,7 @@ export async function verifyNativeRefreshConcurrency(pool, userId) {
         privateKey: generateKeyPairSync("ed25519").privateKey });
     try {
         const tokens = await redeemNativeCodeConcurrently(pool, signer, account, factors);
+        const deliveryChecks = await verifyNativeDeliveryConcurrency(pool, userId, tokens.access_token, signer.clientId);
         // Hold both physical connections before starting either transaction, proving cross-connection contention.
         const connections = [await pool.getConnection()];
         try {
@@ -40,7 +42,7 @@ export async function verifyNativeRefreshConcurrency(pool, userId) {
             { code: "invalid_grant" });
         const [[session]] = await pool.execute("SELECT revoked_ms FROM platform_native_sessions WHERE user_id=?", [userId]);
         assert.notEqual(session.revoked_ms, null);
-        return 12;
+        return 12 + deliveryChecks;
     } finally {
         signer.close();
         await platformTransaction(pool, async (connection) => {

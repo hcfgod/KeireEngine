@@ -26,9 +26,10 @@ const deliver = (clock = () => 1000) => authorizeNativeDownloadDelivery(pool, "g
 
 function results(first = grant, finalLive = 1, currentAccount = account) {
     execute.mockResolvedValueOnce([[first]])
+        .mockResolvedValueOnce([[{ ...grant, id: grant.native_session_id }]])
         .mockResolvedValueOnce([[currentAccount]])
         .mockResolvedValueOnce([[]])
-        .mockResolvedValueOnce([[{ live: finalLive }]]);
+        .mockResolvedValueOnce([[{ ...grant, live: finalLive }]]);
 }
 
 beforeEach(() => {
@@ -92,4 +93,36 @@ it("rejects native session expiry during authorization", async () => {
     results();
     const clock = vi.fn().mockReturnValueOnce(1000).mockReturnValueOnce(1000).mockReturnValue(2000);
     await expect(deliver(clock)).rejects.toMatchObject({ status: 403 });
+});
+
+
+it("locks the native session before any device or entitlement locks", async () => {
+    results();
+    await deliver();
+    const statements = execute.mock.calls.map(([sql]) => String(sql));
+    expect(statements[0]).not.toMatch(/FOR (UPDATE|SHARE)/);
+    expect(statements[1]).toContain("platform_native_sessions WHERE id=? FOR UPDATE");
+    expect(statements[2]).toContain("platform_accounts WHERE id=? FOR UPDATE");
+    expect(statements.at(-1)).toContain("FOR SHARE");
+    const accessOrder = vi.mocked(authorizeNativeDownload).mock.invocationCallOrder[0];
+    expect(accessOrder).toBeGreaterThan(execute.mock.invocationCallOrder[3]);
+    expect(execute.mock.invocationCallOrder.at(-1)).toBeGreaterThan(accessOrder);
+});
+
+it.each([undefined, { ...grant, revoked_ms: 900 }, { ...grant, user_id: "another-owner" },
+    { ...grant, account_binding: "changed" }])("rejects session changes after discovery", async (session) => {
+    execute.mockResolvedValueOnce([[grant]]).mockResolvedValueOnce([[session]]);
+    await expect(deliver()).rejects.toMatchObject({ status: 403 });
+    expect(authorizeNativeDownload).not.toHaveBeenCalled();
+});
+
+it.each([undefined, { ...grant, entitlement_id: "replacement" }, { ...grant, device_id: "other" },
+    { ...grant, organization_id: "other" }, { ...grant, revoked_ms: 900 }])("rechecks final grant bindings", async (current) => {
+    execute.mockResolvedValueOnce([[grant]])
+        .mockResolvedValueOnce([[{ ...grant, id: grant.native_session_id }]])
+        .mockResolvedValueOnce([[account]])
+        .mockResolvedValueOnce([[]])
+        .mockResolvedValueOnce([[current]]);
+    await expect(deliver()).rejects.toMatchObject({ status: 403 });
+    expect(connection.commit).not.toHaveBeenCalled();
 });

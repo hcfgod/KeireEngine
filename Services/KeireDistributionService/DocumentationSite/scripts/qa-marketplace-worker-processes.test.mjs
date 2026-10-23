@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import { test } from "vitest";
 import { isolatedEnvironment, validateWorkerProcessConfiguration } from "./qa-marketplace-worker-processes.mjs";
 
 test("removes inherited provider configuration regardless of Windows name casing", () => {

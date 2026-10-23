@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Fixed a MySQL native-download lock-order conflict with concurrent Hub device registration while retaining grant, session, and entitlement revocation checks.
+
 - Fixed MySQL website deployment packaging to atomically include production host scripts and imported application modules alongside the generated website, with complete runtime rollback.
 
 - Added staged MySQL staff queues, publisher/report decisions, staff and feature management, last-administrator protection, and authenticated signed-evidence downloads.

@@ -8,10 +8,11 @@ const endpoint = `${siteOrigin}/auth/v1/oauth/token`;
 function fixture() {
     const policy = createNativeOAuthPolicy({ siteOrigin, clientId: "keire-hub-desktop" });
     const state = { attempts: 0 };
+    const windowStart = Date.now() - 1;
     const connection = {
         beginTransaction: vi.fn(), commit: vi.fn(), rollback: vi.fn(), release: vi.fn(), destroy: vi.fn(),
         execute: vi.fn(async (sql) => sql.includes("SELECT attempts")
-            ? [[{ attempts: state.attempts, window_start: Date.now() - 1 }]] : [[]]),
+            ? [[{ attempts: state.attempts, window_start: windowStart }]] : [[]]),
     };
     const pool = { getConnection: vi.fn(async () => connection) };
     const signer = { clientId: policy.clientId, issuer: `${siteOrigin}/auth/v1`, sign: vi.fn() };
