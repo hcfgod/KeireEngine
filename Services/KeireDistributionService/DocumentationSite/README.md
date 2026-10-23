@@ -5,6 +5,27 @@ Node deployment. Run `npm test` and `npm run build` from this directory. The bui
 syncs canonical documentation, validates local media, generates search, externalizes
 inline content for the production CSP, and checks links and document structure.
 
+## Staged MySQL GitHub authentication
+
+GitHub sign-in uses provider identity IDs, single-use browser-bound state, S256
+PKCE, verified provider email, and the account's existing MFA requirements.
+Matching an email does not merge accounts. New GitHub identities must first
+create an account and explicitly link GitHub while signed in.
+
+Provision the authorization table once with the protected authentication acceptance
+launcher's `-CreateGitHubSchema` option. Store OAuth application credentials with
+`../scripts/configure-local-platform-github.ps1`; its interactive secret prompt
+writes CurrentUser DPAPI settings in a new dedicated directory. Register
+`https://YOUR-HOST/account/github/callback/` in the GitHub OAuth application.
+Configure the application-owned `windowsGitHubServiceFactory` with that directory
+and the exact site origin. The isolated QA host accepts
+`KEIRE_QA_GITHUB_SETTINGS_DIRECTORY`; the secret itself is never an environment
+variable. Supabase remains separately selectable.
+
+Unit, protected-settings, and MySQL acceptance checks do not prove external GitHub
+consent works. Production credentials, callback registration, and a real provider
+sign-in must pass before live activation.
+
 ## Showcase media
 
 `Source/media/outpost` contains rendered output only. The private project generator
