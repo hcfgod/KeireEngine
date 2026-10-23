@@ -420,6 +420,13 @@ assert(config.includes("checkOrigin: false") && config.includes("Source/middlewa
     "Astro's loopback origin check must defer to the documented proxy-aware mutation guard.");
 
 const middleware = await readFile(path.join(siteRoot, "Source", "middleware.ts"), "utf8");
+const internalWorkerRoute = await readFile(
+    path.join(siteRoot, "Source", "pages", "internal", "[...path].ts"),
+    "utf8",
+);
+assert(internalWorkerRoute.includes("export const prerender = false")
+    && internalWorkerRoute.includes("export const ALL"),
+"Internal worker queues must have a server-dispatched catch-all route for MySQL middleware.");
 const healthRoute = await readFile(path.join(siteRoot, "Source", "pages", "health", "index.ts"), "utf8");
 const contactRoute = await readFile(path.join(siteRoot, "Source", "pages", "contact", "submit.ts"), "utf8");
 assert(healthRoute.includes(`version: "${projectVersion}"`) &&

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Added a server-dispatched internal worker route so MySQL validator and publication queue requests reach their authenticated middleware instead of Astro's generic 404 response.
+
 - Updated generated Marketplace samples to use the current managed `Transform` API and initialized serialized Sandbox fields so first-party packages pass warnings-as-errors validation.
 
 - Wait for the public HTTPS sign-in page as well as local host readiness before reporting a website deployment successful, covering reverse-proxy health recovery delays.
