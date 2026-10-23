@@ -46,6 +46,10 @@ provider settings, and a single-writer marker. Inspect a marker left after a cra
 before recovery; it is not automatically removed. The Caddy template replaces
 forwarded client identity and omits URLs/headers from access logs. Existing live
 proxy configuration is not modified by editing the template.
+Set `KEIRE_QA_CADDY` to the installed Caddy executable and run
+`node scripts/test-production-proxy-live.mjs` to test the adapted template on
+isolated loopback listeners. It checks upload/ordinary body limits, forwarding
+header replacement, and exclusion of synthetic secrets from actual access logs.
 
 Staff operations require current MFA and staff membership. Evidence reads verify
 the trusted signature and stored content hash and recheck access on each request.
