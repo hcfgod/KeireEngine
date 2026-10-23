@@ -238,6 +238,11 @@ The full `test-platform-http-live.mjs` run also exercises native authorization w
 signed identity and access-token binding, profile reads, idempotent device
 registration, refresh, and logout revocation. It uses the harness's disposable
 account and removes only that fixture's native sessions, devices, and requests.
+When the QA download settings and package root are configured too, the same run
+creates a private draft product with a withdrawn version and synthetic transport
+bytes. It verifies HTTPS byte equality, tampered-link rejection, and entitlement
+revocation, then removes its own rows and file. This does not test installation
+of a signed engine package or publish the fixture to the marketplace.
 Production host key provisioning and storage configuration remain pending; this
 does not enable live downloads or establish complete Hub migration readiness.
 

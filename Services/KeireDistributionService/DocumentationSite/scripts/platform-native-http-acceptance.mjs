@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { createHash, randomBytes } from "node:crypto";
 import { createLocalJWKSet, jwtVerify } from "jose";
 import { platformTransaction } from "../Source/lib/platform-mysql.mjs";
+import { createDownloadHttpFixture } from "./platform-download-http-fixture.mjs";
 
 /** Exercises the built HTTPS application using only the caller's disposable HTTP account. */
 export async function verifyNativeHttp({ pool, userId, origin, clientIdentity, browserRequest, setStage }) {
@@ -24,6 +25,7 @@ export async function verifyNativeHttp({ pool, userId, origin, clientIdentity, b
         method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" },
         body: new URLSearchParams(parameters),
     });
+    let downloadChecks = 0;
     try {
         setStage("authorize");
         const parameters = new URLSearchParams({
@@ -94,6 +96,48 @@ export async function verifyNativeHttp({ pool, userId, origin, clientIdentity, b
         const repeatedDevice = await registerDevice();
         assert.equal(repeatedDevice.status, 201);
         assert.equal((await repeatedDevice.json()).data.deviceSessionId, deviceData.deviceSessionId);
+        if (process.env.KEIRE_QA_PACKAGE_ROOT) {
+            setStage("private-download");
+            let fixture;
+            try {
+                fixture = await createDownloadHttpFixture(pool, userId, process.env.KEIRE_QA_PACKAGE_ROOT);
+            } catch (error) {
+                if (/^ER_[A-Z0-9_]+$/.test(error.code ?? "")) {
+                    const constraint = /Check constraint '([A-Za-z0-9_]+)'/.exec(error.sqlMessage ?? "")?.[1];
+                    setStage(`private-download-fixture-${error.code}${constraint ? `-${constraint}` : ""}`);
+                }
+                throw error;
+            }
+            try {
+                const issued = await request("/functions/v1/marketplace-hub", {
+                    method: "POST",
+                    headers: { authorization: `Bearer ${tokens.access_token}`, "content-type": "application/json" },
+                    body: JSON.stringify({ operation: "download.issue", versionId: fixture.version,
+                        deviceSessionId: deviceData.deviceSessionId }),
+                });
+                assert.equal(issued.status, 201);
+                const grant = (await issued.json()).data;
+                const downloadUrl = new URL(grant.url);
+                assert.equal(downloadUrl.origin, origin);
+                assert.equal(grant.archive_sha256, fixture.sha256);
+                const download = await request(downloadUrl.pathname + downloadUrl.search);
+                assert.equal(download.status, 200);
+                assert.match(download.headers.get("cache-control"), /no-store/);
+                assert.deepEqual(Buffer.from(await download.arrayBuffer()), fixture.bytes);
+                const tampered = new URL(downloadUrl);
+                tampered.searchParams.set("signature", "a".repeat(43));
+                const rejected = await request(tampered.pathname + tampered.search);
+                assert.equal(rejected.status, 403);
+                await rejected.arrayBuffer();
+                await pool.execute("UPDATE marketplace_entitlements SET revoked_at=UTC_TIMESTAMP(6) WHERE id=?", [fixture.entitlement]);
+                const revokedDownload = await request(downloadUrl.pathname + downloadUrl.search);
+                assert.equal(revokedDownload.status, 403);
+                await revokedDownload.arrayBuffer();
+                downloadChecks = 8;
+            } finally {
+                await fixture.close();
+            }
+        }
         const replay = await postToken(exchangeForm);
         assert.equal(replay.status, 400);
         await replay.arrayBuffer();
@@ -111,7 +155,7 @@ export async function verifyNativeHttp({ pool, userId, origin, clientIdentity, b
         const revoked = await request("/auth/v1/user", { headers });
         assert.equal(revoked.status, 401);
         await revoked.arrayBuffer();
-        return 37;
+        return 37 + downloadChecks;
     } finally {
         await platformTransaction(pool, async (connection) => {
             await connection.execute(`DELETE device FROM oauth_device_sessions device
