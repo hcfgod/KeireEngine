@@ -4,6 +4,11 @@ The default rule names remain `Keire Marketplace Validator - <program role>` wit
 
 For a separate QA installation, choose a unique namespace and pass the same values to all three commands:
 
+Use dedicated copies of the tools when testing outbound isolation, so blocking the managed compiler does not affect
+normal editor builds. Copy the complete required runtime: ClamAV needs its DLLs, current `database` directory, and
+`certs` directory to verify database signatures. A successful `clamscan --version` alone does not prove it can load
+and scan with those databases. Confirm an actual scan before running the worker acceptance harness.
+
 ```powershell
 -FirewallRulePrefix 'Keire QA 20261023' -FirewallRuleGroup 'Keire QA 20261023'
 ```
