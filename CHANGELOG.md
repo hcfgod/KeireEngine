@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Added operator-only storage recovery that verifies original package hashes and sizes before recording recovery, preserving published identities and existing immutable files.
+
 - Accept GitHub OAuth callback issuer metadata only for the exact GitHub issuer, rejecting foreign, empty, and duplicate issuer values before token exchange.
 
 - Reject incompatible standalone website builds before stopping a MySQL host; deployment preflight imports the adapter with automatic startup disabled.
