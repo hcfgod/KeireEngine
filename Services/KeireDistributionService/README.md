@@ -496,7 +496,10 @@ process ownership and swaps only `Web/dist`. When reviewed runtime dependencies 
 script performs a locked production-only install in sibling staging, swaps the complete `Web` root transactionally,
 waits for the scheduled supervisor and owned Node process to stop before swapping, retains a timestamped rollback, and
 requires the schema-2 ownership/readiness probe to pass. A pre-swap failure restarts the previous deployment. Never use
-the runtime-update switch for an unreviewed lockfile.
+the runtime-update switch for an unreviewed lockfile. Schema-3 MySQL deployments always require this switch, even
+with an unchanged lockfile: their production host imports runtime modules outside Astro's bundle. The transaction
+includes the production entry scripts and application libraries, excludes unit tests, and retains the previous
+complete runtime for rollback. Supabase deployments retain the bundle-only path when dependencies are unchanged.
 
 Run `./scripts/install-web-runtime.ps1`, then validate the host with
 `./scripts/start-windows-host.ps1 -ValidateOnly`. The supervisor starts Kestrel and the shared Caddy proxy before it

@@ -34,9 +34,10 @@ if (-not (Test-Path -LiteralPath $SettingsPath -PathType Leaf)) {
 }
 $settingsDirectory = Split-Path -Parent $SettingsPath
 $settings = Get-Content -LiteralPath $SettingsPath -Raw | ConvertFrom-Json
-if ([int] $settings.schemaVersion -ne 2) {
-    throw 'Transactional web deployment requires Windows host settings schema 2.'
+if ([int] $settings.schemaVersion -notin @(2, 3)) {
+    throw 'Transactional web deployment requires Windows host settings schema 2 or 3.'
 }
+$mysqlDeployment = [int] $settings.schemaVersion -eq 3 -and $settings.platformBackend -eq 'mysql'
 $destinationRoot = Resolve-ConfiguredPath ([string] $settings.webRoot) $settingsDirectory
 $nodeExecutable = Resolve-ConfiguredPath ([string] $settings.nodeExecutable) $settingsDirectory
 $supervisor = Join-Path $settingsDirectory 'scripts\start-windows-host.ps1'
@@ -53,6 +54,15 @@ foreach ($requiredFile in @((Join-Path $sourceDist 'server\entry.mjs'), (Join-Pa
 }
 $runtimeUpdate = (Get-FileHash -LiteralPath $sourceLock -Algorithm SHA256).Hash -ne
     (Get-FileHash -LiteralPath $destinationLock -Algorithm SHA256).Hash
+if ($mysqlDeployment) {
+    # The MySQL host imports application modules outside Astro dist; replace them atomically with the bundle.
+    $runtimeUpdate = $true
+    foreach ($requiredFile in @('scripts/platform-production-start.mjs', 'Source/lib/platform-backend.mjs')) {
+        if (-not (Test-Path -LiteralPath (Join-Path $sourceRoot $requiredFile) -PathType Leaf)) {
+            throw "The MySQL deployment is missing runtime module '$requiredFile'."
+        }
+    }
+}
 if ((Get-NormalizedPrefix $sourceRoot).StartsWith((Get-NormalizedPrefix $destinationRoot),
         [StringComparison]::OrdinalIgnoreCase) -or
     (Get-NormalizedPrefix $destinationRoot).StartsWith((Get-NormalizedPrefix $sourceRoot),
@@ -60,7 +70,7 @@ if ((Get-NormalizedPrefix $sourceRoot).StartsWith((Get-NormalizedPrefix $destina
     throw 'The source and live web roots may not contain one another.'
 }
 if ($runtimeUpdate -and -not $AllowRuntimeUpdate) {
-    throw 'The dependency lock changed; pass -AllowRuntimeUpdate for a transactional locked-runtime deployment.'
+    throw 'This deployment requires -AllowRuntimeUpdate for an atomic locked-runtime replacement.'
 }
 if ($ValidateOnly) {
     $kind = if ($runtimeUpdate) { 'locked-runtime' } else { 'bundle-only' }
@@ -76,6 +86,9 @@ $stagedWeb = Join-Path $destinationParent ('.' + $destinationName + '.staging-' 
 $backupWeb = Join-Path $destinationParent ($destinationName + '.rollback-' +
     [DateTime]::UtcNow.ToString('yyyyMMddTHHmmssZ') + '-' + [Guid]::NewGuid().ToString('N'))
 $destinationEntry = Join-Path $destinationDist 'server\entry.mjs'
+if ($mysqlDeployment) {
+    $destinationEntry = Join-Path $destinationRoot 'scripts\platform-production-start.mjs'
+}
 $hostTasks = @(Get-ScheduledTask -ErrorAction SilentlyContinue | Where-Object {
         foreach ($action in $_.Actions) {
             $argumentsProperty = $action.PSObject.Properties['Arguments']
@@ -179,6 +192,17 @@ if ($runtimeUpdate) {
         [IO.Directory]::CreateDirectory($stagedWeb) | Out-Null
         Copy-Item -LiteralPath $sourcePackage, $sourceLock -Destination $stagedWeb
         Copy-Item -LiteralPath $sourceDist -Destination (Join-Path $stagedWeb 'dist') -Recurse
+        if ($mysqlDeployment) {
+            $stagedScripts = Join-Path $stagedWeb 'scripts'
+            $stagedLibraries = Join-Path $stagedWeb 'Source/lib'
+            [IO.Directory]::CreateDirectory($stagedScripts) | Out-Null
+            [IO.Directory]::CreateDirectory($stagedLibraries) | Out-Null
+            Get-ChildItem -LiteralPath (Join-Path $sourceRoot 'scripts') -File -Filter 'platform-production-*.mjs' |
+                Copy-Item -Destination $stagedScripts
+            Get-ChildItem -LiteralPath (Join-Path $sourceRoot 'Source/lib') -File |
+                Where-Object { $_.Extension -in @('.mjs', '.ts') -and $_.Name -notmatch '\.test\.' } |
+                Copy-Item -Destination $stagedLibraries
+        }
         & $npmExecutable --prefix $stagedWeb ci --omit=dev --ignore-scripts --no-audit --no-fund
         if ($LASTEXITCODE -ne 0) {
             throw 'The staged locked web runtime dependency installation failed.'

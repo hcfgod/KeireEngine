@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Fixed MySQL website deployment packaging to atomically include production host scripts and imported application modules alongside the generated website, with complete runtime rollback.
+
 - Added staged MySQL staff queues, publisher/report decisions, staff and feature management, last-administrator protection, and authenticated signed-evidence downloads.
 - Added explicit MySQL Windows-host selection, protected worker credentials, private storage checks, and reverse-proxy identity validation. Production activation remains gated on deployment and external-provider acceptance.
 

@@ -374,6 +374,30 @@ try {
     Assert-True ($global:KeireWebDeploymentTestState.StartCount -eq 2) `
         "The rollback-start failure did not exercise both start attempts."
 
+    $mysql = New-DeploymentFixture "mysql-runtime" $false
+    $mysqlSettings = Get-Content -LiteralPath $mysql.SettingsPath -Raw | ConvertFrom-Json
+    $mysqlSettings.schemaVersion = 3
+    $mysqlSettings | Add-Member -NotePropertyName platformBackend -NotePropertyValue 'mysql'
+    Set-Utf8NoBomFile $mysql.SettingsPath ($mysqlSettings | ConvertTo-Json)
+    $mysqlScripts = Join-Path $mysql.SourceRoot 'scripts'
+    $mysqlLibraries = Join-Path $mysql.SourceRoot 'Source/lib'
+    [IO.Directory]::CreateDirectory($mysqlScripts) | Out-Null
+    [IO.Directory]::CreateDirectory($mysqlLibraries) | Out-Null
+    Set-Utf8NoBomFile (Join-Path $mysqlScripts 'platform-production-start.mjs') 'export {};'
+    Set-Utf8NoBomFile (Join-Path $mysqlLibraries 'platform-backend.mjs') 'export {};'
+    Set-Utf8NoBomFile (Join-Path $mysqlLibraries 'local-blob-store.ts') 'export {};'
+    Set-Utf8NoBomFile (Join-Path $mysqlLibraries 'platform-backend.test.ts') 'Do not deploy test fixture.'
+    Reset-Mocks $mysql
+    & $Deployment -SourceWebRoot $mysql.SourceRoot -SettingsPath $mysql.SettingsPath -AllowRuntimeUpdate
+    Assert-True (Test-Path -LiteralPath (Join-Path $mysql.WebRoot 'scripts/platform-production-start.mjs')) `
+        'MySQL deployment omitted its production entry.'
+    Assert-True (Test-Path -LiteralPath (Join-Path $mysql.WebRoot 'Source/lib/local-blob-store.ts')) `
+        'MySQL deployment omitted imported TypeScript runtime modules.'
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $mysql.WebRoot 'Source/lib/platform-backend.test.ts'))) `
+        'MySQL deployment included unit test code.'
+    Assert-True ($global:KeireWebDeploymentTestState.TaskState -eq 'Running') `
+        'MySQL deployment did not restart the configured host.'
+
     Write-Host "Windows web deployment transaction checks passed."
 }
 finally {
