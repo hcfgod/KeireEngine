@@ -77,3 +77,16 @@ $fixture = Join-Path $env:TEMP ('keire-identity-system-qa-' + [Guid]::NewGuid().
 ```
 
 This runner creates seven **synthetic** CurrentUser DPAPI files in a new private fixture, then exercises Prepare/Execute/Verify through the actual temporary SYSTEM task. It verifies unchanged source ciphertext, the SYSTEM receipt, failure of original-user decryption of SYSTEM output, task removal and refusal to overwrite. It never reads production settings or changes live configuration. It retains the encrypted fixture and a sanitized `result.json` on success or failure. Its explicit execution creates a temporary scheduled task; parser/planning tests do not.
+
+## Read-only application acceptance after transfer
+
+Run `DocumentationSite/scripts/platform-production-system-acceptance.mjs` as SYSTEM with two absolute arguments:
+a configuration JSON path and a new result JSON path. Configuration fields are `schemaVersion: 1`, `siteOrigin`,
+`expectedNativeKeyId`, `powerShellExecutable`, `scriptsDirectory`, `settingsRoot`, and `storageRoot`.
+The paths point to the installed PowerShell, protected-settings reader scripts, transferred credential root,
+and private storage root containing `Spool`, `Packages`, and `Evidence`.
+
+The runner verifies the actual service identity, storage permissions, MySQL TLS and read-only queries, native public
+key identity, local download signing, worker credential loading, and SMTP authentication. It sends no email, writes
+no database records, and starts no website. Results contain only check counts, the public key ID, or a failing stage.
+A passed result does not replace real email delivery, GitHub consent, worker execution, or end-to-end Hub acceptance.
