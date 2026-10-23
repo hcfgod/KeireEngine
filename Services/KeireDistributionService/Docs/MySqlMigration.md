@@ -1,10 +1,20 @@
 # Local MySQL migration
 
-Status: preparation in progress. The website and Hub still use Supabase. Creating the local database does not
-enable a MySQL application backend, migrate accounts, or copy Storage files.
+Status: implementation and isolated acceptance are substantially complete; live cutover remains pending.
+The public website and Hub still use Supabase. The sections below record incremental implementation milestones;
+their earlier pending statements are historical unless repeated in the current release gates here.
 
-The isolated account-data import is now implemented and has been verified against the initial snapshot. This is not
-login acceptance or live cutover. Marketplace data and file-body migration remain pending.
+Account and marketplace records have been imported and checked against the snapshot. MySQL account, marketplace,
+administration, native authentication and download paths have passed isolated database and HTTPS acceptance.
+The actual C# broker, guarded offline worker and publication signer have also passed one complete isolated managed
+package flow, including compilation, malware scanning, review transitions and independent publication-signature
+verification. That test used connection-local temporary tables and did not publish a customer asset.
+
+Remaining release gates are production Windows service-identity acceptance, external GitHub authorization and real
+email delivery, the final backup/delta and rollback-controlled cutover, and actual Hub login/download/install checks.
+Twenty-one imported private Storage object records still lack recovered file bodies. Preserve those records and
+their ownership, report unavailability clearly, and do not claim the files were migrated or synthesize replacements.
+The isolated worker result does not establish production service-account operation or completion of live migration.
 
 ## Backend boundary
 
