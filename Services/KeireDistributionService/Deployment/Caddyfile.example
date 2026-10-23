@@ -21,7 +21,21 @@
 		not path /preview-downloads/*
 	}
 	encode @compressible zstd gzip
-	request_body {
+	@package_chunk {
+		method PATCH
+		path /publisher/v1/transfer/*
+	}
+	@ordinary_body {
+		not {
+			method PATCH
+			path /publisher/v1/transfer/*
+		}
+	}
+	# Browser transfers use 6 MiB chunks; other API requests retain the smaller cap.
+	request_body @package_chunk {
+		max_size 8MiB
+	}
+	request_body @ordinary_body {
 		max_size 2MB
 	}
 
