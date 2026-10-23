@@ -466,6 +466,16 @@ report and a blocked report, a killed worker has demonstrated stale-lease recove
 fingerprint, policy version, package digest, and manifest digest match the reviewed release evidence. Do not use real
 malware for acceptance.
 
+For isolated pipeline acceptance, `tests/KeireMarketplaceValidator.Tests/RunMarketplacePipeline.ps1`
+creates a fresh private exchange, checks scanner freshness and the guarded worker configuration, then runs the
+worker alongside a supplied Node integration entrypoint. The entrypoint receives `--worker-config` and `--result`;
+it must use isolated database fixtures and write a sanitized result with `status: "passed"` only after verification.
+Use dedicated QA executable copies and firewall rules so testing does not change installed worker rules.
+The runner stops only its own process trees and preserves evidence. Its focused orchestration checks run with
+`pwsh -NoProfile -File tests/KeireMarketplaceValidator.Tests/TestMarketplacePipeline.ps1`.
+Those checks exercise guards and cleanup; they do not prove database integration, production service identities,
+or successful asset publication. Record the actual pipeline result separately before enabling a live queue.
+
 On Windows, an extracted self-contained package can be supervised at user sign-in without an administrator-owned
 service. Copy Caddy beside the service, copy `Deployment/Caddyfile.example` to `Caddyfile`, and create
 `host-settings.json` beside `scripts/start-windows-host.ps1`:
