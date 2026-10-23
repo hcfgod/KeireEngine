@@ -24,6 +24,23 @@ function fixture() {
 }
 
 describe("SYSTEM read-only platform acceptance", () => {
+    it("reports allowlisted MySQL failure codes without driver messages", async () => {
+        const f = fixture();
+        f.pool.query.mockRejectedValue(Object.assign(new Error("private-password SQL"), { code: "ER_ACCESS_DENIED_ERROR" }));
+        const result = await verifySystemPlatformRuntime(f.configuration, f.overrides);
+        expect(result).toMatchObject({ status: "failed", failureCode: "ER_ACCESS_DENIED_ERROR", mysqlOperation: "connect-and-query" });
+        expect(JSON.stringify(result)).not.toContain("private-password");
+        expect(f.pool.end).toHaveBeenCalledOnce();
+    });
+
+    it("does not expose arbitrary error codes from CA loading", async () => {
+        const f = fixture();
+        f.overrides.createPlatformPool.mockRejectedValue(Object.assign(new Error("secret"), { code: "secret" }));
+        const result = await verifySystemPlatformRuntime(f.configuration, f.overrides);
+        expect(result).toMatchObject({ status: "failed", failureCode: "unclassified", mysqlOperation: "load-ca-and-create-pool" });
+        expect(JSON.stringify(result)).not.toContain("secret");
+    });
+
     it("checks protected runtime dependencies without sending mail or mutating the database", async () => {
         const f = fixture();
         const result = await verifySystemPlatformRuntime(f.configuration, f.overrides);

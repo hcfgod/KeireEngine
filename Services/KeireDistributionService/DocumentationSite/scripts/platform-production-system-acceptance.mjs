@@ -42,6 +42,8 @@ export async function verifySystemPlatformRuntime(configuration, overrides = {})
     let passed = false;
     let publicKeyId;
     let failureStage;
+    let failureCode;
+    let mysqlOperation;
     try {
         const allowed = ["schemaVersion", "siteOrigin", "expectedNativeKeyId", ...requiredPaths];
         if (!configuration || configuration.schemaVersion !== 1 || Object.keys(configuration).some((name) => !allowed.includes(name)) ||
@@ -77,9 +79,12 @@ export async function verifySystemPlatformRuntime(configuration, overrides = {})
         assert(Buffer.isBuffer(runtime.accountEncryptionKey) && runtime.accountEncryptionKey.length === 32);
         assert(!Object.hasOwn(runtime.settings, "migration"));
         stage = "mysql-tls-read-only";
+        mysqlOperation = "load-ca-and-create-pool";
         pool = await dependencies.createPlatformPool(runtime.settings, "runtime");
+        mysqlOperation = "connect-and-query";
         const [probe] = await pool.query("SELECT 1 AS ready, DATABASE() AS database_name");
         assert(Number(probe[0]?.ready) === 1 && probe[0]?.database_name === runtime.settings.database);
+        mysqlOperation = "verify-session-cipher";
         const [tls] = await pool.query("SHOW SESSION STATUS LIKE 'Ssl_cipher'");
         assert(tls.length === 1 && typeof tls[0].Value === "string" && tls[0].Value.length > 0);
         stage = "native-identity-loader";
@@ -113,8 +118,16 @@ export async function verifySystemPlatformRuntime(configuration, overrides = {})
         await mailer.verify();
         checks++;
         passed = true;
-    } catch {
+    } catch (error) {
         failureStage = stage;
+        // Only known constant codes are safe evidence; driver messages can contain credentials or SQL.
+        const safeCodes = new Set(["ENOENT", "EACCES", "EPERM", "ECONNREFUSED", "ETIMEDOUT",
+            "ER_ACCESS_DENIED_ERROR", "ER_DBACCESS_DENIED_ERROR", "ER_BAD_DB_ERROR",
+            "ER_PARSE_ERROR", "HANDSHAKE_SSL_ERROR", "ERR_TLS_CERT_ALTNAME_INVALID",
+            "CERT_HAS_EXPIRED", "UNABLE_TO_VERIFY_LEAF_SIGNATURE", "SELF_SIGNED_CERT_IN_CHAIN"]);
+        if (stage === "mysql-tls-read-only") {
+            failureCode = safeCodes.has(error?.code) ? error.code : "unclassified";
+        }
     } finally {
         for (const cleanup of [() => mailer?.close(), () => capabilities?.close(), () => signer?.close(), () => pool?.end()]) {
             try {
@@ -139,6 +152,7 @@ export async function verifySystemPlatformRuntime(configuration, overrides = {})
         }
     }
     return { status: passed ? "passed" : "failed", checks, ...(passed ? { nativePublicKeyId: publicKeyId } : { stage: failureStage }),
+        ...(failureCode ? { failureCode, mysqlOperation } : {}),
         databaseWrites: false, emailSent: false, websiteStarted: false, liveConfigurationChanged: false };
 }
 
