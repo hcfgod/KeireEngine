@@ -4,11 +4,13 @@ param(
     [Parameter(Mandatory = $true)] [string]$OutputDirectory,
     [Parameter(Mandatory = $true)] [string]$ValidatorProtectedKey,
     [Parameter(Mandatory = $true)] [string]$PublicationProtectedKey,
-    [string]$CurrentTrustBundle = ""
+    [string]$CurrentTrustBundle = "",
+    [ValidateSet("supabase", "mysql")] [string]$Backend = "supabase"
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+. (Join-Path $PSScriptRoot "marketplace-public-key-registration.ps1")
 
 if (-not (Test-Path -LiteralPath $Publisher -PathType Leaf)) { throw "The distribution publisher is missing." }
 $output = [IO.Path]::GetFullPath($OutputDirectory)
@@ -32,27 +34,7 @@ $protector = Join-Path $PSScriptRoot "protect-windows-marketplace-secret.ps1"
 
 $validator = Get-Content -LiteralPath $validatorPublic -Raw | ConvertFrom-Json
 $publication = Get-Content -LiteralPath $publicationPublic -Raw | ConvertFrom-Json
-foreach ($document in @($validator, $publication)) {
-    if ($document.schemaVersion -ne 1 -or $document.algorithm -cne "Ed25519" -or
-        $document.keyId -cnotmatch '^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$' -or
-        $document.publicKey -cnotmatch '^[A-Za-z0-9+/]{43}=$' -or
-        $document.fingerprint -cnotmatch '^sha256:[0-9a-f]{64}$') {
-        throw "A generated public key failed its identity contract."
-    }
-}
-
-$sql = @"
-begin;
-insert into public.marketplace_validator_attestation_keys
-    (key_id, algorithm, public_key_base64, fingerprint, active)
-values
-    ('$($validator.keyId)', 'ed25519', '$($validator.publicKey)', '$($validator.fingerprint)', true);
-insert into public.marketplace_signature_keys
-    (key_id, algorithm, public_key_base64, fingerprint, active)
-values
-    ('$($publication.keyId)', 'ed25519', '$($publication.publicKey)', '$($publication.fingerprint)', true);
-commit;
-"@
+$sql = New-MarketplacePublicKeyRegistrationSql -Validator $validator -Publication $publication -Backend $Backend
 $sqlPath = Join-Path $output "register-marketplace-public-keys.sql"
 [IO.File]::WriteAllText($sqlPath, $sql, [Text.UTF8Encoding]::new($false))
 
@@ -70,5 +52,6 @@ if (-not [string]::IsNullOrWhiteSpace($CurrentTrustBundle)) {
 }
 
 Write-Host "Generated two independent Ed25519 identities and protected their online copies with machine DPAPI."
-Write-Host "Release the candidate Hub trust bundle before activating the publication key in Supabase."
-Write-Host "Archive the ACL-protected PEM files offline; never place either private key in the repository or Supabase."
+Write-Host "Public-key registration SQL targets the $Backend backend. Review it before applying it to that backend."
+Write-Host "Release the candidate Hub trust bundle before activating the publication key."
+Write-Host "Archive the ACL-protected PEM files offline; never place either private key in the repository or a platform database."
