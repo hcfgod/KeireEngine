@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Accept GitHub OAuth callback issuer metadata only for the exact GitHub issuer, rejecting foreign, empty, and duplicate issuer values before token exchange.
+
 - Reject incompatible standalone website builds before stopping a MySQL host; deployment preflight imports the adapter with automatic startup disabled.
 
 - Allowed the explicit GitHub HTTPS origin in website form-navigation policies so the OAuth POST redirect can reach GitHub; same-origin CSRF checks remain enforced.

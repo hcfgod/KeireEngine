@@ -67,9 +67,12 @@ export async function handleGitHubRequest(authentication, provider, request, cli
             return redirect(started.url);
         }
         headers.append("set-cookie", cookie(browserCookie, "", 0));
-        const allowed = new Set(["state", "code", "error", "error_description", "error_uri"]);
+        const allowed = new Set(["state", "code", "iss", "error", "error_description", "error_uri"]);
         if ([...url.searchParams.keys()].some((key) => !allowed.has(key) || url.searchParams.getAll(key).length !== 1)) {
             return page("This GitHub callback is invalid. Start sign-in again.");
+        }
+        if (url.searchParams.has("iss") && url.searchParams.get("iss") !== "https://github.com/login/oauth") {
+            return page("The GitHub callback issuer is invalid. Start sign-in again.");
         }
         const authorization = await consumeGitHubAuthorization(authentication, provider, url.searchParams.get("state"),
             cookieToken(request, browserCookie), sessionToken);

@@ -14,6 +14,26 @@ async function begin(f, cookie = "") {
 }
 
 describe("GitHub browser boundary", () => {
+    it("accepts GitHub's issuer and rejects foreign, empty, and duplicate issuers before exchange", async () => {
+        for (const issuer of ["https://evil.invalid", "", "https://github.com/login/oauth&iss=https://github.com/login/oauth"]) {
+            const f = githubFixture();
+            const flow = await begin(f);
+            const response = await handleGitHubRequest(f.auth, f.provider,
+                request(`/account/github/callback/?state=${flow.state}&code=code123&iss=${issuer}`,
+                    "GET", { cookie: flow.cookie }), "loopback");
+            expect(response.status).toBe(400);
+            expect(f.provider.identity).not.toHaveBeenCalled();
+        }
+        const f = githubFixture();
+        const flow = await begin(f);
+        const response = await handleGitHubRequest(f.auth, f.provider,
+            request(`/account/github/callback/?state=${flow.state}&code=code123&iss=https%3A%2F%2Fgithub.com%2Flogin%2Foauth`,
+                "GET", { cookie: flow.cookie }), "loopback");
+        expect(response.status).toBe(303);
+        expect(response.headers.get("location")).toBe("/account/");
+        expect(f.provider.identity).toHaveBeenCalledTimes(1);
+    });
+
     it("GET only renders explicit confirmation; POST requires exact origin", async () => {
         const f = githubFixture();
         const prompt = await handleGitHubRequest(f.auth, f.provider,
