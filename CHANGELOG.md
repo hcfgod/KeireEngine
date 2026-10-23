@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Updated generated Marketplace samples to use the current managed `Transform` API and initialized serialized Sandbox fields so first-party packages pass warnings-as-errors validation.
+
 - Wait for the public HTTPS sign-in page as well as local host readiness before reporting a website deployment successful, covering reverse-proxy health recovery delays.
 
 - Added operator-only storage recovery that verifies original package hashes and sizes before recording recovery, preserving published identities and existing immutable files.

@@ -107,6 +107,14 @@ with tempfile.TemporaryDirectory(
         "Assets/NeonForgeCreatorPack/Scripts/Runtime/NeonForgePulse.cs" in sources,
         "The upload sample must inventory its C# behaviour.",
     )
+    managed_source = (
+        payload / "Assets/NeonForgeCreatorPack/Scripts/Runtime/NeonForgePulse.cs"
+    ).read_text(encoding="utf-8")
+    require(
+        "Transform transform = Entity.Transform;" in managed_source
+        and "TransformHandle" not in managed_source,
+        "The upload sample must use the current managed Transform API.",
+    )
     require(
         manifest["installedSizeBytes"]
         == sum(item["sizeBytes"] for item in manifest["files"]),

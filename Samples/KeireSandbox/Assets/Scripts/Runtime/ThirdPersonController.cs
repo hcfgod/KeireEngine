@@ -15,7 +15,7 @@ public sealed class ThirdPersonController : Behaviour
     private float _footstepVolume = 0.65f;
 
     [SerializeField, StableFieldId("73616e64-626f-4078-8000-000000000013")]
-    private AudioClip? _footstepClip;
+    private AudioClip? _footstepClip = null;
 
     [SerializeField, StableFieldId("73616e64-626f-4078-8000-000000000014")]
     [Range(0.0, 40.0), Tooltip("How quickly locomotion parameters catch up with physical movement.")]

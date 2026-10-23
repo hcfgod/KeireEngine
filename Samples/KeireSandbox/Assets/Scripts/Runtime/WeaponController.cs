@@ -8,7 +8,7 @@ public sealed class WeaponController : Behaviour
 {
     [SerializeField, StableFieldId("73616e64-626f-4078-8000-000000000041")]
     [Tooltip("Input Actions asset used by the Sandbox weapons.")]
-    private InputActionAsset? _inputActions;
+    private InputActionAsset? _inputActions = null;
 
     private readonly List<WeaponRuntime> _weapons = [];
     private readonly WeaponPresentationRig _presentation = new();

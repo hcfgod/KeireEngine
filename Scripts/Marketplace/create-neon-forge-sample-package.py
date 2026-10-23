@@ -201,7 +201,7 @@ public sealed class NeonForgePulse : Behaviour
             return;
 
         _elapsed += deltaTime;
-        TransformHandle transform = Entity.Transform;
+        Transform transform = Entity.Transform;
         transform.LocalRotation = Quaternion.Euler(0.0f, _elapsed * _rotationSpeed);
         transform.LocalPosition = _origin + (Vector3.Up * (MathF.Sin(_elapsed * 1.5f) * _pulseHeight));
     }
