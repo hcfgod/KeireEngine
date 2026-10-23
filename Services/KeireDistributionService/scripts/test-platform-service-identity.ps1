@@ -51,7 +51,7 @@ Assert-IdentityReject { Resolve-KeireIdentityPath 'C:\test\file:alternate-stream
 Assert-IdentityTest (Test-KeireIdentityBytesEqual ([byte[]]@(0, 1, 255)) ([byte[]]@(0, 1, 255)))
 Assert-IdentityTest (-not (Test-KeireIdentityBytesEqual ([byte[]]@(0, 1, 255)) ([byte[]]@(0, 1, 254))))
 Assert-IdentityTest (-not (Test-KeireIdentityBytesEqual ([byte[]]@(0, 1)) ([byte[]]@(0, 1, 0))))
-foreach ($name in @('migrate-platform-service-identity.ps1', 'complete-platform-service-identity.ps1', 'platform-service-identity-common.psm1'))
+foreach ($name in @('migrate-platform-service-identity.ps1', 'complete-platform-service-identity.ps1', 'platform-service-identity-common.psm1', 'test-platform-service-identity-system.ps1'))
 {
     $errors = $null
     $ast = [Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot $name), [ref]$null, [ref]$errors)

@@ -65,3 +65,15 @@ Regression command (no elevation, tasks, DPAPI migration or live changes):
 ```powershell
 ./test-platform-service-identity.ps1
 ```
+
+
+## Explicit synthetic SYSTEM acceptance (not run by the ordinary regression command)
+
+After review, launch this from an elevated PowerShell 7 console as the original provisioning user:
+
+```powershell
+$fixture = Join-Path $env:TEMP ('keire-identity-system-qa-' + [Guid]::NewGuid().ToString('N'))
+./test-platform-service-identity-system.ps1 -FixtureRoot $fixture
+```
+
+This runner creates seven **synthetic** CurrentUser DPAPI files in a new private fixture, then exercises Prepare/Execute/Verify through the actual temporary SYSTEM task. It verifies unchanged source ciphertext, the SYSTEM receipt, failure of original-user decryption of SYSTEM output, task removal and refusal to overwrite. It never reads production settings or changes live configuration. It retains the encrypted fixture and a sanitized `result.json` on success or failure. Its explicit execution creates a temporary scheduled task; parser/planning tests do not.
