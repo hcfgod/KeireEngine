@@ -2,6 +2,8 @@ import http from "node:http";
 import os from "node:os";
 import { describe, expect, it, vi } from "vitest";
 import { startProductionServer } from "./platform-production-server.mjs";
+import { createRequestFromNodeRequest } from "astro/app/node";
+import { canonicalPlatformRequest } from "../Source/lib/platform-proxy-request.mjs";
 
 function request(port, target, headers = {}, method = "GET") {
     return new Promise((resolve, reject) => {
@@ -30,6 +32,26 @@ async function fixture(handler) {
 }
 
 describe("production loopback listener", () => {
+    it("passes verified HTTPS identity through the actual Astro HTTP adapter", async () => {
+        let handlerCalls = 0;
+        const f = await fixture(async (req, res, next, locals) => {
+            handlerCalls++;
+            const adapted = createRequestFromNodeRequest(req);
+            const canonical = canonicalPlatformRequest(adapted, locals.platformVerifiedOrigin);
+            res.end(JSON.stringify({ origin: new URL(canonical.url).origin, path: new URL(canonical.url).pathname }));
+        });
+        try {
+            const accepted = await request(f.port, "/account/github/", headers);
+            expect(accepted.status).toBe(200);
+            expect(JSON.parse(accepted.body)).toEqual({ origin: "https://platform.invalid", path: "/account/github/" });
+            const rejected = await request(f.port, "/account/github/", { ...headers, "x-forwarded-host": "attacker.invalid" });
+            expect(rejected.status).toBe(400);
+            expect(handlerCalls).toBe(1);
+        } finally {
+            await f.host.close();
+        }
+    });
+
     it("accepts verified proxy metadata and rejects direct application requests", async () => {
         const f = await fixture();
         try {
