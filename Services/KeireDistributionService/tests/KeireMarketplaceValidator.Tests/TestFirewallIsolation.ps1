@@ -105,7 +105,11 @@ if (-not $failed -or $script:mutations -ne 0)
 {
     throw 'Ambiguous collision mutated rules.'
 }
-foreach ($file in @((Join-Path $deployment 'configure-windows-validator-firewall.ps1'), (Join-Path $deployment 'start-windows-marketplace-validator.ps1'), (Join-Path $PSScriptRoot 'RunOfflineWorker.ps1')))
+foreach ($file in @(
+        (Join-Path $deployment 'configure-windows-validator-firewall.ps1'),
+        (Join-Path $deployment 'start-windows-marketplace-validator.ps1'),
+        (Join-Path $deployment 'install-windows-marketplace-validator-tasks.ps1'),
+        (Join-Path $PSScriptRoot 'RunOfflineWorker.ps1')))
 {
     $tokens = $null
     $errors = $null
@@ -123,4 +127,9 @@ foreach ($file in @((Join-Path $deployment 'configure-windows-validator-firewall
         }
     }
 }
-Write-Output 'Passed 8 firewall isolation checks; all firewall operations mocked.'
+$installer = Get-Content (Join-Path $deployment 'install-windows-marketplace-validator-tasks.ps1') -Raw
+if ($installer -notmatch '"-FirewallRulePrefix"' -or $installer -notmatch '"-FirewallRuleGroup"')
+{
+    throw 'The durable worker task does not retain its isolated firewall namespace.'
+}
+Write-Output 'Passed 9 firewall isolation checks; all firewall operations mocked.'

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Allowed durable Windows marketplace validator tasks to retain an isolated firewall rule prefix and group, avoiding collisions with parallel QA validators.
+
 - Added a server-dispatched internal worker route so MySQL validator and publication queue requests reach their authenticated middleware instead of Astro's generic 404 response.
 
 - Updated generated Marketplace samples to use the current managed `Transform` API and initialized serialized Sandbox fields so first-party packages pass warnings-as-errors validation.

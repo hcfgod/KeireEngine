@@ -28,6 +28,12 @@ param(
 
     [string]$FirewallAttestation,
 
+    [ValidatePattern('^[A-Za-z0-9][A-Za-z0-9 _.-]{0,79}$')]
+    [string]$FirewallRulePrefix = 'Keire Marketplace Validator',
+
+    [ValidatePattern('^$|^[A-Za-z0-9][A-Za-z0-9 _.-]{0,79}$')]
+    [string]$FirewallRuleGroup = '',
+
     [string]$SecretFile,
 
     [string]$AttestationPublicKey,
@@ -137,7 +143,8 @@ if ($WorkerId -cnotmatch '^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$') {
 & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $WorkerLauncher `
     -Validator $Validator -ExchangeRoot $ExchangeRoot -WorkRoot $WorkRoot -AssetTool $AssetTool `
     -MalwareScanner $MalwareScanner -Dotnet $Dotnet -ManagedApi $ManagedApi `
-    -ProtectedAttestationKey $ProtectedAttestationKey -FirewallAttestation $FirewallAttestation -ValidateOnly
+    -ProtectedAttestationKey $ProtectedAttestationKey -FirewallAttestation $FirewallAttestation `
+    -FirewallRulePrefix $FirewallRulePrefix -FirewallRuleGroup $FirewallRuleGroup -ValidateOnly
 if ($LASTEXITCODE -ne 0) {
     throw "The offline marketplace validator configuration failed validation."
 }
@@ -168,7 +175,9 @@ $workerArguments = @(
     "-Dotnet", (Quote-TaskArgument ([IO.Path]::GetFullPath($Dotnet))),
     "-ManagedApi", (Quote-TaskArgument ([IO.Path]::GetFullPath($ManagedApi))),
     "-ProtectedAttestationKey", (Quote-TaskArgument ([IO.Path]::GetFullPath($ProtectedAttestationKey))),
-    "-FirewallAttestation", (Quote-TaskArgument ([IO.Path]::GetFullPath($FirewallAttestation)))
+    "-FirewallAttestation", (Quote-TaskArgument ([IO.Path]::GetFullPath($FirewallAttestation))),
+    "-FirewallRulePrefix", (Quote-TaskArgument $FirewallRulePrefix),
+    "-FirewallRuleGroup", (Quote-TaskArgument $FirewallRuleGroup)
 ) -join " "
 $brokerArguments = @(
     "-NoProfile",
