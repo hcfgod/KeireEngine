@@ -140,7 +140,10 @@ fails. Later Windows opens enumerate compatible Visual Studio automation session
 for packaged .NET 10 workspaces, match the loaded solution's canonical path to the current project, and open the source
 through that exact instance. An unrelated or incompatible Visual Studio window is never selected. While Visual Studio
 is still starting, or if the original instance has closed, Kéire discovers the newest complete, launchable compatible
-installation and opens the exact project solution before issuing `File.OpenFile` for the requested source. An explicit
+installation and opens the exact project solution. C# opens wait for the source to belong to a loaded C# project in that
+solution and for its `Keire.Managed` reference to resolve, then open and activate that project item rather than a loose
+Miscellaneous File. This also applies while a running IDE reloads regenerated project files. The bounded background
+wait leaves the Editor responsive; a timeout is reported in the core log instead of opening an unowned script. An explicit
 `devenv.exe` preference remains authoritative. Build Settings also exposes
 **Regenerate C# Project**. Generated root `.sln` and `.csproj` files are ignored by newly created projects.
 

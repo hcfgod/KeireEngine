@@ -45,8 +45,9 @@ ordinary scripts under `Assets/Scripts`, compiled by the built-in `Assembly-CSha
 The Project panel can create an optional folder-based managed assembly, or a C# script anywhere under Assets.
 Script and assembly sources open in a configured external editor or the operating-system default application.
 Before a C# source opens, the editor regenerates a project-root Visual Studio solution and one SDK-style project per
-resolved assembly. The first Windows open loads that solution normally and then runs Visual Studio's `File.OpenFile` command
-for the requested script. Later opens target the running Visual Studio instance that has that exact solution loaded,
+resolved assembly. The first Windows open loads that solution, waits for the requested source's C# project and resolved
+`Keire.Managed` reference, then opens the owned project item. Solution identity alone does not mean C# projects have
+finished loading. Later opens use the same readiness check in the running instance that has that exact solution loaded,
 instead of opening an isolated source file or relying on the most-recent IDE window. The generated projects are
 authoring artifacts; they are refreshed before builds once a workspace is open, including when the runtime build fails,
 while managed compilation and last-good assembly publication remain governed by the canonical assembly definitions.

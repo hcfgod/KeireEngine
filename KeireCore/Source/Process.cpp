@@ -1,5 +1,6 @@
 #include "KeireInternal/Process.h"
 
+#include "Keire/Log.h"
 #include "KeireInternal/FileSystem.h"
 #include "KeireInternal/VisualStudioDiscovery.h"
 
@@ -186,6 +187,38 @@ namespace Keire::Detail
             return value;
         }
 
+        [[nodiscard]] ComReference<IDispatch> InvokeObjectMethod(IDispatch& dispatch, wchar_t* name,
+                                                                 const std::wstring_view value)
+        {
+            const auto member = ResolveDispatchMember(dispatch, name);
+            if (member == DISPID_UNKNOWN)
+            {
+                return {};
+            }
+            VARIANTARG argument;
+            VariantInit(&argument);
+            argument.vt = VT_BSTR;
+            argument.bstrVal = SysAllocStringLen(value.data(), static_cast<UINT>(value.size()));
+            if (!argument.bstrVal)
+            {
+                return {};
+            }
+            DISPPARAMS parameters{&argument, nullptr, 1, 0};
+            VARIANT result;
+            VariantInit(&result);
+            const auto status = dispatch.Invoke(member, IID_NULL, LOCALE_USER_DEFAULT, DISPATCH_METHOD, &parameters,
+                                                &result, nullptr, nullptr);
+            VariantClear(&argument);
+            if (FAILED(status) || result.vt != VT_DISPATCH || !result.pdispVal)
+            {
+                VariantClear(&result);
+                return {};
+            }
+            auto* object = result.pdispVal;
+            result.vt = VT_EMPTY;
+            return ComReference<IDispatch>(object);
+        }
+
         [[nodiscard]] bool SameWindowsPath(const std::filesystem::path& left, const std::filesystem::path& right)
         {
             std::error_code leftError;
@@ -234,43 +267,61 @@ namespace Keire::Detail
                                                       std::string& diagnostic, const std::uint32_t line,
                                                       const std::uint32_t column)
         {
-            auto itemOperations = ReadDispatchProperty(dte, const_cast<wchar_t*>(L"ItemOperations"));
-            if (!itemOperations)
+            if (source.extension() == ".cs")
             {
-                diagnostic = "The matching Visual Studio instance did not expose ItemOperations.";
-                return false;
+                auto solution = ReadDispatchProperty(dte, const_cast<wchar_t*>(L"Solution"));
+                const auto solutionPath =
+                    solution ? ReadStringProperty(*solution.Get(), const_cast<wchar_t*>(L"FullName")) : std::wstring{};
+                if (!solution || solutionPath.empty() ||
+                    !OpenLoadedVisualStudioProjectItem(*solution.Get(), source, solutionPath, diagnostic))
+                {
+                    return false;
+                }
+                if (line == 0)
+                {
+                    return true;
+                }
             }
-            const auto member = ResolveDispatchMember(*itemOperations.Get(), const_cast<wchar_t*>(L"OpenFile"));
-            if (member == DISPID_UNKNOWN)
+            if (source.extension() != ".cs")
             {
-                diagnostic = "The matching Visual Studio instance did not expose OpenFile.";
-                return false;
-            }
-            VARIANTARG argument;
-            VariantInit(&argument);
-            argument.vt = VT_BSTR;
-            argument.bstrVal = SysAllocString(source.wstring().c_str());
-            if (!argument.bstrVal)
-            {
-                diagnostic = "Visual Studio source-path allocation failed.";
-                return false;
-            }
-            DISPPARAMS parameters{&argument, nullptr, 1, 0};
-            VARIANT result;
-            VariantInit(&result);
-            EXCEPINFO exception{};
-            UINT argumentError = 0;
-            const auto status = itemOperations.Get()->Invoke(member, IID_NULL, LOCALE_USER_DEFAULT, DISPATCH_METHOD,
-                                                             &parameters, &result, &exception, &argumentError);
-            VariantClear(&argument);
-            VariantClear(&result);
-            SysFreeString(exception.bstrSource);
-            SysFreeString(exception.bstrDescription);
-            SysFreeString(exception.bstrHelpFile);
-            if (FAILED(status))
-            {
-                diagnostic = "Visual Studio could not open the source in the matching solution instance.";
-                return false;
+                auto itemOperations = ReadDispatchProperty(dte, const_cast<wchar_t*>(L"ItemOperations"));
+                if (!itemOperations)
+                {
+                    diagnostic = "The matching Visual Studio instance did not expose ItemOperations.";
+                    return false;
+                }
+                const auto member = ResolveDispatchMember(*itemOperations.Get(), const_cast<wchar_t*>(L"OpenFile"));
+                if (member == DISPID_UNKNOWN)
+                {
+                    diagnostic = "The matching Visual Studio instance did not expose OpenFile.";
+                    return false;
+                }
+                VARIANTARG argument;
+                VariantInit(&argument);
+                argument.vt = VT_BSTR;
+                argument.bstrVal = SysAllocString(source.wstring().c_str());
+                if (!argument.bstrVal)
+                {
+                    diagnostic = "Visual Studio source-path allocation failed.";
+                    return false;
+                }
+                DISPPARAMS parameters{&argument, nullptr, 1, 0};
+                VARIANT result;
+                VariantInit(&result);
+                EXCEPINFO exception{};
+                UINT argumentError = 0;
+                const auto status = itemOperations.Get()->Invoke(member, IID_NULL, LOCALE_USER_DEFAULT, DISPATCH_METHOD,
+                                                                 &parameters, &result, &exception, &argumentError);
+                VariantClear(&argument);
+                VariantClear(&result);
+                SysFreeString(exception.bstrSource);
+                SysFreeString(exception.bstrDescription);
+                SysFreeString(exception.bstrHelpFile);
+                if (FAILED(status))
+                {
+                    diagnostic = "Visual Studio could not open the source in the matching solution instance.";
+                    return false;
+                }
             }
             if (line != 0)
             {
@@ -361,7 +412,10 @@ namespace Keire::Detail
                     continue;
                 matchingInstance = true;
                 opened = InvokeVisualStudioOpenFile(*dte.Get(), source, diagnostic, line, column);
-                break;
+                if (opened)
+                {
+                    break;
+                }
             }
             bindContext = {};
             enumeration = {};
@@ -406,8 +460,14 @@ namespace Keire::Detail
                 {
                     bool matchingInstance = false;
                     std::string ignoredDiagnostic;
-                    (void)WaitForMatchingVisualStudioInstance(source, solution, std::chrono::seconds(60), minimumMajor,
-                                                              matchingInstance, ignoredDiagnostic, line, column);
+                    if (!WaitForMatchingVisualStudioInstance(source, solution, std::chrono::seconds(120), minimumMajor,
+                                                             matchingInstance, ignoredDiagnostic, line, column))
+                    {
+                        Log::GetCoreLogger().Write(
+                            LogLevel::Warn,
+                            "Visual Studio script handoff timed out waiting for its loaded C# project: " +
+                                ignoredDiagnostic);
+                    }
                 })
                 .detach();
         }
@@ -656,6 +716,62 @@ namespace Keire::Detail
         };
 #endif
     } // namespace
+
+#if defined(_WIN32)
+    bool OpenLoadedVisualStudioProjectItem(IDispatch& solution, const std::filesystem::path& source,
+                                           const std::filesystem::path& solutionPath, std::string& diagnostic)
+    {
+        diagnostic = "Waiting for Visual Studio to load the script's C# project and engine reference.";
+        auto item = InvokeObjectMethod(solution, const_cast<wchar_t*>(L"FindProjectItem"), source.wstring());
+        auto project = item ? ReadDispatchProperty(*item.Get(), const_cast<wchar_t*>(L"ContainingProject"))
+                            : ComReference<IDispatch>{};
+        const std::filesystem::path projectPath =
+            project ? ReadStringProperty(*project.Get(), const_cast<wchar_t*>(L"FullName")) : std::wstring{};
+        if (projectPath.extension() != L".csproj" ||
+            !SameWindowsPath(projectPath.parent_path(), solutionPath.parent_path()))
+        {
+            return false;
+        }
+        auto languageProject = ReadDispatchProperty(*project.Get(), const_cast<wchar_t*>(L"Object"));
+        auto references = languageProject
+                              ? ReadDispatchProperty(*languageProject.Get(), const_cast<wchar_t*>(L"References"))
+                              : ComReference<IDispatch>{};
+        auto engineReference =
+            references ? InvokeObjectMethod(*references.Get(), const_cast<wchar_t*>(L"Find"), L"Keire.Managed")
+                       : ComReference<IDispatch>{};
+        if (!engineReference)
+        {
+            return false;
+        }
+        const auto resolved = ResolveDispatchMember(*engineReference.Get(), const_cast<wchar_t*>(L"Resolved"));
+        DISPPARAMS noArguments{};
+        VARIANT result;
+        VariantInit(&result);
+        const auto status = engineReference.Get()->Invoke(resolved, IID_NULL, LOCALE_USER_DEFAULT, DISPATCH_PROPERTYGET,
+                                                          &noArguments, &result, nullptr, nullptr);
+        const bool ready = SUCCEEDED(status) && result.vt == VT_BOOL && result.boolVal == VARIANT_TRUE;
+        VariantClear(&result);
+        if (!ready)
+        {
+            return false;
+        }
+        // Opening the owned item, not a loose file, gives Roslyn the evaluated project context.
+        auto window =
+            InvokeObjectMethod(*item.Get(), const_cast<wchar_t*>(L"Open"), L"{7651A700-06E5-11D1-8EBD-00A0C90F26EA}");
+        if (!window)
+        {
+            return false;
+        }
+        const auto activate = ResolveDispatchMember(*window.Get(), const_cast<wchar_t*>(L"Activate"));
+        if (FAILED(window.Get()->Invoke(activate, IID_NULL, LOCALE_USER_DEFAULT, DISPATCH_METHOD, &noArguments, nullptr,
+                                        nullptr, nullptr)))
+        {
+            return false;
+        }
+        diagnostic.clear();
+        return true;
+    }
+#endif
 
     Utf8CommandLine::Utf8CommandLine(const int count, char* const* values)
     {
@@ -1361,10 +1477,6 @@ namespace Keire::Detail
                     return true;
                 if (matchingInstance)
                 {
-                    if (line != 0)
-                    {
-                        return false;
-                    }
                     OpenInVisualStudioWhenSolutionReady(source, managedSolution,
                                                         ManagedWorkspaceMinimumVisualStudioMajor, line, column);
                     return true;
@@ -1390,7 +1502,9 @@ namespace Keire::Detail
                     }
                     if (matchingInstance)
                     {
-                        return false;
+                        OpenInVisualStudioWhenSolutionReady(source, managedSolution,
+                                                            ManagedWorkspaceMinimumVisualStudioMajor, line, column);
+                        return true;
                     }
                     arguments = {PathToUtf8(managedSolution)};
                     if (!LaunchDetachedProcess(std::filesystem::weakly_canonical(preferredEditor), arguments, working,

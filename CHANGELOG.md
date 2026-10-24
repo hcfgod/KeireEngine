@@ -10,6 +10,8 @@
 
 ### Hot patch — 2026-10-24
 
+- Wait for a script's loaded Visual Studio C# project and resolved engine reference before opening its owned project
+  item. This avoids opening new scripts as Miscellaneous Files without engine completion during solution startup.
 - Added Windows Hub setup choices to repair/update, uninstall, or explicitly remove and reinstall in a new location.
   Repair restores missing owned payload files without overwriting modified content, and recovery retains the original
   missing-file state across interruptions.

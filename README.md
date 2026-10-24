@@ -5,6 +5,9 @@
 
 **Build worlds. Keep control.**
 
+Opening a C# script waits for its Visual Studio project and engine reference, then opens the project-owned document
+so engine types participate in completion. The Editor remains responsive while the IDE loads.
+
 UI Document selection stays in the Inspector; use **Open Visual Tree in UI Builder** when you want to edit it.
 The Builder presents outlined input fields and a multiline style editor. Console compiler diagnostics support
 **Open source** and double-click navigation through your configured IDE. Lighting bake settings participate in

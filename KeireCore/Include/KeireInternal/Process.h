@@ -10,8 +10,18 @@
 #include <string_view>
 #include <vector>
 
+#if defined(_WIN32)
+struct IDispatch;
+#endif
+
 namespace Keire::Detail
 {
+#if defined(_WIN32)
+    [[nodiscard]] bool OpenLoadedVisualStudioProjectItem(IDispatch& solution, const std::filesystem::path& source,
+                                                         const std::filesystem::path& solutionPath,
+                                                         std::string& diagnostic);
+#endif
+
     class Utf8CommandLine final
     {
       public:

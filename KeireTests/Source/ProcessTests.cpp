@@ -12,6 +12,7 @@
 #include <filesystem>
 #include <fstream>
 #include <future>
+#include <map>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -20,6 +21,146 @@
 
 #if defined(_WIN32)
 #include <Windows.h>
+
+#include <OleAuto.h>
+
+namespace
+{
+    class VisualStudioDispatchFixture final : public IDispatch
+    {
+      public:
+        std::map<std::wstring, IDispatch*> Objects;
+        std::wstring ProjectPath;
+        bool Resolved = false;
+        unsigned Opens = 0;
+        unsigned Activations = 0;
+
+        HRESULT STDMETHODCALLTYPE QueryInterface(REFIID id, void** object) override
+        {
+            if (id != IID_IUnknown && id != IID_IDispatch)
+            {
+                *object = nullptr;
+                return E_NOINTERFACE;
+            }
+            *object = this;
+            AddRef();
+            return S_OK;
+        }
+
+        ULONG STDMETHODCALLTYPE AddRef() override { return 1; }
+
+        ULONG STDMETHODCALLTYPE Release() override { return 1; }
+
+        HRESULT STDMETHODCALLTYPE GetTypeInfoCount(UINT* count) override
+        {
+            *count = 0;
+            return S_OK;
+        }
+
+        HRESULT STDMETHODCALLTYPE GetTypeInfo(UINT, LCID, ITypeInfo**) override { return E_NOTIMPL; }
+
+        HRESULT STDMETHODCALLTYPE GetIDsOfNames(REFIID, LPOLESTR* names, UINT count, LCID, DISPID* ids) override
+        {
+            if (count != 1)
+            {
+                return E_INVALIDARG;
+            }
+            for (std::size_t index = 0; index < Names.size(); ++index)
+            {
+                if (Names[index] == names[0])
+                {
+                    *ids = static_cast<DISPID>(index);
+                    return S_OK;
+                }
+            }
+            return DISP_E_UNKNOWNNAME;
+        }
+
+        HRESULT STDMETHODCALLTYPE Invoke(DISPID id, REFIID, LCID, WORD, DISPPARAMS*, VARIANT* result, EXCEPINFO*,
+                                         UINT*) override
+        {
+            if (id < 0 || static_cast<std::size_t>(id) >= Names.size())
+            {
+                return DISP_E_MEMBERNOTFOUND;
+            }
+            const auto name = Names[static_cast<std::size_t>(id)];
+            if (name == L"Activate")
+            {
+                ++Activations;
+                return S_OK;
+            }
+            if (!result)
+            {
+                return E_POINTER;
+            }
+            if (name == L"FullName")
+            {
+                result->vt = VT_BSTR;
+                result->bstrVal = SysAllocString(ProjectPath.c_str());
+                return S_OK;
+            }
+            if (name == L"Resolved")
+            {
+                result->vt = VT_BOOL;
+                result->boolVal = Resolved ? VARIANT_TRUE : VARIANT_FALSE;
+                return S_OK;
+            }
+            const auto object = Objects.find(std::wstring(name));
+            if (object == Objects.end() || !object->second)
+            {
+                return E_FAIL;
+            }
+            if (name == L"Open")
+            {
+                ++Opens;
+            }
+            result->vt = VT_DISPATCH;
+            result->pdispVal = object->second;
+            result->pdispVal->AddRef();
+            return S_OK;
+        }
+
+      private:
+        static constexpr std::array<std::wstring_view, 9> Names{L"FindProjectItem", L"ContainingProject",
+                                                                L"FullName",        L"Object",
+                                                                L"References",      L"Find",
+                                                                L"Resolved",        L"Open",
+                                                                L"Activate"};
+    };
+} // namespace
+
+TEST_CASE("Visual Studio handoff waits for project membership and a resolved engine reference")
+{
+    VisualStudioDispatchFixture solution, item, project, language, references, engine, window;
+    const auto root = std::filesystem::current_path();
+    const auto source = root / "Assets/Player.cs";
+    const auto solutionPath = root / "Game.sln";
+    std::string diagnostic;
+    const auto open = [&]
+    { return Keire::Detail::OpenLoadedVisualStudioProjectItem(solution, source, solutionPath, diagnostic); };
+
+    CHECK_FALSE(open());
+    solution.Objects[L"FindProjectItem"] = &item;
+    CHECK_FALSE(open());
+    item.Objects[L"ContainingProject"] = &project;
+    project.ProjectPath = (root / "Assembly-CSharp.VisualStudio.csproj").wstring();
+    project.Objects[L"Object"] = &language;
+    language.Objects[L"References"] = &references;
+    references.Objects[L"Find"] = &engine;
+    item.Objects[L"Open"] = &window;
+    CHECK_FALSE(open());
+    CHECK(item.Opens == 0);
+
+    engine.Resolved = true;
+    project.ProjectPath = (root / "Other/Foreign.csproj").wstring();
+    CHECK_FALSE(open());
+    CHECK(item.Opens == 0);
+    project.ProjectPath = (root / "Assembly-CSharp.VisualStudio.csproj").wstring();
+    CHECK(open());
+    CHECK(item.Opens == 1);
+    CHECK(window.Activations == 1);
+    CHECK(diagnostic.empty());
+}
 #endif
 
 TEST_CASE("external editor diagnostic arguments keep spaced paths in a single argument")
