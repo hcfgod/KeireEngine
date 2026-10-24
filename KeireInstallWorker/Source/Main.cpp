@@ -22,8 +22,10 @@ namespace
         KeireHub::InstallProduct Product = KeireHub::InstallProduct::Editor;
         std::filesystem::path Source;
         std::filesystem::path Root;
+        std::filesystem::path PreviousRoot;
         bool StartMenu = false;
         bool Desktop = false;
+        bool RepairMissingFiles = false;
     };
 
     [[nodiscard]] std::optional<Arguments> ParseArguments(const int count, char** values)
@@ -51,12 +53,23 @@ namespace
             {
                 result.Root = std::filesystem::absolute(values[index + 1]).lexically_normal();
             }
-            else if (name == "--start-menu" || name == "--desktop")
+            else if (name == "--previous-root")
+            {
+                result.PreviousRoot = std::filesystem::absolute(values[index + 1]).lexically_normal();
+            }
+            else if (name == "--start-menu" || name == "--desktop" || name == "--repair-missing")
             {
                 const std::string_view enabled(values[index + 1]);
                 if (enabled != "0" && enabled != "1")
                     return std::nullopt;
-                (name == "--start-menu" ? result.StartMenu : result.Desktop) = enabled == "1";
+                if (name == "--repair-missing")
+                {
+                    result.RepairMissingFiles = enabled == "1";
+                }
+                else
+                {
+                    (name == "--start-menu" ? result.StartMenu : result.Desktop) = enabled == "1";
+                }
             }
             else
             {
@@ -64,7 +77,10 @@ namespace
             }
         }
         if (result.Root.empty() ||
-            ((result.Command == "install" || result.Command == "install-deferred") && result.Source.empty()))
+            ((result.Command == "install" || result.Command == "install-deferred" ||
+              result.Command == "validate-relocation") &&
+             result.Source.empty()) ||
+            (result.Command == "validate-relocation" && result.PreviousRoot.empty()))
             return std::nullopt;
         return result;
     }
@@ -112,6 +128,16 @@ namespace
         std::cerr << '\n';
     }
 
+    [[nodiscard]] std::string RelocationPathKey(const std::filesystem::path& path)
+    {
+        auto key = KeireHub::Detail::NormalizedInstallPathKey(path);
+        while (!key.empty() && key.back() == '/')
+        {
+            key.pop_back();
+        }
+        return key;
+    }
+
     class CommandTiming final
     {
       public:
@@ -145,26 +171,75 @@ namespace
 int main(const int count, char** values)
 {
     const auto arguments = ParseArguments(count, values);
-    if (!arguments ||
-        (arguments->Command != "install" && arguments->Command != "install-deferred" &&
-         arguments->Command != "commit" && arguments->Command != "verify" &&
-         arguments->Command != "--verify-installation" && arguments->Command != "integrate" &&
-         arguments->Command != "recover" && arguments->Command != "uninstall" && arguments->Command != "prepare"))
+    if (!arguments || (arguments->Command != "install" && arguments->Command != "install-deferred" &&
+                       arguments->Command != "commit" && arguments->Command != "verify" &&
+                       arguments->Command != "--verify-installation" && arguments->Command != "integrate" &&
+                       arguments->Command != "recover" && arguments->Command != "uninstall" &&
+                       arguments->Command != "prepare" && arguments->Command != "validate-relocation"))
     {
         std::cerr << "Usage: KeireInstallWorker "
-                     "<prepare|install|install-deferred|integrate|commit|--verify-installation|recover|uninstall> "
+                     "<prepare|install|install-deferred|integrate|commit|--verify-installation|recover|uninstall|"
+                     "validate-relocation> "
                      "--product <editor|hub> "
                      "--root <absolute-path> [--source <absolute-path>] "
-                     "[--start-menu <0|1>] [--desktop <0|1>]\n";
+                     "[--previous-root <absolute-path>] [--start-menu <0|1>] [--desktop <0|1>] "
+                     "[--repair-missing <0|1>]\n";
         return 64;
     }
     CommandTiming timing(arguments->Command);
     auto registrationStore = KeireInstallWorker::CreateProductRegistrationStore(arguments->Product);
+    if (arguments->Command == "validate-relocation")
+    {
+        // This is deliberately read-only: removal and the new install remain separate, explicit transactions.
+        const auto active = registrationStore.Read(arguments->Product);
+        if (!active)
+        {
+            PrintError(active.Error());
+            return 1;
+        }
+        const auto oldKey = RelocationPathKey(arguments->PreviousRoot);
+        const auto newKey = RelocationPathKey(arguments->Root);
+        if (arguments->Product != KeireHub::InstallProduct::Hub || !active.Value() ||
+            RelocationPathKey(active.Value()->Root) != oldKey || oldKey == newKey || oldKey.starts_with(newKey + "/") ||
+            newKey.starts_with(oldKey + "/"))
+        {
+            std::cerr << "Relocation requires the registered Hub and a distinct, non-nested destination.\n";
+            return 1;
+        }
+        if (const auto tree = KeireHub::Detail::ValidateInstallTree(arguments->Root, true); !tree)
+        {
+            PrintError(tree.Error());
+            return 1;
+        }
+        if (const auto path = KeireHub::Detail::ValidateInstallMutationPath(arguments->Root.root_path(),
+                                                                            arguments->Root.relative_path(), true);
+            !path)
+        {
+            PrintError(path.Error());
+            return 1;
+        }
+        std::error_code error;
+        const bool exists = std::filesystem::exists(arguments->Root, error);
+        if (error || (exists && (!std::filesystem::is_directory(arguments->Root, error) || error ||
+                                 !std::filesystem::is_empty(arguments->Root, error) || error)))
+        {
+            std::cerr << "The new Hub location must be an empty folder or an unused path.\n";
+            return 1;
+        }
+        const auto manifest = KeireHub::Detail::ReadInstallerPackageManifest(arguments->Source, arguments->Product);
+        if (!manifest)
+        {
+            PrintError(manifest.Error());
+            return 1;
+        }
+        return 0;
+    }
     KeireHub::InstallTransactionRequest request{.Product = arguments->Product,
                                                 .SourceRoot = arguments->Source,
                                                 .DestinationRoot = arguments->Root,
                                                 .Registration = registrationStore,
-                                                .DeferCommit = arguments->Command == "install-deferred"};
+                                                .DeferCommit = arguments->Command == "install-deferred",
+                                                .RepairMissingFiles = arguments->RepairMissingFiles};
 #if defined(KEIRE_INSTALL_WORKER_FAULT_INJECTION)
     const auto fault = FaultPhase();
 #endif

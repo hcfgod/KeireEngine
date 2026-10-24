@@ -2,6 +2,7 @@ Unicode True
 
 !include "FileFunc.nsh"
 !include "MUI2.nsh"
+!include "nsDialogs.nsh"
 
 !ifndef PRODUCT_IDENTIFIER
     !error "PRODUCT_IDENTIFIER is required."
@@ -39,7 +40,9 @@ Unicode True
 
 !define PRODUCT_NAME "${PRODUCT_DISPLAY_NAME} Hub"
 !define INSTALL_FOLDER_NAME "${PRODUCT_IDENTIFIER} Hub"
-!define HUB_REGISTRY_KEY "Software\${PRODUCT_IDENTIFIER}\HubInstaller"
+!ifndef HUB_REGISTRY_KEY
+    !define HUB_REGISTRY_KEY "Software\${PRODUCT_IDENTIFIER}\HubInstaller"
+!endif
 !ifndef INSTALL_OWNERSHIP_IDENTIFIER
     !define INSTALL_OWNERSHIP_IDENTIFIER "${PRODUCT_IDENTIFIER}"
 !endif
@@ -58,6 +61,13 @@ Var KeireInstallWorkerPending
 Var KeireHubStartMenuSelected
 Var KeireHubDesktopSelected
 Var KeireExtractionStarted
+Var KeireHubExistingRoot
+Var KeireHubMaintenance
+Var KeireHubRepairChoice
+Var KeireHubRemoveChoice
+Var KeireHubRelocateChoice
+Var KeireHubPreviousRemoved
+Var KeireHubRepairMissing
 
 !macro KeireHubTestTrace MESSAGE
 !ifdef KEIRE_INSTALL_TEST_TRACE_PATH
@@ -203,6 +213,27 @@ HubUpdateInitInvalid:
     Call ReleaseHubInstallerMutex
     Abort
 HubUpdateInitDone:
+    StrCpy $KeireHubPreviousRemoved "0"
+    StrCpy $KeireHubRepairMissing "0"
+    StrCpy $KeireHubMaintenance ""
+    StrCmp $KeireHubUpdateMode "1" HubMaintenanceInitDone
+    ReadRegStr $KeireHubExistingRoot HKCU "${HUB_REGISTRY_KEY}" "InstallDirectory"
+    ${GetParameters} $0
+    ClearErrors
+    ${GetOptions} $0 "/MAINTENANCE=" $KeireHubMaintenance
+    IfErrors HubMaintenanceInitDone
+    StrCmp $KeireHubExistingRoot "" HubMaintenanceInvalid
+    StrCmp $KeireHubMaintenance "repair" HubMaintenanceUseExisting
+    StrCmp $KeireHubMaintenance "uninstall" HubMaintenanceUseExisting
+    StrCmp $KeireHubMaintenance "relocate" HubMaintenanceInitDone
+HubMaintenanceInvalid:
+    MessageBox MB_ICONSTOP|MB_OK "Maintenance requires an existing Hub and /MAINTENANCE=repair, uninstall, or relocate." /SD IDOK
+    SetErrorLevel 1
+    Call ReleaseHubInstallerMutex
+    Abort
+HubMaintenanceUseExisting:
+    StrCpy $INSTDIR $KeireHubExistingRoot
+HubMaintenanceInitDone:
 FunctionEnd
 
 Function .onGUIEnd
@@ -211,12 +242,72 @@ Function .onGUIEnd
 FunctionEnd
 
 Function SkipUpdateDirectoryPage
-    StrCmp $KeireHubUpdateMode "1" 0 +2
+    StrCmp $KeireHubUpdateMode "1" SkipHubDirectory
+    StrCmp $KeireHubMaintenance "repair" SkipHubDirectory
+    StrCmp $KeireHubMaintenance "uninstall" SkipHubDirectory SkipHubDirectoryDone
+SkipHubDirectory:
+    Abort
+SkipHubDirectoryDone:
+FunctionEnd
+
+Function HubMaintenancePage
+    StrCmp $KeireHubUpdateMode "1" HubMaintenancePageSkip
+    StrCmp $KeireHubExistingRoot "" HubMaintenancePageSkip
+    !insertmacro MUI_HEADER_TEXT "Existing Hub installation" "Choose how to manage the installed Hub."
+    nsDialogs::Create 1018
+    Pop $0
+    StrCmp $0 "error" HubMaintenancePageSkip
+    ${NSD_CreateLabel} 0 0 100% 30u "Installed at:$\r$\n$KeireHubExistingRoot"
+    Pop $0
+    ${NSD_CreateRadioButton} 0 38u 100% 14u "Repair / update this installation"
+    Pop $KeireHubRepairChoice
+    ${NSD_CreateRadioButton} 0 58u 100% 14u "Uninstall the Hub"
+    Pop $KeireHubRemoveChoice
+    ${NSD_CreateRadioButton} 0 78u 100% 14u "Install in a new location (remove the current Hub first)"
+    Pop $KeireHubRelocateChoice
+    ${NSD_CreateLabel} 0 100u 100% 52u "Close the Hub before continuing. Projects and unrelated files are preserved. Moving is uninstall followed by install, not an atomic move. If the new install fails after removal, run setup again."
+    Pop $0
+    StrCmp $KeireHubMaintenance "uninstall" HubMaintenanceCheckRemove
+    StrCmp $KeireHubMaintenance "relocate" HubMaintenanceCheckRelocate
+    ${NSD_Check} $KeireHubRepairChoice
+    Goto HubMaintenanceShow
+HubMaintenanceCheckRemove:
+    ${NSD_Check} $KeireHubRemoveChoice
+    Goto HubMaintenanceShow
+HubMaintenanceCheckRelocate:
+    ${NSD_Check} $KeireHubRelocateChoice
+HubMaintenanceShow:
+    nsDialogs::Show
+    Return
+HubMaintenancePageSkip:
+    Abort
+FunctionEnd
+
+Function HubMaintenancePageLeave
+    ${NSD_GetState} $KeireHubRelocateChoice $0
+    StrCmp $0 ${BST_CHECKED} HubMaintenanceSelectRelocate
+    ${NSD_GetState} $KeireHubRemoveChoice $0
+    StrCmp $0 ${BST_CHECKED} HubMaintenanceSelectRemove
+    StrCpy $KeireHubMaintenance "repair"
+    StrCpy $INSTDIR $KeireHubExistingRoot
+    Return
+HubMaintenanceSelectRemove:
+    StrCpy $KeireHubMaintenance "uninstall"
+    StrCpy $INSTDIR $KeireHubExistingRoot
+    Return
+HubMaintenanceSelectRelocate:
+    StrCpy $KeireHubMaintenance "relocate"
+FunctionEnd
+
+Function SkipUninstallComponents
+    StrCmp $KeireHubMaintenance "uninstall" 0 +2
     Abort
 FunctionEnd
 
 !insertmacro MUI_PAGE_WELCOME
 !insertmacro MUI_PAGE_LICENSE "${LICENSE_PATH}"
+Page custom HubMaintenancePage HubMaintenancePageLeave
+!define MUI_PAGE_CUSTOMFUNCTION_PRE SkipUninstallComponents
 !insertmacro MUI_PAGE_COMPONENTS
 !define MUI_PAGE_CUSTOMFUNCTION_PRE SkipUpdateDirectoryPage
 !insertmacro MUI_PAGE_DIRECTORY
@@ -240,7 +331,23 @@ Section "${PRODUCT_NAME} (required)" MainSection
     File /oname=KeireInstallWorker.exe "${SOURCE_DIRECTORY}\bin\KeireInstallWorker.exe"
     !insertmacro KeireHubTestTrace "embedded worker extracted"
     DetailPrint "Checking the installation folder before extracting the Hub..."
-    nsExec::ExecToStack '"$PLUGINSDIR\KeireInstallWorker.exe" prepare --product hub --root "$INSTDIR"'
+    ; Modern uninstall validates ownership itself and preserves modified files. Full repair preparation would
+    ; reject that drift before uninstall could preserve it. Legacy roots still need worker-owned migration.
+    StrCmp $KeireHubMaintenance "uninstall" HubPrepareRemoval
+    StrCmp $KeireHubMaintenance "relocate" HubPrepareRemoval
+    Goto HubPrepareDestination
+HubPrepareRemoval:
+    IfFileExists "$KeireHubExistingRoot\.keire-install-receipt.json" HubDestinationReady
+    StrCmp $KeireHubMaintenance "relocate" HubPreparePrevious
+    Goto HubPrepareDestination
+HubPreparePrevious:
+    nsExec::ExecToStack '"$PLUGINSDIR\KeireInstallWorker.exe" prepare --product hub --root "$KeireHubExistingRoot"'
+    Goto HubPreparedOutput
+HubPrepareDestination:
+    StrCmp $KeireHubMaintenance "repair" 0 +2
+    StrCpy $KeireHubRepairMissing "1"
+    nsExec::ExecToStack '"$PLUGINSDIR\KeireInstallWorker.exe" prepare --product hub --root "$INSTDIR" --repair-missing $KeireHubRepairMissing'
+HubPreparedOutput:
     Pop $0
     Pop $1
     DetailPrint "$1"
@@ -251,6 +358,19 @@ Section "${PRODUCT_NAME} (required)" MainSection
     SetErrorLevel 1
     Abort
 HubDestinationReady:
+    StrCmp $KeireHubMaintenance "uninstall" HubRemoveOnly
+    Goto HubExtractPayload
+HubRemoveOnly:
+    nsExec::ExecToStack '"$PLUGINSDIR\KeireInstallWorker.exe" uninstall --product hub --root "$KeireHubExistingRoot"'
+    Pop $0
+    Pop $1
+    DetailPrint "$1"
+    !insertmacro KeireHubTestTrace "maintenance uninstall exit=$0 output=$1"
+    StrCmp $0 "0" 0 HubInstallWorkerFailed
+    MessageBox MB_ICONINFORMATION|MB_OK "The Hub was uninstalled. Projects and unrelated files were preserved." /SD IDOK
+    SetErrorLevel 0
+    Quit
+HubExtractPayload:
     System::Call 'kernel32::GetTickCount()i .r0'
     StrCpy $KeireExtractionStarted $0
     DetailPrint "Extracting Hub files..."
@@ -275,8 +395,24 @@ HubDestinationReady:
 !ifdef KEIRE_HUB_TEST_FAIL_DURING_STAGE
     Goto HubInstallWorkerFailed
 !endif
+    StrCmp $KeireHubMaintenance "relocate" 0 HubInstallPayload
+    DetailPrint "Validating the new location and payload before removing the previous Hub..."
+    nsExec::ExecToStack '"$PLUGINSDIR\KeireInstallWorker.exe" validate-relocation --product hub --source "$PLUGINSDIR\payload" --root "$INSTDIR" --previous-root "$KeireHubExistingRoot"'
+    Pop $0
+    Pop $1
+    DetailPrint "$1"
+    !insertmacro KeireHubTestTrace "relocation preflight exit=$0 output=$1"
+    StrCmp $0 "0" 0 HubInstallWorkerFailed
+    nsExec::ExecToStack '"$PLUGINSDIR\KeireInstallWorker.exe" uninstall --product hub --root "$KeireHubExistingRoot"'
+    Pop $0
+    Pop $1
+    DetailPrint "$1"
+    !insertmacro KeireHubTestTrace "relocation uninstall exit=$0 output=$1"
+    StrCmp $0 "0" 0 HubInstallWorkerFailed
+    StrCpy $KeireHubPreviousRemoved "1"
+HubInstallPayload:
     DetailPrint "Verifying and installing the Hub payload..."
-    nsExec::ExecToLog '"$PLUGINSDIR\KeireInstallWorker.exe" install-deferred --product hub --source "$PLUGINSDIR\payload" --root "$INSTDIR"'
+    nsExec::ExecToLog '"$PLUGINSDIR\KeireInstallWorker.exe" install-deferred --product hub --source "$PLUGINSDIR\payload" --root "$INSTDIR" --repair-missing $KeireHubRepairMissing'
     Pop $0
     StrCpy $1 "See the installation details for the completed phases and any file verification errors."
     !insertmacro KeireHubTestTrace "install-deferred exit=$0 output=$1"
@@ -290,8 +426,14 @@ HubDestinationReady:
 HubInstallWorkerRecover:
     Call RecoverPendingHubInstall
 HubInstallWorkerFailed:
+    SetErrorLevel 1
+    StrCmp $KeireHubPreviousRemoved "1" 0 HubInstallPreviousPreserved
     MessageBox MB_ICONSTOP|MB_OK \
-        "The Hub install worker rejected or rolled back the transaction. Existing and unrelated files were preserved." \
+        "The previous Hub was removed, but the new installation did not finish. Projects and unrelated files were preserved. Run setup again to install the Hub." /SD IDOK
+    Abort
+HubInstallPreviousPreserved:
+    MessageBox MB_ICONSTOP|MB_OK \
+        "The Hub operation did not finish. See the installation details for the rejected or recovered step. Unrelated files were preserved." \
         /SD IDOK
     Abort
 HubInstallWorkerPrepared:
@@ -327,6 +469,12 @@ Section "-Finalize Hub installation" HubInstallWorkerCommitSection
     Goto HubInstallWorkerCommitDone
 HubInstallWorkerShellRollback:
     Call RecoverPendingHubInstall
+    SetErrorLevel 1
+    StrCmp $KeireHubPreviousRemoved "1" 0 HubInstallWorkerRepairRollback
+    MessageBox MB_ICONSTOP|MB_OK \
+        "The new Hub installation could not be finalized and was rolled back when safe. The previous Hub was already removed. Run setup again; projects and unrelated files were preserved." /SD IDOK
+    Abort
+HubInstallWorkerRepairRollback:
     MessageBox MB_ICONSTOP|MB_OK \
         "Hub shortcut creation or final commit failed. The previous installation was restored when safe." /SD IDOK
     Abort

@@ -6,6 +6,7 @@
 #include "KeireHub/HubDistributionWorkflow.h"
 #include "KeireHub/HubLocalContent.h"
 #include "KeireHub/HubProductUi.h"
+#include "KeireHubInternal/HubAccountNotice.h"
 
 #include "KeireHubRuntime/HubActivationProtocol.h"
 #include "KeireHubRuntime/MarketplaceCache.h"
@@ -230,6 +231,7 @@ namespace KeireHub
 
     void HubAccountIntegration::ApplyMarketplaceNotice(std::string& notice, bool& noticeError)
     {
+        ApplyBrowserSignInCompletionNotice(*m_Workflow.Snapshot(), notice, noticeError);
         const auto marketplace = m_Marketplace.Snapshot();
         if (marketplace->Running || marketplace->Completion == 0U ||
             marketplace->Completion == m_HandledMarketplaceCompletion)

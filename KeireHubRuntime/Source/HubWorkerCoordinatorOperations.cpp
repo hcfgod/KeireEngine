@@ -1,5 +1,7 @@
 #include <KeireHubRuntimeInternal/HubWorkerCoordinatorOperations.h>
 
+#include <KeireHubRuntimeInternal/InstallMutationFileSystem.h>
+#include <KeireHubRuntimeInternal/InstallTransactionInternal.h>
 #include <KeireHubRuntimeInternal/Persistence.h>
 
 #include <algorithm>
@@ -7,6 +9,7 @@
 #include <ranges>
 #include <system_error>
 #include <utility>
+#include <vector>
 
 namespace KeireHub::Detail
 {
@@ -80,49 +83,84 @@ namespace KeireHub::Detail
 
     HubStatus PrepareManagedEditorRoot(const std::filesystem::path& root, const std::string& taskId)
     {
-        std::error_code error;
-        auto status = std::filesystem::symlink_status(root, error);
-        if (error && error.default_error_condition() != std::errc::no_such_file_or_directory)
+        if (!root.is_absolute())
         {
-            return HubStatus::Failure({.Code = HubErrorCode::IoRead,
-                                       .Message = "The editor installation root could not be inspected.",
-                                       .Retryable = true,
-                                       .AffectedItem = taskId,
-                                       .TechnicalDetails = error.message()});
-        }
-        if (!error && status.type() != std::filesystem::file_type::not_found)
-        {
-            if (std::filesystem::is_directory(status) && !std::filesystem::is_symlink(status))
-                return HubStatus::Success();
             return HubStatus::Failure({.Code = HubErrorCode::UnsafeInstallRoot,
-                                       .Message = "The editor installation root is occupied by an unsafe object.",
+                                       .Message = "Choose an absolute editor installation folder.",
                                        .AffectedItem = taskId});
         }
+        for (const auto& component : root.relative_path())
+        {
+            if (component == "..")
+            {
+                return HubStatus::Failure(
+                    {.Code = HubErrorCode::UnsafeInstallRoot,
+                     .Message = "The editor installation folder must not contain parent traversal.",
+                     .AffectedItem = taskId});
+            }
+        }
 
-        error.clear();
-        const auto parentStatus = std::filesystem::symlink_status(root.parent_path(), error);
-        if (error || !std::filesystem::is_directory(parentStatus) || std::filesystem::is_symlink(parentStatus))
+        auto normalizedRoot = root.lexically_normal();
+        if (normalizedRoot.filename().empty() && normalizedRoot != normalizedRoot.root_path())
         {
-            return HubStatus::Failure({.Code = HubErrorCode::UnsafeInstallRoot,
-                                       .Message = "The editor installation root parent is unavailable or unsafe.",
-                                       .AffectedItem = taskId,
-                                       .TechnicalDetails = error ? error.message() : std::string{}});
+            normalizedRoot = normalizedRoot.parent_path();
         }
-        if (!std::filesystem::create_directory(root, error) && error)
+        // This is the destination's parent, so a drive root is valid for installations such as D:\\Editor.
+        if (normalizedRoot != normalizedRoot.root_path())
         {
-            return HubStatus::Failure({.Code = HubErrorCode::IoWrite,
-                                       .Message = "The editor installation root could not be created.",
-                                       .Retryable = true,
-                                       .AffectedItem = taskId,
-                                       .TechnicalDetails = error.message()});
+            if (const auto safe =
+                    ValidateInstallMutationPath(normalizedRoot.root_path(), normalizedRoot.relative_path(), true);
+                !safe)
+            {
+                return safe;
+            }
         }
-        status = std::filesystem::symlink_status(root, error);
-        if (error || !std::filesystem::is_directory(status) || std::filesystem::is_symlink(status))
+
+        std::vector<std::filesystem::path> missing;
+        auto current = normalizedRoot;
+        while (!current.empty())
         {
-            return HubStatus::Failure({.Code = HubErrorCode::UnsafeInstallRoot,
-                                       .Message = "The created editor installation root is unsafe.",
-                                       .AffectedItem = taskId,
-                                       .TechnicalDetails = error ? error.message() : std::string{}});
+            std::error_code error;
+            const auto status = std::filesystem::symlink_status(current, error);
+            if (status.type() == std::filesystem::file_type::not_found ||
+                error.default_error_condition() == std::errc::no_such_file_or_directory)
+            {
+                const auto parent = current.parent_path();
+                if (parent.empty() || parent == current)
+                {
+                    return HubStatus::Failure({.Code = HubErrorCode::UnsafeInstallRoot,
+                                               .Message = "The selected editor installation drive is unavailable.",
+                                               .AffectedItem = taskId,
+                                               .TechnicalDetails = PathToUtf8(current)});
+                }
+                missing.push_back(current);
+                current = parent;
+                continue;
+            }
+            if (error || !std::filesystem::is_directory(status) || std::filesystem::is_symlink(status))
+            {
+                return HubStatus::Failure(
+                    {.Code = HubErrorCode::UnsafeInstallRoot,
+                     .Message = "The editor installation path contains an unavailable folder, file, or link.",
+                     .AffectedItem = taskId,
+                     .TechnicalDetails = PathToUtf8(current) + (error ? ": " + error.message() : "")});
+            }
+            break;
+        }
+
+        // Match transaction parent preparation: create one ordinary directory at a time and keep new parents pinned.
+        InstallMutationAuthority mutation;
+        for (auto iterator = missing.rbegin(); iterator != missing.rend(); ++iterator)
+        {
+            if (const auto pinned = mutation.Pin(*iterator, true, true); !pinned)
+            {
+                return HubStatus::Failure(
+                    {.Code = pinned.Error().Code,
+                     .Message =
+                         "The editor installation folder could not be created safely. Choose a writable location.",
+                     .AffectedItem = taskId,
+                     .TechnicalDetails = PathToUtf8(*iterator) + ": " + pinned.Error().TechnicalDetails});
+            }
         }
         return HubStatus::Success();
     }

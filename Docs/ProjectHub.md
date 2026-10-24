@@ -318,6 +318,10 @@ executable. A Hub launched directly from a build or portable directory therefore
 installer or administrator access. Registration is transactional: a failed update restores the previous values before
 the browser flow begins.
 
+The browser callback reports only that an app link was requested; elapsed time, focus loss, and tab visibility cannot
+prove whether Hub opened or signed in. Recovery help is optional, and the Hub account status is authoritative. Inside
+Hub, the temporary code-exchange notice resolves to the actual sign-in result without replacing unrelated notices.
+
 If the user is signed out, Hub retains the requested product ID in memory and opens the account dialog. After sign-in,
 Hub synchronizes My Assets and prepares the package without exposing the access token to the Editor. If an Editor is
 already open, its Package Manager observes the atomic token-free cache update. Hub renews a short-lived, token-free

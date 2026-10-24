@@ -1872,6 +1872,13 @@ neighbors, and never recursively deletes the selected root. The real Editor and 
 pre-Application `--verify-installation` handler that revalidates the product's exact schema-2 package manifest and file
 inventory without creating preferences, projects, windows, singleton activation, or network clients. NSIS runs that
 handler with a bounded timeout while rollback is still possible. Linux and macOS installer authorities are unchanged.
+
+Explicit missing-file repair retains the same receipt, marker, and registration checks, but permits absent owned payload
+files while requiring every present file to match its recorded hash. The transaction journal records this policy so a
+fresh recovery process can restore a sparse backup without inventing files that were missing before repair. Modified
+owned files remain conflicts. Hub relocation is separately disclosed uninstall-then-install: its read-only preflight
+validates the new destination, ancestor links, active previous registration, and complete extracted payload before
+removal. It does not bypass the single registered-root guard or promise atomic rollback across roots.
 NSIS extracts only the worker before calling `prepare`: it recovers pending transactions, validates the destination,
 and can migrate a verified legacy installation before payload extraction. Installation repeats these checks; preparation
 does not grant lasting mutation authority. Receipt-less transaction scaffolding is removed only after a directory-only

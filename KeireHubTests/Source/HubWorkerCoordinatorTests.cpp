@@ -503,6 +503,69 @@ TEST_CASE("Worker coordinator rejects non-installer packages as Hub updates")
     CHECK(status.Error().Code == HubErrorCode::PackageManifestInvalid);
 }
 
+TEST_CASE("Managed editor roots create missing custom parent folders and preserve existing contents")
+{
+    KeireHubTests::TemporaryDirectory temporary;
+    const auto root = temporary.Path() / std::filesystem::path(u8"Downloads/Kéire/Hub/Editors");
+    REQUIRE(Detail::PrepareManagedEditorRoot(root, "custom-editor-root"));
+    CHECK(std::filesystem::is_directory(root));
+    KeireHubTests::WriteText(root / "keep.txt", "existing content");
+    REQUIRE(Detail::PrepareManagedEditorRoot(root, "existing-editor-root"));
+    CHECK(KeireHubTests::ReadText(root / "keep.txt") == "existing content");
+    REQUIRE(Detail::PrepareManagedEditorRoot(root / "Nested" / "", "trailing-separator"));
+    REQUIRE(Detail::PrepareManagedEditorRoot(root / "." / "Another", "current-directory-component"));
+    CHECK(std::filesystem::is_directory(root / "Nested"));
+    CHECK(std::filesystem::is_directory(root / "Another"));
+}
+
+TEST_CASE("Managed editor roots reject unsafe parents and ambiguous destinations")
+{
+    KeireHubTests::TemporaryDirectory temporary;
+    const auto occupied = temporary.Path() / "occupied";
+    KeireHubTests::WriteText(occupied, "preserve me");
+    CHECK_FALSE(Detail::PrepareManagedEditorRoot(occupied / "Hub" / "Editors", "file-parent"));
+    CHECK(KeireHubTests::ReadText(occupied) == "preserve me");
+    CHECK_FALSE(Detail::PrepareManagedEditorRoot({}, "empty-root"));
+    CHECK_FALSE(Detail::PrepareManagedEditorRoot("relative/Editors", "relative-root"));
+    CHECK(Detail::PrepareManagedEditorRoot(temporary.Path().root_path(), "drive-root-parent"));
+    CHECK_FALSE(Detail::PrepareManagedEditorRoot(temporary.Path() / "unused" / ".." / "Editors", "traversal"));
+    CHECK_FALSE(std::filesystem::exists(temporary.Path() / "unused"));
+}
+
+TEST_CASE("Managed editor roots do not follow linked ancestors")
+{
+    KeireHubTests::TemporaryDirectory temporary;
+    KeireHubTests::TemporaryDirectory outside;
+    const auto link = temporary.Path() / "linked";
+    std::error_code error;
+    std::filesystem::create_directory_symlink(outside.Path(), link, error);
+    if (error)
+    {
+        MESSAGE("Directory symlink creation is not available: " << error.message());
+        return;
+    }
+    CHECK_FALSE(Detail::PrepareManagedEditorRoot(link / "Hub" / "Editors", "linked-parent"));
+    CHECK_FALSE(std::filesystem::exists(outside.Path() / "Hub"));
+}
+
+#if defined(_WIN32)
+TEST_CASE("Managed editor roots fail promptly when the selected drive is unavailable")
+{
+    for (wchar_t letter = L'Z'; letter >= L'D'; --letter)
+    {
+        std::wstring drive = L"Z:\\";
+        drive.front() = letter;
+        std::error_code error;
+        if (!std::filesystem::exists(drive, error) && !error)
+        {
+            CHECK_FALSE(Detail::PrepareManagedEditorRoot(std::filesystem::path(drive) / "Editors", "missing-drive"));
+            return;
+        }
+    }
+    MESSAGE("No unused drive letter is available for this test.");
+}
+#endif
+
 TEST_CASE("Worker coordinator preserves catalog-bound editor installs through completion and restart")
 {
     KeireHubTests::TemporaryDirectory temporary;
@@ -519,7 +582,13 @@ TEST_CASE("Worker coordinator preserves catalog-bound editor installs through co
     auto created = HubWorkerCoordinator::Create(Specification(temporary.Path()), std::move(host));
     REQUIRE(created);
     auto coordinator = std::move(created).Value();
-    const auto install = EditorInstall(temporary.Path());
+    auto install = EditorInstall(temporary.Path());
+    SUBCASE("New default parent") {}
+    SUBCASE("Nested custom Unicode parent")
+    {
+        install.AllowedInstallRoot = temporary.Path() / std::filesystem::path(u8"Downloads/Kéire/Hub/Editors");
+        install.Destination = install.AllowedInstallRoot / "1.0.0";
+    }
     CHECK_FALSE(std::filesystem::exists(install.AllowedInstallRoot));
     REQUIRE(coordinator->QueueEditorInstall(install));
     REQUIRE(WaitUntil([&] { return HasState(*coordinator, "install-editor", HubTaskState::Completed); }));

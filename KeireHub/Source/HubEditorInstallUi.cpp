@@ -46,7 +46,7 @@ namespace KeireHub
 
         [[nodiscard]] std::string Utf8Path(const std::filesystem::path& path)
         {
-            const auto value = path.generic_u8string();
+            const auto value = std::filesystem::path(path).make_preferred().u8string();
             return {reinterpret_cast<const char*>(value.data()), value.size()};
         }
 

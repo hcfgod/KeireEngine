@@ -580,8 +580,18 @@ Windows Editor and Hub installers use the shared first-party install worker for 
 rollback, reparse-safe destination checks, and drift-preserving uninstall. Fresh installs require an absent or empty
 ordinary directory; unknown and modified neighboring files are never recursively removed.
 Missing parent folders are created when installation begins; choosing a destination during preparation does not create them.
-Setup checks the destination before extracting the large payload. If the product is already registered elsewhere,
-select that installation folder to upgrade it, or uninstall it from Windows Settings before choosing another folder.
+Hub setup detects an existing installation and offers **Repair / update**, **Uninstall**, or **Install in a new location**.
+Repair restores missing receipt-owned payload files. Modified owned files produce an actionable conflict rather than
+being overwritten; missing or altered ownership metadata still requires investigation. Interrupted repairs restore the
+original state, including files that were already missing, before allowing another attempt.
+The new-location option validates the extracted payload and an empty, non-nested destination before uninstalling the
+previous Hub. This is an explicit uninstall followed by install, not an atomic relocation: if installation fails after
+removal, run setup again. Projects and unrelated files stay in their existing locations. Silent maintenance uses
+`/MAINTENANCE=repair`, `/MAINTENANCE=uninstall`, or `/MAINTENANCE=relocate /D=<new-path>` (`/D` must be last).
+Without an explicit maintenance choice, setup still rejects another registered root instead of replacing its ownership.
+Editor setup checks the destination before extracting its large payload; select the registered installation folder to
+upgrade, or uninstall it from Windows Settings before choosing another folder. Hub-managed Editor installs also create
+missing custom parent folders when installation begins, after validating the destination.
 If the registered folder was deleted or is empty, setup can reinstall into that same location without manual registry edits.
 Editor setup verifies every installed file, including the bundled SDK, and allows up to five minutes for this check.
 If verification times out, setup rolls back and asks you to close disk-intensive applications before retrying.
@@ -896,6 +906,8 @@ Hub builds now use `https://keireengine.duckdns.org` with the registered `keire-
 `Config/Supabase.json` filename is retained for package compatibility; schemas 1 and 2 remain supported for legacy
 deployments. A rebuilt/reinstalled Hub is required to replace older packaged configuration. Browser sign-in and
 callback acceptance must be retested against the deployed native service before release.
+The browser callback provides an explicit **Open Hub** action rather than repeatedly launching protocol requests.
+After Hub completes the token exchange, its temporary sign-in progress notice changes to success or the actual error.
 Saved Hub logins now record the account provider, server origin, and OAuth client inside protected storage.
 Changing those settings requires signing in again before a refresh token is sent. Older saved logins without this
 binding also require one fresh sign-in; user projects and installed packages are unaffected.

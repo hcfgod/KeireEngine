@@ -4,6 +4,7 @@
 
 #include "KeireHub/HubProjectUiSupport.h"
 #include "KeireHub/HubRuntimeUiBridge.h"
+#include "KeireHubInternal/HubAccountNotice.h"
 
 #include <algorithm>
 #include <exception>
@@ -143,8 +144,7 @@ namespace KeireHub
                 break;
             }
             NotifyActivation(controller, NotificationSeverity::Info, "Hub sign-in continuing",
-                             "The authorization code was accepted and is being exchanged securely.", notice,
-                             noticeError);
+                             std::string(BrowserSignInProgressNotice), notice, noticeError);
             break;
         }
         case HubActivationAction::MarketplaceProduct:

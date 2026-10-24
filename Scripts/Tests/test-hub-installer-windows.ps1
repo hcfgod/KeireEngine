@@ -1,3 +1,6 @@
+[CmdletBinding()]
+param([switch]$SourceOnly)
+
 $ErrorActionPreference = "Stop"
 if (Get-Variable -Name PSNativeCommandUseErrorActionPreference -ErrorAction SilentlyContinue) {
     $PSNativeCommandUseErrorActionPreference = $false
@@ -35,6 +38,14 @@ foreach ($contract in @('RequestExecutionLevel user', 'MUI_PAGE_LICENSE', 'MUI_P
         '/INSTALL_ROOT=', '/RESUME_TOKEN=', '/WAIT_PROCESS=', 'WaitForSingleObject')) {
     if (-not $template.Contains($contract)) {
         throw "The worker-authority Hub NSIS template is missing '$contract'."
+    }
+}
+foreach ($contract in @('Page custom HubMaintenancePage HubMaintenancePageLeave',
+        '/MAINTENANCE=', 'Repair / update this installation', 'Uninstall the Hub',
+        'Install in a new location', 'not an atomic move', 'validate-relocation --product hub',
+        'KeireHubPreviousRemoved', 'The previous Hub was removed')) {
+    if (-not $template.Contains($contract)) {
+        throw "Hub maintenance choice or safety disclosure is missing '$contract'."
     }
 }
 if ($template.Contains('SetCompressor /SOLID')) {
@@ -130,6 +141,11 @@ foreach ($contract in @('$installWorkerTarget', 'KEIRE_INSTALL_WORKER_INTERRUPT_
     if (-not $hubPackage.Contains($contract)) {
         throw "The Hub package must enforce the production install-worker boundary '$contract'."
     }
+}
+
+if ($SourceOnly) {
+    Write-Host 'Hub installer source contracts passed; runtime checks were not requested.'
+    return
 }
 
 & (Join-Path $PSScriptRoot "prepare-install-worker-runtime-windows.ps1")

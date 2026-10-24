@@ -32,14 +32,15 @@ const success = Boolean(validCode && validState);
                     <p class="form-message" role="status" aria-live="polite" data-hub-handoff-status>
                         Your browser may ask for permission to open Kéire Hub.
                     </p>
-                    <div class="hub-handoff__recovery" data-hub-handoff-recovery hidden>
-                        <strong>Kéire Hub did not open?</strong>
-                        <p>A current Hub installation registers the secure <code>keirehub</code> app link. Repair or reinstall the Hub, keep it open, and retry this handoff before the authorization code expires.</p>
+                    <details class="hub-handoff__recovery" data-hub-handoff-recovery>
+                        <summary>Need help opening Kéire Hub?</summary>
+                        <p>This page cannot verify whether the app opened or sign-in finished. Check your account status in the Hub; if it shows you are signed in, you can close this tab.</p>
+                        <p>If nothing opened, approve your browser's app-link prompt and try again. A current Hub installation registers the secure <code>keirehub</code> app link. Repair or reinstall only if the link is unavailable. If the code expired or was already used, start a new sign-in from the Hub.</p>
                         <div class="actions">
                             <a class="button button--secondary" href={hubUrl} rel="noreferrer" data-hub-handoff>Try again</a>
                             <a class="button button--secondary" href="/downloads/">Repair or reinstall Hub</a>
                         </div>
-                    </div>
+                    </details>
                 </div>
             )}
             <p class="fine-print">This page forwards only the bounded authorization response. It never exchanges the code, receives Hub tokens, or transfers browser cookies.</p>
@@ -50,39 +51,13 @@ const success = Boolean(validCode && validState);
 <script>
     const handoffLinks = [...document.querySelectorAll("[data-hub-handoff]")];
     const handoffStatus = document.querySelector("[data-hub-handoff-status]");
-    const handoffRecovery = document.querySelector("[data-hub-handoff-recovery]");
-    let handoffAttempt = 0;
-
-    const reportBrowserHandoff = () => {
-        if (!handoffAttempt || !(handoffStatus instanceof HTMLElement)) return;
-        handoffStatus.textContent = "The browser handed off the request. Return to Kéire Hub to finish signing in.";
-        handoffStatus.dataset.kind = "success";
-    };
 
     for (const link of handoffLinks) {
         link.addEventListener("click", () => {
-            handoffAttempt += 1;
             if (handoffStatus instanceof HTMLElement) {
-                handoffStatus.textContent = "Opening Kéire Hub… Approve the browser prompt if one appears.";
-                handoffStatus.dataset.kind = "success";
+                handoffStatus.textContent = "App link requested. Approve the browser prompt if one appears, then check your sign-in status in Kéire Hub. This page cannot confirm the result.";
+                delete handoffStatus.dataset.kind;
             }
-            if (handoffRecovery instanceof HTMLElement) handoffRecovery.hidden = true;
-            const attempt = handoffAttempt;
-            window.setTimeout(() => {
-                if (attempt === handoffAttempt && document.visibilityState === "visible" &&
-                    handoffRecovery instanceof HTMLElement) {
-                    handoffRecovery.hidden = false;
-                    if (handoffStatus instanceof HTMLElement) {
-                        handoffStatus.textContent = "No app handoff was detected. Use the recovery options below.";
-                        handoffStatus.dataset.kind = "error";
-                    }
-                }
-            }, 2200);
         });
     }
-
-    window.addEventListener("blur", reportBrowserHandoff);
-    document.addEventListener("visibilitychange", () => {
-        if (document.visibilityState === "hidden") reportBrowserHandoff();
-    });
 </script>

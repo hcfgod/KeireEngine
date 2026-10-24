@@ -4,6 +4,19 @@
 
 ## 0.4.8
 
+### Hot patch — 2026-10-24
+
+- Added Windows Hub setup choices to repair/update, uninstall, or explicitly remove and reinstall in a new location.
+  Repair restores missing owned payload files without overwriting modified content, and recovery retains the original
+  missing-file state across interruptions.
+  Relocation checks the staged payload and destination before removal, preserves unrelated files, and retains singleton
+  registration ownership; it does not promise atomic rollback across the two installations.
+- Allowed Hub-managed Editor installation into custom paths whose parent folders do not yet exist.
+- Made the website Hub OAuth handoff explicit and replaced the Hub's temporary token-exchange notice with the completed
+  sign-in result instead of leaving it visible indefinitely.
+
+### Release changes
+
 - Added undoable scene lighting bake settings and kept lighting authoring in Edit mode.
 - Populate native Windows player executable product/version Details during branding before signing, retaining Unicode
   product names and complete semantic-version strings.

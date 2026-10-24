@@ -515,8 +515,9 @@ for (const contract of [
     "data-hub-handoff",
     "data-hub-handoff-status",
     "data-hub-handoff-recovery",
-    'window.addEventListener("blur"',
-    'document.addEventListener("visibilitychange"',
+    '<details class="hub-handoff__recovery"',
+    'Need help opening Kéire Hub?',
+    'This page cannot confirm the result.',
     'href="/downloads/"',
 ]) {
     assert(hubOAuthCallback.includes(contract), `Hub OAuth callback recovery is missing ${contract}.`);
@@ -524,6 +525,10 @@ for (const contract of [
 assert(hubOAuthCallback.includes("This page forwards only the bounded authorization response") &&
     !hubOAuthCallback.includes("navigator.clipboard"),
     "Hub OAuth recovery must not expose the single-use authorization code for copying.");
+assert(!hubOAuthCallback.includes("setTimeout") && !hubOAuthCallback.includes('addEventListener("blur"') &&
+    !hubOAuthCallback.includes('addEventListener("visibilitychange"') &&
+    !hubOAuthCallback.includes('dataset.kind = "success"') && !hubOAuthCallback.includes('dataset.kind = "error"'),
+    "Hub OAuth handoff must not infer app success or failure from elapsed time or browser focus.");
 const signInPage = await readFile(path.join(siteRoot, "Source", "pages", "account", "sign-in.astro"), "utf8");
 assert(signInPage.includes('role="alert"') && signInPage.includes("finish in the same browser"),
     "The sign-in page must provide an accessible PKCE recovery message.");

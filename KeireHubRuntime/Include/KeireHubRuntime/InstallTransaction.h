@@ -92,6 +92,9 @@ namespace KeireHub
         std::function<bool(InstallTransactionPhase)> ContinueAfterPhase;
         // Keeps a verified transaction recoverable until its UI shell has completed shortcuts and other shell work.
         bool DeferCommit = false;
+        // Explicit repair tolerates absent owned payload files, never modified files or missing ownership metadata.
+        // The journal records this policy so rollback restores the original sparse inventory after a restart.
+        bool RepairMissingFiles = false;
     };
 
     struct InstallUninstallResult final

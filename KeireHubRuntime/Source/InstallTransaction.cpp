@@ -37,6 +37,7 @@ namespace KeireHub
             std::filesystem::path DestinationRoot;
             std::optional<InstallRegistration> PreviousRegistration;
             std::optional<InstallRegistration> NewRegistration;
+            bool RepairMissingFiles = false;
         };
 
         [[nodiscard]] HubError TransactionError(const HubErrorCode code, std::string message,
@@ -163,6 +164,8 @@ namespace KeireHub
                 {"destinationRoot", Detail::PathToUtf8(journal.DestinationRoot)},
                 {"previousRegistration", nullptr},
                 {"newRegistration", nullptr}};
+            if (journal.RepairMissingFiles)
+                document["repairMissingFiles"] = true;
             if (journal.PreviousRegistration)
                 document["previousRegistration"] = EncodeRegistration(*journal.PreviousRegistration);
             if (journal.NewRegistration)
@@ -202,6 +205,7 @@ namespace KeireHub
                     journal.PreviousRegistration = DecodeRegistration(document.Value().at("previousRegistration"));
                 if (!document.Value().at("newRegistration").is_null())
                     journal.NewRegistration = DecodeRegistration(document.Value().at("newRegistration"));
+                journal.RepairMissingFiles = document.Value().value("repairMissingFiles", false);
                 return HubResult<TransactionJournal>::Success(std::move(journal));
             }
             catch (const std::exception& error)
@@ -312,13 +316,14 @@ namespace KeireHub
             return HubStatus::Success();
         }
 
-        [[nodiscard]] HubStatus VerifyReceiptFiles(const std::filesystem::path& root, const InstallReceipt& receipt)
+        [[nodiscard]] HubStatus VerifyReceiptFiles(const std::filesystem::path& root, const InstallReceipt& receipt,
+                                                   const bool allowMissing = false)
         {
             if (const auto status = Detail::ValidateInstallTree(root, false); !status)
                 return status;
             for (const auto& file : receipt.Files)
             {
-                if (const auto status = VerifyFile(root, file); !status)
+                if (const auto status = VerifyFile(root, file, allowMissing); !status)
                     return status;
             }
             return HubStatus::Success();
@@ -419,8 +424,18 @@ namespace KeireHub
                 }
                 receipt = std::move(migrated);
             }
-            if (const auto verified = VerifyIdentity(request, receipt.Value(), true); !verified)
+            if (const auto verified = VerifyIdentity(request, receipt.Value(), !request.RepairMissingFiles); !verified)
                 return HubResult<std::optional<InstallReceipt>>::Failure(verified.Error());
+            if (request.RepairMissingFiles)
+            {
+                if (const auto verified = VerifyReceiptFiles(request.DestinationRoot, receipt.Value(), true); !verified)
+                {
+                    auto failure = verified.Error();
+                    failure.Message = "Repair stopped because an owned file was modified or is unsafe. Back up the "
+                                      "affected file, remove only that file if appropriate, and run Repair again.";
+                    return HubResult<std::optional<InstallReceipt>>::Failure(std::move(failure));
+                }
+            }
             return HubResult<std::optional<InstallReceipt>>::Success(std::move(receipt).Value());
         }
 
@@ -563,7 +578,8 @@ namespace KeireHub
                 auto receipt = ReadInstallReceipt(backup);
                 if (!receipt)
                     return HubStatus::Failure(receipt.Error());
-                const bool allowMissingFiles = journal.Operation == TransactionOperation::Uninstall;
+                const bool allowMissingFiles =
+                    journal.Operation == TransactionOperation::Uninstall || journal.RepairMissingFiles;
                 if (const auto moved = MoveReceiptInventory(mutation, backup, request.DestinationRoot, receipt.Value(),
                                                             false, allowMissingFiles);
                     !moved)
@@ -1224,7 +1240,8 @@ namespace KeireHub
                                    .TransactionId = locator.TransactionId,
                                    .LocatorSha256 = locator.DocumentSha256,
                                    .DestinationRoot = request.DestinationRoot,
-                                   .PreviousRegistration = registration.Value()};
+                                   .PreviousRegistration = registration.Value(),
+                                   .RepairMissingFiles = request.RepairMissingFiles};
         auto staged = StagePackage(mutation, request, manifest.Value(), previous.Value(), locator);
         if (!staged)
         {
@@ -1251,7 +1268,7 @@ namespace KeireHub
         if (previous.Value())
         {
             if (const auto moved = MoveReceiptInventory(mutation, request.DestinationRoot, BackupRoot(locator),
-                                                        *previous.Value(), true);
+                                                        *previous.Value(), true, request.RepairMissingFiles);
                 !moved)
                 return PreserveOriginalFailure(mutation, request, journal, locator, moved.Error());
         }

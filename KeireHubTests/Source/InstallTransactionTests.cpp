@@ -1028,3 +1028,89 @@ TEST_CASE("install worker prepares destinations before extracting a payload")
         CHECK(KeireHubTests::ReadText(destination / "bin" / "app.exe") == "modified-after-prepare");
     }
 }
+
+TEST_CASE("explicit install repair restores missing owned files without accepting drift")
+{
+    KeireHubTests::TemporaryDirectory temporary;
+    const auto source = CreatePackage(temporary.Path(), InstallProduct::Hub, "6.0.0", "payload");
+    const auto destination = temporary.Path() / "hub";
+    TestRegistrationStore registration;
+    auto request = Request(InstallProduct::Hub, source, destination, registration);
+    REQUIRE(InstallPackageTransaction(request));
+    const auto previousReceipt = registration.Value->ReceiptSha256;
+    REQUIRE(std::filesystem::remove(destination / "bin" / "app.exe"));
+    KeireHubTests::WriteText(destination / "user.txt", "preserve user data");
+    CHECK_FALSE(PrepareInstallDestination(request));
+    request.RepairMissingFiles = true;
+
+    SUBCASE("repair restores absent payload and preserves unrelated content")
+    {
+        REQUIRE(PrepareInstallDestination(request));
+        CHECK_FALSE(std::filesystem::exists(destination / "bin" / "app.exe"));
+        REQUIRE(InstallPackageTransaction(request));
+        CHECK(VerifyInstalledPackage(request));
+        CHECK(KeireHubTests::ReadText(destination / "bin" / "app.exe") == "payload");
+        CHECK(KeireHubTests::ReadText(destination / "user.txt") == "preserve user data");
+    }
+    SUBCASE("repair refuses a modified owned file before any transaction")
+    {
+        KeireHubTests::WriteText(destination / "Config" / "default.txt", "user changed this");
+        const auto result = PrepareInstallDestination(request);
+        REQUIRE_FALSE(result);
+        CHECK(result.Error().Message.find("Back up") != std::string::npos);
+        CHECK_FALSE(InstallPackageTransaction(request));
+        CHECK_FALSE(std::filesystem::exists(TransactionLocatorPath(destination)));
+        CHECK(registration.Value->ReceiptSha256 == previousReceipt);
+        CHECK(KeireHubTests::ReadText(destination / "Config" / "default.txt") == "user changed this");
+    }
+    SUBCASE("repair recreates a missing owned payload directory")
+    {
+        REQUIRE(std::filesystem::remove(destination / "bin" / "KeireInstallWorker.exe"));
+        REQUIRE(std::filesystem::remove(destination / "bin"));
+        REQUIRE(PrepareInstallDestination(request));
+        REQUIRE(InstallPackageTransaction(request));
+        CHECK(VerifyInstalledPackage(request));
+        CHECK(KeireHubTests::ReadText(destination / "bin" / "app.exe") == "payload");
+        CHECK(KeireHubTests::ReadText(destination / "user.txt") == "preserve user data");
+    }
+    SUBCASE("repair still requires the ownership marker")
+    {
+        REQUIRE(std::filesystem::remove(destination / InstallMarkerFileName));
+        CHECK_FALSE(PrepareInstallDestination(request));
+        CHECK_FALSE(InstallPackageTransaction(request));
+        CHECK(registration.Value->ReceiptSha256 == previousReceipt);
+    }
+}
+
+TEST_CASE("interrupted missing-file repair restores the original sparse inventory after restart")
+{
+    for (const auto interrupted : {InstallTransactionPhase::Staged, InstallTransactionPhase::BackupMoved,
+                                   InstallTransactionPhase::PayloadActivated,
+                                   InstallTransactionPhase::RegistrationWritten, InstallTransactionPhase::Verified})
+    {
+        CAPTURE(static_cast<int>(interrupted));
+        KeireHubTests::TemporaryDirectory temporary;
+        const auto source = CreatePackage(temporary.Path(), InstallProduct::Hub, "6.0.0", "payload");
+        const auto destination = temporary.Path() / "hub";
+        TestRegistrationStore registration;
+        auto request = Request(InstallProduct::Hub, source, destination, registration);
+        REQUIRE(InstallPackageTransaction(request));
+        const auto previousReceipt = registration.Value->ReceiptSha256;
+        REQUIRE(std::filesystem::remove(destination / "bin" / "app.exe"));
+        KeireHubTests::WriteText(destination / "user.txt", "preserve user data");
+        request.RepairMissingFiles = true;
+        request.ContinueAfterPhase = [interrupted](const InstallTransactionPhase phase)
+        { return phase != interrupted; };
+        const auto result = InstallPackageTransaction(request);
+        REQUIRE_FALSE(result);
+        REQUIRE(result.Error().Code == HubErrorCode::WorkerInterrupted);
+        auto recovery = Request(InstallProduct::Hub, {}, destination, registration);
+        REQUIRE(RecoverInstallTransaction(recovery));
+        CHECK(RecoverInstallTransaction(recovery));
+        CHECK_FALSE(std::filesystem::exists(destination / "bin" / "app.exe"));
+        CHECK(KeireHubTests::ReadText(destination / "Config" / "default.txt") == "payload-config");
+        CHECK(KeireHubTests::ReadText(destination / "user.txt") == "preserve user data");
+        CHECK(registration.Value->ReceiptSha256 == previousReceipt);
+        CHECK_FALSE(std::filesystem::exists(TransactionLocatorPath(destination)));
+    }
+}

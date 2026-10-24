@@ -195,6 +195,9 @@ function New-Installer {
     if ($TestDefine) {
         $arguments += "/D$TestDefine=1"
     }
+    if ($Product -eq 'hub') {
+        $arguments += "/DHUB_REGISTRY_KEY=$registryRelative\Product\HubInstaller"
+    }
     if ($VerificationTimeoutMs -gt 0) {
         $arguments += "/DKEIRE_EDITOR_VERIFY_TIMEOUT_MS=$VerificationTimeoutMs"
     }
@@ -323,6 +326,94 @@ try {
         $completed = $true
         Write-Host "$Product worker-authority NSIS fresh-install check passed."
         return
+    }
+
+    if ($Product -eq 'hub') {
+        Remove-Item -LiteralPath (Join-Path $installRoot 'README.md')
+        $exit = Invoke-Installer -Path $installer1 -Arguments @('/S', '/MAINTENANCE=repair') `
+            -Operation 'maintenance-repair'
+        Assert-ExitCode -Actual $exit -Expected @(0) -Operation 'Hub maintenance repair'
+        Assert-Version -RootPath $installRoot -Version '1.0.0'
+
+        $preflightOutput = @(& $worker validate-relocation --product hub --source $payload1 `
+            --root $alternateRoot --previous-root "$installRoot\" 2>&1)
+        if ($LASTEXITCODE -ne 0 -or (Test-Path -LiteralPath $alternateRoot)) {
+            throw 'Valid Hub relocation preflight failed or created its destination.'
+        }
+        $preflightOutput = @(& $worker validate-relocation --product hub --source $payload1 `
+            --root (Join-Path $installRoot 'nested') --previous-root "$installRoot\" 2>&1)
+        if ($LASTEXITCODE -eq 0) {
+            throw 'A trailing slash bypassed the Hub relocation nesting guard.'
+        }
+        $corruptPayload = Join-Path $caseRoot 'corrupt-relocation-payload'
+        New-Payload -Version '1.0.0' -Path $corruptPayload
+        [IO.File]::WriteAllText((Join-Path $corruptPayload 'README.md'), 'tampered payload')
+        $preflightOutput = @(& $worker validate-relocation --product hub --source $corruptPayload `
+            --root $alternateRoot --previous-root $installRoot 2>&1)
+        if ($LASTEXITCODE -eq 0 -or (Test-Path -LiteralPath $alternateRoot)) {
+            throw 'Hub relocation preflight accepted corrupt payload or created the new root.'
+        }
+        Assert-Version -RootPath $installRoot -Version '1.0.0'
+        $preflightOutput = @(& $worker validate-relocation --product hub --source $payload1 `
+            --root $alternateRoot --previous-root (Join-Path $caseRoot 'unregistered') 2>&1)
+        if ($LASTEXITCODE -eq 0 -or (Test-Path -LiteralPath $alternateRoot)) {
+            throw 'Hub relocation preflight accepted an unregistered previous root or changed the destination.'
+        }
+        Assert-Version -RootPath $installRoot -Version '1.0.0'
+
+        $blockedDestination = Join-Path $caseRoot 'unowned'
+        $exit = Invoke-Installer -Path $installer1 `
+            -Arguments @('/S', '/MAINTENANCE=relocate', "/D=$blockedDestination") `
+            -Operation 'maintenance-relocation-preflight-rejected'
+        if ($exit -eq 0) {
+            throw 'Hub relocation accepted a non-empty unrelated destination.'
+        }
+        Assert-Version -RootPath $installRoot -Version '1.0.0'
+        Assert-UnknownFiles -RootPath $blockedDestination
+
+        $exit = Invoke-Installer -Path $installer1 `
+            -Arguments @('/S', '/MAINTENANCE=relocate', "/D=$installRoot\nested") `
+            -Operation 'maintenance-relocation-nested-rejected'
+        if ($exit -eq 0) {
+            throw 'Hub relocation accepted a destination nested inside the previous installation.'
+        }
+        Assert-Version -RootPath $installRoot -Version '1.0.0'
+
+        $userFile = Join-Path $installRoot 'keep-user-content.txt'
+        [IO.File]::WriteAllText($userFile, 'preserved across explicit relocation')
+        $exit = Invoke-Installer -Path $installer1 `
+            -Arguments @('/S', '/MAINTENANCE=relocate', "/D=$alternateRoot") `
+            -Operation 'maintenance-relocation'
+        Assert-ExitCode -Actual $exit -Expected @(0) -Operation 'Hub maintenance relocation'
+        Assert-Version -RootPath $alternateRoot -Version '1.0.0'
+        if ((Get-ItemPropertyValue -LiteralPath $productRegistry -Name InstallDirectory) -ne $alternateRoot) {
+            throw 'Hub relocation did not select the new singleton installation registration.'
+        }
+        $protocolCommandPath = Join-Path $registryPath 'Classes\keirehub\shell\open\command'
+        $protocolCommand = (Get-Item -LiteralPath $protocolCommandPath).GetValue('', $null)
+        $expectedCommand = '"' + (Join-Path $alternateRoot 'bin\KeireHub.exe') + '" "%1"'
+        if ($protocolCommand -cne $expectedCommand) {
+            throw 'Hub relocation did not transfer the singleton protocol command to the new root.'
+        }
+        if (-not (Test-Path -LiteralPath $userFile) -or
+            (Test-Path -LiteralPath (Join-Path $installRoot '.keire-install-receipt.json'))) {
+            throw 'Hub relocation did not preserve user content and retire the previous receipt.'
+        }
+        $exit = Invoke-Installer -Path $installer1 -Arguments @('/S', '/MAINTENANCE=uninstall') `
+            -Operation 'maintenance-uninstall'
+        Assert-ExitCode -Actual $exit -Expected @(0) -Operation 'Hub maintenance uninstall'
+        if (Test-Path -LiteralPath (Join-Path $alternateRoot '.keire-install-receipt.json')) {
+            throw 'Hub maintenance uninstall retained its ownership receipt.'
+        }
+        if ((Get-Item -LiteralPath $protocolCommandPath).GetValue('', $null)) {
+            throw 'Hub maintenance uninstall retained its owned protocol command.'
+        }
+        # Continue the existing repair/rollback matrix at a fresh, empty root.
+        $installRoot = Join-Path $caseRoot 'after-maintenance'
+        $exit = Invoke-Installer -Path $installer1 -Arguments @('/S', "/D=$installRoot") `
+            -Operation 'fresh-after-maintenance'
+        Assert-ExitCode -Actual $exit -Expected @(0) -Operation 'Hub fresh install after maintenance'
+        Assert-Version -RootPath $installRoot -Version '1.0.0'
     }
 
     foreach ($directory in @("Config", "Docs", "Samples")) {
