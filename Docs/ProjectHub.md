@@ -6,7 +6,7 @@ An explicit requester must match a registered usable installation; running, unhe
 guidance rather than falling back to a different Editor. Older two-field requests remain accepted, but the updated
 Editor and Hub should be deployed together for requester-aware routing.
 
-Windows Hub and Editor 0.4.7 are published through the signed catalog. Consult the verified catalog for its current sequence. The catalog retains independently validated
+Windows Hub and Editor 0.4.8 are published through the signed catalog. Consult the verified catalog for its current sequence. The catalog retains independently validated
 Linux 0.4.2 packages. Historical platform evidence below retains its original version and scope.
 
 `KeireHub` is the normal product entrypoint and is packaged independently from versioned editor installations. The Hub

@@ -1,6 +1,6 @@
 # Kéire Production Readiness Review
 
-Windows Hub and Editor 0.4.7 are published through signed catalog sequence 22. Historical platform evidence below
+Windows Hub and Editor 0.4.8 are published through signed catalog sequence 26. Historical platform evidence below
 retains its original version and scope; this historical review is not a certification of the current release.
 
 Review date: 2026-08-25

@@ -106,7 +106,7 @@ a project-first authoring workflow. The Kéire Hub manages projects and installe
 native scene, asset, rendering, scripting, profiling, and player-build workflows; and the runtime ships only the
 systems and cooked content selected by a project.
 
-Kéire is currently **version 0.4.7 and pre-1.0**. Its foundations are production-oriented, but interfaces, content
+Kéire is currently **version 0.4.8 and pre-1.0**. Its foundations are production-oriented, but interfaces, content
 formats, and release procedures may still change before the first stable release. The project documents current
 capabilities and remaining production-readiness work directly rather than presenting roadmap work as complete.
 Renaming an open scene in the Asset Browser or Inspector preserves its identity and pending edits. Clean scenes update
@@ -132,7 +132,7 @@ authored base mixer, including its reverb effects and sends.
 VFX edit previews and browser/Inspector thumbnails wait for initial asset imports when opening a project with a fresh
 cache, then start automatically.
 The status bar shows **Preparing GPU effects...** during background shader preparation; effects appear when ready.
-Windows Hub and Editor 0.4.7 are active in immutable signed catalog sequence 23. The same signed
+Windows Hub and Editor 0.4.8 are active in immutable signed catalog sequence 26. The same signed
 snapshot retains the independently validated Linux x86-64 0.4.2 packages and the previous Windows and Linux records;
 macOS downloads remain gated pending platform, signing, and notarization validation.
 

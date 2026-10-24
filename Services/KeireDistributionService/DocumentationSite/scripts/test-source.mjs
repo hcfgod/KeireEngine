@@ -346,7 +346,7 @@ for (const contract of [
     "DEB for Ubuntu or Debian",
     "RPM for Fedora, Rocky Linux, and openSUSE",
     "The current EXE is not Authenticode-signed",
-    "Users of older Hub versions need to download and run 0.4.7 manually",
+    "Users of older Hub versions need to download and run 0.4.8 manually",
     "Linux packages are validated independently of Windows",
 ]) {
     assert(downloadsPage.includes(contract), `Downloads page is missing current platform contract: ${contract}`);
@@ -357,10 +357,10 @@ for (const contract of [
     "unknown-publisher warning",
     "Verify the displayed SHA-256",
     "Older in-app updaters require an Authenticode signature",
-    "Download and run 0.4.7 manually",
+    "Download and run 0.4.8 manually",
     "<dt>Native signing</dt><dd>Not Authenticode-signed</dd>",
 ]) {
-    assert(windowsDownloadsPage.includes(contract),
+    assert(windowsDownloadsPage.replace(/>\s+</g, "><").includes(contract),
         `Windows downloads page is missing unsigned-installer guidance: ${contract}`);
 }
 assert(releaseStatus?.version === projectVersion && ["preparing", "active"].includes(releaseStatus.state),
@@ -632,26 +632,27 @@ assert(changelogFeed.includes('Content-Type": "application/rss+xml; charset=utf-
     changelogFeed.includes("releaseNotes.filter((release) => release.published).map"),
     "The changelog RSS endpoint must publish the canonical release archive.");
 
-// The published Editor version owns the package and managed API compatibility defaults.
-const publishedEditorVersion = "0.4.7";
+// Current downloads and Marketplace compatibility are independent release contracts.
+const publishedEditorVersion = "0.4.8";
+const marketplaceCompatibilityVersion = "0.4.7";
 assert(windowsDownloadsPage.includes(`Download Editor ${publishedEditorVersion} for Windows x86-64`),
-    "Publisher compatibility boundary must match the available Windows Editor download.");
+    "The published Editor version must match the available Windows Editor download.");
 const publisherPage = await readFile(path.join(siteRoot, "Source", "pages", "publisher", "index.astro"), "utf8");
 assert(!publisherPage.includes("offline signing") && publisherPage.includes("queued metadata signing"),
     "Publisher copy must describe the automatic metadata-only publication workflow.");
-assert(publisherPage.includes(`name="minimumEngineVersion" value="${publishedEditorVersion}"`) &&
-    publisherPage.includes(`name="managedApiVersion" value="${publishedEditorVersion}"`),
-    "Publisher defaults must target the published Editor/API version, independently of Hub-only releases.");
+assert(publisherPage.includes(`name="minimumEngineVersion" value="${marketplaceCompatibilityVersion}"`) &&
+    publisherPage.includes(`name="managedApiVersion" value="${marketplaceCompatibilityVersion}"`),
+    "Publisher defaults must retain the deployed Marketplace compatibility baseline.");
 const marketplacePage = await readFile(path.join(siteRoot, "Source", "pages", "marketplace", "index.astro"), "utf8");
 const marketplacePolicy = await readFile(
     path.join(siteRoot, "Source", "pages", "policies", "marketplace", "index.astro"), "utf8");
 const publisherPolicy = await readFile(
     path.join(siteRoot, "Source", "pages", "policies", "publisher", "index.astro"), "utf8");
 assert(marketplacePage.includes("Browse free assets, tools, and examples for Kéire") &&
-    marketplacePolicy.includes(`Free products in Kéire ${publishedEditorVersion}`) &&
-    marketplacePolicy.includes(`zero minor-unit price for Kéire ${publishedEditorVersion}`) &&
-    publisherPolicy.includes(`Native plugins remain prohibited for Kéire ${publishedEditorVersion}`),
-    "Marketplace and publisher policy copy must identify the published Editor version without changing deployed services.");
+    marketplacePolicy.includes(`Free products in Kéire ${marketplaceCompatibilityVersion}`) &&
+    marketplacePolicy.includes(`zero minor-unit price for Kéire ${marketplaceCompatibilityVersion}`) &&
+    publisherPolicy.includes(`Native plugins remain prohibited for Kéire ${marketplaceCompatibilityVersion}`),
+    "Marketplace and publisher policy copy must retain the deployed compatibility baseline.");
 for (const contract of [
     'import { Upload } from "tus-js-client"',
     'import { sha256 } from "@noble/hashes/sha2.js"',
