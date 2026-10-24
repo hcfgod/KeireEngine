@@ -246,14 +246,28 @@ Place a Character Controller on a player root and parent the camera to that root
 than writing the player Transform directly:
 
 ```csharp
-CharacterController? motor = GetComponent<CharacterController>();
-if (motor is not { IsValid: true })
-    return;
+protected override void FixedUpdate()
+{
+    CharacterController? motor = GetComponent<CharacterController>();
+    if (motor is not { IsValid: true })
+    {
+        return;
+    }
 
-Vector3 horizontal = (Entity.Transform.Forward * move.Y + Entity.Transform.Right * move.X) * speed;
-float verticalSpeed = motor.Grounded ? -2.0f : fallingSpeed;
-motor.Move((horizontal + Vector3.Up * verticalSpeed) * Time.DeltaTime);
+    Vector3 horizontal = (Transform.Forward * move.Y + Transform.Right * move.X) * speed;
+    float verticalSpeed = motor.Grounded ? -2.0f : fallingSpeed;
+    if (!motor.Move((horizontal + Vector3.Up * verticalSpeed) * Time.FixedDeltaTime))
+    {
+        Debug.Warn("Character movement was rejected.");
+    }
+}
 ```
+
+This fragment consumes game-owned `move`, `speed`, and `fallingSpeed` values; it does not supply input setup or integrate
+gravity. Normalize/clamp movement intent in your controller, update falling velocity in fixed simulation, and latch
+one-shot jump input from `Update` so each press is consumed once. Use `FixedDeltaTime` here: `DeltaTime` remains the
+variable-frame delta even inside `FixedUpdate`. Follow the complete
+[action movement recipe](Cookbook.md#fixed-step-action-movement) for input ownership and lifecycle setup.
 
 `Move` queues a finite world-space displacement and returns false if the bounded command queue is full or the component
 is unavailable. During physics, Kéire capsule-casts that displacement, ignores the controller's own body, slides along
@@ -315,7 +329,10 @@ or trigger callbacks rather than branching on `Trigger` unless a shared helper c
 
 ## Navigation
 
-Path queries are asynchronous and cancellation-aware:
+Path queries are asynchronous and cancellation-aware, but this managed entry point requires a host integration that
+installs an `IRuntimeBridge` providing navigation. An ordinary gameplay script and scene do not install that provider;
+the default bridge throws when queried. The native Navigation system's existence does not make this sample usable in
+an unconfigured Editor or player. Use this pattern only after your host integration supplies the provider:
 
 ```csharp
 [SerializeField, StableFieldId("b9b127fc-254d-4fee-8cd6-fc9243641370")]
@@ -336,6 +353,12 @@ private async Task FindPathAsync(CancellationToken cancellation)
             areaMask: uint.MaxValue,
             cancellation: cancellation);
 
+        cancellation.ThrowIfCancellationRequested();
+        if (!Entity.IsValid)
+        {
+            return;
+        }
+
         for (int index = 1; index < path.Points.Count; ++index)
         {
             Debug.DrawLine(
@@ -347,9 +370,18 @@ private async Task FindPathAsync(CancellationToken cancellation)
     }
     catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
     {
+        // The owner stopped, disabled, or reloaded.
+    }
+    catch (Exception exception)
+    {
+        Debug.LogException(exception);
     }
 }
 ```
+
+The task observes its own failures because the lifecycle callback deliberately does not await it. An exception stored
+on a discarded task does not pass through callback quarantine. If navigation must restart after managed reload,
+invoke the same request from an enabled/active `OnAfterReload` path; do not assume `OnEnable` reruns for that migration.
 
 `NavigationPath` exposes `Points` and the navigation-mesh revision used by the result. A newer mesh can make previously
 computed paths stale at the native service boundary. Re-query after relevant navigation changes.

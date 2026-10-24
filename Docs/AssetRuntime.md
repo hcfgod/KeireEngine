@@ -7,9 +7,12 @@
 `Disabled`, so applications opt into either development catalogs or cooked-only distribution catalogs deliberately.
 
 An `AssetHandle<T>` is a small reference-counted view over shared load state. Repeated requests for the same `AssetId`
-return the same state and payload revision. A valid handle's `Get()` always returns the registered typed fallback:
-`BinaryAsset` and `TextAsset` use empty values. `TryGetLoaded()` distinguishes loaded data from a fallback, while
-`Require()` turns `Failed` and `Cancelled` into `AssetLoadError`. `Require()` never blocks the asset-system owner thread;
+return the same state and payload revision. `Get()` returns the current immutable payload: the registered typed
+fallback before the first successful load, then loaded data, retaining the last-good payload during reload.
+`BinaryAsset` and `TextAsset` use empty fallback values. An empty handle's `Get()` returns null; a nonempty handle
+does not by itself mean loading succeeded. `TryGetLoaded()` returns loaded data only in `Ready` or `Reloading`.
+`Require()` turns `Failed` and `Cancelled` into `AssetLoadError`, and rejects an empty handle.
+`Require()` never blocks the asset-system owner thread;
 callers there should observe state or completion events instead.
 
 States progress through `Queued`, `Loading`, and `Ready`, or end in `Failed`/`Cancelled`. Reloads use `Reloading` and

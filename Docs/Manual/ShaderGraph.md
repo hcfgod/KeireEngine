@@ -20,7 +20,9 @@ compatible-add, endpoint selection, unlink, and deletion actions.
 
 ## Build A Stable Contract
 
-Expose the properties that materials should control, give them durable stable property IDs, and choose clear names.
+Expose the properties that materials should control and choose clear names. The Editor generates their stable IDs;
+preserve them by renaming existing parameters rather than deleting and recreating them. The node Inspector displays
+the ID read-only and edits **Display Name** and **Shader Symbol** separately.
 Materials bind stable IDs before display names, which keeps compatible renames from silently losing values. Avoid
 duplicating shader logic just to give two objects different colors; use Materials or Material Instances for values.
 
@@ -54,8 +56,9 @@ See [worked camera-effect steps](ShaderGraphExamples.md#example-4-camera-tint-ef
 [particle material steps](VfxGraph.md#use-an-authored-particle-material).
 
 Graph edits update the live preview through a validated candidate. Invalid topology reports diagnostics and retains the
-last valid result. Applied Shader Graph document edits have an idle autosave path, but node-property fields can remain
-an unapplied draft. **Save** or **Ctrl+S** applies that draft, waits for compilation, and writes the source. Resolve
+last valid result. Idle processing compiles previews; it does not save the graph. Node-property fields can also remain
+an unapplied draft. **Apply** updates the document, while **Save** or **Ctrl+S** applies that draft, waits for compilation,
+and writes the source. Save after graph edits, including layout changes. Resolve
 **Node changes pending Save / Apply** before assuming a property rename or default has been published. Source changes
 trigger targeted compilation and hot reload. Reopen the graph to verify persistence.
 

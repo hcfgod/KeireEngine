@@ -77,7 +77,8 @@ remain valid in settings and appear as `Layer N` in the Inspector so every slot 
 
 New Empty and Starter projects receive this file transactionally. Older projects without it use stable defaults. The
 editor opens **Project Settings** from the Edit or Window menu and applies edits to Scene and Game submissions in the
-same frame. Each change is validated and written atomically, so an interrupted write cannot publish partial JSON.
+same frame. Committing a control edit validates and saves it atomically, so an interrupted write cannot publish partial
+JSON. Undo/Redo restores pending settings; save those restored settings to persist them.
 
 A malformed or unsupported file produces a persistent Rendering diagnostic and falls back to defaults for the current
 session. It does not disable assets, scenes, input, or other project services. Fix the diagnostic and reopen the project

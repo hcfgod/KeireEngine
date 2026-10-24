@@ -25,7 +25,8 @@ flowchart LR
 ```
 
 1. Create a **Shader Graph > Surface / Lit** asset.
-2. Add exposed Base Texture, Tint, Tiling, Metallic, and Roughness properties with durable stable IDs.
+2. Add exposed Base Texture, Tint, Tiling, Metallic, and Roughness properties. The Editor generates their stable IDs;
+   preserve them when renaming by editing the existing parameters rather than deleting and recreating them.
 3. Scale UV by Tiling, sample Base Texture, multiply its color by Tint, and connect the result to Base Color.
 4. Connect the two scalar controls to the compatible surface pins exposed by the template.
 5. Save, wait for compilation, select the shader, choose **Create > Material from Shader**, and assign that material

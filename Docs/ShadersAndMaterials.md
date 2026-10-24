@@ -185,7 +185,7 @@ and arbitrary multi-pass intermediate targets are not provided by these presets.
 Create **Shader Graph** in the Project panel, then choose a **Surface / ...** template, UI, Fullscreen Effect, VFX, or
 Custom Graphics. **Compute (not supported)** is disabled. The
 isolated worker restores the published source index instead of rescanning unrelated assets, validates the new source,
-and opens the resulting `NewShaderGraph.keireshadergraph` directly in the dockable editor. Nodes,
+and opens the resulting `<entered-name>.keireshadergraph` directly in the dockable editor. Nodes,
 pins, connections, and parameter properties use stable opaque identities. Validated cable replacement, bounded
 undo/redo, deterministic schema upgrades, and last-good compilation make incomplete edits recoverable.
 Creating a node brings that node into view, including nodes added from the blackboard or reusable-function picker.

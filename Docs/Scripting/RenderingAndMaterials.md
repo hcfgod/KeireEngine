@@ -175,18 +175,38 @@ private MaterialParameterCollection? _weather;
 
 private MaterialParameterCollectionInstance? _weatherRuntime;
 
-protected override void Start()
+protected override void OnEnable() => BindWeather();
+
+protected override void OnAfterReload()
 {
+    if (Enabled && Entity.ActiveInHierarchy)
+    {
+        BindWeather();
+    }
+}
+
+private void BindWeather()
+{
+    _weatherRuntime = null;
     if (_weather is { IsValid: true })
+    {
         _weatherRuntime = GlobalMaterialParameters.Open(_weather);
+    }
 }
 
 protected override void Update()
 {
     if (_weatherRuntime is { IsReady: true })
+    {
         _weatherRuntime.SetFloat("Rain", 0.65f);
+    }
 }
 ```
+
+`_weatherRuntime` is a runtime-only wrapper, so reacquire it when the Behaviour enables and after an active managed
+reload. `Start` does not rerun after reload. The collection's values belong to the world; disabling this writer does
+not implicitly reset `Rain`. Give that parameter one gameplay owner and explicitly `Reset("Rain")` when your weather
+policy calls for restoring its authored default. Do not clear an entire shared collection just to release a wrapper.
 
 Opening a collection starts its ordinary asynchronous asset load; `IsReady` becomes true after the owner thread pumps
 the load completion. Setters validate names and types against the collection definition, while `Reset(name)` restores

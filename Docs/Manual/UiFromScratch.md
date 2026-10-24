@@ -25,7 +25,8 @@ If you want to preserve the starter example, save your work in a separate scene 
 1. Create a folder such as `Assets/UI`. In its Project-panel **Create** menu choose **UI Document** and name it `GameHud`.
    Creation opens the document in UI Builder; double-click its `.keireui` asset to reopen it later.
 2. In **Design**, select the root container. Use the Library's **Search controls** to find `ProgressBar` and click
-   **+ ProgressBar**, or drag the control onto the canvas. Set its **Minimum** to `0` and **Maximum** to `100`.
+   **+ ProgressBar**, or drag the control onto the canvas. Keep its default range of `0` to `100`;
+   the current Builder Inspector does not expose range controls.
 3. Select the root again and add a Button. Set its Name to `heal` and its text to `Heal`. A runtime query uses the
    authored Name, not the displayed text. Use unique names for controls that scripts query.
 4. Move and resize the controls in the preview. Canvas manipulation writes absolute layout properties. For a responsive
@@ -73,19 +74,22 @@ do not save a presentation policy; the `.keireuipanel` asset does.
 5. Save the scene, enter Play, and inspect Game view. Both controls should appear. If another document covers them,
    compare component and Panel Settings sorting orders; their sum controls document stacking.
 
-Selecting a UI Document entity can focus its Builder document. Edit the visual tree in UI Builder and assign
-scene references on the component Inspector; these are distinct tasks.
+To edit the assigned document, select the entity and click **Open Visual Tree in UI Builder** in its Inspector.
+Selecting the entity alone does not open Builder. Edit the visual tree in Builder and assign scene references on the
+component Inspector; these are distinct tasks.
 
 ## 5. Bind Health And Handle Activation
 
 1. Select the ProgressBar in Builder. Set **Target Property** to `value`, **Source Path** to `Player.Health`, and the
    mode to **OneWay**, then click **Add or Replace Binding**. Save the document.
-2. Copy [HealthPanel.cs](../Scripting/Examples/HealthPanel.cs) to `Assets/HealthPanel.cs`. Wait for a successful build,
-   then attach **HealthPanel** to the scene entity holding your UI Document.
+2. Copy [HealthPanel.cs](../Scripting/Examples/HealthPanel.cs) to `Assets/HealthPanel.cs`. In your copied file, change
+   the `_health` initializer from `100` to `75` for this smoke test. Wait for a successful build, then attach
+   **HealthPanel** to the scene entity holding your UI Document.
 3. Its `Update` publishes `Player.Health` with `SetBindingValue`. This is an explicit key; it does not discover an
    object called Player through reflection.
-4. Call `Damage(25)` from your own damage/interaction logic. The health bar should decrease; clicking Heal restores it.
-   The sample's initial health is 100, so clicking Heal before taking damage produces no visible change.
+4. Enter Play. The bar should show 75; click Heal and confirm it reaches 100. Stop Play before editing the scene.
+   After this smoke test, restore the initializer to `100` and connect `Damage(25)` to your own damage/interaction
+   logic. Clicking Heal at full health intentionally produces no visible change.
 
 The supplied example demonstrates pointer activation. For keyboard/gamepad menus, focus a live control with
 `RuntimeVisualElement.Focus()` and route both `ClickedThisFrame` and `SubmittedThisFrame` to the same action, reading

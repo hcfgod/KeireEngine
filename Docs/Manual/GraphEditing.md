@@ -66,8 +66,9 @@ only presentation. Do not infer a matching selection-extraction command for VFX;
 
 Move, arrange, comment edit, paste, cut, duplicate, knot edit, and connection edit each participate in the graph
 document's undo context. Invalid changes remain editable when repair is possible, while compile/save publication stays
-blocked until the graph is valid. Applied Shader Graph edits have an idle autosave path; unapplied node properties
-require **Apply** or **Save**. **Ctrl+S** also applies a pending shader node draft before saving. VFX uses its panel's
+blocked until the graph is valid. Shader Graph requires explicit **Save** after edits; idle preview compilation does
+not persist the source. **Apply** transfers pending node properties into the document but does not save it. **Save** or
+**Ctrl+S** also applies a pending shader node draft before saving. VFX uses its panel's
 explicit validated **Save** workflow. Material Inspector edits commit at edit boundaries instead of a graph Save step.
 
 Graph schema migrations preserve authoring metadata in memory, but an explicit save publishes the current schema. Do

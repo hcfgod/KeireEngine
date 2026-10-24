@@ -2,7 +2,7 @@
 
 Kéire UI Toolkit separates `.keireui` visual trees, `.keirestyle` style sheets, and `.keireuipanel` presentation
 settings. A scene entity has one `Keire.UI.UIDocument` component. Screen/camera documents render in Game/Play/runtime
-and UI Builder, while world-surface documents render as depth-tested scene geometry.
+and UI Builder, while world-surface documents render as scene geometry using the Panel Settings depth-test policy.
 
 For the complete asset, UI Builder, target-mode, Play draft, runtime-debugger, managed API, and current-limit contract,
 use [UI Toolkit and Events from C#](../Scripting/UiAndEvents.md).
@@ -41,6 +41,7 @@ public sealed class ResumeButton : Behaviour
         bool submitted = resume.SubmittedThisFrame;
         if (clicked || submitted)
         {
+            Time.Paused = false;
             Time.TimeScale = 1.0f;
         }
     }
@@ -50,6 +51,9 @@ public sealed class ResumeButton : Behaviour
 Queries can return `null` before first presentation. Event properties consume pending events; use one input owner
 per control and route mouse and keyboard/gamepad activation to the same action. Read both events before testing the
 result so a short-circuit expression does not leave Submit pending. Query again after a successful document reload.
+
+Explicit pause and time scale are independent. This example clears both pause and a zero scale, restoring normal speed.
+If your game supports slow motion, restore its previously saved nonzero scale instead of always selecting `1.0f`.
 
 `new VisualElement()` creates an independent managed tree. It does not attach that tree to a scene `UIDocument`;
 `RootVisualElement` is a read-only handle to the source-backed tree. Use managed `Clicked` callbacks for managed
