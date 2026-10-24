@@ -18,6 +18,8 @@ namespace KeireEditor
 {
     class IInspectorController;
 
+    [[nodiscard]] std::string FormatUiBuilderInlineStyles(std::span<const Keire::UiNamedValue> values);
+
     struct UiBuilderInspectorEdit final
     {
         std::optional<std::string> Name;

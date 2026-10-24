@@ -412,7 +412,7 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                         scene->Components()->Find(Keire::TransformComponent::StaticType());
                     const float transformCardHeight =
                         transformExpanded ? (ui.ContentAvailable().Width < 325.0F ? 267.0F : 212.0F) : 38.0F;
-                    if (auto card = ui.BeginChild("TransformCard", {0.0F, transformCardHeight}, true); card)
+                    if (auto card = ui.BeginChild("TransformCard", {0.0F, transformCardHeight}, true, false); card)
                     {
                         if (transformRegistration)
                             (void)drawComponentHeader(transform, *transformRegistration, transformExpanded, "TRANSFORM",
@@ -545,8 +545,8 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                     {
                         ui.Spacing();
                         auto& lightExpanded = expansion("directional-light");
-                        if (auto card =
-                                ui.BeginChild("DirectionalLightCard", {0.0F, lightExpanded ? 665.0F : 38.0F}, true);
+                        if (auto card = ui.BeginChild("DirectionalLightCard", {0.0F, lightExpanded ? 665.0F : 38.0F},
+                                                      true, false);
                             card)
                         {
                             const auto registration = scene->Components()->Find(light->Type());
@@ -654,7 +654,8 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                     {
                         ui.Spacing();
                         auto& cameraExpanded = expansion("camera");
-                        if (auto card = ui.BeginChild("CameraCard", {0.0F, cameraExpanded ? 620.0F : 38.0F}, true);
+                        if (auto card =
+                                ui.BeginChild("CameraCard", {0.0F, cameraExpanded ? 620.0F : 38.0F}, true, false);
                             card)
                         {
                             const auto registration = scene->Components()->Find(camera->Type());
@@ -797,8 +798,8 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                     {
                         ui.Spacing();
                         auto& rendererExpanded = expansion("mesh-renderer");
-                        if (auto card =
-                                ui.BeginChild("MeshRendererCard", {0.0F, rendererExpanded ? 426.0F : 38.0F}, true);
+                        if (auto card = ui.BeginChild("MeshRendererCard", {0.0F, rendererExpanded ? 426.0F : 38.0F},
+                                                      true, false);
                             card)
                         {
                             const auto registration = scene->Components()->Find(renderer->Type());
@@ -1093,7 +1094,7 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                                                         compactFieldHeight + vfxInspectorHeight + audioSetupHeight +
                                                         animatorDiagnosticsHeight + uiDocumentActionsHeight)
                                  : 38.0F;
-                    if (auto card = ui.BeginChild(cardId, {0.0F, cardHeight}, true); card)
+                    if (auto card = ui.BeginChild(cardId, {0.0F, cardHeight}, true, false); card)
                     {
                         const bool removed = drawComponentHeader(component, *registration, expanded, registration->Name,
                                                                  mixedComponentValues);

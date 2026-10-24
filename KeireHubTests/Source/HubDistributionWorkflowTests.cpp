@@ -68,3 +68,45 @@ TEST_CASE("Hub distribution reports a reachable service as online before platfor
     CHECK_FALSE(product.Reconnecting);
     CHECK_FALSE(product.CatalogAvailable);
 }
+
+TEST_CASE("Hub distribution explains cache fallback and clears the failure after network recovery")
+{
+    DistributionCatalogSnapshot catalogs;
+    catalogs.OnlineDiscoveryEnabled = true;
+    catalogs.PackageCatalogs.push_back({.Channel = "stable",
+                                        .Status = {.State = DistributionCatalogSourceState::LastKnownGood,
+                                                   .Error = HubError{.Code = HubErrorCode::CatalogTransportFailed,
+                                                                     .Message = "Service unavailable.",
+                                                                     .Retryable = true,
+                                                                     .TechnicalDetails = "HTTP status 503"}}});
+    catalogs.Content.Status.State = DistributionCatalogSourceState::Online;
+    HubProductSnapshot product;
+    ApplyHubDistributionSnapshot({.Catalogs = std::make_shared<const DistributionCatalogSnapshot>(catalogs)}, product);
+    CHECK(product.Reconnecting);
+    CHECK(product.ConnectionMessage.find("HTTP status 503") != std::string::npos);
+    CHECK(product.ConnectionMessage.find("Retrying automatically") != std::string::npos);
+    REQUIRE(product.ConnectionFailureCode);
+    CHECK(*product.ConnectionFailureCode == HubErrorCode::CatalogTransportFailed);
+
+    product.Settings.OfflineMode = true;
+    ApplyHubDistributionSnapshot({.Catalogs = std::make_shared<const DistributionCatalogSnapshot>(catalogs)}, product);
+    CHECK_FALSE(product.Reconnecting);
+    CHECK_FALSE(product.Online);
+    CHECK(product.ConnectionMessage.empty());
+    CHECK_FALSE(product.ConnectionFailureCode);
+    product.Settings.OfflineMode = false;
+
+    catalogs.PackageCatalogs.front().Status.Error->Retryable = false;
+    CHECK_FALSE(HubDistributionNeedsNetworkRetry(catalogs));
+    ApplyHubDistributionSnapshot({.Catalogs = std::make_shared<const DistributionCatalogSnapshot>(catalogs)}, product);
+    CHECK_FALSE(product.Reconnecting);
+    CHECK_FALSE(product.ConnectionMessage.empty());
+
+    catalogs.PackageCatalogs.front().Status.State = DistributionCatalogSourceState::Online;
+    catalogs.PackageCatalogs.front().Status.Error.reset();
+    ApplyHubDistributionSnapshot({.Catalogs = std::make_shared<const DistributionCatalogSnapshot>(catalogs)}, product);
+    CHECK(product.Online);
+    CHECK_FALSE(product.Reconnecting);
+    CHECK(product.ConnectionMessage.empty());
+    CHECK_FALSE(product.ConnectionFailureCode);
+}

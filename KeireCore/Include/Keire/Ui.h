@@ -586,6 +586,8 @@ namespace Keire
         [[nodiscard]] UiWindowScope BeginWindow(std::string_view title, bool* open = nullptr,
                                                 UiWindowOptions options = {});
         [[nodiscard]] UiChildScope BeginChild(std::string_view id, UiSize size = {}, bool border = false);
+        // Decorative cards can forward the mouse wheel to their parent while retaining their scrollbar.
+        [[nodiscard]] UiChildScope BeginChild(std::string_view id, UiSize size, bool border, bool scrollWithMouse);
         [[nodiscard]] UiMenuBarScope BeginMenuBar();
         [[nodiscard]] UiMenuScope BeginMenu(std::string_view label, bool enabled = true);
         [[nodiscard]] UiTabBarScope BeginTabBar(std::string_view id);
@@ -703,6 +705,8 @@ namespace Keire
         [[nodiscard]] UiPosition CursorPosition() const;
         [[nodiscard]] UiPosition CursorScreenPosition() const;
         [[nodiscard]] bool WindowFocused() const;
+        // Excluding popup descendants lets modal controls defer keyboard input to an open selector.
+        [[nodiscard]] bool WindowFocused(bool includePopups) const;
         [[nodiscard]] UiPointerState PointerState() const;
         void SetCursorShape(UiCursorShape shape);
         /// Claims the vertical pointer wheel for the last item while it is hovered or active. Custom zoomable

@@ -3,7 +3,9 @@
 #include "KeireInternal/LogInternal.h"
 
 #include <algorithm>
+#include <charconv>
 #include <cstdio>
+#include <limits>
 #include <optional>
 #include <ranges>
 #include <sstream>
@@ -11,6 +13,44 @@
 
 namespace KeireEditor
 {
+    std::optional<Detail::ConsoleSourceLocation> Detail::ParseConsoleSourceLocation(std::string_view text)
+    {
+        // Managed diagnostics use path:line:column:. Do not interpret a drive colon as a line delimiter.
+        for (std::size_t delimiter = text.find(':'); delimiter != std::string_view::npos;
+             delimiter = text.find(':', delimiter + 1))
+        {
+            const auto lineEnd = text.find(':', delimiter + 1);
+            const auto columnEnd = lineEnd == std::string_view::npos ? lineEnd : text.find(':', lineEnd + 1);
+            if (columnEnd == std::string_view::npos)
+            {
+                continue;
+            }
+            std::uint32_t line = 0;
+            std::uint32_t column = 0;
+            const auto parse = [&](const std::size_t first, const std::size_t last, std::uint32_t& value)
+            {
+                const auto result = std::from_chars(text.data() + first, text.data() + last, value);
+                return result.ec == std::errc{} && result.ptr == text.data() + last && value > 0 &&
+                       value <= static_cast<std::uint32_t>(std::numeric_limits<std::int32_t>::max());
+            };
+            if (!parse(delimiter + 1, lineEnd, line) || !parse(lineEnd + 1, columnEnd, column))
+            {
+                continue;
+            }
+            auto path = text.substr(0, delimiter);
+            while (!path.empty() && path.front() == ' ')
+            {
+                path.remove_prefix(1);
+            }
+            if (path.empty())
+            {
+                return std::nullopt;
+            }
+            return ConsoleSourceLocation{std::string(path), line, column};
+        }
+        return std::nullopt;
+    }
+
     std::vector<Detail::ConsoleProjectedEntry>
     Detail::ProjectConsoleEntries(const std::span<const ConsoleProjectionEntry> entries, const bool collapse)
     {
@@ -204,6 +244,7 @@ namespace KeireEditor
 
     void ConsolePanel::Draw(Keire::UiFrame& ui, const Keire::UiThemeDefinition& theme)
     {
+        std::optional<Detail::ConsoleSourceLocation> pendingSource;
         if (auto console = ui.BeginPanel(m_Registration, {.NoScrollbar = true, .NoScrollWithMouse = true}); console)
         {
             const auto countInfo = std::ranges::count_if(m_Messages, [](const Message& message)
@@ -317,14 +358,21 @@ namespace KeireEditor
                     auto activeColor = ui.PushStyleColor(Keire::UiStyleColorRole::HeaderActive, highlights.Active);
                     if (ui.Selectable(formatted, m_Selection.Contains(entry->Serial)))
                         m_Selection.Select(visibleOrder, entry->Serial, ui.ShiftDown(), ui.ControlDown());
-                    if (ui.LastItemState().DoubleClicked)
-                        copySelection();
+                    const auto source = Detail::ParseConsoleSourceLocation(entry->Text);
+                    if (ui.LastItemState().DoubleClicked && source && m_OpenSource)
+                    {
+                        pendingSource = source;
+                    }
                     if (auto context = ui.BeginItemContextMenu("ConsoleEntry"); context)
                     {
                         if (!m_Selection.Contains(entry->Serial))
                             m_Selection.Select(visibleOrder, entry->Serial, false, false);
                         if (ui.MenuItem("Copy"))
                             copySelection();
+                        if (ui.MenuItem("Open source", false, source.has_value() && static_cast<bool>(m_OpenSource)))
+                        {
+                            pendingSource = source;
+                        }
                     }
                 }
                 if (ui.Shortcut({.Key = Keire::UiKey::C, .Primary = true}))
@@ -376,6 +424,11 @@ namespace KeireEditor
                         ui.TextColored(theme.MutedText, "Select a message to inspect its full text.");
                 }
             }
+        }
+        // Opening an IDE can report another log entry; never mutate the retained log while traversing it.
+        if (pendingSource && m_OpenSource)
+        {
+            m_OpenSource(*pendingSource);
         }
     }
 } // namespace KeireEditor

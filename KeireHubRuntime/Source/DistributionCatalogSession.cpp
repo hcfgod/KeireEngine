@@ -88,7 +88,7 @@ namespace KeireHub
             status.Sequence = document.Signature.Sequence;
             status.KeyId = document.Signature.KeyId;
             status.ExpiresAt = document.Signature.ExpiresAt;
-            status.Error.reset();
+            status.Error = document.NetworkFailure;
         }
 
         void MarkFailure(DistributionCatalogSourceStatus& status, const bool hasPublishedCatalog, HubError error,

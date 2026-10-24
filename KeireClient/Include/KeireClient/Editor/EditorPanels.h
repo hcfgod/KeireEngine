@@ -211,6 +211,7 @@ namespace KeireEditor
     {
       public:
         virtual ~IProjectSettingsController() = default;
+        virtual void ActivateProjectSettingsHistory() noexcept = 0;
         [[nodiscard]] virtual std::span<const Keire::AssetSourceRecord>
         ProjectSettingsAssetRecords() const noexcept = 0;
         virtual void RevealProjectSettingsAsset(Keire::AssetId asset) = 0;

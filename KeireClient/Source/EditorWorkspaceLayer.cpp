@@ -324,8 +324,21 @@ EditorWorkspaceLayer::EditorWorkspaceLayer(const bool smoke, const bool initiali
     : Layer("EditorWorkspaceLayer"), ManagedRuntimeApplicationServices(true),
       m_AssetBrowserPanel(
           std::make_unique<KeireEditor::AssetBrowserPanel>(static_cast<KeireEditor::IAssetBrowserController&>(*this))),
-      m_ConsolePanel(std::make_unique<KeireEditor::ConsolePanel>([this](const std::string_view text)
-                                                                 { Owner().Windows()->SetClipboardText(text); })),
+      m_ConsolePanel(std::make_unique<KeireEditor::ConsolePanel>(
+          [this](const std::string_view text) { Owner().Windows()->SetClipboardText(text); },
+          [this](const KeireEditor::Detail::ConsoleSourceLocation& location)
+          {
+              const auto project = Owner().GetProject();
+              const auto working = project ? project->Root() : std::filesystem::current_path();
+              const auto path = Keire::Detail::PathFromUtf8(location.Path);
+              std::string diagnostic;
+              if (!Keire::Detail::OpenInExternalEditor(path.is_absolute() ? path : working / path,
+                                                       AssetBrowserExternalEditor(), working, diagnostic, true,
+                                                       location.Line, location.Column))
+              {
+                  ReportError("Open source", diagnostic);
+              }
+          })),
       m_DiagnosticsPanel(std::make_unique<KeireEditor::DiagnosticsPanel>()),
       m_ConstructedDocuments(CreateDocumentWorkspaceDocuments()), m_SceneDocument(m_ConstructedDocuments->Scene.get()),
       m_InputActionsDocument(m_ConstructedDocuments->InputActions.get()),

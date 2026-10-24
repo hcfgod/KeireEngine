@@ -88,10 +88,15 @@ namespace Keire::Detail
     [[nodiscard]] std::vector<std::string>
     ResolveVisualStudioExternalEditorArguments(const std::filesystem::path& source,
                                                const std::filesystem::path& managedSolution);
+    [[nodiscard]] std::vector<std::string> ResolveExternalEditorSourceArguments(const std::filesystem::path& source,
+                                                                                std::string_view editorName,
+                                                                                std::uint32_t line,
+                                                                                std::uint32_t column);
     [[nodiscard]] bool OpenInExternalEditor(const std::filesystem::path& path,
                                             const std::filesystem::path& preferredEditor,
                                             const std::filesystem::path& workingDirectory, std::string& diagnostic,
-                                            bool reuseManagedSession = false) noexcept;
+                                            bool reuseManagedSession = false, std::uint32_t line = 0,
+                                            std::uint32_t column = 0) noexcept;
     [[nodiscard]] bool RevealInFileManager(const std::filesystem::path& path, std::string& diagnostic) noexcept;
 } // namespace Keire::Detail
 #include <chrono>

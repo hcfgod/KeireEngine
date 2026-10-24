@@ -10,6 +10,20 @@
 
 namespace KeireEditor
 {
+    std::string FormatUiBuilderInlineStyles(const std::span<const Keire::UiNamedValue> values)
+    {
+        std::string result;
+        for (const auto& value : values)
+        {
+            if (!result.empty())
+            {
+                result += '\n';
+            }
+            result += value.Name + ": " + value.Value + ';';
+        }
+        return result;
+    }
+
     Keire::UiVisualTreeDefinition ApplyUiBuilderInspectorEdit(Keire::UiVisualTreeDefinition definition,
                                                               const Keire::AssetId primary,
                                                               const std::span<const Keire::AssetId> selection,

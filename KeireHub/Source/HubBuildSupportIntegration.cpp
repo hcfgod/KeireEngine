@@ -204,7 +204,7 @@ namespace KeireHub
             if (m_PendingFocus && !m_Editors.empty())
             {
                 auto pending = std::exchange(m_PendingFocus, std::nullopt);
-                (void)FocusTarget(*pending->Platform, *pending->Architecture);
+                (void)FocusTarget(*pending->Platform, *pending->Architecture, m_PendingRequestingEditor);
             }
 
             if (!m_Selection)
@@ -254,7 +254,8 @@ namespace KeireHub
             return HubStatus::Success();
         }
 
-        HubStatus FocusTarget(const std::string_view platform, const std::string_view architecture)
+        HubStatus FocusTarget(const std::string_view platform, const std::string_view architecture,
+                              const std::filesystem::path& requestingEditor)
         {
             if (!m_OperationStoreAvailable)
             {
@@ -269,7 +270,7 @@ namespace KeireHub
                                            .Retryable = true,
                                            .AffectedItem = active->TargetInstallationId});
             }
-            auto selected = SelectBuildSupportEditorForTarget(m_Editors, platform, architecture);
+            auto selected = SelectBuildSupportEditorForTarget(m_Editors, platform, architecture, requestingEditor);
             m_RequestOpen = true;
             if (!selected)
             {
@@ -277,6 +278,7 @@ namespace KeireHub
                 {
                     m_PendingFocus = BuildSupportFilter{.Platform = std::string(platform),
                                                         .Architecture = std::string(architecture)};
+                    m_PendingRequestingEditor = requestingEditor;
                     m_Message = "Waiting for editor discovery before opening the requested Build Support target.";
                     m_Error = false;
                     return HubStatus::Success();
@@ -338,11 +340,28 @@ namespace KeireHub
 
         HubStatus ExecuteTaskCommand(const HubUiCommand& command)
         {
+            if (command.Type == HubUiCommandType::ClearFinishedTasks)
+            {
+                return m_OperationStore.ClearTerminal();
+            }
             if (!OwnsTask(command.ItemId))
             {
                 return HubStatus::Failure({.Code = HubErrorCode::NotFound,
                                            .Message = "The Build Support task is no longer available.",
                                            .AffectedItem = command.ItemId});
+            }
+            if (command.Type == HubUiCommandType::DismissTask)
+            {
+                const auto records = m_OperationStore.Snapshot();
+                const auto record = std::ranges::find_if(*records, [&](const auto& item)
+                                                         { return BuildSupportTaskId(item.Id) == command.ItemId; });
+                if (record == records->end())
+                {
+                    return HubStatus::Failure({.Code = HubErrorCode::NotFound,
+                                               .Message = "The Build Support task is no longer available.",
+                                               .AffectedItem = command.ItemId});
+                }
+                return m_OperationStore.RemoveTerminal(record->Id);
             }
             const auto active = ActiveOperation(m_OperationStore);
             if (command.Type != HubUiCommandType::CancelTask || !active ||
@@ -501,7 +520,8 @@ namespace KeireHub
                                          .Active = IsActive(record.State),
                                          .Cancellable = IsActive(record.State) &&
                                                         record.State != BuildSupportOperationState::Cancelling &&
-                                                        record.Kind != BuildSupportOperationKind::Remove});
+                                                        record.Kind != BuildSupportOperationKind::Remove,
+                                         .Dismissible = IsTerminal(record.State)});
             }
         }
 
@@ -1352,6 +1372,7 @@ namespace KeireHub
         std::vector<BuildSupportComponent> m_Filtered;
         std::optional<BuildSupportSelection> m_Selection;
         std::optional<BuildSupportFilter> m_PendingFocus;
+        std::filesystem::path m_PendingRequestingEditor;
         std::optional<BuildSupportComponent> m_PendingRemoval;
         std::optional<BuildSupportCommandPlan> m_Operation;
         std::optional<Keire::Detail::ChildProcess> m_Process;
@@ -1388,9 +1409,10 @@ namespace KeireHub
         return m_Impl->ManageEditor(installationId);
     }
     HubStatus HubBuildSupportIntegration::FocusTarget(const std::string_view platform,
-                                                      const std::string_view architecture)
+                                                      const std::string_view architecture,
+                                                      const std::filesystem::path& requestingEditor)
     {
-        return m_Impl->FocusTarget(platform, architecture);
+        return m_Impl->FocusTarget(platform, architecture, requestingEditor);
     }
     HubStatus HubBuildSupportIntegration::ImportPackage(const std::filesystem::path& package)
     {

@@ -25,6 +25,7 @@ namespace KeireEditor
         }
         [[nodiscard]] bool Dirty() const noexcept { return m_Dirty; }
         [[nodiscard]] bool Opened() const noexcept { return !m_ProjectRoot.empty(); }
+        [[nodiscard]] Keire::Ref<Keire::UndoContext> UndoContext() const noexcept { return m_Undo; }
 
         void Update(Keire::RenderEnvironmentSettings settings);
         void UpdateAuthoring(Keire::ProjectAuthoringSettings settings);

@@ -14,6 +14,81 @@
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <string_view>
+
+TEST_CASE("Inspector cards forward wheel scrolling to their parent without removing child scrollbars")
+{
+    REQUIRE(SDL_SetHintWithPriority(SDL_HINT_VIDEO_DRIVER, "dummy", SDL_HINT_OVERRIDE));
+    for (const bool scrollWithMouse : {false, true})
+    {
+        bool checked = false;
+        class CardScrollLayer final : public Keire::Layer
+        {
+          public:
+            CardScrollLayer(const bool scrollWithMouse, bool& checked)
+                : Layer("Card wheel routing"), m_ScrollWithMouse(scrollWithMouse), m_Checked(checked)
+            {
+            }
+
+          protected:
+            void OnUi(Keire::UiFrame& ui) override
+            {
+                ui.SetNextWindowSize({420, 320}, false);
+                auto window = ui.BeginWindow("Inspector card wheel fixture");
+                auto* parent = ImGui::GetCurrentWindow();
+                float childScroll = 0.0F;
+                {
+                    using OriginalBeginChild =
+                        Keire::UiChildScope (Keire::UiFrame::*)(std::string_view, Keire::UiSize, bool);
+                    constexpr OriginalBeginChild originalBeginChild = &Keire::UiFrame::BeginChild;
+                    auto card = m_ScrollWithMouse ? (ui.*originalBeginChild)("Card", {300, 140}, true)
+                                                  : ui.BeginChild("Card", {300, 140}, true, false);
+                    auto* child = ImGui::GetCurrentWindow();
+                    CHECK(((child->Flags & ImGuiWindowFlags_NoScrollWithMouse) != 0) == !m_ScrollWithMouse);
+                    CHECK((child->Flags & ImGuiWindowFlags_NoScrollbar) == 0);
+                    childScroll = child->Scroll.y;
+                    if (m_Frame == 0)
+                    {
+                        ImGui::GetIO().AddMousePosEvent(child->Pos.x + 60, child->Pos.y + 60);
+                    }
+                    for (int row = 0; row < 30; ++row)
+                    {
+                        ui.Text("Editable component property");
+                    }
+                }
+                for (int row = 0; row < 30; ++row)
+                {
+                    ui.Text("Next component");
+                }
+                if (m_Frame == 3)
+                {
+                    ImGui::GetIO().AddMouseWheelEvent(0, -1);
+                }
+                if (++m_Frame == 9)
+                {
+                    CHECK((childScroll > 0.0F) == m_ScrollWithMouse);
+                    CHECK((parent->Scroll.y > 0.0F) == !m_ScrollWithMouse);
+                    m_Checked = true;
+                    Owner().RequestExit();
+                }
+            }
+
+          private:
+            bool m_ScrollWithMouse;
+            bool& m_Checked;
+            int m_Frame = 0;
+        };
+        Keire::ApplicationSpecification specification;
+        specification.MainWindow.Visible = false;
+        specification.TargetFrameRate = 0;
+        specification.Ui.Mode = Keire::UiMode::Headless;
+        specification.Ui.LayoutPath.clear();
+        Keire::Application application(specification);
+        (void)application.PushLayer(std::make_unique<CardScrollLayer>(scrollWithMouse, checked));
+        CHECK(application.Run() == 0);
+        CHECK(checked);
+    }
+}
 
 TEST_CASE("Overlay actions receive pointer clicks above an overlapping viewport canvas")
 {
@@ -79,6 +154,101 @@ TEST_CASE("Overlay actions receive pointer clicks above an overlapping viewport 
         (void)application.PushLayer(std::make_unique<OverlayInputLayer>(fastClick, checked));
         CHECK(application.Run() == 0);
         CHECK(checked);
+    }
+}
+
+TEST_CASE("Modal name fields select existing text and expose Enter and Escape despite text ownership")
+{
+    REQUIRE(SDL_SetHintWithPriority(SDL_HINT_VIDEO_DRIVER, "dummy", SDL_HINT_OVERRIDE));
+    for (const auto key : {Keire::UiKey::Enter, Keire::UiKey::Escape})
+    {
+        for (const bool childSelector : {false, true})
+        {
+            bool verified = false;
+            class NameInputLayer final : public Keire::Layer
+            {
+              public:
+                NameInputLayer(const Keire::UiKey key, const bool childSelector, bool& verified)
+                    : Layer("Modal name input"), m_Key(key), m_ChildSelector(childSelector), m_Verified(verified)
+                {
+                }
+
+              protected:
+                void OnUi(Keire::UiFrame& ui) override
+                {
+                    auto window = ui.BeginWindow("Modal owner");
+                    if (m_Frame == 0)
+                    {
+                        ui.OpenPopup("Rename fixture");
+                    }
+                    if (auto popup = ui.BeginPopupModal("Rename fixture"); popup)
+                    {
+                        if (m_Frame == 0)
+                        {
+                            ui.RequestKeyboardFocus();
+                        }
+                        (void)ui.InputText("Name", m_Name, true);
+                        if (m_Frame == 2)
+                        {
+                            const auto* input = ImGui::GetInputTextState(ImGui::GetItemID());
+                            REQUIRE(input);
+                            CHECK(input->HasSelection());
+                            if (m_ChildSelector)
+                            {
+                                ui.OpenPopup("Child selector");
+                            }
+                        }
+                        if (auto selector = ui.BeginPopup("Child selector"); selector)
+                        {
+                            ui.Text("Choose an option");
+                        }
+                        const bool focused = ui.WindowFocused(false);
+                        const bool keyboardReady = m_WasFocused && focused;
+                        m_WasFocused = focused;
+                        if (m_Frame == 3)
+                        {
+                            CHECK(ui.WindowFocused());
+                            CHECK(focused == !m_ChildSelector);
+                            ImGui::GetIO().AddKeyEvent(m_Key == Keire::UiKey::Enter ? ImGuiKey_Enter : ImGuiKey_Escape,
+                                                       true);
+                        }
+                        if (m_Frame == 4)
+                        {
+                            CHECK(ui.KeyPressed(m_Key));
+                            CHECK(keyboardReady == !m_ChildSelector);
+                            if (m_ChildSelector && m_Key == Keire::UiKey::Escape)
+                            {
+                                // Native Escape already closed the child and focused the parent this frame.
+                                CHECK(focused);
+                            }
+                            m_Verified = ui.KeyPressed(m_Key) && keyboardReady == !m_ChildSelector;
+                            ui.CloseCurrentPopup();
+                        }
+                    }
+                    if (++m_Frame == 6)
+                    {
+                        Owner().RequestExit();
+                    }
+                }
+
+              private:
+                Keire::UiKey m_Key;
+                bool m_ChildSelector;
+                bool& m_Verified;
+                bool m_WasFocused = false;
+                int m_Frame = 0;
+                std::string m_Name = "Existing name";
+            };
+            Keire::ApplicationSpecification specification;
+            specification.MainWindow.Visible = false;
+            specification.TargetFrameRate = 0;
+            specification.Ui.Mode = Keire::UiMode::Headless;
+            specification.Ui.LayoutPath.clear();
+            Keire::Application application(specification);
+            (void)application.PushLayer(std::make_unique<NameInputLayer>(key, childSelector, verified));
+            CHECK(application.Run() == 0);
+            CHECK(verified);
+        }
     }
 }
 

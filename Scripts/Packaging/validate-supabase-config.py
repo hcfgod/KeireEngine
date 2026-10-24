@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate that a packaged Supabase desktop configuration contains only safe public values."""
+"""Validate public desktop account configuration (legacy filename retained for compatibility)."""
 
 from __future__ import annotations
 
@@ -12,6 +12,38 @@ from urllib.parse import urlsplit
 
 PUBLISHABLE_KEY = re.compile(r"^sb_publishable_[A-Za-z0-9_-]{16,192}$")
 OAUTH_CLIENT_ID = re.compile(r"^[\x21-\x7e]{8,128}$")
+NATIVE_CLIENT_ID = re.compile(r"^[A-Za-z0-9._~-]{8,128}$")
+
+
+def validate_native(value: dict[str, object]) -> None:
+    required = {"schemaVersion", "enabled", "provider"}
+    if value["enabled"]:
+        required.update({"projectUrl", "hubOAuthClientId"})
+    if set(value) != required or value.get("provider") != "mysql":
+        raise ValueError("Native account configuration has unsupported fields or provider.")
+    if not value["enabled"]:
+        return
+    origin = value["projectUrl"]
+    client_id = value["hubOAuthClientId"]
+    if not isinstance(origin, str) or len(origin) > 2048 or origin.endswith("/"):
+        raise ValueError("Native account origin is invalid.")
+    parsed = urlsplit(origin)
+    if (
+        parsed.scheme != "https"
+        or not parsed.hostname
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.port not in (None, 443)
+        or parsed.path
+        or parsed.query
+        or parsed.fragment
+        or "?" in origin
+        or "#" in origin
+        or any(ord(character) <= 32 or ord(character) >= 127 for character in origin)
+    ):
+        raise ValueError("Native account configuration requires a canonical HTTPS origin.")
+    if not isinstance(client_id, str) or not NATIVE_CLIENT_ID.fullmatch(client_id):
+        raise ValueError("Native account configuration requires a registered public client ID.")
 
 
 def validate(path: Path) -> None:
@@ -22,11 +54,15 @@ def validate(path: Path) -> None:
     value = json.loads(path.read_text(encoding="utf-8"))
     if (
         not isinstance(value, dict)
-        or value.get("schemaVersion") not in (1, 2)
+        or type(value.get("schemaVersion")) is not int
+        or value.get("schemaVersion") not in (1, 2, 3)
         or not isinstance(value.get("enabled"), bool)
     ):
         raise ValueError("Supabase configuration has an invalid schema header.")
     schema_version = value["schemaVersion"]
+    if schema_version == 3:
+        validate_native(value)
+        return
     if not value["enabled"]:
         allowed = {"schemaVersion", "enabled"}
         if schema_version == 2:

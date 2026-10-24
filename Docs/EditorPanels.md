@@ -10,8 +10,20 @@ do not reach through workspace friendship.
 
 Console entries use distinct theme colors for informational, warning, and error severity. Click selects one entry,
 Ctrl/Cmd-click toggles entries, and Shift-click selects the complete visible range from the prior anchor;
-Ctrl/Cmd+Shift-click adds that range. `Ctrl/Cmd+C`, double-click, and the **Copy** context action write every selected
+Ctrl/Cmd+Shift-click adds that range. `Ctrl/Cmd+C` and the **Copy** context action write every selected
 entry in chronological order, including its frame, category, and message, through the workspace clipboard callback.
+
+Recognized compiler diagnostics offer **Open source** and double-click navigation to their file, line and column
+through the configured external editor. Non-diagnostic entries retain their copy behavior.
+
+Lighting bake configuration changes use scene-document Undo/Redo; stop Play before editing or baking lighting.
+Prefab Overrides compares the live instance against its composed source and shows readable before/after values.
+Reverting inherited prefab data retains scene-owned root placement and external parenting.
+
+UI Document selection does not open UI Builder automatically; use the Inspector's explicit open action. Builder
+fields show input outlines and focus feedback, and inline styles are presented one declaration per line. Inspector
+component cards forward mouse-wheel scrolling to their parent while retaining their own scrollbars. Unsupported
+asset drops provide assignment guidance. Fixed-aspect Game previews are centered within the available area.
 
 KeireClient is a composition of dockable tools built exclusively on Kéire's public UI façade. Dear ImGui and SDL remain
 inside KeireCore. `SceneDocument` and `InputActionsDocument` own their respective authoring state and undo contexts;
@@ -40,6 +52,11 @@ exercises document lifecycle, material draft ownership, camera persistence, and 
 complete editor application.
 
 ## Global Commands
+
+Name dialogs focus and select the existing name on opening; Enter confirms a valid name and Escape cancels.
+The Project browser uses compact controls in short docks, with thumbnail options and status under **Options**.
+When a thumbnail row cannot fit, it temporarily shows list rows without changing the saved view preference.
+UI Builder starts at a usable authoring size on first use, constrained to the viewport; saved custom geometry is retained.
 
 Edit menu history is supplied by application-owned `UndoService`. Focus selects the scene, Input Actions, Project
 assets, or theme context, so one tool never clears another tool's redo stack. Labels identify the pending command, such

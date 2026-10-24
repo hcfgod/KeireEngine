@@ -82,6 +82,8 @@ namespace KeireHub
         explicit BuildSupportOperationStore(std::filesystem::path operationRoot);
 
         [[nodiscard]] HubStatus Load();
+        [[nodiscard]] HubStatus RemoveTerminal(std::string_view operationId);
+        [[nodiscard]] HubStatus ClearTerminal();
         [[nodiscard]] HubStatus Add(BuildSupportOperationRecord record);
         [[nodiscard]] HubStatus AttachProcess(const std::string& operationId, std::uint64_t processId,
                                               std::uint64_t updatedUnixSeconds);

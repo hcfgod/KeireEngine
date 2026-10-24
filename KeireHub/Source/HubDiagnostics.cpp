@@ -62,7 +62,11 @@ namespace KeireHub
                    : snapshot.Reconnecting       ? "reconnecting"
                                                  : "unavailable")
                << '\n'
-               << "Signed catalog: " << (snapshot.CatalogAvailable ? "available" : "unavailable") << '\n'
+               << "Signed catalog: " << (snapshot.CatalogAvailable ? "available" : "unavailable")
+               << '\n'
+               // Export the controlled error code, never arbitrary transport text, URLs, or proxy credentials.
+               << "Catalog connection error: "
+               << (snapshot.ConnectionFailureCode ? ToString(*snapshot.ConnectionFailureCode) : "none") << '\n'
                << "Hub update: "
                << (snapshot.HubUpdate
                        ? snapshot.HubUpdate->Version + (snapshot.HubUpdate->Required ? " (required)" : " (available)")

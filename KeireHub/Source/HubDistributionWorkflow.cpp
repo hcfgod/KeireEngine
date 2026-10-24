@@ -165,6 +165,33 @@ namespace KeireHub
     void ApplyHubDistributionSnapshot(const HubDistributionWorkflowSnapshot& distribution, HubProductSnapshot& product)
     {
         product.Online = false;
+        product.ConnectionMessage.clear();
+        product.ConnectionFailureCode.reset();
+        const auto describeFailure = [&](const HubError& failure)
+        {
+            if (product.ConnectionMessage.empty())
+            {
+                product.ConnectionMessage = failure.Message;
+                product.ConnectionFailureCode = failure.Code;
+                if (!failure.TechnicalDetails.empty())
+                {
+                    product.ConnectionMessage += " " + failure.TechnicalDetails;
+                }
+                if (distribution.Catalogs)
+                {
+                    product.ConnectionMessage +=
+                        failure.Retryable ? " Retrying automatically." : " Checking again periodically.";
+                }
+                else
+                {
+                    product.ConnectionMessage += " Check connection and settings.";
+                }
+            }
+        };
+        if (!product.Settings.OfflineMode && distribution.Failure)
+        {
+            describeFailure(*distribution.Failure);
+        }
         product.Reconnecting = !product.Settings.OfflineMode &&
                                (distribution.Refreshing || (distribution.Failure && distribution.Failure->Retryable));
         product.CatalogAvailable = false;
@@ -173,7 +200,22 @@ namespace KeireHub
         if (!distribution.Catalogs)
             return;
         const auto& catalogs = *distribution.Catalogs;
-        product.Reconnecting = product.Reconnecting || HubDistributionNeedsNetworkRetry(catalogs);
+        if (!product.Settings.OfflineMode)
+        {
+            for (const auto& package : catalogs.PackageCatalogs)
+            {
+                if (package.Status.Error)
+                {
+                    describeFailure(*package.Status.Error);
+                }
+            }
+            if (catalogs.Content.Status.Error)
+            {
+                describeFailure(*catalogs.Content.Status.Error);
+            }
+        }
+        product.Reconnecting =
+            !product.Settings.OfflineMode && (product.Reconnecting || HubDistributionNeedsNetworkRetry(catalogs));
         const auto available = [](const DistributionCatalogSourceStatus& status)
         {
             return status.State == DistributionCatalogSourceState::Online ||
@@ -181,7 +223,7 @@ namespace KeireHub
                    status.State == DistributionCatalogSourceState::OfflineLastKnownGood;
         };
         product.Online =
-            !catalogs.OfflineMode &&
+            !product.Settings.OfflineMode && !catalogs.OfflineMode &&
             (std::ranges::any_of(catalogs.PackageCatalogs, [&](const auto& value)
                                  { return value.Status.State == DistributionCatalogSourceState::Online; }) ||
              catalogs.Content.Status.State == DistributionCatalogSourceState::Online);

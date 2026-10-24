@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <deque>
 #include <functional>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -18,6 +19,15 @@ namespace KeireEditor
 {
     namespace Detail
     {
+        struct ConsoleSourceLocation final
+        {
+            std::string Path;
+            std::uint32_t Line = 0;
+            std::uint32_t Column = 0;
+        };
+
+        [[nodiscard]] std::optional<ConsoleSourceLocation> ParseConsoleSourceLocation(std::string_view text);
+
         struct ConsoleProjectionEntry final
         {
             std::string_view Category;
@@ -66,8 +76,12 @@ namespace KeireEditor
     {
       public:
         using CopyTextCallback = std::function<void(std::string_view)>;
+        using OpenSourceCallback = std::function<void(const Detail::ConsoleSourceLocation&)>;
 
-        explicit ConsolePanel(CopyTextCallback copyText = {}) : m_CopyText(std::move(copyText)) {}
+        explicit ConsolePanel(CopyTextCallback copyText = {}, OpenSourceCallback openSource = {})
+            : m_CopyText(std::move(copyText)), m_OpenSource(std::move(openSource))
+        {
+        }
         void Attach(Keire::UiWorkspace& workspace);
         void Add(std::string category, std::string message, Keire::UiColor color, std::uint64_t frame,
                  Keire::LogLevel level = Keire::LogLevel::Info);
@@ -90,6 +104,7 @@ namespace KeireEditor
         };
 
         CopyTextCallback m_CopyText;
+        OpenSourceCallback m_OpenSource;
         Keire::UiPanelRegistration m_Registration;
         std::deque<Message> m_Messages;
         std::vector<Message> m_PausedSnapshot;

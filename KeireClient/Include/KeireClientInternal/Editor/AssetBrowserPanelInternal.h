@@ -1,5 +1,7 @@
 #pragma once
 
+#include "KeireClient/Editor/AssetBrowserLayoutPolicy.h"
+
 #include "KeireClient/Editor/AssetBrowserPanel.h"
 
 #include "KeireClient/Editor/AssetBrowserFolderCache.h"
@@ -1105,7 +1107,7 @@ namespace KeireEditor
                 DrawBlankContextItems(ui, editor);
         }
 
-        void DrawContentPane(Keire::UiFrame& ui, IAssetBrowserController& editor)
+        void DrawContentPane(Keire::UiFrame& ui, IAssetBrowserController& editor, const float paneHeight)
         {
             const auto contentDropArea = ui.ContentRect();
             DrawBreadcrumbs(ui, editor);
@@ -1129,7 +1131,8 @@ namespace KeireEditor
             for (const auto* record : displayedAssets)
                 VisibleSelectionOrder.push_back(record->Id);
 
-            if (Mode == ViewMode::List)
+            constexpr float breadcrumbHeight = 36.0F;
+            if (Mode == ViewMode::List || UseAssetBrowserListForHeight(paneHeight - breadcrumbHeight, ThumbnailSize))
             {
                 for (const auto& folder : folders)
                     if (Search.empty() || folder.filename().string().find(Search) != std::string::npos)
@@ -1248,6 +1251,7 @@ namespace KeireEditor
         std::string RenameBuffer;
         std::string CreateNameBuffer;
         std::string CreateError;
+        bool NameDialogWasFocused = false;
         std::string TrashError;
         std::filesystem::path PendingCreateFolder;
         NamedCreateKind PendingCreateKind = NamedCreateKind::None;

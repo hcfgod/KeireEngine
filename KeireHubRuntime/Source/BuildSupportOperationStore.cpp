@@ -589,6 +589,36 @@ namespace KeireHub
         return Commit(std::move(records));
     }
 
+    HubStatus BuildSupportOperationStore::RemoveTerminal(const std::string_view operationId)
+    {
+        auto records = *Snapshot();
+        const auto found = std::ranges::find(records, operationId, &BuildSupportOperationRecord::Id);
+        if (found == records.end())
+        {
+            return HubStatus::Failure({.Code = HubErrorCode::NotFound,
+                                       .Message = "The Build Support operation is no longer available.",
+                                       .AffectedItem = std::string(operationId)});
+        }
+        if (!IsTerminal(found->State))
+        {
+            return HubStatus::Failure({.Code = HubErrorCode::InvalidTransition,
+                                       .Message = "An active Build Support operation cannot be dismissed.",
+                                       .AffectedItem = std::string(operationId)});
+        }
+        records.erase(found);
+        return Commit(std::move(records));
+    }
+
+    HubStatus BuildSupportOperationStore::ClearTerminal()
+    {
+        auto records = *Snapshot();
+        if (std::erase_if(records, [](const auto& record) { return IsTerminal(record.State); }) == 0)
+        {
+            return HubStatus::Success();
+        }
+        return Commit(std::move(records));
+    }
+
     std::shared_ptr<const std::vector<BuildSupportOperationRecord>>
     BuildSupportOperationStore::Snapshot() const noexcept
     {

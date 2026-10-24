@@ -16,10 +16,25 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <vector>
 
 #if defined(_WIN32)
 #include <Windows.h>
 #endif
+
+TEST_CASE("external editor diagnostic arguments keep spaced paths in a single argument")
+{
+    const auto source = std::filesystem::current_path() / "Project Space" / "Game.cs";
+    const auto path = Keire::Detail::PathToUtf8(source);
+    CHECK((Keire::Detail::ResolveExternalEditorSourceArguments(source, "code", 39, 27) ==
+           std::vector<std::string>{"--goto", path + ":39:27"}));
+    CHECK((Keire::Detail::ResolveExternalEditorSourceArguments(source, "vscodium", 2, 0) ==
+           std::vector<std::string>{"--goto", path + ":2:1"}));
+    CHECK(
+        (Keire::Detail::ResolveExternalEditorSourceArguments(source, "code", 0, 0) == std::vector<std::string>{path}));
+    CHECK((Keire::Detail::ResolveExternalEditorSourceArguments(source, "custom", 2, 3) ==
+           std::vector<std::string>{path}));
+}
 
 TEST_CASE("detached process launch reports a trackable process identity")
 {

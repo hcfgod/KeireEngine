@@ -192,7 +192,8 @@ void EditorWorkspaceLayer::OpenBuildSupportHub(const Keire::PlayerBuildProfile& 
 {
     const auto hub = Keire::Detail::ResolveCompanionExecutable(m_ExecutablePath, "KeireHub");
     const std::vector<std::string> arguments{"--build-support", std::string(Keire::ToString(profile.Platform)),
-                                             std::string(Keire::ToString(profile.Architecture))};
+                                             std::string(Keire::ToString(profile.Architecture)),
+                                             Keire::Detail::PathToUtf8(m_ExecutablePath)};
     std::string diagnostic;
     if (!Keire::Detail::LaunchDetachedProcess(hub, arguments, hub.parent_path(), diagnostic))
         throw std::runtime_error("Could not open the Hub Build Support page: " + diagnostic);

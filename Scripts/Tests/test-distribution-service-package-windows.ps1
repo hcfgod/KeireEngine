@@ -270,6 +270,7 @@ try {
         }
     }
     & (Join-Path $PSScriptRoot 'test-windows-host-supervisor-probes.ps1')
+    & (Join-Path $PSScriptRoot 'test-windows-host-task-settings.ps1')
     & (Join-Path $PSScriptRoot 'test-distribution-publish-wrappers.ps1')
     $startupTask = Join-Path $Root `
         "Services\KeireDistributionService\scripts\install-windows-startup-task.ps1"

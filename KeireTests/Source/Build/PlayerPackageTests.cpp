@@ -11,12 +11,14 @@
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #if defined(_WIN32)
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <Windows.h>
+#include <winver.h>
 #endif
 
 namespace
@@ -237,6 +239,30 @@ TEST_CASE("Windows player packages rename the executable and self-describe their
     CHECK(loaded->ManagedRuntime == layout.ManagedRuntime);
 }
 
+TEST_CASE("Player packages omit empty runtime generations without modifying their support template")
+{
+    TemporaryDirectory directory;
+    const auto supportRoot = directory.Path / "support";
+    WritePortableExecutable(supportRoot / "KeireRuntime.exe");
+    const auto hostRoot = std::filesystem::path("Managed/Dotnet/host/fxr");
+    const auto runtimeRoot = std::filesystem::path("Managed/Dotnet/shared/Microsoft.NETCore.App");
+    Write(supportRoot / hostRoot / "10.0.10/hostfxr.dll");
+    Write(supportRoot / runtimeRoot / "10.0.10/coreclr.dll");
+    std::filesystem::create_directories(supportRoot / hostRoot / "10.0.12");
+    std::filesystem::create_directories(supportRoot / runtimeRoot / "10.0.12");
+
+    const auto profile = Profile(Keire::PlayerPlatform::Windows);
+    const auto layout = Keire::Detail::AssemblePlayerPackage(Support(supportRoot, profile.Platform, "KeireRuntime.exe"),
+                                                             Settings(), profile, directory.Path / "stage");
+
+    CHECK(std::filesystem::is_regular_file(layout.Root / hostRoot / "10.0.10/hostfxr.dll"));
+    CHECK(std::filesystem::is_regular_file(layout.Root / runtimeRoot / "10.0.10/coreclr.dll"));
+    CHECK_FALSE(std::filesystem::exists(layout.Root / hostRoot / "10.0.12"));
+    CHECK_FALSE(std::filesystem::exists(layout.Root / runtimeRoot / "10.0.12"));
+    CHECK(std::filesystem::is_directory(supportRoot / hostRoot / "10.0.12"));
+    CHECK(std::filesystem::is_directory(supportRoot / runtimeRoot / "10.0.12"));
+}
+
 TEST_CASE("Linux player packages include a desktop entry")
 {
     TemporaryDirectory directory;
@@ -297,7 +323,7 @@ TEST_CASE("Windows player branding writes only within manifest-declared bounded 
 }
 
 #if defined(_WIN32)
-TEST_CASE("Windows player packaging embeds the generated fallback icon in the executable")
+TEST_CASE("Windows player packaging embeds icon and native product version metadata before signing")
 {
     TemporaryDirectory directory;
     std::array<wchar_t, 32768> executablePath{};
@@ -312,7 +338,20 @@ TEST_CASE("Windows player packaging embeds the generated fallback icon in the ex
     auto support = Support(supportRoot, profile.Platform, "KeireRuntime.exe");
     support.Manifest.BrandingSlots = {
         {.Path = "KeireRuntime.exe", .Kind = "windows-resource-update", .Offset = 0, .Size = 1}};
-    const auto layout = Keire::Detail::AssemblePlayerPackage(support, Settings(), profile, directory.Path / "stage");
+    auto settings = Settings();
+    settings.ProductName = "Caf\xc3\xa9 Game";
+    settings.Version = "1.2.3-beta.4";
+    DWORD expectedMajor = 0x00010002U;
+    DWORD expectedMinor = 0x00030000U;
+    SUBCASE("Unicode branding retains semantic prerelease text") {}
+    SUBCASE("Semantic versions outside Windows numeric limits retain their complete string")
+    {
+        settings.Version = "70000.2.3+release.5";
+        expectedMajor = 0;
+        expectedMinor = 0;
+    }
+    const auto expectedVersion = Keire::Detail::PathFromUtf8(settings.Version).wstring();
+    const auto layout = Keire::Detail::AssemblePlayerPackage(support, settings, profile, directory.Path / "stage");
 
     const auto module =
         LoadLibraryExW(layout.Executable.c_str(), nullptr, LOAD_LIBRARY_AS_DATAFILE | LOAD_LIBRARY_AS_IMAGE_RESOURCE);
@@ -321,6 +360,69 @@ TEST_CASE("Windows player packaging embeds the generated fallback icon in the ex
     CHECK(iconGroup != nullptr);
     if (iconGroup)
         CHECK(SizeofResource(module, iconGroup) > 6);
+
+    const auto versionResource = FindResourceW(module, MAKEINTRESOURCEW(1), MAKEINTRESOURCEW(16));
+    CHECK(versionResource != nullptr);
+    const auto versionLibrary = LoadLibraryExW(L"version.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
+    CHECK(versionLibrary != nullptr);
+    if (versionResource && versionLibrary)
+    {
+        using QueryVersion = BOOL(WINAPI*)(LPCVOID, LPCWSTR, LPVOID*, PUINT);
+        const auto query = reinterpret_cast<QueryVersion>(GetProcAddress(versionLibrary, "VerQueryValueW"));
+        CHECK(query != nullptr);
+        const auto resource = LoadResource(module, versionResource);
+        const auto bytes = resource ? LockResource(resource) : nullptr;
+        CHECK(bytes != nullptr);
+        if (query && bytes)
+        {
+            const auto checkString = [&](const wchar_t* key, const std::wstring_view expected)
+            {
+                void* value = nullptr;
+                UINT stringLength = 0;
+                CHECK(query(bytes, key, &value, &stringLength));
+                if (value && stringLength > 0)
+                {
+                    CHECK(std::wstring_view(static_cast<const wchar_t*>(value), stringLength - 1U) == expected);
+                }
+            };
+            checkString(L"\\StringFileInfo\\040904b0\\ProductName", L"Caf\u00e9 Game");
+            checkString(L"\\StringFileInfo\\040904b0\\FileDescription", L"Caf\u00e9 Game");
+            checkString(L"\\StringFileInfo\\040904b0\\FileVersion", expectedVersion);
+            checkString(L"\\StringFileInfo\\040904b0\\ProductVersion", expectedVersion);
+            checkString(L"\\StringFileInfo\\040904b0\\InternalName", L"com.example.sample-game");
+            checkString(L"\\StringFileInfo\\040904b0\\OriginalFilename", L"Caf\u00e9 Game.exe");
+            void* value = nullptr;
+            UINT valueBytes = 0;
+            CHECK(query(bytes, L"\\", &value, &valueBytes));
+            if (value && valueBytes == sizeof(VS_FIXEDFILEINFO))
+            {
+                const auto& fixed = *static_cast<const VS_FIXEDFILEINFO*>(value);
+                CHECK(fixed.dwSignature == 0xfeef04bdU);
+                CHECK(fixed.dwFileVersionMS == expectedMajor);
+                CHECK(fixed.dwFileVersionLS == expectedMinor);
+                CHECK(fixed.dwProductVersionMS == fixed.dwFileVersionMS);
+                CHECK(fixed.dwProductVersionLS == fixed.dwFileVersionLS);
+            }
+            else
+            {
+                FAIL_CHECK("Native version metadata is missing its fixed version block");
+            }
+            CHECK(query(bytes, L"\\VarFileInfo\\Translation", &value, &valueBytes));
+            if (value && valueBytes == 4)
+            {
+                CHECK(static_cast<const WORD*>(value)[0] == 0x0409);
+                CHECK(static_cast<const WORD*>(value)[1] == 1200);
+            }
+            else
+            {
+                FAIL_CHECK("Native version metadata is missing its language/codepage translation");
+            }
+        }
+    }
+    if (versionLibrary)
+    {
+        CHECK(FreeLibrary(versionLibrary));
+    }
     CHECK(FreeLibrary(module));
 }
 #endif

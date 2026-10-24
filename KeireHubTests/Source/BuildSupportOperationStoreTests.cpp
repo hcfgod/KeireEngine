@@ -57,6 +57,60 @@ namespace
     }
 } // namespace
 
+TEST_CASE("Build Support finished history can be dismissed without removing active work")
+{
+    KeireHubTests::TemporaryDirectory temporary;
+    const auto root = temporary.Path() / "BuildSupportOperations";
+    BuildSupportOperationStore store(root);
+    const auto completed = ImportRecord(root, 1);
+    REQUIRE(store.Add(completed));
+    REQUIRE(store.Finish(completed.Id, BuildSupportOperationState::Completed, "Completed", "Imported", 1.0F, 20));
+    const auto failed = ImportRecord(root, 2);
+    REQUIRE(store.Add(failed));
+    REQUIRE(store.Finish(failed.Id, BuildSupportOperationState::Failed, "Failed", "Failed", 0.0F, 20));
+    const auto cancelled = ImportRecord(root, 3);
+    REQUIRE(store.Add(cancelled));
+    REQUIRE(store.Finish(cancelled.Id, BuildSupportOperationState::Cancelled, "Cancelled", "Cancelled", 0.0F, 20));
+    const auto active = ImportRecord(root, 4);
+    REQUIRE(store.Add(active));
+
+    const auto before = store.Snapshot();
+    const auto rejected = store.RemoveTerminal(active.Id);
+    REQUIRE_FALSE(rejected);
+    CHECK(rejected.Error().Code == HubErrorCode::InvalidTransition);
+    CHECK(store.Snapshot() == before);
+    CHECK_FALSE(store.RemoveTerminal("missing"));
+    REQUIRE(store.RemoveTerminal(completed.Id));
+    CHECK(store.Snapshot()->size() == 3);
+    BuildSupportOperationStore reloaded(root);
+    REQUIRE(reloaded.Load());
+    CHECK(*reloaded.Snapshot() == *store.Snapshot());
+    REQUIRE(reloaded.ClearTerminal());
+    REQUIRE(reloaded.Snapshot()->size() == 1);
+    CHECK(reloaded.Snapshot()->front() == active);
+    REQUIRE(reloaded.ClearTerminal());
+    BuildSupportOperationStore finalReload(root);
+    REQUIRE(finalReload.Load());
+    CHECK(*finalReload.Snapshot() == *reloaded.Snapshot());
+}
+
+TEST_CASE("Build Support history dismissal preserves the snapshot when persistence fails")
+{
+    KeireHubTests::TemporaryDirectory temporary;
+    const auto root = temporary.Path() / "BuildSupportOperations";
+    BuildSupportOperationStore store(root);
+    const auto record = ImportRecord(root);
+    REQUIRE(store.Add(record));
+    REQUIRE(store.Finish(record.Id, BuildSupportOperationState::Completed, "Completed", "Imported", 1.0F, 20));
+    const auto before = store.Snapshot();
+    std::filesystem::remove(store.Path());
+    std::filesystem::create_directories(store.Path());
+    CHECK_FALSE(store.RemoveTerminal(record.Id));
+    CHECK(store.Snapshot() == before);
+    CHECK_FALSE(store.ClearTerminal());
+    CHECK(store.Snapshot() == before);
+}
+
 TEST_CASE("Build Support operation journal survives restart and preserves cancellation ownership")
 {
     KeireHubTests::TemporaryDirectory temporary;

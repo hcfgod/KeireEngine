@@ -625,7 +625,7 @@ namespace KeireEditor
         const Keire::RenderCamera& camera, const Keire::UiItemRect viewport, const bool allowManipulation,
         const bool pointerBlocked, const BeginUndo& beginUndo, const MeshBoundsResolver& resolveMeshBounds,
         const std::span<const Keire::AssetId> selections, const Keire::ScenePresentationRuntime* presentation,
-        const UiPanelSettingsResolver& resolveUiPanelSettings, const OpenUiDocument& openUiDocument,
+        const UiPanelSettingsResolver& resolveUiPanelSettings, const OpenUiDocument&,
         const PoseBoundsResolver& resolvePoseBounds)
     {
         if (!scene || viewport.Size().Width <= 1.0F || viewport.Size().Height <= 1.0F)
@@ -686,9 +686,7 @@ namespace KeireEditor
                     m_RoutedUiVisualTree = uiDocument->VisualTree();
                     m_RoutedUiPanelSettings = uiDocument->PanelSettings();
                     m_RoutedUiDocumentRoute = selectedUiDocumentRoute;
-                    if (selectedDocumentChanged &&
-                        selectedUiDocumentRoute == SceneUiDocumentAuthoringRoute::FocusUiBuilder && openUiDocument)
-                        openUiDocument(uiDocument->VisualTree());
+                    // Selection updates the Inspector only. Opening UI Builder is an explicit Inspector action.
                 }
 
                 if (selectedUiDocumentRoute == SceneUiDocumentAuthoringRoute::WorldSurfaceGizmo && panelSettings &&

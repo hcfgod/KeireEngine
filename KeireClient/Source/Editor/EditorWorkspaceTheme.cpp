@@ -551,6 +551,8 @@ void EditorWorkspaceLayer::OpenPendingDialog(Keire::UiFrame& ui)
     if (!m_OpenDialog)
         return;
     m_OpenDialog = false;
+    m_FocusNameDialog = true;
+    m_NameDialogWasFocused = false;
     switch (m_Dialog)
     {
     case Dialog::SaveLayout:
@@ -619,10 +621,18 @@ void EditorWorkspaceLayer::DrawNameDialog(Keire::UiFrame& ui, Keire::UiWorkspace
     if (auto popup = ui.BeginPopupModal(title); popup)
     {
         ui.Text(dialog == Dialog::RenameEntity ? "Entity name" : "Profile name");
-        (void)ui.InputText("##ProfileName", m_ProfileName);
+        if (std::exchange(m_FocusNameDialog, false))
+        {
+            ui.RequestKeyboardFocus();
+        }
+        (void)ui.InputText("##ProfileName", m_ProfileName, true);
+        // The focused text field owns Enter, so routed shortcuts cannot submit this modal.
+        const bool focused = ui.WindowFocused(false);
+        const bool keyboardReady = std::exchange(m_NameDialogWasFocused, focused) && focused;
+        const bool submit = keyboardReady && ui.KeyPressed(Keire::UiKey::Enter);
         if (auto disabled = ui.BeginDisabled(m_ProfileName.empty()); disabled)
         {
-            if (ui.Button(dialog == Dialog::SaveTheme ? "Save" : "Confirm"))
+            if ((ui.Button(dialog == Dialog::SaveTheme ? "Save" : "Confirm") || submit) && !m_ProfileName.empty())
             {
                 try
                 {
@@ -663,7 +673,7 @@ void EditorWorkspaceLayer::DrawNameDialog(Keire::UiFrame& ui, Keire::UiWorkspace
             }
         }
         ui.SameLine();
-        if (ui.Button("Cancel"))
+        if (ui.Button("Cancel") || (keyboardReady && ui.KeyPressed(Keire::UiKey::Escape)))
         {
             m_Dialog = Dialog::None;
             if (m_SceneTransitions)

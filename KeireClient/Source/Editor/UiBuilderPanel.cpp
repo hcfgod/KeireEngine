@@ -50,18 +50,6 @@ namespace KeireEditor
             return found == values.end() ? std::string{} : found->Value;
         }
 
-        [[nodiscard]] std::string InlineStyles(const std::span<const Keire::UiNamedValue> values)
-        {
-            std::string result;
-            for (const auto& value : values)
-            {
-                if (!result.empty())
-                    result += ' ';
-                result += value.Name + ": " + value.Value + ';';
-            }
-            return result;
-        }
-
         [[nodiscard]] std::vector<Keire::UiNamedValue> ParseInlineStyles(const std::string_view text)
         {
             std::vector<Keire::UiNamedValue> result;
@@ -277,13 +265,14 @@ namespace KeireEditor
         m_ClassesDraft = JoinClasses(element->Classes);
         m_TextDraft = NamedValue(element->Attributes, "text");
         m_CustomTypeDraft = element->CustomType;
-        m_InlineStyleDraft = InlineStyles(element->InlineStyles);
+        m_InlineStyleDraft = FormatUiBuilderInlineStyles(element->InlineStyles);
         m_TemplateDraft = element->Template ? element->Template.ToString() : std::string{};
         m_SlotDraft = element->Slot;
     }
 
     void UiBuilderPanel::Draw(Keire::UiFrame& ui)
     {
+        ui.SetNextWindowSize({1040.0F, 640.0F});
         auto panel = ui.BeginPanel(m_Registration);
         if (!panel)
             return;
@@ -883,20 +872,38 @@ namespace KeireEditor
             }
             return Detail::InspectorControlLabel(label, layout.Stacked);
         };
-        const bool nameEdited = ui.InputText(prepareField("Name"), m_NameDraft);
-        const bool classesEdited = ui.InputText(
-            prepareField(document.Selections().size() > 1 ? "Classes (all selected)" : "Classes"), m_ClassesDraft);
-        const bool textEdited = ui.InputText(prepareField("Text"), m_TextDraft);
+        const auto outlineField = [&ui, this]()
+        {
+            const auto state = ui.LastItemState();
+            const auto& theme = m_Controller.UiBuilderTheme();
+            ui.DrawRectangle(ui.LastItemRect(), state.Active || state.Hovered ? theme.Accent : theme.MutedText, 1.0F,
+                             3.0F);
+        };
+        const auto textField = [&ui, &prepareField, &outlineField](const std::string_view label, std::string& value)
+        {
+            const bool edited = ui.InputText(prepareField(label), value);
+            outlineField();
+            return edited;
+        };
+        const bool nameEdited = textField("Name", m_NameDraft);
+        const bool classesEdited =
+            textField(document.Selections().size() > 1 ? "Classes (all selected)" : "Classes", m_ClassesDraft);
+        const bool textEdited = textField("Text", m_TextDraft);
         bool customTypeEdited = false;
         if (element->Type == Keire::UiVisualElementType::Custom)
-            customTypeEdited = ui.InputText(prepareField("Custom Type"), m_CustomTypeDraft);
+            customTypeEdited = textField("Custom Type", m_CustomTypeDraft);
         bool templateEdited = false;
         if (element->Type == Keire::UiVisualElementType::TemplateContainer)
-            templateEdited = ui.InputText(prepareField("Template Asset ID"), m_TemplateDraft);
+            templateEdited = textField("Template Asset ID", m_TemplateDraft);
         bool slotEdited = false;
         if (element->Type != Keire::UiVisualElementType::Slot)
-            slotEdited = ui.InputText(prepareField("Slot Assignment"), m_SlotDraft);
-        bool inlineStyleEdited = ui.InputTextMultiline(prepareField("Inline Style"), m_InlineStyleDraft, 5);
+            slotEdited = textField("Slot Assignment", m_SlotDraft);
+        ui.Text("Inline Style");
+        ui.SetNextItemWidth(ui.ContentAvailable().Width);
+        bool inlineStyleEdited = ui.InputTextMultiline("##InlineStyle", m_InlineStyleDraft, 8);
+        outlineField();
+        ui.TextColoredWrapped(m_Controller.UiBuilderTheme().MutedText,
+                              "One declaration per line, for example: width: 100%;");
         ui.TextColoredWrapped(m_Controller.UiBuilderTheme().MutedText,
                               "Property changes apply automatically and are undoable.");
         if (ui.Button("Clear Inline Styles"))

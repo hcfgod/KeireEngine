@@ -293,6 +293,7 @@ $supabaseUrl = ''
 $supabasePublishableKey = ''
 $platformBackend = 'supabase'
 $platformConfigurationPath = ''
+$platformSpoolDirectory = ''
 if ($schemaVersion -eq 3) {
     $platformBackend = [string] (Get-RequiredSetting $settings 'platformBackend')
     if ($platformBackend -notin @('supabase', 'mysql')) {
@@ -314,6 +315,8 @@ if ($schemaVersion -ge 2) {
             [IO.Path]::GetFullPath($platformConfiguration.webRoot) -ne $webRoot) {
             throw 'MySQL platform configuration must match this deployment root, HTTPS origin and loopback port.'
         }
+        $platformSpoolDirectory = [IO.Path]::GetFullPath(
+            [string] (Get-RequiredSetting $platformConfiguration 'spoolDirectory'))
     }
     else {
         $supabaseUrl = [string] (Get-RequiredSetting $settings 'supabaseUrl')
@@ -337,6 +340,12 @@ if ($schemaVersion -ge 2) {
         if (-not (Test-Path -LiteralPath $requiredFile -PathType Leaf)) {
             throw "A required Windows web platform file does not exist: '$requiredFile'."
         }
+    }
+}
+if ($platformBackend -eq 'mysql') {
+    $writerRetirementScript = Join-Path $PSScriptRoot 'retire-platform-writer.ps1'
+    if (-not (Test-Path -LiteralPath $writerRetirementScript -PathType Leaf)) {
+        throw "The MySQL writer retirement helper does not exist: '$writerRetirementScript'."
     }
 }
 if (-not (Test-Path -LiteralPath $storageRoot -PathType Container)) {
@@ -403,6 +412,15 @@ function Start-WebPlatform {
                 (Get-HttpProbeFailureDetail)
         }
         return
+    }
+
+    if ($platformBackend -eq 'mysql') {
+        $writerMarker = Join-Path $platformSpoolDirectory '.keire-platform-writer.lock'
+        $hadWriterMarker = Test-Path -LiteralPath $writerMarker
+        & $writerRetirementScript -SpoolDirectory $platformSpoolDirectory
+        if ($hadWriterMarker) {
+            Write-HostEvent 'Retired the stopped web platform writer marker before restart.'
+        }
     }
 
     $env:NODE_ENV = 'production'

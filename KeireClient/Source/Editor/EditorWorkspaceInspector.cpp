@@ -293,7 +293,16 @@ void EditorWorkspaceLayer::AddScriptToEntity(const Keire::EntityId entity, const
                                { return static_cast<char>(std::tolower(character)); });
     }
     if (extension != ".cs")
-        return;
+    {
+        if (extension == ".keireui")
+        {
+            throw std::invalid_argument("To assign a UI document, select the entity and use the UI Document "
+                                        "component's Visual Tree picker in the Inspector. Dropping it on an entity "
+                                        "does not change the current assignment.");
+        }
+        throw std::invalid_argument("This entity drop target accepts C# scripts. Assign other assets through their "
+                                    "component fields in the Inspector.");
+    }
     const auto scripts = Owner().Scripts();
     if (!scripts || !scripts->RuntimeHostAvailable())
         throw std::logic_error("The managed scripting runtime is unavailable.");
@@ -550,6 +559,11 @@ void EditorWorkspaceLayer::SetInspectorAssetStatus(std::string status) noexcept 
 void EditorWorkspaceLayer::ReportInspectorAssetError(std::string message) noexcept
 {
     SetAssetError(std::move(message));
+}
+
+void EditorWorkspaceLayer::ActivateProjectSettingsHistory() noexcept
+{
+    m_ActiveUndoContext = m_ProjectSettingsDocument->UndoContext();
 }
 
 std::span<const Keire::AssetSourceRecord> EditorWorkspaceLayer::ProjectSettingsAssetRecords() const noexcept

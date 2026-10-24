@@ -1,9 +1,7 @@
 {
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "enabled": true,
-  "hubOAuthEnabled": true,
-  "projectUrl": "https://khjduyjamzwumhducmou.supabase.co",
-  "publishableKey": "sb_publishable_ULD9rGixCgViUHWaHjPuVg_Y0RR3Hjw",
-  "hubOAuthClientId": "e48aacbe-3636-43b2-9043-7f4e641b207f",
-  "hubOAuthWebsiteCallbackUrl": "https://keireengine.duckdns.org/oauth/hub/callback/"
+  "provider": "mysql",
+  "projectUrl": "https://keireengine.duckdns.org",
+  "hubOAuthClientId": "keire-hub-desktop"
 }

@@ -121,7 +121,8 @@ namespace KeireHub
         case HubActivationAction::BuildSupport:
         {
             page = HubPage::Installs;
-            const auto focused = callbacks.FocusBuildSupport(*request.Platform, *request.Architecture);
+            const auto focused = callbacks.FocusBuildSupport(*request.Platform, *request.Architecture,
+                                                             request.Path.value_or(std::filesystem::path{}));
             if (!focused)
             {
                 NotifyActivation(controller, NotificationSeverity::Warning, "Build Support unavailable",

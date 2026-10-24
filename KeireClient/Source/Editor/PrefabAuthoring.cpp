@@ -7,6 +7,8 @@
 #include <unordered_map>
 #include <utility>
 
+#include <nlohmann/json.hpp>
+
 namespace KeireEditor
 {
     namespace
@@ -215,6 +217,27 @@ namespace KeireEditor
             throw std::invalid_argument("Prefab instance root is unavailable.");
         const auto externalParent = currentRoot->Parent;
 
+        // Every source root has scene-owned placement, including additional roots in a multi-root prefab.
+        std::unordered_map<Keire::AssetId, Keire::SceneObjectDefinition> rootPlacements;
+        for (const auto& object : composed.Objects)
+        {
+            if (object.Parent)
+            {
+                continue;
+            }
+            const auto mapping = std::ranges::find(instance->Objects, object.Id, &Keire::PrefabObjectMapping::Source);
+            if (mapping == instance->Objects.end())
+            {
+                continue;
+            }
+            const auto current =
+                std::ranges::find(replacement.Objects, mapping->Instance, &Keire::SceneObjectDefinition::Id);
+            if (current != replacement.Objects.end())
+            {
+                rootPlacements.emplace(object.Id, *current);
+            }
+        }
+
         std::unordered_map<Keire::AssetId, Keire::AssetId> remapped;
         for (const auto& mapping : instance->Objects)
             remapped.emplace(mapping.Source, mapping.Instance);
@@ -247,6 +270,20 @@ namespace KeireEditor
             auto copy = object;
             copy.Id = remapped.at(object.Id);
             copy.Parent = object.Parent ? remapped.at(object.Parent) : externalParent;
+            if (const auto placement = rootPlacements.find(object.Id); placement != rootPlacements.end())
+            {
+                copy.Parent = placement->second.Parent;
+                copy.Transform = placement->second.Transform;
+                const auto currentTransform =
+                    std::ranges::find(placement->second.Components, Keire::TransformComponent::StaticType(),
+                                      &Keire::SceneComponentDefinition::Type);
+                const auto sourceTransform = std::ranges::find(copy.Components, Keire::TransformComponent::StaticType(),
+                                                               &Keire::SceneComponentDefinition::Type);
+                if (currentTransform != placement->second.Components.end() && sourceTransform != copy.Components.end())
+                {
+                    sourceTransform->Data = currentTransform->Data;
+                }
+            }
             replacement.Objects.push_back(std::move(copy));
             instance->Objects.push_back({object.Id, remapped.at(object.Id)});
             if (!object.Parent && !instance->Root)
@@ -481,5 +518,107 @@ namespace KeireEditor
         auto updatedPrefab = UpdatePrefabFromEditingScene(source, normalized, composedBase);
         Keire::SceneAsset::Validate(updatedScene);
         return {std::move(updatedPrefab), std::move(updatedScene)};
+    }
+    std::vector<PrefabOverrideReviewEntry> ReviewPrefabInstance(const Keire::SceneDefinition& scene,
+                                                                const Keire::AssetId instanceRoot,
+                                                                const Keire::SceneDefinition& composedSource)
+    {
+        // Normalize using the same path as Apply so review cannot silently omit live component edits.
+        Keire::PrefabDefinition source;
+        source.Template = composedSource;
+        const auto update = ApplyPrefabInstanceToSource(scene, instanceRoot, source, composedSource);
+        const auto& edited = update.Prefab.Template;
+        std::vector<PrefabOverrideReviewEntry> result;
+        for (const auto& original : composedSource.Objects)
+        {
+            if (!FindPrefabObject(edited, original.Id))
+            {
+                result.push_back({original.Id, original.Name, {}, "Object", "Present", "Removed"});
+            }
+        }
+        for (const auto& object : edited.Objects)
+        {
+            const auto* original = FindPrefabObject(composedSource, object.Id);
+            if (!original)
+            {
+                result.push_back({object.Id, object.Name, {}, "Object", "Absent", "Added"});
+                continue;
+            }
+            const auto add = [&](const Keire::ComponentTypeId component, std::string property,
+                                 const nlohmann::json& before, const nlohmann::json& after)
+            {
+                if (before != after)
+                {
+                    result.push_back(
+                        {object.Id, object.Name, component, std::move(property), before.dump(), after.dump()});
+                }
+            };
+            add({}, "Name", original->Name, object.Name);
+            add({}, "Active", original->Active, object.Active);
+            add({}, "Layer", original->Layer, object.Layer);
+            add({}, "Tags", original->Tags, object.Tags);
+            const auto vectorValue = [](const Keire::Vector3& value)
+            { return nlohmann::json::array({value.X, value.Y, value.Z}); };
+            const auto rotationValue = [](const Keire::Quaternion& value)
+            { return nlohmann::json::array({value.X, value.Y, value.Z, value.W}); };
+            const auto transform = Keire::TransformComponent::StaticType();
+            add(transform, "Position", vectorValue(original->Transform.Position),
+                vectorValue(object.Transform.Position));
+            add(transform, "Rotation", rotationValue(original->Transform.Rotation),
+                rotationValue(object.Transform.Rotation));
+            add(transform, "Scale", vectorValue(original->Transform.Scale), vectorValue(object.Transform.Scale));
+            for (const auto& component : original->Components)
+            {
+                if (std::ranges::find(object.Components, component.Type, &Keire::SceneComponentDefinition::Type) ==
+                    object.Components.end())
+                {
+                    result.push_back({object.Id, object.Name, component.Type, "Component", "Present", "Removed"});
+                }
+            }
+            for (const auto& component : object.Components)
+            {
+                const auto previous =
+                    std::ranges::find(original->Components, component.Type, &Keire::SceneComponentDefinition::Type);
+                if (previous == original->Components.end())
+                {
+                    result.push_back({object.Id, object.Name, component.Type, "Component", "Absent", "Added"});
+                    continue;
+                }
+                add(component.Type, "Enabled", previous->Enabled, component.Enabled);
+                add(component.Type, "Schema version", previous->SchemaVersion, component.SchemaVersion);
+                if (component.Type == transform)
+                {
+                    continue;
+                }
+                const auto before = nlohmann::json::parse(previous->Data, nullptr, false);
+                const auto after = nlohmann::json::parse(component.Data, nullptr, false);
+                if (!before.is_object() || !after.is_object())
+                {
+                    add(component.Type, "Data", previous->Data, component.Data);
+                    continue;
+                }
+                std::set<std::string> properties;
+                for (const auto& [key, value] : before.items())
+                {
+                    properties.insert(key);
+                }
+                for (const auto& [key, value] : after.items())
+                {
+                    properties.insert(key);
+                }
+                for (const auto& property : properties)
+                {
+                    if (!before.contains(property) || !after.contains(property))
+                    {
+                        result.push_back({object.Id, object.Name, component.Type, property,
+                                          before.contains(property) ? before.at(property).dump() : "<absent>",
+                                          after.contains(property) ? after.at(property).dump() : "<absent>"});
+                        continue;
+                    }
+                    add(component.Type, property, before.at(property), after.at(property));
+                }
+            }
+        }
+        return result;
     }
 } // namespace KeireEditor

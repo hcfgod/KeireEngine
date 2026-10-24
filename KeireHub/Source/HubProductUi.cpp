@@ -1155,6 +1155,16 @@ namespace KeireHub
         auto& settings = *m_EditedSettings;
         PageHeader(ui, m_Tokens, "Settings", "Hub preferences are versioned, validated, and written atomically.");
 
+        if (ui.Button("Save settings", {116.0F, 34.0F}))
+        {
+            command = {.Type = HubUiCommandType::SaveSettings, .Settings = settings};
+        }
+        ui.SameLine();
+        ui.TextColored(settings == snapshot.Settings ? m_Tokens.SecondaryText : m_Tokens.Warning,
+                       settings == snapshot.Settings ? "All changes saved"
+                                                     : "Unsaved changes — Save settings to apply");
+        ui.Separator();
+
         auto settingsBody = ui.BeginChild("SettingsBody", {0.0F, 0.0F}, false);
         if (!settingsBody)
             return;
@@ -1288,9 +1298,6 @@ namespace KeireHub
 #endif
 
         ui.Spacing();
-        if (ui.Button("Save settings", {116.0F, 34.0F}))
-            command = {.Type = HubUiCommandType::SaveSettings, .Settings = settings};
-        ui.SameLine();
         if (ui.Button("Collect diagnostics...", {160.0F, 34.0F}))
             command.Type = HubUiCommandType::CopyDiagnostics;
         ui.SameLine();

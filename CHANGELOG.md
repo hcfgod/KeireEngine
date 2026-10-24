@@ -2,6 +2,33 @@
 
 ## Unreleased
 
+## 0.4.8
+
+- Added undoable scene lighting bake settings and kept lighting authoring in Edit mode.
+- Populate native Windows player executable product/version Details during branding before signing, retaining Unicode
+  product names and complete semantic-version strings.
+- Made prefab override review compare live state with its source, show readable before/after values, and preserve
+  scene-owned root placement when reverting inherited data.
+- Improved Inspector wheel scrolling, UI Builder field visibility and multiline style authoring, unsupported asset-drop
+  guidance, and fixed-aspect Game preview centering. Selecting a UI Document no longer opens its builder automatically.
+- Added compiler diagnostic source navigation and actionable feedback for already-open Hub projects. Build Support
+  requests identify their requesting Editor instead of silently selecting a different installation.
+
+- Run the Windows distribution-host startup task at normal priority so the supervisor and hosted services do not
+  inherit background scheduling that can starve startup and HTTP responses under competing workloads.
+- Migrated the bundled Hub account configuration and package validation to the MySQL-backed website sign-in flow.
+- Preserved catalog connection failures when browsing verified cached releases, exposed connection details in the Hub,
+  and distinguished transient reconnect retries from permanent endpoint errors while respecting explicit Offline mode.
+- Fixed duplicate versions in Hub install labels and made completed Build Support tasks dismissible, including from
+  Clear finished. Settings now keep Save and an unsaved-changes indicator above the scrolling preferences.
+- Routed focused Project Settings Undo/Redo to settings history, improved keyboard submission of Editor name dialogs,
+  and kept the Project browser usable in short docks. UI Builder now has a usable first-open size.
+- Added a popup-excluding `UiFrame::WindowFocused(false)` query while preserving the existing overload, and isolated
+  parent-dialog Enter/Escape handling from keys used to close child selectors.
+- Kept recovery snapshots after Save As while recording the saved-copy path in the original scene's recovery notice.
+- Omitted empty template directories from player packages so an empty newer .NET host folder cannot shadow the bundled
+  runtime and prevent standalone startup.
+
 - Fixed Windows PowerShell preflight quoting and a shutdown race where an exited Node process could be mistaken for a timeout, leaving the website host stopped with a stale writer lease.
 
 - Restored MySQL Marketplace download handoff for newly published packages whose immutable local package object is

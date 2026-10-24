@@ -86,10 +86,11 @@ namespace KeireHub
         }
         if (!compact)
         {
-            const auto connection = snapshot.Settings.OfflineMode ? "Offline mode"
-                                    : snapshot.Reconnecting       ? "Reconnecting"
-                                    : snapshot.Online             ? "Online"
-                                                                  : "Unavailable";
+            const auto connection = snapshot.Settings.OfflineMode         ? "Offline mode"
+                                    : !snapshot.ConnectionMessage.empty() ? "Connection issue"
+                                    : snapshot.Reconnecting               ? "Reconnecting"
+                                    : snapshot.Online                     ? "Online"
+                                                                          : "Unavailable";
             const auto version = "Hub " + snapshot.HubVersion;
             constexpr float footerGap = 8.0F;
             const auto connectionWidth = ui.MeasureText(connection).Width;
@@ -98,7 +99,12 @@ namespace KeireHub
             const auto footerOrigin = ui.CursorPosition();
             ui.SetCursorPosition(
                 {footerOrigin.X + std::max((width - footerWidth) * 0.5F, 0.0F), footerOrigin.Y + 4.0F});
-            ui.TextColored(snapshot.Online ? m_Tokens.Success : m_Tokens.Warning, connection);
+            ui.TextColored(snapshot.Online && snapshot.ConnectionMessage.empty() ? m_Tokens.Success : m_Tokens.Warning,
+                           connection);
+            if (!snapshot.ConnectionMessage.empty())
+            {
+                ui.SetTooltip(snapshot.ConnectionMessage, {.Delayed = true});
+            }
             ui.SameLine();
             ui.TextColored(m_Tokens.MutedText, version);
         }

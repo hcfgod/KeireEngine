@@ -182,8 +182,10 @@ namespace KeireHub
     void HubProjectsUi::DrawActionMenu(Keire::UiFrame& ui, const Keire::RecentProject& project,
                                        const bool confirmRemoval, HubProjectUiCommand& command)
     {
-        if (ui.MenuItem(project.Status == Keire::ProjectStatus::Ready ? "Open" : "Review upgrade", false,
-                        CanOpenOrUpgrade(project.Status)))
+        if (ui.MenuItem(project.Status == Keire::ProjectStatus::InUse   ? "Already open..."
+                        : project.Status == Keire::ProjectStatus::Ready ? "Open"
+                                                                        : "Review upgrade",
+                        false, CanOpenOrUpgrade(project.Status)))
         {
             command = {.Type = HubProjectUiCommandType::Open, .ProjectId = project.Id.ToString(), .Path = project.Root};
         }
@@ -406,7 +408,8 @@ namespace KeireHub
                                              project.Status == Keire::ProjectStatus::UnsupportedSchema;
                     if (auto disabled = ui.BeginDisabled(!CanOpenOrUpgrade(project.Status) && !needsEditor); disabled)
                     {
-                        const auto label = needsEditor                                     ? "Find editor"
+                        const auto label = project.Status == Keire::ProjectStatus::InUse   ? "Open"
+                                           : needsEditor                                   ? "Find editor"
                                            : project.Status == Keire::ProjectStatus::Ready ? "Open"
                                                                                            : "Upgrade";
                         if (ui.Button(label, {needsEditor ? 88.0F : 64.0F, 30.0F}))

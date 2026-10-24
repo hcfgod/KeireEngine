@@ -2,6 +2,7 @@
 
 #include "KeireHub/HubDesignTokens.h"
 #include "KeireHub/HubTemplateBrowser.h"
+#include "KeireHubRuntime/HubError.h"
 
 #include "Keire/Ui.h"
 #include "Keire/Window.h"
@@ -213,6 +214,8 @@ namespace KeireHub
         bool BuildSupportInventoryLoading = false;
         bool Online = false;
         bool Reconnecting = false;
+        std::string ConnectionMessage;
+        std::optional<HubErrorCode> ConnectionFailureCode;
         bool CatalogAvailable = false;
         std::vector<HubEditorUiRecord> Editors;
         std::vector<std::string> PopulatedEditorChannels;

@@ -32,7 +32,7 @@ namespace
                                             "Locate and import a validated legacy Build Support package."},
         Keire::ApplicationCommandLineOption{"--install-version <package-or-version>",
                                             "Open the verified editor installation review."},
-        Keire::ApplicationCommandLineOption{"--build-support <platform> <architecture>",
+        Keire::ApplicationCommandLineOption{"--build-support <platform> <architecture> [editor-executable]",
                                             "Open the matching editor's Build Support components."},
     };
 

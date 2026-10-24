@@ -1,11 +1,27 @@
 $ErrorActionPreference = "Stop"
 
 $Root = Resolve-Path (Join-Path $PSScriptRoot "..\..")
-$Deployment = Join-Path $Root "Services\KeireDistributionService\scripts\deploy-windows-web.ps1"
+$DeploymentSource = Join-Path $Root "Services\KeireDistributionService\scripts\deploy-windows-web.ps1"
 $FixtureRoot = Join-Path ([IO.Path]::GetTempPath()) `
     ("keire-windows-web-deployment-test-" + [Guid]::NewGuid().ToString("N"))
 [IO.Directory]::CreateDirectory($FixtureRoot) | Out-Null
 $script:Utf8NoBomEncoding = [Text.UTF8Encoding]::new($false)
+$deploymentTools = Join-Path $FixtureRoot 'deployment-tools'
+[IO.Directory]::CreateDirectory($deploymentTools) | Out-Null
+$Deployment = Join-Path $deploymentTools 'deploy-windows-web.ps1'
+Copy-Item -LiteralPath $DeploymentSource -Destination $Deployment
+[IO.File]::WriteAllText(
+    (Join-Path $deploymentTools 'start-windows-host.ps1'),
+    @'
+$global:KeireWebDeploymentTestState.ProbeCount++
+if ($global:KeireWebDeploymentTestState.ProbeErrors.Count -ne 0) {
+    throw $global:KeireWebDeploymentTestState.ProbeErrors.Dequeue()
+}
+'@,
+    $script:Utf8NoBomEncoding)
+Copy-Item -LiteralPath `
+    (Join-Path $Root 'Services/KeireDistributionService/scripts/retire-platform-writer.ps1') `
+    -Destination (Join-Path $deploymentTools 'retire-platform-writer.ps1')
 
 $global:KeireWebDeploymentTestState = [pscustomobject]@{
     TaskAvailable = $true
@@ -240,6 +256,8 @@ if ($global:KeireWebDeploymentTestState.ProbeErrors.Count -ne 0) {
 }
 '@
     Set-Utf8NoBomFile $supervisor $supervisorContents
+    Set-Utf8NoBomFile (Join-Path $scripts 'retire-platform-writer.ps1') `
+        '# Previous writer retirement helper fixture'
     $settingsPath = Join-Path $hostRoot "host-settings.json"
     $settingsContents = [pscustomobject]@{
         schemaVersion = 2
@@ -331,7 +349,7 @@ try {
         Assert-True ($global:KeireWebDeploymentTestState.StartCount -eq 1) `
             "Swap failure did not perform exactly one recovery start."
         $rollbacks = @(Get-ChildItem -LiteralPath $fixture.Fixture -Recurse -Force | Where-Object {
-                $_.Name -like "*.rollback-*"
+                $_.PSIsContainer -and $_.Name -like "*.rollback-*"
             })
         Assert-True ($rollbacks.Count -eq 0) "Swap failure left the previous deployment stranded as a rollback."
     }
@@ -412,6 +430,45 @@ try {
         "The successful web deployment restarted the host task an unexpected number of times."
     Assert-True ($global:KeireWebDeploymentTestState.TaskState -eq "Running") `
         "The successful web deployment did not leave the host task running."
+
+    $missingHelperValidation = New-DeploymentFixture "missing-helper-validation" $false
+    $missingValidationHelper = Join-Path (Split-Path $missingHelperValidation.SettingsPath) `
+        'scripts/retire-platform-writer.ps1'
+    Remove-Item -LiteralPath $missingValidationHelper -Force
+    Reset-Mocks $missingHelperValidation
+    & $Deployment -SourceWebRoot $missingHelperValidation.SourceRoot `
+        -SettingsPath $missingHelperValidation.SettingsPath -ValidateOnly
+    Assert-True (-not $global:KeireWebDeploymentTestState.TaskStopIssued) `
+        'Validation-only mode stopped the host when the destination helper was absent.'
+
+    $missingHelperSuccess = New-DeploymentFixture "missing-helper-success" $false
+    $missingSuccessHelper = Join-Path (Split-Path $missingHelperSuccess.SettingsPath) `
+        'scripts/retire-platform-writer.ps1'
+    Remove-Item -LiteralPath $missingSuccessHelper -Force
+    Reset-Mocks $missingHelperSuccess
+    & $Deployment -SourceWebRoot $missingHelperSuccess.SourceRoot `
+        -SettingsPath $missingHelperSuccess.SettingsPath
+    Assert-True (Test-Path -LiteralPath $missingSuccessHelper -PathType Leaf) `
+        'A successful deployment did not install the missing writer retirement helper.'
+    Assert-True ((Get-FileHash -LiteralPath $missingSuccessHelper -Algorithm SHA256).Hash -eq
+        (Get-FileHash -LiteralPath (Join-Path $deploymentTools 'retire-platform-writer.ps1') -Algorithm SHA256).Hash) `
+        'A successful deployment installed the wrong writer retirement helper.'
+
+    $missingHelperRollback = New-DeploymentFixture "missing-helper-rollback" $false
+    $missingRollbackHelper = Join-Path (Split-Path $missingHelperRollback.SettingsPath) `
+        'scripts/retire-platform-writer.ps1'
+    Remove-Item -LiteralPath $missingRollbackHelper -Force
+    $missingRollbackSupervisor = [IO.File]::ReadAllText($missingHelperRollback.Supervisor)
+    Reset-Mocks $missingHelperRollback
+    $global:KeireWebDeploymentTestState.StartErrors.Enqueue('injected missing-helper startup failure')
+    Invoke-ExpectedFailure $missingHelperRollback 'injected missing-helper startup failure'
+    Assert-PreviousDeployment $missingHelperRollback
+    Assert-True (-not (Test-Path -LiteralPath $missingRollbackHelper)) `
+        'Rollback retained a writer retirement helper that did not previously exist.'
+    Assert-True ([IO.File]::ReadAllText($missingHelperRollback.Supervisor) -ceq $missingRollbackSupervisor) `
+        'Rollback did not restore the supervisor after first-time helper installation.'
+    Assert-True ($global:KeireWebDeploymentTestState.TaskState -eq 'Running') `
+        'Rollback after first-time helper installation left the host stopped.'
 
     $rollbackStart = New-DeploymentFixture "rollback-start" $false
     Reset-Mocks $rollbackStart
@@ -541,6 +598,9 @@ try {
     Copy-Item -LiteralPath $Deployment -Destination $isolatedDeployment
     $newSupervisor = $priorSupervisor + "`n# New provider supervisor fixture`n"
     Set-Utf8NoBomFile (Join-Path $transitionTools 'start-windows-host.ps1') $newSupervisor
+    Copy-Item -LiteralPath `
+        (Join-Path $Root 'Services/KeireDistributionService/scripts/retire-platform-writer.ps1') `
+        -Destination (Join-Path $transitionTools 'retire-platform-writer.ps1')
     Reset-Mocks $mysql
     & $isolatedDeployment -SourceWebRoot $mysql.SourceRoot -SettingsPath $mysql.SettingsPath `
         -CandidateSettingsPath $candidatePath -AllowRuntimeUpdate

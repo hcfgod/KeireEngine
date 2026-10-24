@@ -114,6 +114,11 @@ namespace KeireEditor
         if (!panel)
             return;
 
+        if (ui.WindowFocused())
+        {
+            m_Controller.ActivateProjectSettingsHistory();
+        }
+
         ui.TextColored(theme.Accent, "PROJECT SETTINGS");
         ui.Separator();
         ui.Text("Scripting");

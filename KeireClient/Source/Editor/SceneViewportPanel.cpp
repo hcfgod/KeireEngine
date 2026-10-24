@@ -173,6 +173,11 @@ void KeireEditor::SceneViewportPanel::Draw(Keire::UiFrame& ui)
     if (hasScene && document.RecoveryAvailable())
     {
         ui.TextColored(theme.Warning, "A recovery snapshot is available for this scene.");
+        if (!document.RecoverySavedCopy().empty())
+        {
+            ui.Text("A scene copy was saved as: " + document.RecoverySavedCopy());
+            ui.Text("This original snapshot was retained and may differ from the saved copy.");
+        }
         if (ui.Button("Restore Recovery"))
         {
             try

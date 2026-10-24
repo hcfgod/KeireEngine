@@ -75,6 +75,43 @@ TEST_CASE("Build Support selection requires an explicit healthy editor and choos
     CHECK_FALSE(SelectBuildSupportEditor(std::span(&escaped, 1), "escaped"));
 }
 
+TEST_CASE("Build Support handoff never substitutes an idle installation for the requesting editor")
+{
+    KeireHubTests::TemporaryDirectory directory;
+    std::array editors{Editor(directory.Path() / "requester", "requester", "2.1.0"),
+                       Editor(directory.Path() / "other", "other", "9.0.0")};
+    const auto executable = editors[0].Root / "bin" / "KeireClient.exe";
+    const auto selected = SelectBuildSupportEditorForTarget(editors, "windows", "x86_64", executable);
+    REQUIRE(selected);
+    CHECK(selected.Value().Editor.InstallationId == "requester");
+    editors[0].Running = true;
+    const auto running = SelectBuildSupportEditorForTarget(editors, "windows", "x86_64", executable);
+    REQUIRE_FALSE(running);
+    CHECK(running.Error().Code == HubErrorCode::InstallationBusy);
+    CHECK(running.Error().AffectedItem == "requester");
+    editors[0].Running = false;
+    editors[0].Healthy = false;
+    CHECK_FALSE(SelectBuildSupportEditorForTarget(editors, "windows", "x86_64", executable));
+    const auto missing = SelectBuildSupportEditorForTarget(editors, "windows", "x86_64",
+                                                           directory.Path() / "unregistered" / "KeireClient.exe");
+    REQUIRE_FALSE(missing);
+    CHECK(missing.Error().Code == HubErrorCode::NotFound);
+}
+
+TEST_CASE("Build Support handoff chooses the nearest registered root and refuses an unhealthy nested editor")
+{
+    KeireHubTests::TemporaryDirectory directory;
+    const auto outerRoot = directory.Path() / "outer";
+    const auto innerRoot = outerRoot / "nested";
+    std::array editors{Editor(outerRoot, "outer", "9.0.0"), Editor(innerRoot, "inner", "2.1.0")};
+    const auto executable = innerRoot / "bin" / "KeireClient.exe";
+    const auto selected = SelectBuildSupportEditorForTarget(editors, "windows", "x86_64", executable);
+    REQUIRE(selected);
+    CHECK(selected.Value().Editor.InstallationId == "inner");
+    editors[1].Healthy = false;
+    CHECK_FALSE(SelectBuildSupportEditorForTarget(editors, "windows", "x86_64", executable));
+}
+
 TEST_CASE("Build Support inventory is filtered by selected editor version and optional target")
 {
     KeireHubTests::TemporaryDirectory directory;

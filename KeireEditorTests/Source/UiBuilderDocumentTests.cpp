@@ -25,6 +25,13 @@
 #include <string>
 #include <vector>
 
+TEST_CASE("UI Builder inline style drafts show each declaration on its own line")
+{
+    CHECK(KeireEditor::FormatUiBuilderInlineStyles({}).empty());
+    const std::array values{Keire::UiNamedValue{"width", "100%"}, Keire::UiNamedValue{"height", "80px"},
+                            Keire::UiNamedValue{"color", "#ffffffff"}};
+    CHECK(KeireEditor::FormatUiBuilderInlineStyles(values) == "width: 100%;\nheight: 80px;\ncolor: #ffffffff;");
+}
 namespace
 {
     [[nodiscard]] Keire::UiVisualTreeDefinition TestDocument()

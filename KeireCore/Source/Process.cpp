@@ -231,7 +231,8 @@ namespace Keire::Detail
         }
 
         [[nodiscard]] bool InvokeVisualStudioOpenFile(IDispatch& dte, const std::filesystem::path& source,
-                                                      std::string& diagnostic)
+                                                      std::string& diagnostic, const std::uint32_t line,
+                                                      const std::uint32_t column)
         {
             auto itemOperations = ReadDispatchProperty(dte, const_cast<wchar_t*>(L"ItemOperations"));
             if (!itemOperations)
@@ -271,13 +272,43 @@ namespace Keire::Detail
                 diagnostic = "Visual Studio could not open the source in the matching solution instance.";
                 return false;
             }
+            if (line != 0)
+            {
+                auto document = ReadDispatchProperty(dte, const_cast<wchar_t*>(L"ActiveDocument"));
+                auto selection = document ? ReadDispatchProperty(*document.Get(), const_cast<wchar_t*>(L"Selection"))
+                                          : ComReference<IDispatch>{};
+                const auto move =
+                    selection ? ResolveDispatchMember(*selection.Get(), const_cast<wchar_t*>(L"MoveToLineAndOffset"))
+                              : DISPID_UNKNOWN;
+                if (move == DISPID_UNKNOWN)
+                {
+                    diagnostic = "Source opened, but Visual Studio did not expose text navigation.";
+                    return false;
+                }
+                VARIANTARG coordinates[2];
+                for (auto& coordinate : coordinates)
+                {
+                    VariantInit(&coordinate);
+                    coordinate.vt = VT_I4;
+                }
+                coordinates[0].lVal = static_cast<LONG>(std::max(column, 1U));
+                coordinates[1].lVal = static_cast<LONG>(line);
+                DISPPARAMS position{coordinates, nullptr, 2, 0};
+                if (FAILED(selection.Get()->Invoke(move, IID_NULL, LOCALE_USER_DEFAULT, DISPATCH_METHOD, &position,
+                                                   nullptr, nullptr, nullptr)))
+                {
+                    diagnostic = "Source opened, but Visual Studio could not navigate to the diagnostic location.";
+                    return false;
+                }
+            }
             return true;
         }
 
         [[nodiscard]] bool OpenInMatchingVisualStudioInstance(const std::filesystem::path& source,
                                                               const std::filesystem::path& solution,
                                                               const std::uint32_t minimumMajor, bool& matchingInstance,
-                                                              std::string& diagnostic)
+                                                              std::string& diagnostic, const std::uint32_t line,
+                                                              const std::uint32_t column)
         {
             matchingInstance = false;
             const auto initialized = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
@@ -329,7 +360,7 @@ namespace Keire::Detail
                 if (fullName.empty() || !SameWindowsPath(fullName, solution))
                     continue;
                 matchingInstance = true;
-                opened = InvokeVisualStudioOpenFile(*dte.Get(), source, diagnostic);
+                opened = InvokeVisualStudioOpenFile(*dte.Get(), source, diagnostic, line, column);
                 break;
             }
             bindContext = {};
@@ -344,7 +375,8 @@ namespace Keire::Detail
                                                                const std::filesystem::path& solution,
                                                                const std::chrono::milliseconds timeout,
                                                                const std::uint32_t minimumMajor, bool& matchingInstance,
-                                                               std::string& diagnostic)
+                                                               std::string& diagnostic, const std::uint32_t line = 0,
+                                                               const std::uint32_t column = 0)
         {
             const auto deadline = std::chrono::steady_clock::now() + timeout;
             matchingInstance = false;
@@ -352,7 +384,8 @@ namespace Keire::Detail
             {
                 bool currentMatch = false;
                 std::string currentDiagnostic;
-                if (OpenInMatchingVisualStudioInstance(source, solution, minimumMajor, currentMatch, currentDiagnostic))
+                if (OpenInMatchingVisualStudioInstance(source, solution, minimumMajor, currentMatch, currentDiagnostic,
+                                                       line, column))
                     return true;
                 matchingInstance = matchingInstance || currentMatch;
                 if (!currentDiagnostic.empty())
@@ -365,15 +398,16 @@ namespace Keire::Detail
         }
 
         void OpenInVisualStudioWhenSolutionReady(std::filesystem::path source, std::filesystem::path solution,
-                                                 const std::uint32_t minimumMajor)
+                                                 const std::uint32_t minimumMajor, const std::uint32_t line = 0,
+                                                 const std::uint32_t column = 0)
         {
             std::thread(
-                [source = std::move(source), solution = std::move(solution), minimumMajor]
+                [source = std::move(source), solution = std::move(solution), minimumMajor, line, column]
                 {
                     bool matchingInstance = false;
                     std::string ignoredDiagnostic;
                     (void)WaitForMatchingVisualStudioInstance(source, solution, std::chrono::seconds(60), minimumMajor,
-                                                              matchingInstance, ignoredDiagnostic);
+                                                              matchingInstance, ignoredDiagnostic, line, column);
                 })
                 .detach();
         }
@@ -1285,9 +1319,23 @@ namespace Keire::Detail
         return {PathToUtf8(managedSolution)};
     }
 
+    std::vector<std::string> ResolveExternalEditorSourceArguments(const std::filesystem::path& source,
+                                                                  const std::string_view editorName,
+                                                                  const std::uint32_t line, const std::uint32_t column)
+    {
+        const auto sourceText = PathToUtf8(source);
+        if (line != 0 && (editorName == "code" || editorName == "code-insiders" || editorName == "cursor" ||
+                          editorName == "codium" || editorName == "vscodium"))
+        {
+            return {"--goto", sourceText + ":" + std::to_string(line) + ":" + std::to_string(std::max(column, 1U))};
+        }
+        return {sourceText};
+    }
+
     bool OpenInExternalEditor(const std::filesystem::path& path, const std::filesystem::path& preferredEditor,
                               const std::filesystem::path& workingDirectory, std::string& diagnostic,
-                              [[maybe_unused]] const bool reuseManagedSession) noexcept
+                              [[maybe_unused]] const bool reuseManagedSession, const std::uint32_t line,
+                              const std::uint32_t column) noexcept
     {
         try
         {
@@ -1309,12 +1357,16 @@ namespace Keire::Detail
                 const auto wait = reuseManagedSession ? std::chrono::milliseconds(1500) : std::chrono::milliseconds(0);
                 if (WaitForMatchingVisualStudioInstance(source, managedSolution, wait,
                                                         ManagedWorkspaceMinimumVisualStudioMajor, matchingInstance,
-                                                        diagnostic))
+                                                        diagnostic, line, column))
                     return true;
                 if (matchingInstance)
                 {
+                    if (line != 0)
+                    {
+                        return false;
+                    }
                     OpenInVisualStudioWhenSolutionReady(source, managedSolution,
-                                                        ManagedWorkspaceMinimumVisualStudioMajor);
+                                                        ManagedWorkspaceMinimumVisualStudioMajor, line, column);
                     return true;
                 }
             }
@@ -1329,15 +1381,27 @@ namespace Keire::Detail
 #if defined(_WIN32)
                 if (editorName == "devenv" && !managedSolution.empty())
                 {
+                    bool matchingInstance = false;
+                    if (WaitForMatchingVisualStudioInstance(source, managedSolution, std::chrono::milliseconds(0),
+                                                            ManagedWorkspaceMinimumVisualStudioMajor, matchingInstance,
+                                                            diagnostic, line, column))
+                    {
+                        return true;
+                    }
+                    if (matchingInstance)
+                    {
+                        return false;
+                    }
                     arguments = {PathToUtf8(managedSolution)};
                     if (!LaunchDetachedProcess(std::filesystem::weakly_canonical(preferredEditor), arguments, working,
                                                diagnostic))
                         return false;
                     OpenInVisualStudioWhenSolutionReady(source, managedSolution,
-                                                        ManagedWorkspaceMinimumVisualStudioMajor);
+                                                        ManagedWorkspaceMinimumVisualStudioMajor, line, column);
                     return true;
                 }
 #endif
+                arguments = ResolveExternalEditorSourceArguments(source, editorName, line, column);
                 return LaunchDetachedProcess(std::filesystem::weakly_canonical(preferredEditor), arguments, working,
                                              diagnostic);
             }
@@ -1358,7 +1422,7 @@ namespace Keire::Detail
                     if (!LaunchDetachedProcess(visualStudio, solutionArguments, working, diagnostic))
                         return false;
                     OpenInVisualStudioWhenSolutionReady(source, managedSolution,
-                                                        ManagedWorkspaceMinimumVisualStudioMajor);
+                                                        ManagedWorkspaceMinimumVisualStudioMajor, line, column);
                     return true;
                 }
             }
@@ -1373,7 +1437,8 @@ namespace Keire::Detail
                 return false;
             }
             if (managedVisualStudioDocument)
-                OpenInVisualStudioWhenSolutionReady(source, managedSolution, ManagedWorkspaceMinimumVisualStudioMajor);
+                OpenInVisualStudioWhenSolutionReady(source, managedSolution, ManagedWorkspaceMinimumVisualStudioMajor,
+                                                    line, column);
             return true;
 #elif defined(__APPLE__)
             const std::filesystem::path executable = "/usr/bin/open";

@@ -143,13 +143,48 @@ namespace KeireHub
 
     HubResult<BuildSupportSelection>
     SelectBuildSupportEditorForTarget(const std::span<const BuildSupportEditorTarget> editors,
-                                      const std::string_view platform, const std::string_view architecture)
+                                      const std::string_view platform, const std::string_view architecture,
+                                      const std::filesystem::path& requestingEditor)
     {
         BuildSupportFilter filter{.Platform = std::string(platform), .Architecture = std::string(architecture)};
         if (!ValidFilter(filter))
         {
             return HubResult<BuildSupportSelection>::Failure(
                 InvalidSelection("The requested Build Support target is invalid."));
+        }
+        if (!requestingEditor.empty())
+        {
+            if (!requestingEditor.is_absolute())
+            {
+                return HubResult<BuildSupportSelection>::Failure(
+                    InvalidSelection("The requesting Editor path must be absolute."));
+            }
+            // Walk outward so a nested installation wins over an enclosing installation. Never silently
+            // substitute another version when the caller is busy, unhealthy, or not registered.
+            auto directory = requestingEditor.lexically_normal().parent_path();
+            while (!directory.empty())
+            {
+                for (const auto& editor : editors)
+                {
+                    std::error_code error;
+                    if (editor.Root.lexically_normal() == directory ||
+                        std::filesystem::equivalent(editor.Root, directory, error))
+                    {
+                        return SelectBuildSupportEditor(editors, editor.InstallationId, std::move(filter));
+                    }
+                }
+                const auto parent = directory.parent_path();
+                if (parent == directory)
+                {
+                    break;
+                }
+                directory = parent;
+            }
+            return HubResult<BuildSupportSelection>::Failure(
+                {.Code = HubErrorCode::NotFound,
+                 .Message =
+                     "The requesting Editor is not registered with Hub. Locate that Editor in Installs, then retry.",
+                 .AffectedItem = PathText(requestingEditor)});
         }
         std::vector<BuildSupportEditorTarget> compatible;
         std::ranges::copy_if(editors, std::back_inserter(compatible), [](const BuildSupportEditorTarget& editor)

@@ -30,6 +30,20 @@ TEST_CASE("Game preview waits for drawable dock layout before constructing a pro
         KeireEditor::CalculateGameViewportPreviewSize({640.0F, 480.0F}, std::numeric_limits<float>::infinity()));
 }
 
+TEST_CASE("Game preview centers horizontal and vertical letterboxing without moving Free view")
+{
+    const Keire::UiPosition origin{100.0F, 80.0F};
+    const auto wide = KeireEditor::CenterGameViewportPreview(origin, {1000.0F, 300.0F}, {400.0F, 300.0F});
+    CHECK(wide.X == doctest::Approx(400.0F));
+    CHECK(wide.Y == doctest::Approx(80.0F));
+    const auto tall = KeireEditor::CenterGameViewportPreview(origin, {400.0F, 600.0F}, {400.0F, 225.0F});
+    CHECK(tall.X == doctest::Approx(100.0F));
+    CHECK(tall.Y == doctest::Approx(267.5F));
+    const auto free = KeireEditor::CenterGameViewportPreview(origin, {400.0F, 600.0F}, {400.0F, 600.0F});
+    CHECK(free.X == origin.X);
+    CHECK(free.Y == origin.Y);
+}
+
 TEST_CASE("Scene click and rectangle selection track animated bounds and stop fallback")
 {
     auto scene =

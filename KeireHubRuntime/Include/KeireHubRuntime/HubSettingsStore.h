@@ -89,6 +89,8 @@ namespace KeireHub
         std::string LogLevel = "info";
         std::optional<std::string> DevelopmentServiceUrl;
         std::optional<std::string> DevelopmentTrustedKey;
+
+        [[nodiscard]] bool operator==(const HubSettings&) const = default;
     };
 
     class HubSettingsStore final

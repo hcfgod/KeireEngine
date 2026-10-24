@@ -15,6 +15,22 @@
 #include <string>
 #include <vector>
 
+TEST_CASE("Console parses managed diagnostic source coordinates without confusing Windows drive letters")
+{
+    const auto windows = KeireEditor::Detail::ParseConsoleSourceLocation("D:/My Project/Game.cs:39:27: CS1061: error");
+    REQUIRE(windows);
+    CHECK(windows->Path == "D:/My Project/Game.cs");
+    CHECK(windows->Line == 39);
+    CHECK(windows->Column == 27);
+    const auto unixPath = KeireEditor::Detail::ParseConsoleSourceLocation("/tmp/Game.cs:2:1: error");
+    REQUIRE(unixPath);
+    CHECK(unixPath->Line == 2);
+    CHECK_FALSE(KeireEditor::Detail::ParseConsoleSourceLocation("Ready"));
+    CHECK_FALSE(KeireEditor::Detail::ParseConsoleSourceLocation("Game.cs:0:1: error"));
+    CHECK_FALSE(KeireEditor::Detail::ParseConsoleSourceLocation("Game.cs:1:4294967296: error"));
+    CHECK_FALSE(KeireEditor::Detail::ParseConsoleSourceLocation("Game.cs:1:2x: error"));
+}
+
 namespace
 {
     class LogScope final

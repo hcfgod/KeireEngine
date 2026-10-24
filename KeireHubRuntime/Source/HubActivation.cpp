@@ -304,8 +304,8 @@ namespace KeireHub
             }
             break;
         case HubActivationAction::BuildSupport:
-            if (request.Page || request.Path || request.VersionId || request.Url || request.ProductId ||
-                !ValidBuildSupport(request))
+            if (request.Page || request.VersionId || request.Url || request.ProductId || !ValidBuildSupport(request) ||
+                (request.Path && !ValidatePath(request.Path)))
             {
                 return HubStatus::Failure(
                     InvalidArgument("Build Support activation requires a valid platform and architecture."));
@@ -362,6 +362,15 @@ namespace KeireHub
         case HubActivationAction::BuildSupport:
             fields.push_back(*request.Platform);
             fields.push_back(*request.Architecture);
+            if (request.Path)
+            {
+                auto encoded = EncodePath(*request.Path);
+                if (!encoded)
+                {
+                    return HubResult<std::string>::Failure(encoded.Error());
+                }
+                fields.push_back(std::move(encoded).Value());
+            }
             break;
         case HubActivationAction::OAuthCallback:
             fields.push_back(*request.Url);
@@ -414,9 +423,10 @@ namespace KeireHub
             return HubResult<HubActivationRequest>::Failure(InvalidFrame("Activation action is unknown."));
         }
         const auto action = static_cast<HubActivationAction>(actionValue);
-        const std::size_t expectedFields = action == HubActivationAction::Show           ? 0
-                                           : action == HubActivationAction::BuildSupport ? 2
-                                                                                         : 1;
+        const std::size_t expectedFields = action == HubActivationAction::Show ? 0
+                                           : action == HubActivationAction::BuildSupport
+                                               ? (static_cast<unsigned char>(frame[8]) == 3 ? 3 : 2)
+                                               : 1;
         if (static_cast<unsigned char>(frame[8]) != expectedFields)
             return HubResult<HubActivationRequest>::Failure(InvalidFrame("Activation field count is invalid."));
 
@@ -465,6 +475,15 @@ namespace KeireHub
         case HubActivationAction::BuildSupport:
             request.Platform = fields[0];
             request.Architecture = fields[1];
+            if (fields.size() == 3)
+            {
+                auto path = DecodePath(fields[2]);
+                if (!path)
+                {
+                    return HubResult<HubActivationRequest>::Failure(path.Error());
+                }
+                request.Path = std::move(path).Value();
+            }
             break;
         case HubActivationAction::OAuthCallback:
             request.Url = fields[0];
@@ -530,11 +549,21 @@ namespace KeireHub
             return ParsedRequest(
                 {.Action = HubActivationAction::InstallVersion, .VersionId = std::string(arguments[1])});
         }
-        if (option == "--build-support" && arguments.size() == 3)
+        if (option == "--build-support" && (arguments.size() == 3 || arguments.size() == 4))
         {
-            return ParsedRequest({.Action = HubActivationAction::BuildSupport,
-                                  .Platform = std::string(arguments[1]),
-                                  .Architecture = std::string(arguments[2])});
+            HubActivationRequest request{.Action = HubActivationAction::BuildSupport,
+                                         .Platform = std::string(arguments[1]),
+                                         .Architecture = std::string(arguments[2])};
+            if (arguments.size() == 4)
+            {
+                auto path = DecodePath(arguments[3]);
+                if (!path)
+                {
+                    return HubResult<HubActivationRequest>::Failure(path.Error());
+                }
+                request.Path = std::move(path).Value();
+            }
+            return ParsedRequest(std::move(request));
         }
         if (option == "--marketplace-product" && arguments.size() == 2)
         {

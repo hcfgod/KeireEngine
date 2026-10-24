@@ -546,6 +546,12 @@ host, open an elevated PowerShell session and install the repository-owned start
 ./scripts/install-windows-startup-task.ps1 -SettingsPath ./scripts/host-settings.json
 ```
 
+The startup task explicitly uses Task Scheduler priority 4 (Normal process priority), and its supervised processes
+inherit that priority. The default task priority 7 is BelowNormal and is unsuitable for latency-sensitive HTTP servers:
+under CPU scheduling pressure, it can delay both supervisor initialization and website requests even when total CPU
+utilization appears low. Reinstall the task with the updated installer to persist this policy for subsequent launches;
+changing only a running process priority does not update the next startup. This does not use High or RealTime priority.
+
 To move an already-running interactive-user deployment into a protected machine location, use the transactional
 migration helper from an elevated PowerShell session. It accepts legacy static schema 1 hosts and unified web schema 2
 hosts, copies only the active host payload and immutable distribution

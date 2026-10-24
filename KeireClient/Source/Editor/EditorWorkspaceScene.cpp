@@ -1459,6 +1459,7 @@ void EditorWorkspaceLayer::DrawGame(Keire::UiFrame& ui)
             renderRequest->FrameIndex = materialTime.FrameCount();
             Owner().Renderer()->Submit(std::move(*renderRequest));
         }
+        ui.SetCursorScreenPosition(KeireEditor::CenterGameViewportPreview(ui.CursorScreenPosition(), available, size));
         ui.Image(m_GameRenderView->Surface(), size);
         const auto imageState = ui.LastItemState();
         const auto imageRect = ui.LastItemRect();

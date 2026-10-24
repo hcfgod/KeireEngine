@@ -35,6 +35,8 @@ TEST_CASE("Scene Save As recovery state follows the saved copy and preserves the
     document.SetRecoveryPath(originalRecovery);
     REQUIRE(document.WriteRecovery());
     REQUIRE_FALSE(document.RecoveryAvailable());
+    document.RecordRecoverySavedCopy(temporary.Path / "Copy.keirescene");
+    CHECK_FALSE(document.RecoverySavedCopy().empty());
     document.AdvanceRecovery(12.0);
 
     auto saved = Keire::CreateRef<Keire::Scene>(copy, scene->Snapshot());
@@ -45,6 +47,7 @@ TEST_CASE("Scene Save As recovery state follows the saved copy and preserves the
 
     CHECK_FALSE(document.RecoveryAvailable());
     CHECK(document.RecoverySeconds() == 0.0);
+    CHECK(document.RecoverySavedCopy().empty());
     CHECK_FALSE(document.Dirty());
     CHECK(document.Asset() == copy);
     CHECK(std::filesystem::is_regular_file(originalRecovery));
@@ -53,6 +56,7 @@ TEST_CASE("Scene Save As recovery state follows the saved copy and preserves the
 
     document.SetRecoveryPath(originalRecovery);
     CHECK(document.RecoveryAvailable());
+    CHECK(std::filesystem::path(document.RecoverySavedCopy()) == temporary.Path / "Copy.keirescene");
     document.RestoreRecovery();
     CHECK_FALSE(document.RecoveryAvailable());
     document.AdvanceRecovery(2.0);
@@ -66,6 +70,39 @@ TEST_CASE("Scene Save As recovery state follows the saved copy and preserves the
     CHECK(std::filesystem::is_regular_file(originalRecovery));
     document.SetRecoveryPath(temporary.Path);
     CHECK_FALSE(document.RecoveryAvailable());
+    document.Close();
+}
+
+TEST_CASE("Scene recovery provenance survives reopening and is cleared by a new snapshot or discard")
+{
+    RecoveryDirectory temporary;
+    const auto recovery = temporary.Path / "original.recovery";
+    const auto asset = Keire::AssetId::Generate();
+    const auto definition = Keire::SceneAsset::EmptyDefinition("Original");
+    KeireEditor::SceneDocument document;
+    document.Open(Keire::CreateRef<Keire::Scene>(asset, definition), asset);
+    document.SetRecoveryPath(recovery);
+    document.RecordRecoverySavedCopy(temporary.Path / "Missing.keirescene");
+    CHECK(document.RecoverySavedCopy().empty());
+    document.EditingScene()->MarkDirty();
+    REQUIRE(document.WriteRecovery());
+    document.RecordRecoverySavedCopy(temporary.Path / "Saved Copy.keirescene");
+    document.Close();
+
+    document.Open(Keire::CreateRef<Keire::Scene>(asset, definition), asset);
+    document.SetRecoveryPath(recovery);
+    REQUIRE(document.RecoveryAvailable());
+    CHECK(std::filesystem::path(document.RecoverySavedCopy()) == temporary.Path / "Saved Copy.keirescene");
+    document.RestoreRecovery();
+    REQUIRE(document.WriteRecovery());
+    CHECK(document.RecoverySavedCopy().empty());
+    document.RecordRecoverySavedCopy(temporary.Path / "Another Copy.keirescene");
+    document.DiscardRecovery();
+    CHECK_FALSE(std::filesystem::exists(recovery));
+    CHECK(document.RecoverySavedCopy().empty());
+    auto provenance = recovery;
+    provenance += ".saved-copy";
+    CHECK_FALSE(std::filesystem::exists(provenance));
     document.Close();
 }
 

@@ -1145,6 +1145,10 @@ void EditorWorkspaceLayer::UpdateAssetOperations()
                 {
                     if (!completion->Context.SceneSnapshot)
                         throw std::runtime_error("Scene copy completion omitted its captured scene definition.");
+                    if (m_SceneDocument->Asset() == completion->Context.SourceSceneAsset)
+                    {
+                        m_SceneDocument->RecordRecoverySavedCopy(completion->Context.SceneSource);
+                    }
                     const auto editing = m_SceneDocument->EditingScene();
                     const bool unchanged =
                         editing && completion->Context.CanAdoptSceneCopy(m_SceneDocument->Asset(), editing->Snapshot());

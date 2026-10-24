@@ -12,10 +12,12 @@ $entry = Join-Path $scripts 'platform-production-start.mjs'
 $legacyEntry = Join-Path $server 'entry.mjs'
 $configurationPath = Join-Path $fixture 'platform.json'
 $settingsPath = Join-Path $fixture 'host.json'
+$writerRetirementHelper = Join-Path $scripts 'retire-platform-writer.ps1'
 foreach ($file in @($stub, $entry, $legacyEntry)) {
     [IO.File]::WriteAllText($file, 'Validation-only fixture. Never execute.')
 }
 $configuration = @{ schemaVersion = 1; siteOrigin = 'https://qa.invalid'; port = 4321; webRoot = $fixture }
+$configuration.spoolDirectory = $fixture
 $settings = @{
     schemaVersion = 3; host = 'qa.invalid'; httpPort = 18080; httpsPort = 18443
     storageRoot = $fixture; serviceExecutable = $stub; caddyExecutable = $stub
@@ -32,6 +34,8 @@ function Invoke-Validation([bool] $ExpectedSuccess) {
     }
 }
 try {
+    Copy-Item -LiteralPath (Join-Path $repository 'Services/KeireDistributionService/scripts/retire-platform-writer.ps1') `
+        -Destination $writerRetirementHelper
     Invoke-Validation $true
     $configuration.siteOrigin = 'https://different.invalid'
     Invoke-Validation $false
@@ -50,7 +54,7 @@ try {
     Invoke-Validation $true
     Write-Output 'Six Windows host backend validation checks passed; no services launched.'
 } finally {
-    foreach ($file in @($stub, $entry, $legacyEntry, $configurationPath, $settingsPath)) {
+    foreach ($file in @($stub, $entry, $legacyEntry, $configurationPath, $settingsPath, $writerRetirementHelper)) {
         Remove-Item -LiteralPath $file -ErrorAction SilentlyContinue
     }
     foreach ($directory in @($scripts, $server, (Join-Path $fixture 'dist'), $fixture)) {

@@ -49,7 +49,8 @@ namespace KeireHub
         const auto retryable = [](const DistributionCatalogSourceStatus& status)
         {
             return status.State == DistributionCatalogSourceState::NotLoaded ||
-                   status.State == DistributionCatalogSourceState::LastKnownGood ||
+                   (status.State == DistributionCatalogSourceState::LastKnownGood &&
+                    (!status.Error || status.Error->Retryable)) ||
                    (status.State == DistributionCatalogSourceState::Unavailable &&
                     (!status.Error || status.Error->Retryable));
         };

@@ -9,8 +9,12 @@ namespace KeireEditor
         if (auto project = ui.BeginPanel(Registration, {.NoScrollbar = true, .NoScrollWithMouse = true}); project)
         {
             Focused = ui.WindowFocused();
-            ui.TextColored(editor.AssetBrowserTheme().Accent, "ASSET BROWSER");
-            ui.Separator();
+            const bool compact = UseCompactAssetBrowserChrome(ui.ContentAvailable().Height);
+            if (!compact)
+            {
+                ui.TextColored(editor.AssetBrowserTheme().Accent, "ASSET BROWSER");
+                ui.Separator();
+            }
             if (!editor.AssetBrowserDatabase() || !Thumbnails)
             {
                 ui.TextColored(editor.AssetBrowserTheme().Error, editor.AssetBrowserStatus().empty()
@@ -190,19 +194,40 @@ namespace KeireEditor
             if (ui.Button("Trash"))
                 OpenTrashPopup = true;
             ui.SameLine();
+            const auto drawOptions = [&]
+            {
+                if (Mode == ViewMode::Grid && ui.SliderFloat("Thumbnail Size", ThumbnailSize, 48.0F, 160.0F) &&
+                    ui.LastItemState().DeactivatedAfterEdit)
+                {
+                    SavePreferences();
+                }
+                DrawAssetBrowserStatus(ui, editor.AssetBrowserTheme().MutedText, editor.AssetBrowserStatus());
+                ui.TextColored(editor.AssetBrowserTheme().MutedText,
+                               std::to_string(Selection.size() + FolderSelection.size()) + " selected  |  " +
+                                   std::to_string(Thumbnails->PendingCount()) + " thumbnail request(s)");
+            };
+            if (compact)
+            {
+                if (ui.Button("Options"))
+                {
+                    ui.OpenPopup("CompactProjectOptions");
+                }
+                if (auto options = ui.BeginPopup("CompactProjectOptions"); options)
+                {
+                    drawOptions();
+                    ui.Text("Short panels use list rows until there is room for thumbnails.");
+                }
+                ui.SameLine();
+            }
             (void)ui.InputTextWithHint("##ProjectSearch", "Filter current folder", Search);
             if (ui.LastItemState().Hovered)
                 ui.SetTooltip("Filters names in the current folder. Open another folder to search its assets.",
                               {.Delayed = true});
-            if (Mode == ViewMode::Grid && ui.SliderFloat("Thumbnail Size", ThumbnailSize, 48.0F, 160.0F) &&
-                ui.LastItemState().DeactivatedAfterEdit)
-                SavePreferences();
-
+            if (!compact)
+            {
+                drawOptions();
+            }
             ui.Separator();
-            DrawAssetBrowserStatus(ui, editor.AssetBrowserTheme().MutedText, editor.AssetBrowserStatus());
-            ui.TextColored(editor.AssetBrowserTheme().MutedText,
-                           std::to_string(Selection.size() + FolderSelection.size()) + " selected  |  " +
-                               std::to_string(Thumbnails->PendingCount()) + " thumbnail request(s)");
             const auto browserSize = ui.ContentAvailable();
             constexpr float splitterThickness = 4.0F;
             constexpr float minimumFolderWidth = 150.0F;
@@ -225,7 +250,7 @@ namespace KeireEditor
             if (auto contentPane =
                     ui.BeginChild(AssetBrowserContentPaneId(AssetRoot, CurrentFolder), {0.0F, paneHeight});
                 contentPane)
-                DrawContentPane(ui, editor);
+                DrawContentPane(ui, editor, paneHeight);
 
             DrawRenamePopups(ui, editor);
             DrawDeletePopup(ui, editor);

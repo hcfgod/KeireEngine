@@ -40,6 +40,16 @@ namespace KeireEditor
         {
         };
 
+        // Commands follow snapshot replacement without retaining either the document or an obsolete scene.
+        class LightingUndoTarget final : public Keire::RefCounted
+        {
+          public:
+            explicit LightingUndoTarget(const Keire::Ref<Keire::Scene>& scene) : Scene(scene) {}
+
+            Keire::WeakRef<Keire::Scene> Scene;
+            bool Playing = false;
+        };
+
         class InspectorTransformUndoCommand final : public Keire::UndoCommand
         {
           public:
@@ -1048,6 +1058,7 @@ namespace KeireEditor
             }
         }
         m_EditGeneration = Keire::CreateRef<SceneDocumentEditGeneration>();
+        m_LightingUndoTarget = Keire::CreateRef<LightingUndoTarget>(m_Scene);
         m_Asset = asset ? asset : m_Scene->Asset();
         m_Source = std::move(source);
         m_Undo = std::move(undo);
@@ -1066,6 +1077,10 @@ namespace KeireEditor
         m_Scene = std::move(scene);
         if (savedContent)
             m_SavedContent = std::move(savedContent);
+        if (const auto target = Keire::DynamicRefCast<LightingUndoTarget>(m_LightingUndoTarget))
+        {
+            target->Scene = Keire::WeakRef<Keire::Scene>(m_Scene);
+        }
         if (preserveSelection)
             SynchronizeSelection();
         else
@@ -1087,6 +1102,49 @@ namespace KeireEditor
         auto operation = std::move(m_SaveDialog);
         m_SaveDialog.Reset();
         return operation;
+    }
+
+    void SceneDocument::SetLightingBakeConfiguration(const Keire::LightingBakeSettings& settings)
+    {
+        const auto scene = EditingScene();
+        if (!scene || m_PlaySession)
+        {
+            throw std::logic_error("Lighting bake settings require an open scene in Edit mode.");
+        }
+        const auto before = scene->LightingBakeConfiguration();
+        if (before == settings)
+        {
+            return;
+        }
+        if (!m_Undo || !m_Undo->IsOpen())
+        {
+            scene->SetLightingBakeConfiguration(settings);
+            return;
+        }
+
+        const Keire::WeakRef<LightingUndoTarget> weakTarget(
+            Keire::DynamicRefCast<LightingUndoTarget>(m_LightingUndoTarget));
+        const auto resolve = [weakTarget]() -> Keire::Ref<Keire::Scene>
+        {
+            const auto target = weakTarget.Lock();
+            if (!target || target->Playing)
+            {
+                return {};
+            }
+            const auto current = target->Scene.Lock();
+            return current && current->IsOpen() ? current : Keire::Ref<Keire::Scene>{};
+        };
+        const auto available = [resolve] { return static_cast<bool>(resolve()); };
+        const auto apply = [resolve](const Keire::LightingBakeSettings& value)
+        {
+            if (const auto current = resolve())
+            {
+                current->SetLightingBakeConfiguration(value);
+            }
+        };
+        m_Undo->Execute(Keire::CreateUndoCommand(
+            "Change Lighting Bake Settings", [apply, settings] { apply(settings); }, [apply, before] { apply(before); },
+            sizeof(before) + sizeof(settings), available));
     }
 
     void SceneDocument::SetUndoContext(Keire::Ref<Keire::UndoContext> undo) noexcept { m_Undo = std::move(undo); }
@@ -1117,6 +1175,44 @@ namespace KeireEditor
         m_RecoveryPath = std::move(path);
         m_RecoveryAvailable = available;
         m_RecoverySeconds = 0.0;
+        m_RecoverySavedCopy.clear();
+        if (available)
+        {
+            try
+            {
+                auto provenance = m_RecoveryPath;
+                provenance += ".saved-copy";
+                m_RecoverySavedCopy = Keire::Detail::ReadTextFile(provenance, 4096U);
+            }
+            catch (const std::exception&)
+            {
+                // Optional provenance must never prevent restoring the actual recovery snapshot.
+            }
+        }
+    }
+
+    void SceneDocument::RecordRecoverySavedCopy(const std::filesystem::path& copy) noexcept
+    {
+        try
+        {
+            if (m_RecoveryPath.empty() || copy.empty() || !std::filesystem::is_regular_file(m_RecoveryPath))
+            {
+                return;
+            }
+            const auto text = Keire::Detail::PathToUtf8(copy);
+            if (text.size() > 4096U)
+            {
+                return;
+            }
+            auto provenance = m_RecoveryPath;
+            provenance += ".saved-copy";
+            Keire::Detail::WriteTextFileAtomically(provenance, text);
+            m_RecoverySavedCopy = text;
+        }
+        catch (const std::exception&)
+        {
+            // The scene copy is already durable. Metadata failure must not turn a successful Save As into failure.
+        }
     }
 
     void SceneDocument::SetStatus(std::string status) { m_Status = std::move(status); }
@@ -1168,11 +1264,13 @@ namespace KeireEditor
         DocumentSourcePersistence persistence;
         persistence.Bind(m_Source, std::move(bytes));
         auto generation = Keire::CreateRef<SceneDocumentEditGeneration>();
+        auto lightingTarget = Keire::CreateRef<LightingUndoTarget>(scene);
         scene->MarkSaved();
         if (m_Undo)
             m_Undo->Clear();
         ReplaceEditingScene(std::move(scene), false);
         m_EditGeneration = std::move(generation);
+        m_LightingUndoTarget = std::move(lightingTarget);
         m_Persistence = std::move(persistence);
         DiscardRecovery();
     }
@@ -1184,6 +1282,11 @@ namespace KeireEditor
         const auto bytes = Keire::SceneAsset::Encode(m_Scene->Snapshot());
         const std::string contents(reinterpret_cast<const char*>(bytes.data()), bytes.size());
         Keire::Detail::WriteTextFileAtomically(m_RecoveryPath, contents);
+        auto provenance = m_RecoveryPath;
+        provenance += ".saved-copy";
+        std::error_code ignored;
+        std::filesystem::remove(provenance, ignored);
+        m_RecoverySavedCopy.clear();
         m_RecoverySeconds = 0.0;
         return true;
     }
@@ -1207,7 +1310,18 @@ namespace KeireEditor
         {
             std::error_code ignored;
             std::filesystem::remove(m_RecoveryPath, ignored);
+            try
+            {
+                auto provenance = m_RecoveryPath;
+                provenance += ".saved-copy";
+                std::filesystem::remove(provenance, ignored);
+            }
+            catch (const std::exception&)
+            {
+                // Optional metadata cleanup must not interrupt document shutdown.
+            }
         }
+        m_RecoverySavedCopy.clear();
         m_RecoveryAvailable = false;
         m_RecoverySeconds = 0.0;
     }
@@ -1235,6 +1349,10 @@ namespace KeireEditor
         if (runtimeWorld)
             (void)runtimeWorld->Adopt(m_PlaySession);
         m_PlaySession->Play();
+        if (const auto target = Keire::DynamicRefCast<LightingUndoTarget>(m_LightingUndoTarget))
+        {
+            target->Playing = true;
+        }
         SynchronizeSelection();
     }
 
@@ -1248,6 +1366,10 @@ namespace KeireEditor
 
     void SceneDocument::EndPlay() noexcept
     {
+        if (const auto target = Keire::DynamicRefCast<LightingUndoTarget>(m_LightingUndoTarget))
+        {
+            target->Playing = false;
+        }
         if (m_PlaySession)
             m_PlaySession->Stop();
         m_PlaySession.Reset();
@@ -1271,6 +1393,7 @@ namespace KeireEditor
             m_Scene->Close();
         m_Scene.Reset();
         m_EditGeneration.Reset();
+        m_LightingUndoTarget.Reset();
         m_Undo.Reset();
         m_Asset = {};
         ClearSelection();
@@ -1278,6 +1401,7 @@ namespace KeireEditor
         m_Persistence = {};
         m_SavedContent.reset();
         m_RecoveryPath.clear();
+        m_RecoverySavedCopy.clear();
         m_Status.clear();
         m_RecoverySeconds = 0.0;
         m_RecoveryAvailable = false;

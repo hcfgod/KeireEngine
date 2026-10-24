@@ -53,6 +53,11 @@ namespace KeireEditor
             ui.TextColored(theme.MutedText, "Open a scene to configure and bake spatial lighting.");
             return;
         }
+        if (m_Controller.LightingSceneDocument().PlaySession())
+        {
+            ui.TextColored(theme.MutedText, "Stop Play mode to edit or bake scene lighting.");
+            return;
+        }
         auto settings = scene->LightingBakeConfiguration();
         bool changed = false;
         ui.Text("Backend: " + std::string(BackendName(settings.Backend)));
@@ -129,7 +134,7 @@ namespace KeireEditor
         {
             try
             {
-                scene->SetLightingBakeConfiguration(settings);
+                m_Controller.LightingSceneDocument().SetLightingBakeConfiguration(settings);
                 m_Error.clear();
             }
             catch (const std::exception& error)

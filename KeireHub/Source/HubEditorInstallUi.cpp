@@ -2,6 +2,7 @@
 
 #include "KeireHub/HubModalUi.h"
 #include "KeireHubInternal/HubCatalogEmptyState.h"
+#include "KeireHubInternal/HubPackageLabel.h"
 #include "KeireHubRuntime/PackageResolver.h"
 
 #include <algorithm>
@@ -360,12 +361,12 @@ namespace KeireHub
         }
 
         const auto& editor = *m_PendingEditorInstall;
-        const auto editorName = editor.DisplayName.empty() ? std::string("Kéire Editor") : editor.DisplayName;
+        const auto editorName =
+            PackageVersionLabel(editor.DisplayName.empty() ? "Kéire Editor" : editor.DisplayName, editor.Version);
         if (m_ConfirmDuplicateEditorInstall)
         {
             DrawHubModalHeader(ui, m_Tokens, "Editor version already downloading",
-                               editorName + " " + editor.Version + " already has an active download or installation.",
-                               "INSTALLS  •  CONFIRM");
+                               editorName + " already has an active download or installation.", "INSTALLS  •  CONFIRM");
             ui.TextColoredWrapped(
                 m_Tokens.Warning,
                 "Downloading again will create another managed copy in a different location. Continue?");
@@ -397,7 +398,7 @@ namespace KeireHub
                 ui.PushStyleColor(Keire::UiStyleColorRole::ChildBackground, m_Tokens.Elevated);
             if (auto summary = ui.BeginChild("EditorInstallSummary", {0.0F, 84.0F}, true); summary)
             {
-                ui.TextColored(m_Tokens.PrimaryText, editorName + " " + editor.Version);
+                ui.TextColored(m_Tokens.PrimaryText, editorName);
                 ui.TextColored(m_Tokens.SecondaryText, std::string(ChannelLabel(editor.Channel)) + "  •  " +
                                                            editor.Platform + " / " + editor.Architecture);
                 ui.TextColored(m_Tokens.MutedText, "Download " + HumanBytes(editor.DownloadBytes) + "  •  Installed " +
@@ -443,8 +444,8 @@ namespace KeireHub
                 const bool selectionLimit = !enabled && m_SelectedEditorComponents.size() >= MaximumSelectedComponents;
                 if (auto disabled = ui.BeginDisabled(component.Required || selectionLimit); disabled)
                 {
-                    if (ui.Checkbox(component.DisplayName + " " + component.Version + "##" + component.PackageId + '@' +
-                                        component.Version,
+                    if (ui.Checkbox(PackageVersionLabel(component.DisplayName, component.Version) + "##" +
+                                        component.PackageId + '@' + component.Version,
                                     enabled) &&
                         !component.Required)
                     {
@@ -478,7 +479,8 @@ namespace KeireHub
             for (std::size_t index = 0; index < shownSteps; ++index)
             {
                 const auto& step = preview.Steps[index];
-                auto label = step.DisplayName + " " + step.Version + "  ·  " + HumanBytes(step.DownloadBytes);
+                auto label =
+                    PackageVersionLabel(step.DisplayName, step.Version) + "  ·  " + HumanBytes(step.DownloadBytes);
                 if (!step.RequiredBy.empty())
                     label += "  ·  Required by " + RequiredByLabel(step.RequiredBy);
                 ui.TextColored(m_Tokens.SecondaryText, label);

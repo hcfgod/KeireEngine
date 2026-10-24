@@ -331,6 +331,9 @@ TEST_CASE("Catalog client uses validated last-known-good cache for offline and t
     REQUIRE(fallback);
     CHECK(fallback.Value().FromCache);
     CHECK_FALSE(fallback.Value().NetworkValidated);
+    REQUIRE(fallback.Value().NetworkFailure);
+    CHECK(fallback.Value().NetworkFailure->Code == HubErrorCode::CatalogTransportFailed);
+    CHECK(fallback.Value().NetworkFailure->Retryable);
     CHECK(KeireHubTests::Text(*fallback.Value().ExactBytes) == body);
 
     bool offlineTransportCalled = false;
@@ -344,6 +347,7 @@ TEST_CASE("Catalog client uses validated last-known-good cache for offline and t
     REQUIRE(offlineResult);
     CHECK(offlineResult.Value().FromCache);
     CHECK_FALSE(offlineResult.Value().NetworkValidated);
+    CHECK_FALSE(offlineResult.Value().NetworkFailure);
     CHECK_FALSE(offlineTransportCalled);
 
     auto notModified = Client(signer, Options(temporary.Path()),
@@ -358,6 +362,20 @@ TEST_CASE("Catalog client uses validated last-known-good cache for offline and t
     REQUIRE(unchanged);
     CHECK(unchanged.Value().FromCache);
     CHECK(unchanged.Value().NetworkValidated);
+    CHECK_FALSE(unchanged.Value().NetworkFailure);
+
+    for (const auto status : {std::uint16_t{404}, std::uint16_t{503}})
+    {
+        auto failedHttp = Client(
+            signer, Options(temporary.Path()), [status](const CatalogHttpRequest& request)
+            { return HubResult<CatalogHttpResponse>::Success({.StatusCode = status, .EffectiveUrl = request.Url}); });
+        const auto cached = failedHttp.FetchPackageCatalog("stable");
+        REQUIRE(cached);
+        CHECK(cached.Value().FromCache);
+        REQUIRE(cached.Value().NetworkFailure);
+        CHECK(cached.Value().NetworkFailure->TechnicalDetails == "HTTP status " + std::to_string(status));
+        CHECK(cached.Value().NetworkFailure->Retryable == (status == 503U));
+    }
 }
 
 TEST_CASE("Catalog cache never promotes malformed persisted data")

@@ -7,6 +7,14 @@
 #include <initializer_list>
 #include <string>
 
+TEST_CASE("Hub accepts already-open project gestures for explanatory feedback without enabling mutation")
+{
+    CHECK(KeireHub::CanOpenOrUpgrade(Keire::ProjectStatus::InUse));
+    CHECK_FALSE(KeireHub::CanOpenOrUpgrade(Keire::ProjectStatus::Missing));
+    CHECK(KeireHub::ResolveProjectOpenAction(Keire::ProjectStatus::InUse, true) ==
+          KeireHub::HubProjectOpenAction::Unavailable);
+}
+
 TEST_CASE("Hub opens older-schema projects with a compatible installed editor")
 {
     using KeireHub::HubProjectOpenAction;

@@ -1073,6 +1073,7 @@ TEST_CASE("project settings document validates saves and owns one-step edit hist
     const auto undo = undoService->CreateContext({.Name = "Project Settings"});
     KeireEditor::ProjectSettingsDocument document;
     document.Open(root, {}, undo);
+    REQUIRE(document.UndoContext() == undo);
 
     auto edited = document.Settings();
     edited.AmbientIntensity = 2.5F;
@@ -1083,7 +1084,13 @@ TEST_CASE("project settings document validates saves and owns one-step edit hist
     document.CommitEdit();
     CHECK(document.Dirty());
     CHECK(undo->UndoCount() == 1);
-    CHECK(undo->Undo());
+    const auto sceneUndo = undoService->CreateContext({.Name = "Scene"});
+    bool sceneEdited = true;
+    sceneUndo->RecordApplied(Keire::CreateUndoCommand(
+        "Unrelated scene edit", [&sceneEdited] { sceneEdited = true; }, [&sceneEdited] { sceneEdited = false; }));
+    CHECK(document.UndoContext()->Undo());
+    CHECK(sceneEdited);
+    CHECK(sceneUndo->UndoCount() == 1);
     CHECK(document.Settings().AmbientIntensity == doctest::Approx(0.75F));
     CHECK(undo->Redo());
     CHECK(document.Settings().Exposure == doctest::Approx(1.5F));

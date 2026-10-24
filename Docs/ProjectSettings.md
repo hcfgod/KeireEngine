@@ -17,6 +17,8 @@ source in the Project panel. The same picker implementation backs typed componen
 
 Project-owned settings live below `<Project>/ProjectSettings` and are suitable for source control. They are distinct
 from per-user editor state under `Library`, such as dock layouts, Scene-camera navigation, and Scene-tool preferences.
+Focusing Project Settings routes Undo/Redo to its own edit history, including exposure and rendering settings;
+it does not undo unrelated scene changes. Changes restored through history remain pending until settings are saved.
 
 ## Player Build Settings
 

@@ -145,7 +145,8 @@ namespace KeireHub
 
         [[nodiscard]] HubResult<VerifiedCatalogDocument> MakeCachedResult(const CatalogEndpoint& endpoint,
                                                                           const CachedCatalogDocument& cached,
-                                                                          const bool networkValidated = false)
+                                                                          const bool networkValidated = false,
+                                                                          std::optional<HubError> failure = {})
         {
             return HubResult<VerifiedCatalogDocument>::Success(
                 {.Endpoint = endpoint,
@@ -153,7 +154,8 @@ namespace KeireHub
                  .Signature = cached.Signature,
                  .ETag = cached.ETag,
                  .FromCache = true,
-                 .NetworkValidated = networkValidated});
+                 .NetworkValidated = networkValidated,
+                 .NetworkFailure = std::move(failure)});
         }
 
         [[nodiscard]] bool SameSignature(const CatalogSignatureMetadata& left,
@@ -271,11 +273,12 @@ namespace KeireHub
         auto fetched = m_Transport(request);
         if (!fetched)
         {
-            if (cachedIsUsable())
-                return MakeCachedResult(endpoint, *cached);
-            return HubResult<VerifiedCatalogDocument>::Failure(ClientError(
+            auto failure = ClientError(
                 HubErrorCode::CatalogTransportFailed, "The distribution service could not be reached.", item,
-                std::string(ToString(fetched.Error().Code)) + ": " + fetched.Error().TechnicalDetails, true));
+                std::string(ToString(fetched.Error().Code)) + ": " + fetched.Error().TechnicalDetails, true);
+            if (cachedIsUsable())
+                return MakeCachedResult(endpoint, *cached, false, std::move(failure));
+            return HubResult<VerifiedCatalogDocument>::Failure(std::move(failure));
         }
         auto& response = fetched.Value();
         const auto redirectStatus = response.EffectiveUrl.empty() || response.EffectiveUrl == request.Url
@@ -290,18 +293,16 @@ namespace KeireHub
         }
         if (response.StatusCode != 200U && response.StatusCode != 304U)
         {
+            auto failure =
+                ClientError(response.StatusCode == 404U ? HubErrorCode::NotFound : HubErrorCode::CatalogTransportFailed,
+                            response.StatusCode == 404U ? "No catalog has been published for this endpoint."
+                                                        : "The distribution service did not return a usable catalog.",
+                            item, "HTTP status " + std::to_string(response.StatusCode),
+                            response.StatusCode == 0U || response.StatusCode == 408U || response.StatusCode == 429U ||
+                                response.StatusCode >= 500U);
             if (cachedIsUsable())
-                return MakeCachedResult(endpoint, *cached);
-            if (response.StatusCode == 404U)
-            {
-                return HubResult<VerifiedCatalogDocument>::Failure(
-                    ClientError(HubErrorCode::NotFound, "No catalog has been published for this endpoint.", item));
-            }
-            return HubResult<VerifiedCatalogDocument>::Failure(ClientError(
-                HubErrorCode::CatalogTransportFailed, "The distribution service did not return a usable catalog.", item,
-                "HTTP status " + std::to_string(response.StatusCode),
-                response.StatusCode == 0U || response.StatusCode == 408U || response.StatusCode == 429U ||
-                    response.StatusCode >= 500U));
+                return MakeCachedResult(endpoint, *cached, false, std::move(failure));
+            return HubResult<VerifiedCatalogDocument>::Failure(std::move(failure));
         }
 
         auto metadata = ParseResponseMetadata(response, item);

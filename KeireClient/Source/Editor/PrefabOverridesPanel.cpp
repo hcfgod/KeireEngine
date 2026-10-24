@@ -12,34 +12,6 @@
 
 namespace
 {
-    [[nodiscard]] std::string PrefabOverrideName(const Keire::PrefabOverrideKind kind)
-    {
-        switch (kind)
-        {
-        case Keire::PrefabOverrideKind::RenameObject:
-            return "Rename object";
-        case Keire::PrefabOverrideKind::SetObjectActive:
-            return "Set active";
-        case Keire::PrefabOverrideKind::SetObjectTransform:
-            return "Set transform";
-        case Keire::PrefabOverrideKind::SetObjectLayer:
-            return "Set layer";
-        case Keire::PrefabOverrideKind::SetObjectTags:
-            return "Set tags";
-        case Keire::PrefabOverrideKind::SetComponentProperty:
-            return "Set component property";
-        case Keire::PrefabOverrideKind::AddComponent:
-            return "Add component";
-        case Keire::PrefabOverrideKind::RemoveComponent:
-            return "Remove component";
-        case Keire::PrefabOverrideKind::AddObject:
-            return "Add object";
-        case Keire::PrefabOverrideKind::RemoveObject:
-            return "Remove object";
-        }
-        return "Unknown override";
-    }
-
     [[nodiscard]] std::vector<std::byte> ReadPrefabBytes(const std::filesystem::path& path)
     {
         std::ifstream stream(path, std::ios::binary | std::ios::ate);
@@ -131,38 +103,88 @@ void EditorWorkspaceLayer::DrawPrefabOverrides(Keire::UiFrame& ui)
             return;
         }
 
-        ui.TextWrapped("Prefab: " + instance->Prefab.ToString());
-        ui.TextWrapped("Instance root: " + instance->Root.ToString());
+        if (!m_AssetDatabase || !Owner().GetProject())
+        {
+            ui.TextWrapped("The prefab asset database is unavailable. Overrides cannot be reviewed.");
+            return;
+        }
+        const auto record = m_AssetDatabase->Find(instance->Prefab);
+        ui.TextWrapped("Prefab: " + (record ? record->RelativePath.generic_string() : instance->Prefab.ToString()));
+        const auto rootObject =
+            std::ranges::find(definition.Objects, instance->Root, &Keire::SceneObjectDefinition::Id);
+        ui.TextWrapped("Instance root: " +
+                       (rootObject != definition.Objects.end() ? rootObject->Name : instance->Root.ToString()));
         ui.Text(std::to_string(instance->Objects.size()) + " inherited objects");
         ui.Separator();
-        ui.Text(std::to_string(instance->Overrides.size()) + " overrides");
-        for (std::size_t index = 0; index < instance->Overrides.size(); ++index)
+        std::vector<KeireEditor::PrefabOverrideReviewEntry> review;
+        bool reviewAvailable = false;
+        try
         {
-            const auto& overrideValue = instance->Overrides[index];
+            const auto projectRoot = Owner().GetProject()->Root();
+            const auto composed =
+                Keire::ComposePrefab(instance->Prefab,
+                                     [&](const Keire::AssetId prefab)
+                                     {
+                                         const auto dependency = m_AssetDatabase->Find(prefab);
+                                         if (!dependency || dependency->Type != Keire::PrefabAsset::StaticType())
+                                         {
+                                             return Keire::Ref<Keire::PrefabAsset>{};
+                                         }
+                                         const auto path = projectRoot / "Assets" / dependency->RelativePath;
+                                         const auto revision =
+                                             dependency->SourceDigest + ":" + dependency->MetadataDigest;
+                                         auto& cached = m_PrefabReviewSources[path.generic_string()];
+                                         if (!cached.Asset || cached.Revision != revision)
+                                         {
+                                             cached.Asset = Keire::PrefabAsset::Decode(ReadPrefabBytes(path));
+                                             cached.Revision = revision;
+                                         }
+                                         return cached.Asset;
+                                     });
+            review = KeireEditor::ReviewPrefabInstance(definition, instance->Root, composed);
+            reviewAvailable = true;
+        }
+        catch (const std::exception& error)
+        {
+            ui.TextWrapped("Could not review prefab overrides: " + std::string(error.what()));
+        }
+        if (reviewAvailable)
+        {
+            ui.Text(std::to_string(review.size()) + " changed fields (excluding scene-owned root placement)");
+        }
+        for (std::size_t index = 0; index < review.size(); ++index)
+        {
+            const auto& change = review[index];
             auto id = ui.PushId(std::to_string(index));
-            std::string label = PrefabOverrideName(overrideValue.Kind);
-            if (!overrideValue.Property.empty())
-                label += "  " + overrideValue.Property;
-            auto node = ui.BeginTreeNode(label);
-            if (node)
+            std::string label = change.ObjectName;
+            if (change.Component)
             {
-                ui.TextWrapped("Object: " + overrideValue.Object.ToString());
-                if (overrideValue.Component)
-                    ui.TextWrapped("Component: " + overrideValue.Component.ToString());
+                const auto registration = scene->Components()->Find(change.Component);
+                label += " / " + (registration ? registration->Name : change.Component.ToString());
             }
+            label += " / " + change.Property;
+            ui.TextWrapped(label);
+            ui.TextWrapped("Before: " + change.Before);
+            ui.TextWrapped("After: " + change.After);
+            ui.Separator();
         }
 
         ui.Separator();
         const auto instanceRoot = instance->Root;
-        if (ui.Button("Apply to Prefab"))
+        if (auto applyDisabled = ui.BeginDisabled(!reviewAvailable); applyDisabled)
         {
-            try
+            if (ui.Button("Apply to Prefab"))
             {
-                ApplySelectedPrefabOverrides();
-            }
-            catch (const std::exception& error)
-            {
-                ReportError("Prefab", error.what());
+                try
+                {
+                    m_SceneDocument->Select(instanceRoot);
+                    ApplySelectedPrefabOverrides();
+                    m_PrefabReviewSources.clear();
+                }
+                catch (const std::exception& error)
+                {
+                    ReportError("Prefab", error.what());
+                }
             }
         }
         if (!compactActions)

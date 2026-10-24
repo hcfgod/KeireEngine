@@ -1071,6 +1071,10 @@ namespace
                 case KeireHub::HubUiCommandType::RetryTask:
                 case KeireHub::HubUiCommandType::DismissTask:
                 case KeireHub::HubUiCommandType::ClearFinishedTasks:
+                    if (m_BuildSupport && command.Type == KeireHub::HubUiCommandType::ClearFinishedTasks)
+                    {
+                        RequireWorkflowSuccess(m_BuildSupport->ExecuteTaskCommand(command));
+                    }
                     if (m_BuildSupport && m_BuildSupport->OwnsTask(command.ItemId))
                     {
                         RequireWorkflowSuccess(m_BuildSupport->ExecuteTaskCommand(command));
@@ -1211,7 +1215,8 @@ namespace
             return m_Account.CompleteBrowserSignIn(std::string(callbackUrl));
         }
         [[nodiscard]] KeireHub::HubStatus FocusBuildSupport(const std::string_view platform,
-                                                            const std::string_view architecture) override
+                                                            const std::string_view architecture,
+                                                            const std::filesystem::path& requestingEditor) override
         {
             if (!m_BuildSupport)
             {
@@ -1220,7 +1225,7 @@ namespace
                      .Message = "Build Support management is unavailable until the Hub runtime starts.",
                      .AffectedItem = "build-support"});
             }
-            return m_BuildSupport->FocusTarget(platform, architecture);
+            return m_BuildSupport->FocusTarget(platform, architecture, requestingEditor);
         }
         [[nodiscard]] KeireHub::HubStatus OpenMarketplaceProduct(const std::string_view productId) override
         {
@@ -1359,12 +1364,17 @@ namespace
             try
             {
                 const auto inspection = Keire::Project::InspectMetadata(path);
+                if (Keire::Project::IsLocked(inspection.Root))
+                {
+                    m_Notice = "This project is already open. Switch to its Editor window using the taskbar or your "
+                               "window switcher. Close that Editor before opening it with another installation.";
+                    m_NoticeError = false;
+                    return;
+                }
                 if (!m_ProjectWorkflow)
                     throw std::logic_error("Project workflows are unavailable.");
                 RequireWorkflowSuccess(m_ProjectWorkflow->Add(inspection, KeireHub::HubNowUnixSeconds()));
                 KeireHub::ReloadProjectRegistry(m_Registry);
-                if (Keire::Project::IsLocked(inspection.Root))
-                    throw std::runtime_error("Project is already open in another editor.");
                 const bool hasCompatibleEditor =
                     inspection.HasIdentity() &&
                     static_cast<bool>(KeireHub::SelectEditorForProject(m_ProductSnapshot.Editors, inspection));

@@ -5,6 +5,11 @@
 
 **Build worlds. Keep control.**
 
+UI Document selection stays in the Inspector; use **Open Visual Tree in UI Builder** when you want to edit it.
+The Builder presents outlined input fields and a multiline style editor. Console compiler diagnostics support
+**Open source** and double-click navigation through your configured IDE. Lighting bake settings participate in
+scene Undo/Redo, and prefab override review shows live before/after values while Revert retains root placement.
+
 The Project browser's **Create Folder** dialog asks for a name before creating the folder; **Cancel** leaves no
 placeholder. Right-click an existing folder and choose **Rename** to change its name.
 
@@ -144,6 +149,9 @@ Explore the website’s focused [Scene & Editor](https://keireengine.duckdns.org
 [Code & Runtime](https://keireengine.duckdns.org/features/scripting/) pages. The roadmap and release notes
 keep detailed capabilities and changes in expandable sections. Website development and visual checks are documented
 in the [website README](Services/KeireDistributionService/DocumentationSite/README.md).
+
+The Windows hosting task uses Normal process priority for responsive startup and HTTP handling. Existing hosts
+should update the task using the [host installation instructions](Services/KeireDistributionService/README.md).
 
 The Marketplace supports signed-out browsing of published free assets; sign in to add them to your library.
 Paid purchases are not available. Material authoring uses reusable Inspector-based materials with Shader Graph
@@ -404,6 +412,8 @@ from the Editor distribution folder. You can also launch directly through `Scrip
 19 and 20 launch the staged Editor and Hub; options 7 and 8 update those stages after source changes.
 Player exports prefer the Editor's bundled Build Support when compatible, so a same-version module installed by an
 older development build cannot override it. Installed modules remain the fallback for other targets or configurations.
+Exports copy runtime files and their parent directories, not empty leftover template directories that could interfere
+with .NET host-version discovery. The source Build Support installation is left unchanged.
 In the Hub, open **Installs > Manage Components** for an editor to view its installation path and platform modules.
 Use **Import package** to add a compatible `.keireplayersupport` package for that editor version.
 
@@ -458,6 +468,8 @@ new external files to stabilize before assigning asset IDs; explicit asset creat
 The editor switches to the saved copy when the source document is unchanged. If you edit while the copy is saving,
 the editor keeps those edits in the original document and leaves the saved copy available in Project.
 Recovery warnings follow the saved copy's own recovery file. Normal autosaves do not display a restore warning.
+Save As retains the original snapshot; its recovery banner names the successfully saved copy and explains that the
+snapshot may differ. This informational provenance survives reopening and is cleared by a fresh autosave or discard.
 When reopening a scene with a recovery snapshot, automatic saves preserve it until you restore it, discard it,
 or explicitly save the scene. Asset Inspector file actions use full-width rows so
 Rename, Duplicate, and Move to Trash remain accessible in narrow panels.
@@ -879,12 +891,14 @@ including models with an authored axis correction. No compensating entity rotati
 
 Animator warnings reflect the current evaluated setup and clear when the reported problem is resolved.
 
-Staged account migration: Hub account configuration schema 3 selects the MySQL website OAuth provider without a
-Supabase API key. Existing schemas 1 and 2 remain supported. This configuration is not yet release-ready: native
-native identity validation tests and end-to-end migration acceptance remain required; keep published account configuration unchanged.
+Hub account configuration schema 3 selects the MySQL website OAuth provider without a Supabase API key. Packaged
+Hub builds now use `https://keireengine.duckdns.org` with the registered `keire-hub-desktop` client. The legacy
+`Config/Supabase.json` filename is retained for package compatibility; schemas 1 and 2 remain supported for legacy
+deployments. A rebuilt/reinstalled Hub is required to replace older packaged configuration. Browser sign-in and
+callback acceptance must be retested against the deployed native service before release.
 Saved Hub logins now record the account provider, server origin, and OAuth client inside protected storage.
 Changing those settings requires signing in again before a refresh token is sent. Older saved logins without this
 binding also require one fresh sign-in; user projects and installed packages are unaffected.
-The staged native OAuth client verifies Ed25519 ID tokens using keys fetched from the configured HTTPS issuer.
+The native OAuth client verifies Ed25519 ID tokens using keys fetched from the configured HTTPS issuer.
 It checks audience, issuer, token times, nonce on initial sign-in, and the SHA-512 access-token binding on both
 sign-in and refresh. Key retrieval precedes token exchange, and native account transports reject redirects.

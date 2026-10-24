@@ -17,6 +17,50 @@ VALIDATOR = ROOT / "Scripts" / "Packaging" / "validate-supabase-config.py"
 
 
 class SupabaseConfigurationTests(unittest.TestCase):
+    def test_packaged_configuration_selects_native_website_authentication(self) -> None:
+        document = json.loads((ROOT / "Config" / "Supabase.json").read_text(encoding="utf-8"))
+        self.assertEqual(document, {
+            "schemaVersion": 3,
+            "enabled": True,
+            "provider": "mysql",
+            "projectUrl": "https://keireengine.duckdns.org",
+            "hubOAuthClientId": "keire-hub-desktop",
+        })
+        self.assertEqual(self.validate(document).returncode, 0)
+
+    def test_native_configuration_rejects_secrets_and_cross_provider_fields(self) -> None:
+        valid = {
+            "schemaVersion": 3,
+            "enabled": True,
+            "provider": "mysql",
+            "projectUrl": "https://platform.example",
+            "hubOAuthClientId": "keire-hub-desktop",
+        }
+        self.assertEqual(self.validate(valid).returncode, 0)
+        self.assertEqual(self.validate({
+            "schemaVersion": 3, "enabled": False, "provider": "mysql",
+        }).returncode, 0)
+        for change in (
+            {"provider": "supabase"},
+            {"publishableKey": "sb_publishable_0123456789abcdef"},
+            {"serviceRoleKey": "private"},
+            {"hubOAuthWebsiteCallbackUrl": "https://other.example/oauth/hub/callback/"},
+            {"hubOAuthEnabled": True},
+            {"enabled": False},
+            {"hubOAuthClientId": "client with spaces"},
+            {"hubOAuthClientId": "short"},
+            {"schemaVersion": True},
+        ):
+            with self.subTest(change=change):
+                self.assertNotEqual(self.validate(dict(valid, **change)).returncode, 0)
+        for origin in (
+            "http://platform.example", "https://platform.example/", "https://platform.example/path",
+            "https://user@platform.example", "https://platform.example:444",
+            "https://platform.example?", "https://platform.example#", "https://platform.example\n",
+        ):
+            with self.subTest(origin=origin):
+                self.assertNotEqual(self.validate(dict(valid, projectUrl=origin)).returncode, 0)
+
     def validate(self, document: dict[str, object]) -> subprocess.CompletedProcess[str]:
         with tempfile.TemporaryDirectory(prefix="keire-supabase-config-") as directory:
             path = Path(directory) / "Supabase.json"

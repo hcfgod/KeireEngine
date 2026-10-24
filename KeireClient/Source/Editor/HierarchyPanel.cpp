@@ -379,6 +379,13 @@ namespace KeireEditor
             std::vector<std::byte> payload;
             if (ui.AcceptDragPayload("KEIRE_SCENE_OBJECT", payload))
                 moveEntities(DecodeAssetPayload(payload), {}, {});
+            payload.clear();
+            if (ui.AcceptDragPayload("KEIRE_ASSETS", payload))
+            {
+                m_Controller.ReportHierarchyError(
+                    "Assets cannot be assigned to the empty Hierarchy. Drop C# scripts on an entity, or select an "
+                    "entity and assign other assets through its component fields in the Inspector.");
+            }
         }
         if (ui.PointerState().LeftReleased)
             m_PendingSelectionCollapse = {};

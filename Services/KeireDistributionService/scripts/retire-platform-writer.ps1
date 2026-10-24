@@ -1,15 +1,12 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)] [string] $SpoolDirectory,
-    [Parameter(Mandatory)] [int] $StoppedProcessId
+    [int] $StoppedProcessId = 0
 )
 
 $ErrorActionPreference = 'Stop'
-if ($StoppedProcessId -le 0 -or -not [IO.Path]::IsPathRooted($SpoolDirectory)) {
-    throw 'An absolute spool path and stopped process identity are required.'
-}
-if (Get-Process -Id $StoppedProcessId -ErrorAction SilentlyContinue) {
-    throw 'The writer process still exists; refusing to retire its marker.'
+if (-not [IO.Path]::IsPathRooted($SpoolDirectory)) {
+    throw 'An absolute spool path is required.'
 }
 $markerPath = Join-Path $SpoolDirectory '.keire-platform-writer.lock'
 if (-not (Test-Path -LiteralPath $markerPath)) {
@@ -21,6 +18,17 @@ if ($markerFile.Length -gt 4096 -or ($markerFile.Attributes -band [IO.FileAttrib
 }
 $contents = [IO.File]::ReadAllText($markerPath)
 $marker = $contents | ConvertFrom-Json
+if ($StoppedProcessId -le 0) {
+    $processIdIsInteger = $marker.processId -is [int] -or $marker.processId -is [long]
+    if ($marker.schemaVersion -ne 1 -or -not $processIdIsInteger -or
+        $marker.processId -le 0 -or $marker.processId -gt [int]::MaxValue) {
+        throw 'Writer marker does not contain a valid stopped process identity.'
+    }
+    $StoppedProcessId = [int] $marker.processId
+}
+if (Get-Process -Id $StoppedProcessId -ErrorAction SilentlyContinue) {
+    throw 'The writer process still exists; refusing to retire its marker.'
+}
 if ($marker.schemaVersion -ne 1 -or $marker.processId -ne $StoppedProcessId -or
     $marker.owner -notmatch '^[a-f0-9-]{36}$') {
     throw 'Writer marker does not belong to the stopped process.'

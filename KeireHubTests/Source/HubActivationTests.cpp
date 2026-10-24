@@ -36,6 +36,21 @@ namespace
     }
 } // namespace
 
+TEST_CASE("Build Support activation preserves an optional requesting editor through CLI and IPC")
+{
+    const auto executable = std::filesystem::current_path() / "Editor Space" / "KeireClient.exe";
+    const auto text = PathUtf8(executable);
+    const auto parsed = Parse({"--build-support", "windows", "x86_64", text});
+    REQUIRE(parsed);
+    const auto decoded = RoundTrip(parsed.Value());
+    REQUIRE(decoded.Path);
+    CHECK(*decoded.Path == executable);
+    CHECK_FALSE(Parse({"--build-support", "windows", "x86_64", "relative.exe"}));
+    const auto legacy = Parse({"--build-support", "windows", "x86_64"});
+    REQUIRE(legacy);
+    CHECK_FALSE(RoundTrip(legacy.Value()).Path);
+}
+
 TEST_CASE("Hub activation protocol round-trips every typed product action")
 {
     const auto project = std::filesystem::current_path() / "Projects" / "IPC Fixture";

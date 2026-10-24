@@ -74,6 +74,7 @@ namespace KeireEditor
                                                                 Keire::EntityId beforeSibling = {},
                                                                 bool keepWorldTransform = true);
         void SetTransform(Keire::EntityId entity, const TransformValues& values);
+        void SetLightingBakeConfiguration(const Keire::LightingBakeSettings& settings);
         void SetTransforms(std::span<const Keire::AssetId> entities, const TransformValues& values);
         [[nodiscard]] Keire::Ref<Keire::Component> AddComponent(Keire::EntityId entity, Keire::ComponentTypeId type);
         // Adds only missing singleton components; repeated component types receive one instance per entity.
@@ -114,6 +115,9 @@ namespace KeireEditor
                          std::optional<std::vector<std::byte>> loadedBytes = std::nullopt);
         /// Changing the recovery target resets its timer and detects snapshots belonging to the new target.
         void SetRecoveryPath(std::filesystem::path path);
+        /// Records provenance only; the original snapshot is retained even when a copy was saved successfully.
+        void RecordRecoverySavedCopy(const std::filesystem::path& copy) noexcept;
+        [[nodiscard]] const std::string& RecoverySavedCopy() const noexcept { return m_RecoverySavedCopy; }
         void SetStatus(std::string status);
         void Save(bool overwriteExternalChanges = false);
         /// Reconciles edit-mode history with the last saved content, including prefab and lighting data.
@@ -140,6 +144,7 @@ namespace KeireEditor
       private:
         Keire::Ref<Keire::Scene> m_Scene;
         Keire::Ref<Keire::RefCounted> m_EditGeneration;
+        Keire::Ref<Keire::RefCounted> m_LightingUndoTarget;
         Keire::Ref<Keire::SceneRuntimeSession> m_PlaySession;
         Keire::Ref<Keire::SceneLoadOperation> m_LoadOperation;
         Keire::Ref<Keire::SaveFileDialogOperation> m_SaveDialog;
@@ -152,6 +157,7 @@ namespace KeireEditor
         DocumentSourcePersistence m_Persistence;
         std::optional<std::vector<std::byte>> m_SavedContent;
         std::filesystem::path m_RecoveryPath;
+        std::string m_RecoverySavedCopy;
         std::string m_Status;
         double m_RecoverySeconds = 0.0;
         bool m_RecoveryAvailable = false;

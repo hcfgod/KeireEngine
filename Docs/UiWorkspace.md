@@ -8,6 +8,12 @@ Use the workspace for editor-style applications that need multiple persistent pa
 using `UiSpecification::LayoutPath` for one legacy backend layout file, but the two persistence modes are mutually
 exclusive.
 
+`UiFrame::WindowFocused()` includes child windows and popup descendants, preserving the existing panel-focus
+contract. The additive `WindowFocused(false)` overload excludes popup descendants while retaining ordinary child
+windows. Modal keyboard handlers can use it to defer Enter/Escape to a child selector. Require focus on both the
+previous and current frame when dismissing or submitting a parent modal, so a selector's closing key does not also
+activate the newly refocused parent.
+
 ## Enable The Workspace
 
 Configure the workspace before constructing the application runtime:

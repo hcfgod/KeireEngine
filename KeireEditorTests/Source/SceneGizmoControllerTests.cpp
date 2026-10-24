@@ -1,10 +1,59 @@
 #include "KeireClient/Editor/SceneGizmoController.h"
 
+#include <SDL3/SDL.h>
 #include <doctest/doctest.h>
 
 #include <array>
 #include <filesystem>
 #include <fstream>
+#include <memory>
+
+TEST_CASE("Selecting UI documents never opens UI Builder implicitly")
+{
+    REQUIRE(SDL_SetHintWithPriority(SDL_HINT_VIDEO_DRIVER, "dummy", SDL_HINT_OVERRIDE));
+    bool checked = false;
+    class SelectionLayer final : public Keire::Layer
+    {
+      public:
+        explicit SelectionLayer(bool& checked) : Layer("UI document selection"), m_Checked(checked) {}
+
+      protected:
+        void OnUi(Keire::UiFrame& ui) override
+        {
+            auto window = ui.BeginWindow("UI document selection fixture");
+            auto scene = Keire::CreateRef<Keire::Scene>(Keire::AssetId::Generate(),
+                                                        Keire::SceneAsset::EmptyDefinition("UI selection"));
+            auto first = scene->CreateEntity("First HUD");
+            first.AddComponent<Keire::UiDocumentComponent>()->SetVisualTree(Keire::AssetId::Generate());
+            auto second = scene->CreateEntity("Second HUD");
+            second.AddComponent<Keire::UiDocumentComponent>()->SetVisualTree(Keire::AssetId::Generate());
+            KeireEditor::SceneGizmoController controller;
+            int openCount = 0;
+            for (const auto entity : {first, second, first})
+            {
+                const auto result =
+                    controller.UpdateAndDraw(ui, scene, entity.Id(), {}, {{0, 0}, {500, 300}}, false, true, {}, {}, {},
+                                             nullptr, {}, [&openCount](Keire::AssetId) { ++openCount; });
+                CHECK(result.Selection == entity.Id());
+            }
+            CHECK(openCount == 0);
+            m_Checked = true;
+            Owner().RequestExit();
+        }
+
+      private:
+        bool& m_Checked;
+    };
+    Keire::ApplicationSpecification specification;
+    specification.MainWindow.Visible = false;
+    specification.TargetFrameRate = 0;
+    specification.Ui.Mode = Keire::UiMode::Headless;
+    specification.Ui.LayoutPath.clear();
+    Keire::Application application(specification);
+    (void)application.PushLayer(std::make_unique<SelectionLayer>(checked));
+    CHECK(application.Run() == 0);
+    CHECK(checked);
+}
 
 TEST_CASE("scene physics and occlusion gizmo settings migrate version one state and round trip version four")
 {

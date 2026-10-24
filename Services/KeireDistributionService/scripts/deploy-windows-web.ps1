@@ -82,15 +82,34 @@ if ($settingsTransition) {
     }
 }
 $supervisor = Join-Path $settingsDirectory 'scripts\start-windows-host.ps1'
+$retirementHelper = Join-Path $settingsDirectory 'scripts\retire-platform-writer.ps1'
 $originalSupervisorBytes = [IO.File]::ReadAllBytes($supervisor)
+$retirementHelperPathExists = Test-Path -LiteralPath $retirementHelper
+$retirementHelperExisted = Test-Path -LiteralPath $retirementHelper -PathType Leaf
+if ($retirementHelperPathExists -and -not $retirementHelperExisted) {
+    throw "The writer retirement helper path is not a file: '$retirementHelper'."
+}
+if ($retirementHelperExisted -and
+    ((Get-Item -LiteralPath $retirementHelper).Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+    throw "The writer retirement helper may not be a reparse point: '$retirementHelper'."
+}
+$originalRetirementHelperBytes = if ($retirementHelperExisted) {
+    [IO.File]::ReadAllBytes($retirementHelper)
+}
+else {
+    $null
+}
 $script:transitionInstalled = $false
+$script:hostRuntimeInstalled = $false
 $sourceDist = Join-Path $sourceRoot 'dist'
 $destinationDist = Join-Path $destinationRoot 'dist'
 $sourceLock = Join-Path $sourceRoot 'package-lock.json'
 $destinationLock = Join-Path $destinationRoot 'package-lock.json'
 $sourcePackage = Join-Path $sourceRoot 'package.json'
 foreach ($requiredFile in @((Join-Path $sourceDist 'server\entry.mjs'), (Join-Path $destinationDist 'server\entry.mjs'),
-        $sourceLock, $destinationLock, $sourcePackage, $nodeExecutable, $supervisor)) {
+        $sourceLock, $destinationLock, $sourcePackage, $nodeExecutable, $supervisor,
+        (Join-Path $PSScriptRoot 'start-windows-host.ps1'),
+        (Join-Path $PSScriptRoot 'retire-platform-writer.ps1'))) {
     if (-not (Test-Path -LiteralPath $requiredFile -PathType Leaf)) {
         throw "A required web deployment file does not exist: '$requiredFile'."
     }
@@ -111,6 +130,10 @@ function Replace-HostFile([string] $Path, [byte[]] $Contents) {
     $temporary = $Path + '.staging-' + $suffix
     $backup = $Path + '.rollback-' + $suffix
     [IO.File]::WriteAllBytes($temporary, $Contents)
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        [IO.File]::Move($temporary, $Path)
+        return
+    }
     # Preserve the destination ACL and an on-disk recovery copy, including across a process interruption.
     [IO.File]::Replace($temporary, $Path, $backup)
 }
@@ -120,7 +143,6 @@ function Install-ProviderTransition {
         return
     }
     $script:transitionInstalled = $true
-    Replace-HostFile $supervisor ([IO.File]::ReadAllBytes((Join-Path $PSScriptRoot 'start-windows-host.ps1')))
     Replace-HostFile $SettingsPath ([Text.UTF8Encoding]::new($false).GetBytes(($settings | ConvertTo-Json -Depth 20)))
     $script:destinationEntry = $newDestinationEntry
 }
@@ -130,9 +152,46 @@ function Restore-ProviderTransition {
         return
     }
     Replace-HostFile $SettingsPath $originalSettingsBytes
-    Replace-HostFile $supervisor $originalSupervisorBytes
     $script:destinationEntry = $oldDestinationEntry
     $script:transitionInstalled = $false
+}
+
+function Install-HostRuntime {
+    $retirementHelperInstalled = $false
+    try {
+        Replace-HostFile $retirementHelper `
+            ([IO.File]::ReadAllBytes((Join-Path $PSScriptRoot 'retire-platform-writer.ps1')))
+        $retirementHelperInstalled = $true
+        Replace-HostFile $supervisor `
+            ([IO.File]::ReadAllBytes((Join-Path $PSScriptRoot 'start-windows-host.ps1')))
+        $script:hostRuntimeInstalled = $true
+    }
+    catch {
+        Replace-HostFile $supervisor $originalSupervisorBytes
+        if ($retirementHelperInstalled) {
+            if ($retirementHelperExisted) {
+                Replace-HostFile $retirementHelper $originalRetirementHelperBytes
+            }
+            elseif (Test-Path -LiteralPath $retirementHelper -PathType Leaf) {
+                [IO.File]::Delete($retirementHelper)
+            }
+        }
+        throw
+    }
+}
+
+function Restore-HostRuntime {
+    if (-not $script:hostRuntimeInstalled) {
+        return
+    }
+    Replace-HostFile $supervisor $originalSupervisorBytes
+    if ($retirementHelperExisted) {
+        Replace-HostFile $retirementHelper $originalRetirementHelperBytes
+    }
+    elseif (Test-Path -LiteralPath $retirementHelper -PathType Leaf) {
+        [IO.File]::Delete($retirementHelper)
+    }
+    $script:hostRuntimeInstalled = $false
 }
 if ((Get-NormalizedPrefix $sourceRoot).StartsWith((Get-NormalizedPrefix $destinationRoot),
         [StringComparison]::OrdinalIgnoreCase) -or
@@ -331,6 +390,7 @@ if ($runtimeUpdate) {
             }
         }
         Stop-ConfiguredHost
+        Install-HostRuntime
         Move-Item -LiteralPath $destinationRoot -Destination $backupWeb
         $backupCreated = $true
         Move-Item -LiteralPath $stagedWeb -Destination $destinationRoot
@@ -350,11 +410,15 @@ if ($runtimeUpdate) {
                 }
                 Move-Item -LiteralPath $backupWeb -Destination $destinationRoot
                 Restore-ProviderTransition
+                Restore-HostRuntime
                 $backupCreated = $false
             }
             catch {
                 Write-Warning "The previous web deployment could not be restored after deployment failure: $($_.Exception.Message)"
             }
+        }
+        elseif ($script:hostRuntimeInstalled) {
+            Restore-HostRuntime
         }
         if ($script:hostRestartRequired -and (Test-Path -LiteralPath $destinationEntry -PathType Leaf)) {
             try {
@@ -386,6 +450,7 @@ try {
         throw 'The staged server entry point failed the Node.js syntax check.'
     }
     Stop-ConfiguredHost
+    Install-HostRuntime
     Move-Item -LiteralPath $destinationDist -Destination $backupDist
     $backupCreated = $true
     Move-Item -LiteralPath $stagedDist -Destination $destinationDist
@@ -402,11 +467,15 @@ catch {
                 Move-Item -LiteralPath $destinationDist -Destination $failedDist
             }
             Move-Item -LiteralPath $backupDist -Destination $destinationDist
+            Restore-HostRuntime
             $backupCreated = $false
         }
         catch {
             Write-Warning "The previous web deployment could not be restored after deployment failure: $($_.Exception.Message)"
         }
+    }
+    elseif ($script:hostRuntimeInstalled) {
+        Restore-HostRuntime
     }
     if ($script:hostRestartRequired -and (Test-Path -LiteralPath $destinationEntry -PathType Leaf)) {
         try {

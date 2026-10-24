@@ -111,7 +111,7 @@ namespace KeireHub
     bool CanOpenOrUpgrade(const Keire::ProjectStatus status) noexcept
     {
         return status == Keire::ProjectStatus::Ready || status == Keire::ProjectStatus::UpgradeAvailable ||
-               status == Keire::ProjectStatus::RecoveryRequired;
+               status == Keire::ProjectStatus::RecoveryRequired || status == Keire::ProjectStatus::InUse;
     }
 
     HubProjectOpenAction ResolveProjectOpenAction(const Keire::ProjectStatus status,

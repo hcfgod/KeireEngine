@@ -68,8 +68,10 @@ $trigger = New-ScheduledTaskTrigger -AtStartup
 $trigger.Delay = 'PT30S'
 $taskPrincipal = New-ScheduledTaskPrincipal -UserId 'NT AUTHORITY\SYSTEM' -LogonType ServiceAccount `
     -RunLevel Highest
+# Task Scheduler defaults to priority 7 (BelowNormal). These latency-sensitive servers must not inherit
+# background priority, which can starve startup and HTTP handling under sustained lower-priority-core load.
 $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) `
-    -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew
+    -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew -Priority 4
 $task = New-ScheduledTask -Action $action -Trigger $trigger -Principal $taskPrincipal -Settings $settings `
     -Description 'Starts and supervises the Kéire distribution service and Caddy before interactive sign-in.'
 

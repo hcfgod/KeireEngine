@@ -1,6 +1,12 @@
 # Kéire Hub
 
-Windows Hub and Editor 0.4.7 are published through signed catalog sequence 22. The catalog retains independently validated
+Opening a project that is already running reports guidance instead of silently ignoring the action. Build Support
+handoffs can identify their requesting Editor with `--build-support <platform> <architecture> [editor-executable]`.
+An explicit requester must match a registered usable installation; running, unhealthy or unregistered targets receive
+guidance rather than falling back to a different Editor. Older two-field requests remain accepted, but the updated
+Editor and Hub should be deployed together for requester-aware routing.
+
+Windows Hub and Editor 0.4.7 are published through the signed catalog. Consult the verified catalog for its current sequence. The catalog retains independently validated
 Linux 0.4.2 packages. Historical platform evidence below retains its original version and scope.
 
 `KeireHub` is the normal product entrypoint and is packaged independently from versioned editor installations. The Hub
@@ -159,7 +165,7 @@ confined cancellation action. A successful import or repair always requests a po
 older scan is still running, refresh requests coalesce into exactly one follow-up scan instead of publishing stale
 pre-install component state as final.
 
-Terminal package tasks can be dismissed individually, or cleared together with **Clear finished**; active tasks remain
+Terminal package and Build Support tasks can be dismissed individually, or cleared together with **Clear finished**; active tasks remain
 untouched. Notifications preserve unread state, then expose **Dismiss** after they have been read. These actions update
 the durable stores, so cleared history does not return on the next Hub launch.
 
@@ -236,6 +242,9 @@ diagnostics, verified-cache clearing, and reset. Development builds may supply a
 separately trusted public key; packaged builds reject that override. Compatibility fields retained from older settings
 documents are not presented as controls until the product honors them.
 
+The **Save settings** action stays above the scrolling preferences, with an **Unsaved changes** indicator until the
+edited preferences are saved. Appearance changes made in Settings apply on save.
+
 Clearing the verified package cache is an asynchronous, exclusive maintenance operation represented in the task center.
 It refuses to start while package work is active, temporarily closes the idle package coordinator before deleting cache
 content, and recreates that coordinator after the terminal result so downloads cannot repopulate the cache mid-clear.
@@ -250,7 +259,17 @@ unrelated personal files are excluded, and nothing is uploaded automatically. Se
 
 ## Accounts and identity
 
-`Config/Supabase.json` enables optional identity with a project HTTPS URL and modern `sb_publishable_...` key. Schema 2
+When online discovery falls back to a verified cached catalog, the footer shows **Connection issue** rather than an
+unexplained reconnecting state. Hover it for the transport or HTTP failure and retry policy. Transient failures retry
+with bounded backoff; non-retryable responses such as a missing catalog are checked on the normal periodic schedule.
+Successful network revalidation clears the warning. Cached data never counts as fresh network success.
+
+`Config/Supabase.json` retains its legacy filename, but current packages select schema 3 with `provider: "mysql"`,
+the website HTTPS origin, and the registered public client `keire-hub-desktop`. This routes browser authorization,
+token exchange, identity verification, and account requests to the website's native service, not Supabase. The callback
+is derived from the same origin and no API key or client secret is packaged. Changing providers invalidates the saved
+login binding and requires a fresh browser sign-in; it never sends an old provider's refresh token to the new service.
+Legacy schema 1 enables identity with a project HTTPS URL and modern `sb_publishable_...` key. Schema 2
 can independently enable the public-client browser OAuth adapter with a registered client ID and the exact HTTPS
 website callback. The recommended flow uses authorization-code PKCE, state, and nonce; the browser forwards only the
 single-use code through `keirehub://oauth/callback`, and the Hub performs the token exchange. Email authentication

@@ -26,7 +26,8 @@ namespace KeireHub
         [[nodiscard]] HubStatus Refresh();
         void SynchronizeEditors(HubProductSnapshot& product);
         [[nodiscard]] HubStatus ManageEditor(std::string_view installationId);
-        [[nodiscard]] HubStatus FocusTarget(std::string_view platform, std::string_view architecture);
+        [[nodiscard]] HubStatus FocusTarget(std::string_view platform, std::string_view architecture,
+                                            const std::filesystem::path& requestingEditor = {});
         [[nodiscard]] HubStatus ImportPackage(const std::filesystem::path& package);
         [[nodiscard]] bool OwnsTask(std::string_view taskId) const noexcept;
         [[nodiscard]] HubStatus ExecuteTaskCommand(const HubUiCommand& command);

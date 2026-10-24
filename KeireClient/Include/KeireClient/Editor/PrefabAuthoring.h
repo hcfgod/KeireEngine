@@ -14,6 +14,20 @@ namespace KeireEditor
         Keire::SceneDefinition Scene;
     };
 
+    struct PrefabOverrideReviewEntry
+    {
+        Keire::AssetId Object;
+        std::string ObjectName;
+        Keire::ComponentTypeId Component;
+        std::string Property;
+        std::string Before;
+        std::string After;
+    };
+
+    [[nodiscard]] std::vector<PrefabOverrideReviewEntry>
+    ReviewPrefabInstance(const Keire::SceneDefinition& scene, Keire::AssetId instanceRoot,
+                         const Keire::SceneDefinition& composedSource);
+
     [[nodiscard]] Keire::PrefabDefinition CreatePrefabFromSelection(const Keire::SceneDefinition& scene,
                                                                     std::span<const Keire::AssetId> roots,
                                                                     std::string name);

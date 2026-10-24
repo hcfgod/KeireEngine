@@ -27,6 +27,14 @@ namespace KeireEditor
         return size;
     }
 
+    [[nodiscard]] inline Keire::UiPosition CenterGameViewportPreview(const Keire::UiPosition origin,
+                                                                     const Keire::UiSize available,
+                                                                     const Keire::UiSize preview) noexcept
+    {
+        return {origin.X + std::max(0.0F, available.Width - preview.Width) * 0.5F,
+                origin.Y + std::max(0.0F, available.Height - preview.Height) * 0.5F};
+    }
+
     struct SceneViewportCenteredStateLayout final
     {
         Keire::UiItemRect Reservation;

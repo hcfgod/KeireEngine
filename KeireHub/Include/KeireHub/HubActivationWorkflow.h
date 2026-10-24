@@ -22,7 +22,8 @@ namespace KeireHub
         virtual void StartBuildSupportInstall(const std::filesystem::path& package) = 0;
         virtual void RequestEditorInstall(std::string_view packageOrVersion) = 0;
         [[nodiscard]] virtual HubStatus CompleteOAuthCallback(std::string_view callbackUrl) = 0;
-        [[nodiscard]] virtual HubStatus FocusBuildSupport(std::string_view platform, std::string_view architecture) = 0;
+        [[nodiscard]] virtual HubStatus FocusBuildSupport(std::string_view platform, std::string_view architecture,
+                                                          const std::filesystem::path& requestingEditor) = 0;
         [[nodiscard]] virtual HubStatus OpenMarketplaceProduct(std::string_view productId) = 0;
     };
 

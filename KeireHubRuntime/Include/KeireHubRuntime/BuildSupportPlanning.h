@@ -72,7 +72,8 @@ namespace KeireHub
                              BuildSupportFilter filter = {});
     [[nodiscard]] HubResult<BuildSupportSelection>
     SelectBuildSupportEditorForTarget(std::span<const BuildSupportEditorTarget> editors, std::string_view platform,
-                                      std::string_view architecture);
+                                      std::string_view architecture,
+                                      const std::filesystem::path& requestingEditor = {});
     [[nodiscard]] std::vector<BuildSupportComponent>
     FilterBuildSupportComponents(std::span<const BuildSupportComponent> components,
                                  const BuildSupportSelection& selection);

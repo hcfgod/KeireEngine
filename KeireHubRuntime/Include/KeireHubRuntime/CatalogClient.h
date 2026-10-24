@@ -94,6 +94,8 @@ namespace KeireHub
         std::string ETag;
         bool FromCache = false;
         bool NetworkValidated = false;
+        /// Network failure that caused verified-cache fallback; absent for explicit offline mode and HTTP 304.
+        std::optional<HubError> NetworkFailure;
     };
 
     class CatalogTrustStore final

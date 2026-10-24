@@ -423,6 +423,10 @@ TEST_CASE("Distribution catalog sessions distinguish online fallback and offline
     const auto fallbackSnapshot = fallback.Value().Snapshot();
     CHECK(fallbackSnapshot->PackageCatalogs.front().Status.State == DistributionCatalogSourceState::LastKnownGood);
     CHECK(fallbackSnapshot->Content.Status.State == DistributionCatalogSourceState::LastKnownGood);
+    REQUIRE(fallbackSnapshot->PackageCatalogs.front().Status.Error);
+    CHECK(fallbackSnapshot->PackageCatalogs.front().Status.Error->Code == HubErrorCode::CatalogTransportFailed);
+    REQUIRE(fallbackSnapshot->Content.Status.Error);
+    CHECK(fallbackSnapshot->Content.Status.Error->Retryable);
 
     bool offlineTransportCalled = false;
     auto offline =
@@ -440,6 +444,7 @@ TEST_CASE("Distribution catalog sessions distinguish online fallback and offline
           DistributionCatalogSourceState::OfflineLastKnownGood);
     CHECK(offlineSnapshot->Content.Status.State == DistributionCatalogSourceState::OfflineLastKnownGood);
     CHECK_FALSE(offlineTransportCalled);
+    CHECK_FALSE(offlineSnapshot->Content.Status.Error);
 }
 
 TEST_CASE("Distribution catalog sessions remain online after server revalidation")

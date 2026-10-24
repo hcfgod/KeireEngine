@@ -422,6 +422,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     void RevealRiggingStudioAsset(Keire::AssetId asset) override;
     void PreviewRiggingStudioClip(Keire::AssetId asset) override;
     void ReportRiggingStudioError(std::string message) noexcept override;
+    void ActivateProjectSettingsHistory() noexcept override;
     [[nodiscard]] std::span<const Keire::AssetSourceRecord> ProjectSettingsAssetRecords() const noexcept override;
     void RevealProjectSettingsAsset(Keire::AssetId asset) override;
     [[nodiscard]] std::pair<Keire::AssetId, Keire::AssetId> ProjectDefaultInput() const noexcept override;
@@ -853,6 +854,12 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     KeireEditor::SceneDocument* m_SceneDocument = nullptr;
     std::unique_ptr<KeireEditor::SceneDocument> m_PrefabReturnDocument;
     std::optional<PrefabEditingStage> m_PrefabEditingStage;
+    struct PrefabReviewSource
+    {
+        std::string Revision;
+        Keire::Ref<Keire::PrefabAsset> Asset;
+    };
+    std::unordered_map<std::string, PrefabReviewSource> m_PrefabReviewSources;
     KeireEditor::InputActionsDocument* m_InputActionsDocument = nullptr;
     KeireEditor::AnimatorControllerDocument* m_AnimatorControllerDocument = nullptr;
     KeireEditor::AudioMixerDocument* m_AudioMixerDocument = nullptr;
@@ -1078,6 +1085,8 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     bool m_PlayerBuildReported = false;
     bool m_CloseThemeAfterDecision = false;
     bool m_OpenDialog = false;
+    bool m_FocusNameDialog = false;
+    bool m_NameDialogWasFocused = false;
     bool m_Smoke = false;
     bool m_InitializeProject = false;
     bool m_SmokePlay = false;

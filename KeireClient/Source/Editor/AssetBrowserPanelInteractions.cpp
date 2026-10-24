@@ -13,6 +13,7 @@ namespace KeireEditor
             ui.OpenPopup(createTitle);
             OpenNamedCreatePopup = false;
             FocusCreateName = true;
+            NameDialogWasFocused = false;
         }
         if (auto create = ui.BeginPopupModal(createTitle); create)
         {
@@ -24,11 +25,14 @@ namespace KeireEditor
                 FocusCreateName = false;
             }
             (void)ui.InputText("Name", CreateNameBuffer, true);
-            const bool submitCreate = ui.Shortcut({.Key = Keire::UiKey::Enter, .Global = true});
             if (PendingCreateKind == NamedCreateKind::Material)
                 ui.Text("Shader: Kéire/Lit (shared project default)");
             if (PendingCreateKind == NamedCreateKind::MaterialGraph)
                 MaterialGraphCreation.Draw(ui, editor.AssetBrowserRecords(), editor.AssetBrowserTheme());
+            const bool focused = ui.WindowFocused(false);
+            // Wait one frame after a child selector closes so its Enter/Escape cannot submit this dialog too.
+            const bool keyboardReady = std::exchange(NameDialogWasFocused, focused) && focused;
+            const bool submitCreate = keyboardReady && ui.KeyPressed(Keire::UiKey::Enter);
             const auto records = editor.AssetBrowserRecords();
             const auto parent = std::ranges::find(records, PendingVariantBase, &Keire::AssetSourceRecord::Id);
             const bool validParent =
@@ -99,7 +103,7 @@ namespace KeireEditor
                 }
             }
             ui.SameLine();
-            if (ui.Button("Cancel"))
+            if (ui.Button("Cancel") || (keyboardReady && ui.KeyPressed(Keire::UiKey::Escape)))
             {
                 PendingCreateKind = NamedCreateKind::None;
                 PendingCreateFolder.clear();
@@ -119,6 +123,7 @@ namespace KeireEditor
             ui.OpenPopup("Rename Asset");
             OpenRenamePopup = false;
             FocusRenameName = true;
+            NameDialogWasFocused = false;
         }
         if (auto rename = ui.BeginPopupModal("Rename Asset"); rename)
         {
@@ -129,7 +134,9 @@ namespace KeireEditor
                 FocusRenameName = false;
             }
             (void)ui.InputText("Name", RenameBuffer, true);
-            const bool submitRename = ui.Shortcut({.Key = Keire::UiKey::Enter, .Global = true});
+            const bool focused = ui.WindowFocused(false);
+            const bool keyboardReady = std::exchange(NameDialogWasFocused, focused) && focused;
+            const bool submitRename = keyboardReady && ui.KeyPressed(Keire::UiKey::Enter);
             if (ui.Button("Rename") || submitRename)
             {
                 try
@@ -161,7 +168,7 @@ namespace KeireEditor
                 }
             }
             ui.SameLine();
-            if (ui.Button("Cancel"))
+            if (ui.Button("Cancel") || (keyboardReady && ui.KeyPressed(Keire::UiKey::Escape)))
             {
                 Renaming = {};
                 RenameBuffer.clear();
@@ -174,6 +181,7 @@ namespace KeireEditor
             ui.OpenPopup("Rename Folder");
             OpenFolderRenamePopup = false;
             FocusRenameName = true;
+            NameDialogWasFocused = false;
         }
         if (auto rename = ui.BeginPopupModal("Rename Folder"); rename)
         {
@@ -184,7 +192,9 @@ namespace KeireEditor
                 FocusRenameName = false;
             }
             (void)ui.InputText("Name", RenameBuffer, true);
-            const bool submitRename = ui.Shortcut({.Key = Keire::UiKey::Enter, .Global = true});
+            const bool focused = ui.WindowFocused(false);
+            const bool keyboardReady = std::exchange(NameDialogWasFocused, focused) && focused;
+            const bool submitRename = keyboardReady && ui.KeyPressed(Keire::UiKey::Enter);
             if (ui.Button("Rename") || submitRename)
             {
                 try
@@ -216,7 +226,7 @@ namespace KeireEditor
                 }
             }
             ui.SameLine();
-            if (ui.Button("Cancel"))
+            if (ui.Button("Cancel") || (keyboardReady && ui.KeyPressed(Keire::UiKey::Escape)))
             {
                 RenamingFolder.clear();
                 RenameBuffer.clear();

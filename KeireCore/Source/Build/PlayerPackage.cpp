@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <array>
+#include <charconv>
 #include <cmath>
 #include <cstdlib>
 #include <fstream>
@@ -17,6 +18,7 @@
 #include <ranges>
 #include <set>
 #include <stdexcept>
+#include <string_view>
 #include <system_error>
 #include <thread>
 
@@ -24,6 +26,7 @@
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <Windows.h>
+#include <winver.h>
 #endif
 
 namespace Keire::Detail
@@ -233,7 +236,151 @@ namespace Keire::Detail
                    static_cast<std::uint32_t>(std::to_integer<std::uint8_t>(bytes[offset + 3])) << 24U;
         }
 
-        void EmbedWindowsExecutableIcon(const std::filesystem::path& executable, const std::span<const std::byte> icon)
+        void AlignVersionBlock(std::vector<std::byte>& bytes)
+        {
+            while (bytes.size() % sizeof(DWORD) != 0)
+            {
+                bytes.push_back(std::byte{0});
+            }
+        }
+
+        void AppendVersionText(std::vector<std::byte>& bytes, const std::wstring_view text)
+        {
+            for (const auto character : text)
+            {
+                AppendLittleEndian<std::uint16_t>(bytes, static_cast<std::uint16_t>(character));
+            }
+            AppendLittleEndian<std::uint16_t>(bytes, 0);
+        }
+
+        [[nodiscard]] std::size_t BeginVersionBlock(std::vector<std::byte>& bytes, const std::wstring_view key,
+                                                    const WORD valueLength, const WORD type)
+        {
+            AlignVersionBlock(bytes);
+            const auto start = bytes.size();
+            AppendLittleEndian<WORD>(bytes, 0);
+            AppendLittleEndian(bytes, valueLength);
+            AppendLittleEndian(bytes, type);
+            AppendVersionText(bytes, key);
+            AlignVersionBlock(bytes);
+            return start;
+        }
+
+        void EndVersionBlock(std::vector<std::byte>& bytes, const std::size_t start)
+        {
+            const auto length = bytes.size() - start;
+            if (length > 65535U)
+            {
+                throw std::runtime_error("Windows player version information exceeds its resource size limit.");
+            }
+            bytes[start] = static_cast<std::byte>(length & 0xffU);
+            bytes[start + 1] = static_cast<std::byte>((length >> 8U) & 0xffU);
+        }
+
+        [[nodiscard]] std::vector<std::byte> EncodeWindowsVersion(const PlayerSettings& settings)
+        {
+            // Windows fixed versions have four 16-bit fields; preserve the complete user version in the strings.
+            std::array<std::uint32_t, 4> numbers{};
+            std::string_view remaining = settings.Version;
+            for (auto& number : numbers)
+            {
+                const auto parsed = std::from_chars(remaining.data(), remaining.data() + remaining.size(), number);
+                if (parsed.ec != std::errc{} || number > 65535U)
+                {
+                    numbers = {};
+                    break;
+                }
+                if (parsed.ptr == remaining.data() + remaining.size() || *parsed.ptr != '.')
+                {
+                    break;
+                }
+                remaining.remove_prefix(static_cast<std::size_t>(parsed.ptr - remaining.data()) + 1U);
+            }
+            std::vector<std::byte> bytes;
+            const auto root = BeginVersionBlock(bytes, L"VS_VERSION_INFO", 52, 0);
+            const auto major = (numbers[0] << 16U) | numbers[1];
+            const auto minor = (numbers[2] << 16U) | numbers[3];
+            constexpr DWORD signature = 0xfeef04bdU;
+            constexpr DWORD structureVersion = 0x00010000U;
+            for (const DWORD value : std::array<DWORD, 13>{
+                     signature, structureVersion, major, minor, major, minor, DWORD{VS_FFI_FILEFLAGSMASK}, DWORD{0},
+                     DWORD{VOS_NT_WINDOWS32}, DWORD{VFT_APP}, DWORD{0}, DWORD{0}, DWORD{0}})
+            {
+                AppendLittleEndian(bytes, value);
+            }
+            const auto strings = BeginVersionBlock(bytes, L"StringFileInfo", 0, 1);
+            const auto table = BeginVersionBlock(bytes, L"040904b0", 0, 1);
+            const auto appendString = [&](const std::wstring_view key, const std::string& text)
+            {
+                const auto value = PathFromUtf8(text).wstring();
+                if (value.size() >= 32768U)
+                {
+                    throw std::runtime_error("Windows player version string exceeds its size limit.");
+                }
+                const auto entry = BeginVersionBlock(bytes, key, static_cast<WORD>(value.size() + 1U), 1);
+                AppendVersionText(bytes, value);
+                EndVersionBlock(bytes, entry);
+            };
+            appendString(L"ProductName", settings.ProductName);
+            appendString(L"FileDescription", settings.ProductName);
+            appendString(L"FileVersion", settings.Version);
+            appendString(L"ProductVersion", settings.Version);
+            appendString(L"InternalName", settings.ApplicationIdentifier);
+            appendString(L"OriginalFilename", settings.ProductName + ".exe");
+            EndVersionBlock(bytes, table);
+            EndVersionBlock(bytes, strings);
+            const auto variables = BeginVersionBlock(bytes, L"VarFileInfo", 0, 1);
+            const auto translation = BeginVersionBlock(bytes, L"Translation", 4, 0);
+            AppendLittleEndian<WORD>(bytes, 0x0409);
+            AppendLittleEndian<WORD>(bytes, 1200);
+            EndVersionBlock(bytes, translation);
+            EndVersionBlock(bytes, variables);
+            EndVersionBlock(bytes, root);
+            return bytes;
+        }
+
+        [[nodiscard]] std::vector<WORD> WindowsVersionLanguages(const std::filesystem::path& executable)
+        {
+            const auto module =
+                LoadLibraryExW(executable.c_str(), nullptr, LOAD_LIBRARY_AS_DATAFILE | LOAD_LIBRARY_AS_IMAGE_RESOURCE);
+            if (!module)
+            {
+                throw std::runtime_error("Windows could not inspect the player executable resources.");
+            }
+            struct Languages
+            {
+                std::vector<WORD> Values;
+                bool Failed = false;
+            };
+            Languages languages;
+            const auto callback = [](HMODULE, LPCWSTR, LPCWSTR, WORD language, LONG_PTR parameter) -> BOOL
+            {
+                auto& state = *reinterpret_cast<Languages*>(parameter);
+                try
+                {
+                    state.Values.push_back(language);
+                    return TRUE;
+                }
+                catch (...)
+                {
+                    state.Failed = true;
+                    return FALSE;
+                }
+            };
+            const auto enumerated = EnumResourceLanguagesW(module, MAKEINTRESOURCEW(16), MAKEINTRESOURCEW(1), callback,
+                                                           reinterpret_cast<LONG_PTR>(&languages));
+            const auto error = GetLastError();
+            (void)FreeLibrary(module);
+            if (languages.Failed || (!enumerated && error != ERROR_RESOURCE_TYPE_NOT_FOUND &&
+                                     error != ERROR_RESOURCE_NAME_NOT_FOUND && error != ERROR_RESOURCE_DATA_NOT_FOUND))
+            {
+                throw std::runtime_error("Windows could not enumerate existing player version resources.");
+            }
+            return languages.Values;
+        }
+
+        void EmbedWindowsExecutableBranding(const std::filesystem::path& executable,
+                                            const std::span<const std::byte> icon, const PlayerSettings& settings)
         {
             if (icon.size() < 22 || ReadLittleEndian16(icon, 0) != 0 || ReadLittleEndian16(icon, 2) != 1)
                 throw std::runtime_error("Generated Windows player icon is invalid.");
@@ -267,6 +414,8 @@ namespace Keire::Detail
                 resources.push_back({.Id = id, .Bytes = icon.subspan(offset, size)});
             }
 
+            auto version = EncodeWindowsVersion(settings);
+            const auto versionLanguages = WindowsVersionLanguages(executable);
             HANDLE update = BeginUpdateResourceW(executable.c_str(), FALSE);
             if (!update)
                 throw std::runtime_error("Windows could not open the player executable resources for branding (" +
@@ -286,6 +435,21 @@ namespace Keire::Detail
                                      static_cast<DWORD>(group.size())))
                     throw std::runtime_error("Windows could not update the player icon group (" +
                                              std::to_string(GetLastError()) + ").");
+                // Remove template-localized versions so Windows cannot prefer stale engine branding.
+                for (const auto previousLanguage : versionLanguages)
+                {
+                    if (!UpdateResourceW(update, MAKEINTRESOURCEW(16), MAKEINTRESOURCEW(1), previousLanguage, nullptr,
+                                         0))
+                    {
+                        throw std::runtime_error("Windows could not replace template version information.");
+                    }
+                }
+                if (!UpdateResourceW(update, MAKEINTRESOURCEW(16), MAKEINTRESOURCEW(1), language, version.data(),
+                                     static_cast<DWORD>(version.size())))
+                {
+                    throw std::runtime_error("Windows could not update the player version information (" +
+                                             std::to_string(GetLastError()) + ").");
+                }
                 if (!EndUpdateResourceW(update, FALSE))
                 {
                     update = nullptr;
@@ -385,7 +549,8 @@ namespace Keire::Detail
                 const auto output = destination / relative;
                 if (entry.is_directory(error))
                 {
-                    std::filesystem::create_directories(output);
+                    // Materialize directories only as parents of copied files. Empty leftover .NET version
+                    // directories can outrank the bundled host and make runtime discovery fail at launch.
                     continue;
                 }
                 if (!entry.is_regular_file(error) || error)
@@ -594,7 +759,7 @@ namespace Keire::Detail
                     WriteBrandingSlot(stagingRoot / relative, slot.Offset, slot.Size, versionBytes);
 #if defined(_WIN32)
                 else if (slot.Kind == "windows-resource-update")
-                    EmbedWindowsExecutableIcon(stagingRoot / relative, icon);
+                    EmbedWindowsExecutableBranding(stagingRoot / relative, icon, settings);
 #endif
             }
         }

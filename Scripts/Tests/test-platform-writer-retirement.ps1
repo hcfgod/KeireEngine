@@ -34,7 +34,17 @@ try {
     & $helper -SpoolDirectory $fixture -StoppedProcessId 2147483647
     Set-Content -LiteralPath $markerPath -Value '{invalid-json'
     Assert-Rejected 2147483647
-    Write-Host 'Writer retirement checks passed: live owner, wrong owner, archive, missing marker, malformed marker.'
+    Remove-Item -LiteralPath $markerPath -Force
+    & $helper -SpoolDirectory $fixture
+    Write-Marker 2147483647
+    $contents = [IO.File]::ReadAllText($markerPath)
+    & $helper -SpoolDirectory $fixture
+    $archives = @(Get-ChildItem -LiteralPath $fixture -Force -Filter '*.retired-*')
+    if ((Test-Path -LiteralPath $markerPath) -or $archives.Count -ne 2 -or
+        [IO.File]::ReadAllText($archives[-1].FullName) -cne $contents) {
+        throw 'Automatic stopped-writer retirement did not preserve the marker archive.'
+    }
+    Write-Host 'Writer retirement checks passed: live owner, wrong owner, explicit and automatic archive, missing marker, malformed marker.'
 } finally {
     $resolved = [IO.Path]::GetFullPath($fixture)
     $prefix = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar

@@ -362,10 +362,17 @@ namespace Keire
     }
     UiChildScope UiFrame::BeginChild(std::string_view id, const UiSize size, const bool border)
     {
+        return BeginChild(id, size, border, true);
+    }
+
+    UiChildScope UiFrame::BeginChild(std::string_view id, const UiSize size, const bool border,
+                                     const bool scrollWithMouse)
+    {
         m_Impl->RequireActive("BeginChild");
         const std::string safeId(id);
         const auto flags = border ? ImGuiChildFlags_Borders : ImGuiChildFlags_None;
-        const bool visible = ImGui::BeginChild(safeId.c_str(), {size.Width, size.Height}, flags);
+        const auto windowFlags = scrollWithMouse ? ImGuiWindowFlags_None : ImGuiWindowFlags_NoScrollWithMouse;
+        const bool visible = ImGui::BeginChild(safeId.c_str(), {size.Width, size.Height}, flags, windowFlags);
         m_Impl->OpenScope(UiScope::Kind::Child);
         return UiChildScope(*this, visible);
     }
@@ -928,10 +935,14 @@ namespace Keire
         return {{position.x + minimum.x, position.y + minimum.y}, {position.x + maximum.x, position.y + maximum.y}};
     }
 
-    bool UiFrame::WindowFocused() const
+    bool UiFrame::WindowFocused() const { return WindowFocused(true); }
+
+    bool UiFrame::WindowFocused(const bool includePopups) const
     {
         m_Impl->RequireActive("WindowFocused");
-        return ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
+        const auto flags = ImGuiFocusedFlags_RootAndChildWindows |
+                           (includePopups ? ImGuiFocusedFlags_None : ImGuiFocusedFlags_NoPopupHierarchy);
+        return ImGui::IsWindowFocused(flags);
     }
 
     UiPointerState UiFrame::PointerState() const
