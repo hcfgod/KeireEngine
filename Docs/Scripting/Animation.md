@@ -199,9 +199,20 @@ engine combines that intent with the Character Controller's actual post-physics 
 and support motion:
 
 ```csharp
+private bool _jumpPending;
+
+protected override void Update()
+{
+    _jumpPending |= Input.Keyboard.Current?.spaceKey.WasPressedThisFrame == true;
+}
+
 protected override void FixedUpdate()
 {
-    Vector2 move = Input.Axis2D("Move");
+    Vector2 move = _moveAction?.ReadValue<Vector2>() ?? Vector2.Zero;
+    if (move.LengthSquared > 1.0f)
+    {
+        move = move.Normalized;
+    }
     Vector3 desiredVelocity =
         (Entity.Transform.Right * move.X + Entity.Transform.Forward * move.Y) * _moveSpeed;
 
@@ -212,9 +223,17 @@ protected override void FixedUpdate()
             Vector3.Zero,
             _crouching ? 1.0f : 0.0f,
             _sprinting ? 1.0f : 0.0f,
-            Input.Pressed("Jump")));
+            _jumpPending));
+    _jumpPending = false;
 }
 ```
+
+Here `animator` is the validated Animator, `_moveAction` is an enabled `Player/Move` action resolved from your
+controller's owned input context, and `_moveSpeed`, `_crouching`, and `_sprinting` are gameplay state. The direct Space
+key is a minimal jump example; use an owned Button action for remappable controls. Latch frame edges in `Update` and
+clear them after one fixed tick so a frame with multiple fixed ticks does not request multiple jumps. Clear pending
+intent on disable/reload as part of the controller's cleanup. See
+[fixed-step action movement](Cookbook.md#fixed-step-action-movement) for context ownership.
 
 `CrouchAmount` and `RunBlend` must be finite values in `0..1`; all direction and velocity values must be finite.
 `JumpRequested` is a one-tick request. Zero facing or look vectors ask the runtime to use the resolved character root.
@@ -420,12 +439,17 @@ public sealed class CharacterAnimation : Behaviour
             return;
 
         Entity source = _movementSource is { IsValid: true } ? _movementSource : Entity;
-        float speed = Input.Axis2D("Move").Length;
+        Keyboard? keyboard = Input.Keyboard.Current;
+        float horizontal = keyboard?.dKey.IsPressed == true ? 1.0f
+            : keyboard?.aKey.IsPressed == true ? -1.0f : 0.0f;
+        float vertical = keyboard?.wKey.IsPressed == true ? 1.0f
+            : keyboard?.sKey.IsPressed == true ? -1.0f : 0.0f;
+        float speed = Math.Min(1.0f, new Vector2(horizontal, vertical).Length);
 
         animator.SetFloat(SpeedParameter, speed);
         animator.SetBool(GroundedParameter, IsGrounded(source));
 
-        if (Input.Pressed("Jump"))
+        if (keyboard?.spaceKey.WasPressedThisFrame == true)
             animator.SetTrigger(JumpTrigger);
     }
 
@@ -445,3 +469,9 @@ public sealed class CharacterAnimation : Behaviour
 
 Playback and parameter commands are ordered together at the scene animation boundary. Keep controller names stable and
 use `TryGet` reads when optional controller variants may omit a parameter or layer.
+
+For this minimal pattern, author `Speed` as a float, `Grounded` as a Boolean, and `Jump` as a trigger on the assigned
+Animator Controller. WASD supplies normalized input magnitude, not measured physical speed; Space triggers the
+animation only and does not move a character. `IsGrounded` is a simple downward ray with a fixed 0.2-unit range, so
+place the movement source appropriately or replace it with your Character Controller's actual ground state. A production
+animation controller should consume resolved velocity/grounding and shared actions instead of duplicating input logic.

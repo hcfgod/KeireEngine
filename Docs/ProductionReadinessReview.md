@@ -1,9 +1,14 @@
 # Kéire Production Readiness Review
 
-Windows Hub and Editor 0.4.8 are published through signed catalog sequence 26. Historical platform evidence below
+Windows Hub 0.4.8 hot patch and Editor 0.4.8 are published through signed catalog sequence 27. Historical platform evidence below
 retains its original version and scope; this historical review is not a certification of the current release.
 
 Review date: 2026-08-25
+
+Documentation reconciliation, October 24, 2026: the maintained inventory contains 114 guides and progress records,
+including 22 user-manual guides. Current material authoring uses shader selection and properties in the Inspector;
+use [Materials](Manual/MaterialGraph.md) for the workflow. This documentation audit does not rerun the historical
+production scenarios or promote their scores into a current product certification.
 
 Revision: Kéire 0.4.2 sequence-17 release evidence and 0.4.1 full-audit evidence
 
@@ -17,9 +22,9 @@ another.
 Review target: sustained commercial and AAA-team production use. A feature existing in source is not equivalent to a
 validated workflow, and a validated preview is not equivalent to a production-proven 1.0 release.
 
-## 0.4.4 Source Candidate
+## Historical 0.4.4 Source Candidate
 
-Version 0.4.4 is the current source and Windows publication target. Its validation is tracked separately from this
+Version 0.4.4 was the source and Windows publication target for that review. Its validation was tracked separately from this
 review's immutable 0.4.2 sequence-17 evidence; no 0.4.2 Windows or Linux artifact is relabeled as the new release.
 
 As of October 11, 2026, the source publication inventory contains 110 guides and progress records, including 13 material/shader

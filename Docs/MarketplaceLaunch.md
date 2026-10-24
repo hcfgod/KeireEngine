@@ -1,5 +1,30 @@
 # Marketplace Launch Runbook
 
+## Current Backend and Operating Boundary
+
+The current Windows deployment selects the local MySQL platform backend. Its authenticated native routes own account,
+Marketplace, publisher, moderation, and download behavior. A browser or Hub talks to HTTPS service endpoints, never to
+the database directly. Supabase-specific SQL, RLS, Storage, and Edge Function steps later in this document are retained
+launch history for the older backend; do not apply them as instructions for maintaining the MySQL host.
+
+Use the [distribution service guide](../Services/KeireDistributionService/README.md) and
+[MySQL migration and acceptance record](../Services/KeireDistributionService/Docs/MySqlMigration.md) for current host
+selection, service identities, configuration, and acceptance boundaries. Feature availability depends on the active
+backend's configuration and gates; the mere presence of a page, schema, or old staging record does not enable a feature.
+
+Software releases use a separate signed distribution catalog. The Windows Hub 0.4.8 hot patch is catalog revision 27;
+Editor 0.4.8 and the retained platform packages remain separate immutable artifacts. Marketplace asset publication
+does not follow from successful Hub software publication.
+
+For a user importing a package, start with [Asset Packages](AssetPackages.md). For a publisher, use the active website's
+upload, validation, submission, and review workflow. Keep unsigned or quarantined artifacts out of a published library,
+and use the actual workflow status rather than a historical successful test to decide whether a release is available.
+
+## Historical 0.3.2 Launch Record
+
+The remainder records the older launch initiative and its provider-specific acceptance. Dates, feature-gate values,
+service names, and release snapshots below describe that record; they are not assertions about the current host.
+
 This runbook is the release authority for the Kéire 0.3.2 website, identity, marketplace, and asset-package staging
 initiative. A deployed page or database object is not proof that its feature is ready. Public behavior is controlled by
 the feature flags in `public.platform_feature_flags`, which default to disabled.

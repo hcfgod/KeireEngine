@@ -12,7 +12,7 @@ custom runtime assembly definition is:
 
 ```json
 {
-  "schemaVersion": 3,
+  "schemaVersion": 4,
   "name": "MyGame",
   "rootNamespace": "MyGame",
   "classification": "runtime",
@@ -30,7 +30,8 @@ only complete immutable generations. A failed candidate never replaces the last 
 
 ## A Complete Behaviour
 
-Save this as `Mover.cs` anywhere under `Assets` outside an Editor folder. The stable IDs are persistence identities: generate
+Save this as `Mover.cs` anywhere under `Assets` outside an Editor folder. This first test uses direct keyboard input,
+so it does not depend on an Input Actions asset. The stable IDs are persistence identities: generate
 new UUIDs for your own types and fields, then keep them unchanged.
 
 ```csharp
@@ -46,16 +47,31 @@ public sealed class Mover : Behaviour
 
     protected override void Update()
     {
-        Vector2 input = Input.Axis2D("Move");
+        Keyboard? keyboard = Input.Keyboard.Current;
+        float horizontal = keyboard?.dKey.IsPressed == true ? 1.0f
+            : keyboard?.aKey.IsPressed == true ? -1.0f : 0.0f;
+        float vertical = keyboard?.wKey.IsPressed == true ? 1.0f
+            : keyboard?.sKey.IsPressed == true ? -1.0f : 0.0f;
+        Vector2 input = new(horizontal, vertical);
         Vector3 movement = new(input.X, 0.0f, input.Y);
+        if (movement.LengthSquared > 1.0f)
+        {
+            movement = movement.Normalized;
+        }
         Entity.Transform.Position += movement * (_speed * Time.DeltaTime);
     }
 }
 ```
 
 After the build succeeds, use **Add Component > Scripts** in the Inspector or drag the script from Project to an
-entity. Input returns neutral values when the named action is absent, but the intended workflow is to create `Move` in
-the Input Actions editor and assign that action asset in Project Settings.
+entity. Enter Play Mode, focus Game view, and hold WASD. The entity moves on world X/Z axes without collision handling.
+For remappable keyboard/gamepad controls, use an `InputActionAsset` and an owned context as shown in
+[fixed-step action movement](../Scripting/Cookbook.md#fixed-step-action-movement). The old string-based
+`Input.Axis2D`/`Pressed` helpers are obsolete; do not start a new controller with them.
+
+If the component is missing from the picker, check managed build diagnostics before recreating it. If it attaches but
+does not move, check Game-view focus, the component's enabled state, and its entity's active hierarchy. A successful
+last-good build can still be running older code after a failed edit.
 
 ## Lifecycle Order
 
@@ -86,7 +102,13 @@ protected override void OnEnable()
 
 protected override void OnDisable() => ReleaseCapture();
 protected override void OnBeforeReload() => ReleaseCapture();
-protected override void OnAfterReload() => _cursorCapture ??= Cursor.RequestCapture();
+protected override void OnAfterReload()
+{
+    if (Enabled && Entity.ActiveInHierarchy)
+    {
+        _cursorCapture ??= Cursor.RequestCapture();
+    }
+}
 
 private void ReleaseCapture()
 {
@@ -111,3 +133,11 @@ Do not change a stable field ID to rename a field. Use the migration attributes 
 failing instance and reports it; it does not authorize the script to continue mutating through a stale handle.
 
 Next: [Entities, Prefabs, Assets, and Scenes](WorldAndAssets.md).
+
+## Verify Before Keeping A Change
+
+Test one change at a time: enter Play, exercise it, disable/re-enable its owner, then save a script while playing and
+check for a successful reload. Stop and review **Play Mode Changes** if shown. **Apply Selected and Stop** copies the
+selected changes into the edit scene; save that scene separately. **Discard and Stop** ends the session without keeping
+those runtime changes. Saving a C# file or a UI Builder source asset is a separate disk write and is not undone by
+discarding scene changes.

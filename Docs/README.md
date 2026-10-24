@@ -5,8 +5,8 @@ authoring, runtime, scripting, packaging, and release workflows implemented by t
 [Kéire documentation site](https://keireengine.duckdns.org/docs/) is generated from these exact Markdown files; GitHub
 and the website therefore present one maintained body of documentation rather than parallel copies.
 
-The source tree is currently version 0.4.8 and pre-1.0. Signed catalog sequence 26 publishes Windows
-x86-64 Hub and Editor 0.4.8 and retains the independently validated Linux x86-64 0.4.2 packages. Guides
+The source tree is currently version 0.4.8 and pre-1.0. Signed catalog sequence 27 publishes the Windows
+x86-64 Hub 0.4.8 hot patch, retains Editor 0.4.8, and retains the independently validated Linux x86-64 0.4.2 packages. Guides
 describe the checked-in implementation and identify unfinished work honestly. Roadmap
 material is labeled as roadmap material and does not redefine the supported API or activate a release.
 
@@ -24,28 +24,34 @@ structural and API drift; they do not establish that every prose claim or UI wor
 
 | Goal | Start here | Continue with |
 | --- | --- | --- |
-| Learn Kéire as a project author | [Kéire 0.4.4 User Manual](Manual/README.md) | [Projects and Editor](Manual/ProjectsAndEditor.md), [C# API Quick Reference](Manual/CSharpApiQuickReference.md) |
+| Learn Kéire as a project author | [Kéire 0.4.8 User Manual](Manual/README.md) | [Projects and Editor](Manual/ProjectsAndEditor.md), [C# API Quick Reference](Manual/CSharpApiQuickReference.md) |
+| Install, sign in, or recover Hub | [Hub Installation and Recovery](Manual/HubInstallationAndRecovery.md) | [Projects and Editor](Manual/ProjectsAndEditor.md) |
+| Author a material | [Materials](Manual/MaterialGraph.md) | [Material Examples](Manual/MaterialGraphExamples.md), [Shader Graph](Manual/ShaderGraph.md) |
+| Build your own game interface | [Build Your Own Game UI](Manual/UiFromScratch.md) | [UI and Events](Scripting/UiAndEvents.md), [Visual Style Studio](UiStyleStudio.md) |
+| Back up or move a project | [Project Maintenance](Manual/ProjectMaintenance.md) | [Project System](ProjectSystem.md), [Asset Pipeline](AssetPipeline.md) |
+| Verify gameplay before release | [Test Gameplay Before You Ship](Manual/GameplayTesting.md) | [Player Builds and Packages](Manual/PlayerBuildsAndPackages.md) |
 | Build or evaluate Kéire | [Getting Started](GettingStarted.md) | [Project Hub](ProjectHub.md), [Testing and Release](TestingAndRelease.md) |
 | Understand engine ownership | [Architecture](Architecture.md) | [Runtime Lifecycle](RuntimeLifecycle.md), [ECS and Components](ECSAndComponents.md) |
 | Author a project | [Project System](ProjectSystem.md) | [Scene Authoring](SceneAuthoring.md), [Asset Browser](AssetBrowser.md), [Unified Graph Authoring](GraphAuthoring.md) |
 | Write C# gameplay | [Scripting Workflow Map](Scripting/WorkflowMap.md) | Choose the API, callback, lifetime, and setup for each supported scripting workflow. |
-| [C# Scripting Cookbook](Scripting/Cookbook.md) | Adapt compile-checked examples for movement, interactions, spawning, assets, scenes, UI, and jobs. |
-| [Runtime API Member Reference](Scripting/RuntimeReference.md) | Search runtime types, methods, properties, events, defaults, and subclass callbacks. |
-| [Editor API Member Reference](Scripting/EditorReference.md) | Search Editor extension types and exact member signatures. |
-| [GPU Compute From C#](Scripting/Compute.md) | Dispatch host-registered programs with explicit buffers, readback, and resource ownership. |
-| [C# Scripting](Scripting/README.md) | [Scripting Getting Started](Scripting/GettingStarted.md), [Scenes and Render Settings](Scripting/ScenesAndRenderSettings.md), [Managed API Index](Scripting/ApiIndex.md) |
+| Adapt a gameplay recipe | [C# Scripting Cookbook](Scripting/Cookbook.md) | Compile-checked movement, interaction, spawning, asset, scene, UI, and job examples. |
+| Find an exact runtime signature | [Runtime API Member Reference](Scripting/RuntimeReference.md) | Types, methods, properties, events, defaults, and callbacks. |
+| Extend the Editor | [Editor API Member Reference](Scripting/EditorReference.md) | Extension types and exact member signatures. |
+| Dispatch a compute program | [GPU Compute From C#](Scripting/Compute.md) | Host-registered programs, explicit buffers, readback, and ownership. |
+| Explore the scripting reference | [C# Scripting](Scripting/README.md) | [Scripting Getting Started](Scripting/GettingStarted.md), [Scenes and Render Settings](Scripting/ScenesAndRenderSettings.md), [Managed API Index](Scripting/ApiIndex.md). |
 | Build rendering content | [Asset Pipeline](AssetPipeline.md) | [Rendering](Rendering.md), [Shaders and Materials](ShadersAndMaterials.md), [VFX](Vfx.md) |
 | Package a game or SDK | [Desktop Player Builds](PlayerBuilds.md) | [Package Archives](PackageArchives.md), [Testing and Release](TestingAndRelease.md) |
 | Investigate a diagnostic | [Structured Diagnostics](Diagnostics/README.md) | The matching `KEIRE-*` remediation page |
 | Collect support evidence | [Diagnostic Bundles](DiagnosticBundles.md) | Preview the sanitized local archive before sharing it manually |
 | Assess release maturity | [Current acceptance evidence](CurrentAcceptanceEvidence.md) | Source-specific evidence and remaining acceptance requirements. |
-| [September 29 engine and editor review](Reviews/2026-09-29-engine-editor-review.md) | Source-specific evidence and remaining acceptance requirements. |
-| [September 29 remediation handoff](Reviews/2026-09-29-remediation-handoff.md) | Source-specific evidence and remaining acceptance requirements. |
-| [Production Readiness Review](ProductionReadinessReview.md) | [Performance Gates](PerformanceGates.md), [Maintainability](Maintainability.md) |
+| Read a dated review | [September 29 engine and editor review](Reviews/2026-09-29-engine-editor-review.md) | Source-specific evidence and its original acceptance scope. |
+| Follow a historical handoff | [September 29 remediation handoff](Reviews/2026-09-29-remediation-handoff.md) | Recorded findings and follow-up requirements. |
+| Understand readiness criteria | [Production Readiness Review](ProductionReadinessReview.md) | [Performance Gates](PerformanceGates.md), [Maintainability](Maintainability.md). |
 
 ## Complete Guide Library
 
-All 110 published guides and progress records are listed below in the same groups used by the documentation website.
+All 114 published guides and progress records are listed below. User workflows, technical references, and dated
+engineering records have different purposes; use the manual for a current authoring task.
 
 ### Start Here
 
@@ -57,11 +63,15 @@ All 110 published guides and progress records are listed below in the same group
 | [Project System](ProjectSystem.md) | Descriptor schema, stable identity, directory isolation, locking, templates, recent projects, and upgrades. |
 | [Project Settings](ProjectSettings.md) | Tracked rendering and authoring settings, validation, defaults, editor transactions, and persistence. |
 
-### Kéire 0.4.4 User Manual
+### Kéire 0.4.8 User Manual
 
 | Guide | Use it for |
 | --- | --- |
-| [Kéire 0.4.4 User Manual](Manual/README.md) | Task-oriented learning path for active project authors. |
+| [Kéire 0.4.8 User Manual](Manual/README.md) | Task-oriented learning path for active project authors. |
+| [Hub Installation and Recovery](Manual/HubInstallationAndRecovery.md) | Install, repair, relocate, sign in, reconnect, and resolve package tasks. |
+| [Project Maintenance](Manual/ProjectMaintenance.md) | Back up, version, move, recover, and clean template content without losing source identities. |
+| [Build Your Own Game UI](Manual/UiFromScratch.md) | Author a HUD, connect a UI Document and health binding, and verify it in a player. |
+| [Test Gameplay Before You Ship](Manual/GameplayTesting.md) | Exercise input, lifecycle, reload, save/reopen, and standalone-player behavior. |
 | [Projects and the Editor](Manual/ProjectsAndEditor.md) | Hub project creation, workspace orientation, scenes, Play Mode, assets, and undo. |
 | [Visual Workflow Maps](Manual/VisualWorkflowMaps.md) | Diagrams connecting Hub, Editor, scripts, scenes, graphs, assets, and players. |
 | [C# Scripting Fundamentals](Manual/ScriptingFundamentals.md) | Assemblies, Behaviours, lifecycle, reload, cleanup, and Inspector fields. |
@@ -71,8 +81,8 @@ All 110 published guides and progress records are listed below in the same group
 | [UI, Jobs, and Diagnostics](Manual/UiJobsAndDiagnostics.md) | Retained UI Toolkit entry point, event cleanup, managed jobs, cancellation, logging, and profiling. |
 | [Shader Graph](Manual/ShaderGraph.md) | Reusable shader templates, properties, preview, compilation, and functions. |
 | [Shader Graph Examples](Manual/ShaderGraphExamples.md) | Worked tinted, emissive, and world-height graph layouts. |
-| [Material Graph](Manual/MaterialGraph.md) | Surface graphs, materials, instances, runtime overrides, functions, and layers. |
-| [Material Graph Examples](Manual/MaterialGraphExamples.md) | Worked damage, wetness, instance, and global-parameter surfaces. |
+| [Materials](Manual/MaterialGraph.md) | Shader selection, Inspector properties, assignment, instances, overrides, and legacy compatibility. |
+| [Material Examples](Manual/MaterialGraphExamples.md) | Shared shaders, color/texture variations, instances, and runtime override scope. |
 | [VFX Graph](Manual/VfxGraph.md) | Effect creation, preview, Contexts, Blocks, emitters, subgraphs, and runtime control. |
 | [VFX Graph Examples](Manual/VfxGraphExamples.md) | Worked looping, burst, event-driven, and reusable particle systems. |
 | [Graph Editing](Manual/GraphEditing.md) | Selection, navigation, comments, collapse, clipboard, duplication, routing, and reuse. |
@@ -116,15 +126,23 @@ All 110 published guides and progress records are listed below in the same group
 | [Asset Pipeline](AssetPipeline.md) | Metadata, identities, import cache, workers, mesh/texture import, cooking, validation, and CLI operations. |
 | [Built-In Meshes](BuiltinMeshes.md) | Primitive IDs, dimensions, orientation, UV/normal conventions, collision expectations, and usage. |
 | [Rendering](Rendering.md) | Render ownership, frame order, viewports, cameras, static submission, spatial lighting, and diagnostics. |
-| [GPU Occlusion Coverage Plan](GpuOcclusionCoveragePlan.md) | Conservative current-pose bounds, same-frame visibility masks, frame/device ownership, diagnostics, and validation. |
-| [Shaders and Materials](ShadersAndMaterials.md) | Shader manifests, compilation, reflection, material graphs, instances, fallback, and target cooking. |
-| [Material Graph Shader Integration Plan](MaterialGraphShaderIntegrationPlan.md) | Schema, compilation, migration, runtime binding, displacement bounds, and validation contracts. |
-| [Material Ecosystem Parity](MaterialParityMatrix.md) | Unreal-inspired capability matrix, delivered evidence, remaining priorities, and production acceptance gates. |
+| [Shaders and Materials](ShadersAndMaterials.md) | Inspector-based materials, shader authoring, compilation, reflection, instances, legacy migration, and target cooking. |
 | [VFX Authoring and Runtime](Vfx.md) | Graph mental model, effects, scene emitters, C++/C# control, CPU/GPU execution, diagnostics, and budgets. |
-| [VFX Beyond-Parity Roadmap](VfxBeyondParityRoadmap.md) | Explicit future VFX milestones and acceptance evidence; not a current capability contract. |
 | [Generated VFX Capabilities](generated/VfxCapabilities.md) | Generated feature/evidence matrix derived from the reviewed VFX parity manifest. |
-| [VFX and Shader Graph Initiatives](VisualAuthoringInitiatives.md) | Prioritized capability matrix, production scenarios, and phased acceptance for the VFX and Shader Graph initiatives. |
 | [Desktop Player Builds](PlayerBuilds.md) | Ordered scenes, startup selection, build profiles, platform support, output layouts, automation, branding, signing hooks, and launch. |
+
+### Design Plans and Capability Ledgers
+
+These documents explain engineering direction and acceptance criteria. Read the user guides above for current menu
+actions; a planned row or historical graph-first architecture is not a supported authoring instruction.
+
+| Record | Use it for |
+| --- | --- |
+| [GPU Occlusion Coverage Plan](GpuOcclusionCoveragePlan.md) | Visibility bounds, ownership, diagnostics, and validation criteria. |
+| [Material and Shader Overhaul Contract](MaterialGraphShaderIntegrationPlan.md) | Historical graph-first contracts and migration context. |
+| [Material Ecosystem Parity](MaterialParityMatrix.md) | Dated capability comparisons, evidence, and remaining gates. |
+| [VFX Beyond-Parity Roadmap](VfxBeyondParityRoadmap.md) | Future VFX milestones and acceptance requirements. |
+| [Visual Authoring Initiatives](VisualAuthoringInitiatives.md) | Source-backed workflow coverage and unresolved acceptance needs. |
 
 ### C# Scripting
 
@@ -172,7 +190,7 @@ All 110 published guides and progress records are listed below in the same group
 
 These dated implementation and acceptance records distinguish delivered behavior from remaining work. Historical
 findings and test counts are evidence for their stated checkout and date, not proof of current production readiness.
-Start with the replacement overview and verify older observations against its later integration evidence.
+Start with the current [Materials guide](Manual/MaterialGraph.md), then use these records for their dated evidence.
 
 - [Material and shader replacement](MaterialShaderReplacement.md): direction, integration progress, and remaining gates.
 - [Production acceptance](RevampProductionAcceptance.md): interactive scenarios, provenance, and recorded validation.

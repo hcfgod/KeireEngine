@@ -132,7 +132,7 @@ authored base mixer, including its reverb effects and sends.
 VFX edit previews and browser/Inspector thumbnails wait for initial asset imports when opening a project with a fresh
 cache, then start automatically.
 The status bar shows **Preparing GPU effects...** during background shader preparation; effects appear when ready.
-Windows Hub and Editor 0.4.8 are active in immutable signed catalog sequence 26. The same signed
+Windows Hub 0.4.8 hot patch and Editor 0.4.8 are active in immutable signed catalog sequence 27. The same signed
 snapshot retains the independently validated Linux x86-64 0.4.2 packages and the previous Windows and Linux records;
 macOS downloads remain gated pending platform, signing, and notarization validation.
 
@@ -166,8 +166,9 @@ See [scripting lifecycle](Docs/Scripting/BehavioursAndLifecycle.md) and
 
 Explicit formatted logging is available through `Debug.LogFormat`, `Debug.LogWarningFormat`,
 `Debug.LogErrorFormat`, and every `Log` severity. See [logging](Docs/Scripting/AsyncReloadAndDiagnostics.md#logging).
-The [material and shader replacement audit](Docs/MaterialShaderReplacement.md) tracks the requested Inspector-based
-workflow and migration requirements; the full replacement is not yet implemented.
+Use the [Materials guide](Docs/Manual/MaterialGraph.md) for the current Inspector-based workflow. The
+[material and shader replacement audit](Docs/MaterialShaderReplacement.md) preserves dated migration and acceptance
+evidence; legacy graph-owned sources and unresolved acceptance gates are separate from ordinary Material creation.
 Use **Create > Material** to create a property-only material using **Kéire/Lit**.
 The first creation installs shared graphics shaders and pins their source hashes and version in
 `ProjectSettings/SharedShaders.lock`; opening a project does not install or upgrade them. **Material from Shader**
@@ -499,7 +500,8 @@ Current authoring and runtime contracts include:
 | Static mesh | 5 | Earlier payloads remain readable; schema 5 preserves triangle-, line-, and point-list submeshes. |
 | Cooked shader asset | 3 | Schemas 1–2 migrate to the `primary` pass role; schema 3 keys each binary by exact role and backend format. |
 | Shader Graph source | 6 | Schemas 1–5 migrate in memory; publication emits canonical target-based schema 6. |
-| Material Graph source | 7 | Schemas 1–6 migrate in memory; publication emits canonical schema 7 with a self-contained OpenPBR/slab surface graph. |
+| Property-backed Material source | 5 | New Materials select a shader and edit its properties in the Inspector. |
+| Legacy Material Graph source | 7 | Existing graph-owned sources retain compatibility decoding and graph editing; this is not the new-material creation workflow. |
 | VFX source | 5 | Schemas 1–4 migrate in memory; graph and compatibility payloads remain distinct execution sources. |
 | Cooked runtime manifest | 4 | Older builds require a recook; newer unsupported schemas fail before partial startup. |
 | Asset package archive | 1 | `KEIRASPK1` archives are deterministic, bounded, inventoried, hashed, and signature-verifiable. |
@@ -676,20 +678,24 @@ output and reject stale or build-mismatched reports.
 
 ## Documentation
 
-The [documentation library](Docs/README.md) contains 110 guides and progress records grouped around real tasks. Project authors
-should begin with the [Kéire 0.4.7 User Manual](Docs/Manual/README.md):
+The [documentation library](Docs/README.md) contains 114 guides and progress records grouped around real tasks. Project authors
+should begin with the [Kéire 0.4.8 User Manual](Docs/Manual/README.md):
 
 - [Projects and the Editor](Docs/Manual/ProjectsAndEditor.md),
   [C# Scripting Fundamentals](Docs/Manual/ScriptingFundamentals.md), and
   [C# Scripting Recipes](Docs/Manual/ScriptingRecipes.md)
-- [Shader Graph](Docs/Manual/ShaderGraph.md), [Material Graph](Docs/Manual/MaterialGraph.md),
+- [Materials](Docs/Manual/MaterialGraph.md), [Shader Graph](Docs/Manual/ShaderGraph.md),
   [VFX Graph](Docs/Manual/VfxGraph.md), and [Graph Editing](Docs/Manual/GraphEditing.md)
 - [Visual Workflow Maps](Docs/Manual/VisualWorkflowMaps.md),
   [Shader Graph Examples](Docs/Manual/ShaderGraphExamples.md),
-  [Material Graph Examples](Docs/Manual/MaterialGraphExamples.md), and
+  [Material Examples](Docs/Manual/MaterialGraphExamples.md), and
   [VFX Graph Examples](Docs/Manual/VfxGraphExamples.md)
 - [Debugging and Profiling](Docs/Manual/DebuggingAndProfiling.md) and
   [Player Builds and Packages](Docs/Manual/PlayerBuildsAndPackages.md)
+- [Hub Installation and Recovery](Docs/Manual/HubInstallationAndRecovery.md),
+  [Build Your Own Game UI](Docs/Manual/UiFromScratch.md),
+  [Test Gameplay Before You Ship](Docs/Manual/GameplayTesting.md), and
+  [Project Backups and Maintenance](Docs/Manual/ProjectMaintenance.md)
 - [Getting Started](Docs/GettingStarted.md) and [Project Hub](Docs/ProjectHub.md)
 - [Architecture](Docs/Architecture.md), [Runtime Lifecycle](Docs/RuntimeLifecycle.md), and
   [ECS and Components](Docs/ECSAndComponents.md)

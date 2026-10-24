@@ -1,6 +1,6 @@
 # C# Scripting Recipes
 
-These recipes use the Kéire 0.4.0 managed API and are included in the manual's compile-checkable example project where
+These recipes use the current managed API and are included in the manual's compile-checkable example project where
 noted. Add scripts below an assembly source root, let compilation finish, then attach each `Behaviour` from the Add
 Component picker.
 
@@ -23,23 +23,21 @@ entities, components, UI, or assets only after awaiting its completion on the ma
 
 ## Move With An Input Action
 
-This complete example is compiled from `Examples/ManualExamples.cs`. Create a `Move` action with a two-dimensional
-binding, attach the script, and tune Speed in the Inspector.
+Create an Input Actions asset with a `Player` map and a two-dimensional `Move` action. Add directional bindings,
+save/validate the asset, then assign it to the controller's asset field. For a complete controller with private context
+ownership, fixed-step movement, and reload cleanup, use the
+[ActionMotor source and walkthrough](../Scripting/Cookbook.md#fixed-step-action-movement).
+
+The core movement calculation is:
 
 ```csharp
-[StableComponentId("7b5ac27e-4531-4a42-97b8-9a643661660e")]
-public sealed class Mover : Behaviour
+Vector2 input = moveAction?.ReadValue<Vector2>() ?? Vector2.Zero;
+Vector3 direction = new(input.X, 0.0f, input.Y);
+if (direction.LengthSquared > 1.0f)
 {
-    [SerializeField, StableFieldId("4cf59f74-236e-43c2-bb37-863a0ee5500c")]
-    private float _speed = 4.0f;
-
-    protected override void Update()
-    {
-        Vector2 input = Input.Axis2D("Move");
-        Vector3 movement = new(input.X, 0.0f, input.Y);
-        Entity.Transform.Position += movement * (_speed * Time.DeltaTime);
-    }
+    direction = direction.Normalized;
 }
+Transform.Position += direction * (speed * Time.DeltaTime);
 ```
 
 For a Rigidbody-driven character, collect the action value in `Update` and consume it in `FixedUpdate` rather than
@@ -47,25 +45,38 @@ writing Transform and Rigidbody motion from competing paths.
 
 ## Subscribe Safely Across Reload
 
-UI controls expose managed events. Use a symmetrical bind/unbind pair so disable, destruction, and hot reload cannot
+Managed UI controls expose events. For source-backed scene UI, use `UIDocument.Q` and its runtime event properties
+instead; see [scene button workflow](UiJobsAndDiagnostics.md#connect-a-scene-button-to-gameplay).
+Use a symmetrical bind/unbind pair so disable, destruction, and hot reload cannot
 leave a duplicate handler:
 
 ```csharp
 protected override void OnEnable() => Bind();
 protected override void OnDisable() => Unbind();
 protected override void OnBeforeReload() => Unbind();
-protected override void OnAfterReload() => Bind();
+protected override void OnAfterReload()
+{
+    if (Enabled && Entity.ActiveInHierarchy)
+    {
+        Bind();
+    }
+}
 
 private void Bind()
 {
     if (_button is not null)
+    {
+        _button.Clicked -= Resume;
         _button.Clicked += Resume;
+    }
 }
 
 private void Unbind()
 {
     if (_button is not null)
+    {
         _button.Clicked -= Resume;
+    }
 }
 ```
 

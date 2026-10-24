@@ -1,5 +1,10 @@
 # Shader compilation authoring follow-up
 
+> **Engineering history and acceptance evidence.** Dates, test results, open items, and workflow names below belong
+> to their recorded source revision. They are not a current user tutorial or a guarantee that an old menu still exists.
+> Start with the [current user manual](Manual/README.md) for authoring; use
+> [Materials](Manual/MaterialGraph.md) for today's Inspector-based material workflow.
+
 This lane adds correctness fixes to the restored September 12 revamp baseline. Its changes were transferred from the
 isolated worktree to the canonical checkout at the coordinator's direction. Existing seed work is not claimed here.
 

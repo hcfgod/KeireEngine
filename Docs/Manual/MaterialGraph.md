@@ -1,77 +1,73 @@
-# Material Graph
+# Materials
 
-New Materials store a shader selection, property overrides, and surface settings. **Create > Material** selects the
-project's pinned shared **Kéire/Lit** shader and writes a schema-5 property-only `.keirematerial`. Double-click it to
-edit its reflected properties in the Inspector. Shader logic belongs to the selected Shader Graph or code shader.
+Materials are edited in the Inspector. A Material selects a shader and stores property overrides and surface settings;
+it is not a node canvas. Use Shader Graph when you need to change the shader's logic, not just its values.
+This page keeps its historical filename so existing links continue to work.
 
-Older graph-owned Materials remain readable and editable. Their schema-7 `surfaceGraph` stores executable OpenPBR
-expressions. The graph instructions below apply to those existing assets, not the ordinary Material creation command.
+## Create Your First Material
+
+Start with an open project and a scene containing a visible mesh, a Camera, and lighting.
+
+1. In the Project panel, choose **Create > Material**, enter `Paint`, and choose **Create**.
+2. Wait for asset import to finish. The default shader is the project's pinned shared **Kéire/Lit**.
+3. Double-click `Paint.keirematerial`. Its shader and reflected properties appear in the Inspector.
+4. Change `BaseColor` to a visible color and `Roughness` to `0.6`. Finish the edit by releasing the control or leaving
+   its field. The Inspector previews edits live and commits them at edit boundaries; there is no graph Save step.
+5. Assign the Material to a Mesh Renderer material slot, then save the scene to retain that assignment.
+6. Select another asset and reopen `Paint`. Confirm its values remain, then reopen the scene and check the assignment.
+
+Expected result: the mesh uses your color. Objects sharing `Paint` share its authored values.
+The preview is useful for iteration, but final lighting must be checked in the scene and a target player.
 
 ## Choose The Right Asset
 
-| Asset | Use it for |
+| Need | Use |
 | --- | --- |
-| Shader Graph | Surface shader logic or UI, Fullscreen, VFX, and Custom Graphics programs. Compute creation is disabled. |
-| Material | Assignable shader selection, property overrides, and surface settings. |
-| Existing graph-owned Material | Compatibility editing of an executable surface graph or layer stack. |
-| Material Instance | Lightweight inherited overrides from a Material or another instance. |
+| Change color, roughness, texture, or surface mode | Material Inspector |
+| Change the calculation producing those values | Shader Graph, then **Create > Material from Shader** |
+| Keep a persistent variant of a shared material | Select its parent, then **Create > Material Instance** |
+| Change one renderer temporarily during gameplay | `MaterialPropertyBlock`, or a slot-specific dynamic material |
 
-## Create And Edit A Material
+Select a saved shader before **Material from Shader** to preselect it. The creation dialog also provides a shader
+picker. Create the Material, then assign that Material—not the `.keireshadergraph`—to its consumer.
 
-1. In Project, choose **Create > Material**.
-2. Enter a name and choose **Create**. Wait for the asset worker to finish importing its shader dependencies.
-3. Open the new `.keirematerial` in the Inspector and edit the shader's exposed properties and surface settings.
-4. Save and assign the Material asset to a Mesh Renderer material slot.
+## Properties, Surface Settings, And Recovery
 
-For custom logic, create a **Shader Graph > Surface / Lit** or **Surface / Unlit** graph, expose properties, and save
-it. Select that shader and choose **Material from Shader** to create its assignable material. New materials inherit
-shader defaults until overridden; editing their values does not compile another copy of the shader.
+Names, ranges, groups, tooltips, texture semantics, and defaults come from the selected shader. A custom shader need not
+expose the same controls as Kéire/Lit. Surface shaders additionally expose **Surface Mode**, **Double Sided**, and
+**Alpha Cutoff** when the mode is **Mask**. UI, Fullscreen, and VFX materials do not acquire mesh-surface controls.
 
-## Edit An Existing Material Graph
+Expand **Property Overrides** to reset individual explicit values. **Reset Shader Properties** restores shader defaults.
+**Copy Property Values** and **Paste Compatible Property Values** preserve compatible stable property identities.
+For different interfaces, **Paste Across Shaders > Paste Matching Property Names** explicitly matches shader symbols
+instead. Unsupported values are skipped; ordinary paste is not a conversion between arbitrary shaders.
 
-Open an existing graph-owned `.keirematerial`. Choose its surface domain, shading model, and authoring mode, add
-parameters and expression nodes, and connect the final values to its protected Material Output. Save and validate
-the material on scene geometry. Opening an existing graph does not automatically convert it to a property-only source.
+Changing shaders can leave **INACTIVE OVERRIDES**. These are retained values that the current shader cannot use,
+not active rendering inputs. Keep them if you may switch back; **Remove Inactive Overrides** deliberately removes them.
+Shader keyword changes can remain pending while the required shader loads. Resolve the diagnostic or cancel the pending
+choice; the last-good preview is not proof that the new choice succeeded.
 
-The surface catalog includes OpenPBR Surface, Mix Slabs, Add Slabs, Coat, Fuzz, typed Material Attributes, and the
-existing BSDF modifiers. Mix clamps its factor and Add normalizes non-negative weights so the preview and generated
-shader cannot create an unbounded closure contribution. The shared picker, compatible wire search, pin/cable menus,
-routing knots, comments, and clipboard rules work the same way.
+## Older Materials And Migration
 
-## Material State And Instances
+Older graph-owned `.keirematerial` sources can still route to a compatibility editor. Internal types, error messages,
+and historical folders may say “Material Graph”; this is not the workflow for newly created Materials.
 
-Material Output owns surface state and the final surface branches. Use instances when many renderers share one graph
-but need different property values. Use a per-renderer `MaterialPropertyBlock` or `DynamicMaterial` when gameplay needs
-a bounded runtime override without mutating the shared asset:
+To review conversion, leave Play Mode, finish pending asset/build work, and save or discard dirty graph drafts. Choose
+**Assets > Review Legacy Material Conversion...**. Inspect the report before choosing
+**Validate and Apply Reviewed Conversion**. Conversion can extract a Shader Graph and retain the Material identity;
+unsupported materials retain their legacy editor. Backups remain under `Library/MaterialShaderUpgrade`. Conversion
+is a project publication operation, not an ordinary Inspector undo. Keep a project backup and review diagnostics.
 
-```csharp
-MeshRenderer? renderer = Entity.GetComponent<MeshRenderer>();
-if (renderer is not null)
-{
-    renderer.PropertyBlock.SetColor("BaseColor", new Color(1.0f, 0.25f, 0.1f, 1.0f));
-    renderer.PropertyBlock.SetFloat("Roughness", 0.5f);
-}
-```
+## Troubleshooting
 
-These names match the shared Lit shader. For a custom shader, names must match its reflected compatible properties.
-Reset one value with `Reset(name)` or all per-renderer overrides with
-`Clear()`. `GetMaterialInstance(slot)` provides slot-specific dynamic overrides.
+| Symptom | What to check |
+| --- | --- |
+| A Material opens in the Inspector rather than a graph | Expected. Open its Shader Graph to edit logic. |
+| Default material creation fails | Check import diagnostics and pinned shared shader inputs; do not edit generated files. |
+| Property is absent | Check the selected shader and whether its parameter is exposed and imported. |
+| All props change together | They share one Material; create instances for persistent differences. |
+| An edit disappears after reopening | Finish the edit boundary and inspect save/import errors before closing. |
+| A graph cannot be assigned to a renderer | Create and assign a Material using that shader. |
+| Conversion is disabled | Leave Play Mode, finish pending work, and resolve dirty/pending graph or material state. |
 
-## Reusable Surface Logic
-
-Use Material Functions for typed expressions and Material Layers for surface contributions. Functions and layers are
-explicit assets with validated boundaries. Material Parameter Collections provide global values shared across
-materials; managed code opens a live collection through `GlobalMaterialParameters.Open(collection)`. Double-click a
-Function Call node in a Material Graph to open its referenced reusable asset. Its body is an expression-level shader
-graph, so Kéire intentionally edits it in the shared Shader Graph panel while identifying its Material Function purpose.
-
-Kéire does not equate comments or collapsed regions with reusable subgraphs. Collapse is visual only. Reuse requires a
-Function, Layer, or—within VFX—the dedicated VFX Subgraph asset.
-
-## Validate In Context
-
-Check the graph preview, a scene object using the asset, lighting and transparency behavior, and a player build for the
-target renderer. If a candidate graph is invalid, the last good compiled material remains visible and the diagnostic
-explains the failed edit. Preserve stable property IDs when renaming user-facing controls.
-
-Continue with [Graph Editing](GraphEditing.md) and [Shader Graph](ShaderGraph.md).
+Continue with [Material Examples](MaterialGraphExamples.md) and [Shader Graph](ShaderGraph.md).

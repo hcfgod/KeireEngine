@@ -157,13 +157,15 @@ Entity tags are validated, case-sensitive identifiers authored in the Inspector 
 if (!Entity.HasTag("Player"))
     Entity.AddTag("Player");
 
-Entity objective = SceneManager.FindWithTag("Objective");
+Entity? objective = SceneManager.FindWithTag("Objective");
 IReadOnlyList<Entity> enemies = SceneManager.FindAllWithTag("Enemy", maximumResults: 128);
 IReadOnlyList<Entity> lights = SceneManager.FindAllWithComponent<PointLight>();
 ```
 
 `FindByName` and `FindAllByName` provide exact-name lookup. All scene queries are bounded from 1 through 4096 results,
-return active-scene entities in deterministic hierarchy order, and return an empty collection when no entity matches.
+return active-scene entities in deterministic hierarchy order by default. Collection queries return an empty collection
+when nothing matches; singular `FindByName`/`FindWithTag` return `null`. Use explicit `SceneQuery` overloads for loaded,
+specific, or persistent scene scope.
 The indexed native scene state is updated transactionally by rename, tag mutation, duplication, destruction, prefab
 composition, and scene activation. A tag begins with a letter, contains only ASCII letters, digits, `_`, `-`, or `.`,
 uses at most 64 bytes, and each entity holds at most 16 unique tags.
@@ -266,7 +268,7 @@ yawing FPS root; `LocalRotation` remains available for pitch and recoil.
 
 ## Rigid Bodies
 
-`Entity.RigidBody` exposes validated runtime body state without exposing a native physics pointer:
+`GetComponent<RigidBody>()` returns validated runtime body state without exposing a native physics pointer:
 
 ```csharp
 RigidBody? body = GetComponent<RigidBody>();
@@ -354,24 +356,26 @@ computed paths stale at the native service boundary. Re-query after relevant nav
 
 ## Prefab Instantiation
 
-`Prefab.Instantiate` accepts a prefab asset ID:
+Keep a direct `Prefab` asset field and instantiate it to receive the new hierarchy root:
 
 ```csharp
 [SerializeField, StableFieldId("92968407-4ebd-4092-90fb-7bb7f660a4e2")]
 private Prefab? _projectilePrefab;
 
-private Entity SpawnProjectile(Vector3 position, Quaternion rotation)
+private Entity? SpawnProjectile(Vector3 position, Quaternion rotation)
 {
-    if (!_projectilePrefab.IsValid)
-        return default;
+    if (_projectilePrefab is not { IsValid: true })
+    {
+        return null;
+    }
 
-    PrefabInstance instance = Prefab.Instantiate(_projectilePrefab.Id, position, rotation);
-    return instance.Root;
+    return _projectilePrefab.Instantiate(position, rotation);
 }
 ```
 
-`PrefabInstance` contains the root plus the complete instantiated entity list. Passing `default(Quaternion)` uses the
-identity rotation.
+The returned `Entity` is the root of the instantiated hierarchy, not a `PrefabInstance` result record. Passing
+`default(Quaternion)` uses identity rotation. An active prefab can run `Awake`/`OnEnable` before the call returns;
+author required dependencies on the prefab rather than relying on later assignment.
 
 `Prefab` is the direct asset object for authored `.keireprefab` content. `Instantiate` accepts the object
 so project code retains explicit ownership of the resulting entities.
@@ -388,11 +392,13 @@ private VfxEffect? _impact;
 Play it on an entity with a VFX Emitter:
 
 ```csharp
-if (_impact.IsValid)
+if (_impact is { IsValid: true })
 {
-    VfxEmitter? emitter = _impact is null ? null : Vfx.Play(Entity, _impact);
-    if (!emitter.IsValid)
+    VfxEmitter? emitter = Vfx.Play(Entity, _impact);
+    if (emitter is not { IsValid: true })
+    {
         Debug.Warn("VFX playback was rejected.");
+    }
 }
 ```
 
@@ -406,8 +412,11 @@ bool impactQueued = Vfx.SendEvent(Entity, "Impact", 24);
 Vfx.Stop(Entity);
 
 VfxEmitter? emitter = GetComponent<VfxEmitter>();
-handle.Restart(_impact);
-handle.SendEvent("Impact", 24);
+if (emitter is { IsValid: true } && _impact is { IsValid: true })
+{
+    emitter.Restart(_impact);
+    emitter.SendEvent("Impact", 24);
+}
 ```
 
 Handles validate their entity and required component. An effect reference must be valid before `Play` or `Restart`.

@@ -1,12 +1,12 @@
 ---
 title: Kéire Engine Documentation
-description: Learn Kéire Engine through complete, searchable guides for setup, projects, authoring, runtime systems, C# scripting, rendering, diagnostics, builds, and release engineering.
+description: Follow current Kéire workflows for Hub setup, materials, game UI, C# gameplay, testing, and standalone builds, with source-backed technical references.
 slug: docs
 template: splash
 pagefind: false
 hero:
   title: Build with clarity.
-  tagline: Complete, searchable documentation for Kéire Engine—from the first Hub project to a validated player build.
+  tagline: Follow the workflow, check the result, and understand what to try next—from your first project to a standalone player.
   actions:
     - text: Open the user manual
       link: /docs/reference/manual/
@@ -48,6 +48,17 @@ import { allDocSources } from '../../../doc-library.mjs';
 
     [Start C# scripting →](/docs/reference/scripting/)
   </Card>
+  <Card title="Create and use materials" icon="layers">
+    Choose a shader, edit material properties in the Inspector, and assign the result. Use Shader Graph when you need
+    custom shader logic.
+
+    [Start with Materials →](/docs/reference/manual/material-graph/)
+  </Card>
+  <Card title="Build your own game UI" icon="seti:settings">
+    Create a HUD, present it with a scene UI Document, bind health values, and check input and scaling in a player.
+
+    [Build a working HUD →](/docs/reference/manual/ui-from-scratch/)
+  </Card>
   <Card title="Build and validate players" icon="approve-check">
     Cook deterministic content, assemble desktop players, apply signing hooks, and verify release output.
 
@@ -61,10 +72,25 @@ The website renders the maintained Markdown under `Docs/` directly into native d
 page outlines, code copy controls, and previous/next navigation work locally on this site; GitHub remains the source and
 contribution workflow, not the reading experience.
 
+## Find the right kind of guide
+
+- **User manual:** follow a task, prepare its prerequisites, and check the expected result. Start here if you are
+  making a game.
+- **Technical references:** check an exact API, asset format, ownership rule, or failure boundary when a task needs
+  more detail.
+- **Design plans and acceptance records:** read dated proposals, comparisons, measurements, and remaining gates.
+  These preserve engineering history; their old menu names are not current creation instructions.
+
+New materials use the Inspector. The older `material-graph` address remains available so existing links keep working;
+the page now teaches the current Materials workflow.
+
+Before sharing or cleaning a project, read [Back Up, Share, and Recover a Project](/docs/reference/manual/project-maintenance/).
+Before calling gameplay finished, use [Test Gameplay Before You Ship](/docs/reference/manual/gameplay-testing/).
+
 <Aside type="caution" title="Kéire is pre-1.0">
   The documentation describes implemented repository behavior and calls out incomplete production-readiness work without
-  invented dates or guarantees. Start with the [Production Readiness Review](/docs/reference/production-readiness-review/)
-  when evaluating Kéire for a release.
+  invented dates or guarantees. Use [Current Acceptance Evidence](/docs/reference/current-acceptance-evidence/) to
+  distinguish a source capability from a verified platform release. Dated readiness reviews retain their original scope.
 </Aside>
 
 <div class="keire-doc-actions">

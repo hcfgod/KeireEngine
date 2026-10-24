@@ -151,7 +151,7 @@ assert(
 assert(fallbackLanding.includes(`<span data-doc-count>${allDocSources.length} documents</span>`),
     "Fallback documentation count is stale.");
 for (const [fragment, count] of [
-    ["user-manual", 18], ["getting-projects", 5], ["editor-authoring", 11], ["engine-systems", 13], ["assets-builds", 4],
+    ["user-manual", 22], ["getting-projects", 5], ["editor-authoring", 11], ["engine-systems", 13], ["assets-builds", 4],
     ["vfx", 4], ["csharp", 21], ["production", 13], ["material-shader-progress", 13], ["diagnostics", 5],
 ]) {
     assert(new RegExp(`<a href="#${fragment}">[^<]*<span>[^<]+</span><b>${count}</b></a>`).test(fallbackLanding),
@@ -159,10 +159,11 @@ for (const [fragment, count] of [
 }
 
 const manualSources = allDocSources.filter((sourcePath) => sourcePath.startsWith("Manual/"));
-assert(manualSources.length === 18, `Expected 18 user-manual guides, found ${manualSources.length}.`);
+assert(manualSources.length === 22, `Expected 22 user-manual guides, found ${manualSources.length}.`);
 for (const topic of ["ShaderGraph.md", "MaterialGraph.md", "VfxGraph.md", "GraphEditing.md",
     "PlayerBuildsAndPackages.md", "CSharpApiQuickReference.md", "VisualWorkflowMaps.md", "ScriptingRecipes.md",
-    "ShaderGraphExamples.md", "MaterialGraphExamples.md", "VfxGraphExamples.md"]) {
+    "ShaderGraphExamples.md", "MaterialGraphExamples.md", "VfxGraphExamples.md", "HubInstallationAndRecovery.md",
+    "ProjectMaintenance.md", "UiFromScratch.md", "GameplayTesting.md"]) {
     assert(manualSources.includes(`Manual/${topic}`), `User manual is missing ${topic}.`);
 }
 await access(path.join(docsRoot, "Manual", "Examples", "Keire.ManualExamples.csproj"));
@@ -302,9 +303,14 @@ assert(productionReview.includes(`${vfxImplemented} implemented and ${vfxDisable
     productionReview.includes(`cover ${vfxImplemented}/${vfxTotal} rows`),
     "Production-readiness VFX counts do not match the parity manifest.");
 const visualInitiatives = await readMarkdown(path.join(docsRoot, "VisualAuthoringInitiatives.md"));
-assert(visualInitiatives.includes(`${vfxImplemented} enabled Kéire-equivalent rows, ${vfxDisabled} disabled rows`) &&
-    visualInitiatives.includes("Schema-v5 JSON") && visualInitiatives.includes("Twelve paired Sandbox"),
-    "Visual-authoring baseline is stale.");
+assert(visualInitiatives.includes("generated/VfxCapabilities.md") &&
+    visualInitiatives.includes("VfxParityManifest.json") && visualInitiatives.includes("the Inspector") &&
+    visualInitiatives.includes("Review Legacy Material Conversion"),
+    "Visual-authoring guidance must use the maintained capability authorities and current material workflow.");
+const materialsManual = await readMarkdown(path.join(docsRoot, "Manual", "MaterialGraph.md"));
+assert(materialsManual.startsWith("# Materials\n") && materialsManual.includes("Create > Material") &&
+    materialsManual.includes("Inspector") && !materialsManual.includes("Create > Material Graph"),
+    "The Materials tutorial must teach the current Inspector workflow rather than retired creation commands.");
 
 const managedMatrix = await readMarkdown(path.join(docsRoot, "Scripting", "ManagedApiMatrix.md"));
 for (const staleClaim of ["Multi-scene query scopes", "Unified additive worlds", "add native readiness for"]) {

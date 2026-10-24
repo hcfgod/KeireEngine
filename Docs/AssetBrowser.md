@@ -1,5 +1,22 @@
 # Asset Browser
 
+## Everyday Workflow
+
+1. Choose a destination in the Project folder tree. **Filter current folder** does not search every descendant.
+2. Drag source files from Explorer/Finder into that folder. In **Import Assets**, check included files, destination,
+   texture interpretation, and conflict policy before confirming. Wait for import to finish before assigning assets.
+3. Select the resulting asset to inspect it; drag compatible content onto the intended Inspector field or Scene target.
+   A successful import does not automatically assign a texture or shader to a material.
+4. Save the authored scene or asset document and reopen it to verify persistence. Check Console if an operation fails.
+
+Deleting a template entity is different from deleting its assets or C# sources. Before cleanup, save a project checkpoint
+and check references from other scenes/prefabs. Use the Project browser's recoverable **Move to Trash** workflow for
+unneeded assets; keep surviving source files and `.keiremeta` sidecars together. Wait for compilation after removing
+scripts and resolve missing component references. Do not treat `Library` cleanup as a way to remove template source.
+
+If a source file does not open in your IDE, check the configured external editor and generated C# project before
+reimporting assets. Console compiler diagnostics also offer **Open source** for recognized file/line/column locations.
+
 Files and folders can be dragged from the operating system. Dropping over a Project folder imports there; dropping
 over the Scene viewport imports into the current Project folder and then performs the same typed viewport action as an
 internal drag. Meshes create entities, materials assign to the entity under the pointer, and Scene/Input Actions assets

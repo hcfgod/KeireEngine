@@ -1,5 +1,10 @@
 # Compute compiler lane acceptance
 
+> **Engineering history and acceptance evidence.** Dates, test results, open items, and workflow names below belong
+> to their recorded source revision. They are not a current user tutorial or a guarantee that an old menu still exists.
+> Start with the [current user manual](Manual/README.md) for authoring; use
+> [Materials](Manual/MaterialGraph.md) for today's Inspector-based material workflow.
+
 This records additions to the restored September 12 seed. Work began in the isolated compute worktree and root
 transferred the eight initial file increments to the canonical checkout after the user authorized that move.
 Subsequent edits were made in `C:/Users/keith/Desktop/KéireEngine`.

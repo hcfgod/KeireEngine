@@ -1,9 +1,15 @@
 # Getting Started
 
-Windows Hub and Editor 0.4.8 are published through signed catalog sequence 26. The catalog retains independently validated
+Windows Hub 0.4.8 hot patch and Editor 0.4.8 are published through signed catalog sequence 27. The catalog retains independently validated
 Linux 0.4.2 packages. Historical platform evidence below retains its original version and scope.
 
-This guide takes a fresh checkout to a verified local Kéire build. Repository launchers are the supported interface;
+## Choose Your Starting Point
+
+To make a game with a downloaded Editor, start with [Hub installation](Manual/HubInstallationAndRecovery.md) and
+[Projects And The Editor](Manual/ProjectsAndEditor.md). You do not need to clone or compile the engine for that path.
+After a working scene, follow [Player Builds And Packages](Manual/PlayerBuildsAndPackages.md) to test outside the Editor.
+
+The remainder of this guide takes a fresh checkout to a verified local Kéire build. Repository launchers are the supported interface;
 they resolve tools, verify locked dependencies, generate build files, and select compatible compiler settings.
 
 ## Test The Locally Staged Editor And Hub On Windows
@@ -24,9 +30,9 @@ Scripts\project.bat run-staged-editor -ProjectPath "D:\Projects\My Game"
 ```
 
 The project path is the project folder. Omit `-ProjectPath` to open the Editor without selecting a project in the
-command. The interactive `project.bat` menu exposes staging as options 7/8 and launching as options 19/20. A missing
+command. The interactive `project.bat` menu also exposes the named staging and launch commands. A missing
 stage reports which staging command to run. Close an already running installed Hub before testing a different Hub
-build: the Hub's single-instance behavior can otherwise activate the existing process.
+build so browser protocol ownership and the visible instance are unambiguous.
 
 For a first material check, create a new project in Hub, open the Editor, choose **Create > Material** in Project,
 change Base Color and Roughness, assign it to a Mesh Renderer, save, and reopen. The first shared-shader import can
@@ -52,16 +58,19 @@ git submodule update --init --recursive
 Normal bootstrap restores and verifies the commits in `Config/Dependencies.lock`. It does not advance dependency
 pointers or stage Git changes.
 
-## Platform Support Status
+## Historical Platform Validation Evidence
 
-| Platform | Current evidence | Public preview |
+The records below describe specific earlier validation runs, not the currently downloadable version or a promise
+that every later build passed the same hardware matrix. Use the verified catalog for current artifacts.
+
+| Platform | Recorded evidence | Publication at that milestone |
 | --- | --- | --- |
 | Windows x86-64 | Clean 0.4.4 Debug and Dist Editor/Hub suites, SDK consumers, D3D12/Vulkan render suites, packaged rendered smoke, installer workflows, and exact artifact validation passed | Signed 0.4.4 sequence-18 catalog; the native Hub EXE is catalog/hash verified but not Authenticode-signed |
 | Linux x86-64 (glibc) | Clean 0.4.2 Rocky Linux 9 Editor/package gate plus native Rocky RPM and Ubuntu 22.04 DEB build, metadata, payload, and checksum validation passed | Signed sequence-18 catalog retains the 0.4.2 packages; the RPM is catalog/hash verified but not GPG-signed |
 | Linux ARM64 or Alpine/musl | Build contracts retained but not validated in this audit | Not published |
 | macOS x86-64 | Clean Debug source build on Tahoe with 733 Core tests and 51,809 assertions; Hub and render-test products link at the macOS 12 deployment target; VMware has no Metal device for rendered execution | Not published; native signing, notarization, Apple silicon, and Metal-hardware acceptance remain open |
 
-Version 0.4.4 is the current source and active Windows release through immutable signed snapshot
+The historical Windows 0.4.4 release used immutable signed snapshot
 `release-0.4.4-sequence-18-611b191e`. Its Windows catalog retains the 0.4.1 and 0.4.2 records, and its Linux catalog
 retains the independently validated 0.4.1 and 0.4.2 packages without relabeling them as 0.4.4.
 

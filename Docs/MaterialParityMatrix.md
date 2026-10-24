@@ -1,5 +1,10 @@
 # Material Ecosystem Parity Matrix
 
+> **Dated capability ledger.** Status and row counts describe the review below, not a certification of every current
+> workflow. The current material workflow is shader selection and properties in the Inspector; start with
+> [Materials](Manual/MaterialGraph.md). Legacy Material Graph and graph-first comparison rows are retained as
+> engineering history and compatibility context.
+
 Review date: 2026-09-22 (source reconciliation; historical package evidence retains its original dates)
 Comparison model: Unreal-inspired material workflow, adapted to Kéire's renderer-neutral asset and runtime boundaries
 

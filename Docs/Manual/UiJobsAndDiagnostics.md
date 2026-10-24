@@ -7,10 +7,11 @@ and UI Builder, while world-surface documents render as depth-tested scene geome
 For the complete asset, UI Builder, target-mode, Play draft, runtime-debugger, managed API, and current-limit contract,
 use [UI Toolkit and Events from C#](../Scripting/UiAndEvents.md).
 
-## Build And Bind A Retained Control
+## Connect A Scene Button To Gameplay
 
-Managed controls use retained hierarchy, query, and event propagation. Keep callback registration symmetric across the
-controller lifecycle:
+Start with [Build Your Own Game UI](UiFromScratch.md) to create a source document and present it through a scene
+**UI Document** component. Name a Button `resume`, save the document, then attach this script to the same scene entity.
+The script queries the presented tree, so it keeps working after a successful document reload:
 
 ```csharp
 using Keire;
@@ -19,31 +20,40 @@ using Keire.UI;
 namespace MyGame;
 
 [StableComponentId("ee3548b8-662a-4898-8db0-27b034d9f08a")]
+[RequireComponent(typeof(UIDocument))]
 public sealed class ResumeButton : Behaviour
 {
-    private readonly VisualElement _root = new();
-    private readonly Button _button = new() { Name = "resume", Text = "Resume" };
-
-    protected override void Awake() => _root.Add(_button);
-
-    protected override void OnEnable() => Bind();
-    protected override void OnDisable() => Unbind();
-    protected override void OnBeforeReload() => Unbind();
-    protected override void OnAfterReload() => Bind();
-
-    private void Bind()
+    protected override void Update()
     {
-        _button.Clicked += Resume;
-    }
+        UIDocument? document = GetComponent<UIDocument>();
+        if (document is not { IsValid: true })
+        {
+            return;
+        }
 
-    private void Unbind()
-    {
-        _button.Clicked -= Resume;
-    }
+        RuntimeVisualElement? resume = document.Q("resume");
+        if (resume is not { IsAlive: true })
+        {
+            return;
+        }
 
-    private void Resume() => Time.TimeScale = 1.0f;
+        bool clicked = resume.ClickedThisFrame;
+        bool submitted = resume.SubmittedThisFrame;
+        if (clicked || submitted)
+        {
+            Time.TimeScale = 1.0f;
+        }
+    }
 }
 ```
+
+Queries can return `null` before first presentation. Event properties consume pending events; use one input owner
+per control and route mouse and keyboard/gamepad activation to the same action. Read both events before testing the
+result so a short-circuit expression does not leave Submit pending. Query again after a successful document reload.
+
+`new VisualElement()` creates an independent managed tree. It does not attach that tree to a scene `UIDocument`;
+`RootVisualElement` is a read-only handle to the source-backed tree. Use managed `Clicked` callbacks for managed
+controls and symmetric registration/unregistration; use runtime queries above for authored scene controls.
 
 `Button`, `TextField`, `Toggle`, `Slider`, `ProgressBar`, `ScrollView`, `ListView`, `TreeView`, `DropdownField`,
 `Foldout`, and `TabView` expose typed retained state. `ChangeEvent<T>` follows the same capture/target/bubble event

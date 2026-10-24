@@ -1381,14 +1381,19 @@ workspace shutdown, or Play teardown. Live debugging consumes immutable, generat
 renderer-statistics snapshots; unavailable providers remain explicitly unavailable, and picking never exposes mutable
 runtime nodes to editor code.
 
-Editor material authoring has one primary workflow plus explicit compatibility. `MaterialGraphDocument` and
-`MaterialGraphPanel` own a standalone schema-7 OpenPBR surface program, stable parameters and textures, domain,
-shading model, authoring mode, closure budget, compilation diagnostics, dirty lifecycle, and bounded undo/redo.
-`ShaderGraphDocument` owns target-based Material, UI, Fullscreen, VFX, Custom Graphics, and Compute programs.
-`MaterialDocument` and `MaterialInspectorPanel` remain available only for `.keiremateriallegacy` raw/custom-shader
-sources. `MaterialInstanceAsset` stores only inherited property and surface overrides and is edited through the
-Inspector. Compatibility material opens and shader replacement build and validate a candidate before replacing
-document state; shader replacement retains only overrides that pass the runtime material validator.
+Editor material authoring is shader-selected and Inspector-based. New `.keirematerial` assets use
+`MaterialDocument` and `MaterialInspectorPanel`: a material selects a shader, inherits its property defaults, and
+stores overrides and keyword selections. `MaterialSelectionDocument` applies compatible edits across selected
+materials. Materials are not new standalone surface-graph documents. `ShaderGraphDocument` owns executable shader
+logic and target-specific authoring; a material refers to its selected shader instead of duplicating that logic.
+`MaterialInstanceAsset` stores inherited overrides and is also edited through the Inspector.
+
+`MaterialGraphDocument`, `MaterialGraphPanel`, and schema-7 OpenPBR graph data remain compatibility infrastructure
+for existing graph-owned sources. Opening a property-backed source through the historical `OpenMaterialGraph`
+boundary redirects it to the Inspector. Internal type and function names therefore do not determine the current
+creation menu or user workflow. Reviewed conversion moves executable legacy material logic into shader assets while
+preserving material identity; ordinary asset selection does not authorize conversion. Material opens and shader
+replacement build and validate a candidate before replacing document state, retaining only compatible overrides.
 Every path publishes behind the same runtime material boundary. Material file
 snapshots enter the project-assets undo context; the workspace and asset-operation service coordinate persistence.
 Continuous numeric/color edits update a development-only in-memory asset revision for immediate rendering and share a
@@ -1421,13 +1426,15 @@ variant pressure without weakening compile success. Built-in nodes are validated
 when disconnected, while legacy Master nodes accept neutral defaults for later surface and attributes inputs. Graph
 compilation is revisioned, debounced, and performed away from the owner thread; stale completions are discarded and only
 the newest valid result can replace the last-good preview. The workspace supplies confined include reads, nonblocking
-custom-mesh resolution through the asset system, and persistence. Both graph editors reserve the canvas as the dominant
-region and place a bounded, collapsible square preview on the right when space permits. Material evaluates its
-schema-7 surface graph directly; historical externally backed sources compose their compatibility template first.
+custom-mesh resolution through the asset system, and persistence. Shader Graph and the legacy material graph editor
+reserve the canvas as the dominant region and place a bounded, collapsible square preview on the right when space
+permits. Only legacy graph-owned materials evaluate a schema-7 surface graph directly; new property-backed materials
+use the material Inspector.
 Shader Graph expands reusable calls first. Preview evaluation failures remain
 visible diagnostics rather than being converted into an indistinguishable checkerboard result.
 
-Shader, Material, and VFX panels share ordered multi-selection, batch movement/deletion, protected anchors, comment
+Shader, legacy Material Graph, and VFX graph panels share ordered multi-selection, batch movement/deletion, protected
+anchors, comment
 regions, annotation bubbles, bounded canonical clipboard remap, arrange commands, bookmarks, and selection/graph
 framing. Documents apply each accepted multi-item operation as one undo transaction. Comments and annotations persist
 with source authoring metadata but never enter shader, material, or VFX runtime ABIs. Named reroute declarations and
@@ -1467,10 +1474,12 @@ after the staged directory is live. Any source-publication failure restores the 
 preserving the original exception. The asset scanner ignores engine atomic-write temporaries and editor backups, so a
 concurrent scan cannot assign identities to files that will disappear at commit. A successful save then queues a
 targeted import of the parent graph, every generated shader/material subasset, and dependent loaded assets. Runtime
-`MaterialGraphAsset` and `MaterialInstanceAsset` remain immutable data. Schema-7 Material import compiles its
-authoritative OpenPBR surface program through `ProgramArtifact`, publishes reflected variants and an explicit
-domain/shading-model pass contract, then publishes one runtime material. Schema-1–6 assets upgrade deterministically
-and preserve their surface expressions under the canonical `surfaceGraph`. Material Instance resolution starts from a
+`MaterialGraphAsset` and `MaterialInstanceAsset` remain immutable data. The historical `MaterialGraphAsset` name is
+not a requirement to expose a material canvas. Property-backed material import resolves a shader reference and
+validated overrides into an ordinary runtime material. Legacy schema-7 import still compiles its retained OpenPBR
+surface program through `ProgramArtifact`, publishes reflected variants and an explicit domain/shading-model pass
+contract, then publishes a runtime material. Legacy graph migration preserves surface expressions; it is separate
+from new property-material creation. Material Instance resolution starts from a
 Material, compatibility Material, or Material Instance root
 before applying at most 16 ancestors; it rejects cycles, unknown properties, and type changes without introducing
 mutable renderer-global state. Instance import publishes its own stable ordinary `MaterialAsset` subasset referencing

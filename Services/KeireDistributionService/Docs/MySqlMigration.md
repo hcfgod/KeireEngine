@@ -1,8 +1,9 @@
 # Local MySQL migration
 
-Status: implementation and isolated acceptance are substantially complete; live cutover remains pending.
-The public website and Hub still use Supabase. The sections below record incremental implementation milestones;
-their earlier pending statements are historical unless repeated in the current release gates here.
+Current deployment status, reconciled October 24, 2026: the Windows host selects schema-3 MySQL configuration.
+Browser sign-in and the Hub's browser handoff/reconnect have been exercised after cutover. The website and current
+Hub configuration use the native platform routes, not the Supabase authorization endpoint. The sections below retain
+incremental implementation and acceptance history; an earlier pending-cutover statement is not the current provider.
 
 Account and marketplace records have been imported and checked against the snapshot. MySQL account, marketplace,
 administration, native authentication and download paths have passed isolated database and HTTPS acceptance.
@@ -10,11 +11,13 @@ The actual C# broker, guarded offline worker and publication signer have also pa
 package flow, including compilation, malware scanning, review transitions and independent publication-signature
 verification. That test used connection-local temporary tables and did not publish a customer asset.
 
-Remaining release gates are production Windows service-identity acceptance, external GitHub authorization and real
-email delivery, the final backup/delta and rollback-controlled cutover, and actual Hub login/download/install checks.
+Keep service-identity, external authorization, email-delivery, backup/restore, and client workflow evidence separate.
+The recorded successful browser/Hub checks do not establish that every provider, email path, or failure mode has been
+retested. Use retained deployment and acceptance records when deciding which additional checks a release requires.
 Twenty-one imported private Storage object records still lack recovered file bodies. Preserve those records and
 their ownership, report unavailability clearly, and do not claim the files were migrated or synthesize replacements.
-The isolated worker result does not establish production service-account operation or completion of live migration.
+The isolated worker result alone does not establish production service-account operation or complete recovery of
+private file bodies.
 
 ## Backend boundary
 

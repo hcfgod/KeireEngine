@@ -3,7 +3,7 @@
 [Scripting home](README.md) · [Workflow map](WorkflowMap.md) · [Cookbook](Cookbook.md) · [API index](ApiIndex.md)
 
 All scripting-visible native assets derive from `Asset`. Declare the asset class directly; there is no
-`AssetReference<T>` authoring wrapper in 0.4.0.
+`AssetReference<T>` authoring wrapper in the current gameplay API.
 
 ```csharp
 [SerializeField] private AudioClip? _sound;
@@ -114,12 +114,13 @@ and destroyed at runtime but do not become project assets or acquire stable asse
 
 ## Serialization And Dependencies
 
-Direct asset and ScriptableObject references are tagged in state v2 with stable identity and declared/actual type.
+Direct asset and ScriptableObject references carry stable identity and declared/actual type in the managed-state
+document. The current writer uses v4; older supported formats are read and normalized on the next explicit save/cook.
 They work inside supported `[Serializable]` value objects, one-dimensional arrays, and `List<T>`. Cooker dependency
 extraction reads the same tagged records, so scene-to-managed-data-to-native-asset closure is deterministic.
 
 The legacy reader accepts persisted 0.3.x `AssetReference<T>` records. Saving the owning scene, prefab, or data asset
-normalizes them to v2; old C# source must still be migrated to direct asset fields.
+normalizes them to the current format; old C# source must still be migrated to direct asset fields.
 
 ## Constructors
 

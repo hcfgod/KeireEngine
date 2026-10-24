@@ -9,7 +9,9 @@ performance.
 When a saved script appears unchanged in Play Mode:
 
 1. Open the Console and managed build diagnostics.
-2. Confirm the file is below a `.keireasm` source root.
+2. Confirm assembly membership: unclaimed runtime C# sources under `Assets` use default `Assembly-CSharp` (commonly
+   authored in `Assets/Scripts`); Editor-only sources use the Editor assembly. Explicit `.keireasm` definitions
+   establish their own roots and scope.
 3. Fix compile errors, then type-discovery and stable-ID errors.
 4. Check migration/reload diagnostics after compilation.
 5. Confirm the component is enabled and the entity is active in hierarchy.
@@ -20,6 +22,21 @@ runtime behavior can briefly differ.
 
 Use `Debug.LogException(exception)` when you recover locally. Avoid noisy per-frame logging. A good message identifies
 the operation, entity or asset purpose, and whether execution recovered or stopped.
+
+## Navigate Errors And Preserve Evidence
+
+Open Console and clear restrictive search/severity filters before assuming a diagnostic is absent. Console's paused
+message snapshot is not simulation Pause. Select the relevant entries and use **Copy** or `Ctrl/Cmd+C`; copied messages
+retain their category and frame. Recognized compiler diagnostics support double-click and **Open source** to navigate
+to the file, line, and column in the configured external editor. If navigation fails, check the external-editor
+configuration and that the source file still exists; plain runtime messages need not contain a navigable location.
+
+Report the first relevant error, the action that caused it, Editor/Hub version, project or target configuration, and
+whether it reproduces after reopening. Review diagnostic exports before sharing; never include credentials, callback
+codes, or private project content without permission. A successful build is not proof that the game behaved correctly.
+
+For sign-in, persistent reconnecting, installation repair, or missing Build Support, follow
+[Hub Installation And Recovery](HubInstallationAndRecovery.md) before changing project files.
 
 ## Assets, Scenes, And Graphs
 

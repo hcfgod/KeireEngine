@@ -1,6 +1,7 @@
 # Graph Editing
 
-Shader Graph, Material Graph, and VFX Graph share the same 0.4.0 canvas interaction model. Their compilation semantics
+Shader Graph and VFX Graph share a canvas interaction model. Materials use the Inspector, not this canvas.
+Older graph-owned materials retain a compatibility editor using the same interactions. Compilation semantics
 remain separate: visual organization never changes evaluation by itself.
 
 ## Select And Navigate
@@ -15,7 +16,7 @@ remain separate: visual organization never changes evaluation by itself.
 | `F` | Frame the current selection. |
 | `Shift+F` | Frame the complete graph. |
 
-The primary item drives the single-item Inspector. Protected Shader Output, Material Output, and required VFX Context
+The primary item drives the single-item Inspector. Protected Shader Output, legacy Material Output, and required VFX Context
 anchors cannot be deleted or duplicated. Batch operations apply only where every selected item supports them.
 
 The **Arrange** menu aligns edges/centers, distributes selected nodes, and straightens cables whose endpoints are both
@@ -44,27 +45,42 @@ regenerates every persistent identity and validates the remapped result before o
 Malformed, oversized, incompatible, or unsupported fragments are rejected without changing the document. Cross-graph
 paste succeeds only for the graph family and node contracts accepted by the destination.
 
-Double-click a Shader/Material cable to insert a routing knot. Drag knots to reshape the cable; select and Delete or
+Double-click a Shader Graph cable to insert a routing knot. Drag knots to reshape the cable; select and Delete or
 double-click a knot to remove it. Knots do not change evaluation.
 
 ## Reuse Is Explicit
 
 | Graph family | Reusable asset |
 | --- | --- |
-| Shader Graph expressions | Material Function |
+| Shader Graph expressions | Shader Function or Material Function |
 | Shader Graph surface composition | Material Layer |
 | Existing Material Graph | Material Functions and Layers for executable surface expressions; new property-only Materials use the Inspector instead |
 | VFX typed value, Block, or system | VFX Subgraph with Operator, Block, or System purpose |
 
-Kéire 0.4.0 does not provide a universal **Collapse Selection To Subgraph** command. A collapsed comment is not a
-subgraph. Create the appropriate reusable asset and give it a deliberate typed boundary.
+In Shader Graph, select expression nodes and use **Extract Selection to Shader Function...** from the node context
+menu. Output and parameter nodes are excluded from extraction. The function is created beside the graph and the
+selection is replaced with its call after validation. This is different from collapsing a comment: collapse changes
+only presentation. Do not infer a matching selection-extraction command for VFX; its reuse contract is VFX Subgraph.
 
 ## Undo And Save
 
 Move, arrange, comment edit, paste, cut, duplicate, knot edit, and connection edit each participate in the graph
 document's undo context. Invalid changes remain editable when repair is possible, while compile/save publication stays
-blocked until the graph is valid. Shader/Material documents autosave after their short idle delay; VFX uses its panel's
-explicit validated Save workflow.
+blocked until the graph is valid. Applied Shader Graph edits have an idle autosave path; unapplied node properties
+require **Apply** or **Save**. **Ctrl+S** also applies a pending shader node draft before saving. VFX uses its panel's
+explicit validated **Save** workflow. Material Inspector edits commit at edit boundaries instead of a graph Save step.
 
 Graph schema migrations preserve authoring metadata in memory, but an explicit save publishes the current schema. Do
-not save a migrated project in 0.4.0 if it must still be authored by an older Editor.
+not save a migrated project with a newer Editor if it must still be authored by an older one; keep a project backup.
+
+## Practice Without Changing The Result
+
+1. Open a working Shader Graph and select two ordinary expression nodes with Ctrl-click.
+2. Move the selection, then press **F** to frame it. Undo once to restore both positions together.
+3. Double-click a cable to add a routing knot, move it, then double-click the knot to remove it.
+4. Add a comment around the selection, collapse it, and expand it again.
+5. Save and reopen the graph. Confirm the layout persists and the shader still produces the same result.
+
+If shortcuts do nothing, focus the canvas rather than a text field. If deletion leaves the output in place, that is
+its protected-anchor behavior. If a preview stops updating, read the first validation diagnostic; a retained last-good
+image can hide the fact that the current draft is invalid.

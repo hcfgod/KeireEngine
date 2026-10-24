@@ -1,7 +1,7 @@
 # Unified Graph Authoring
 
-Kéire 0.4.0 gives Shader Graph, Material Graph, and VFX Graph one shared authoring interaction model while preserving
-their separate validation and runtime contracts. This guide covers canvas selection, layout, comments, annotations,
+Shader Graph and VFX Graph use a shared canvas interaction model while preserving their separate validation and
+runtime contracts. New Materials use the Inspector; old graph-owned materials retain compatibility handling. This guide covers canvas selection, layout, comments, annotations,
 clipboard fragments, navigation, undo, and schema migration. Graph-specific node semantics remain in
 [Shaders and Materials](ShadersAndMaterials.md) and [VFX Authoring and Runtime](Vfx.md).
 
@@ -16,12 +16,12 @@ is stored with the source asset but remains editor-only:
 - bookmarks are panel-session view state and are not part of the asset;
 - the compiler and runtime continue to consume only the graph's executable definition.
 
-This boundary lets the three graph editors share predictable editing behavior without coupling their compilers or
+This boundary lets graph editors, including the legacy material compatibility panel, share predictable editing behavior without coupling their compilers or
 runtime ABIs.
 
 ## Selection And Movement
 
-Editable Shader, Material, and VFX graphs use an ordered multi-selection plus one primary item. The primary item drives
+Editable Shader and VFX graphs use an ordered multi-selection plus one primary item. The primary item drives
 the single-item Inspector; a mixed selection shows only operations valid for the entire selection.
 
 | Action | Result |
@@ -34,7 +34,7 @@ the single-item Inspector; a mixed selection shows only operations valid for the
 | Drag any selected node | Move the complete selected set while retaining relative offsets. |
 | Delete | Delete all deletable selected nodes and their incident cables in one transaction. |
 
-Shader Output, Material Output, and required VFX Context anchors are protected. A batch delete removes editable nodes,
+Shader Output, legacy Material Output, and required VFX Context anchors are protected. A batch delete removes editable nodes,
 keeps protected anchors, and reports which requested items were retained. The accepted deletion is one undo operation;
 it cannot leave half of a selected topology removed.
 
@@ -123,10 +123,22 @@ collision. Display names and parameter defaults stay intact. Copied groups retai
 root groups when their parent is outside the selection. Cable routing points move by the same offset as their nodes;
 unrelated empty comments are excluded.
 
+## Reusable Functions Versus Visual Grouping
+
+In Shader Graph, select ordinary expression nodes and choose **Extract Selection to Shader Function...** from the node
+context menu. Enter a single filename component and choose **Extract**. The asset worker creates a function beside the
+current source and prepares parent rewiring. Wait for completion, inspect the replacement call, and save the graph.
+Output and parameter nodes are not eligible; conflicting filenames or invalid boundaries report errors.
+
+Expected result: the extracted expressions become a reusable typed function, with the parent retaining its intended
+result. Reopen the graph and function to verify both sources. A collapsed comment is only presentation and never
+performs this extraction. The analogous legacy Material Function action is compatibility support; VFX uses its own
+Operator, Block, and System subgraph contracts rather than this Shader Function command.
+
 ## Schema Migration
 
 Kéire 0.4.0 introduced the shared schema-4 graph metadata and VFX schema 5. The current Shader Graph source schema is
-6 and Material Graph source schema is 7. Shader schema 6 adds explicit UI, Fullscreen, VFX, Custom Graphics, and Compute
+6 and the legacy graph-owned Material source schema is 7. New property-only Materials use a separate schema-5 document. Shader schema 6 adds explicit UI, Fullscreen, VFX, Custom Graphics, and Compute
 program targets while retaining Legacy Surface as a migration target. Material schema 7 stores `surfaceGraph` as the
 authoritative OpenPBR/slab material program. Shader schemas 1–5 and Material schemas 1–6 migrate in memory. Schema
 migration follows the same fail-before-mutation rule across all three formats:
@@ -146,17 +158,17 @@ incorrect fallback.
 
 VFX schema 5 adds the same authoring metadata and complete schema-1 VFX Subgraph assets. Operator, ordered Block, and
 complete System subgraphs validate typed boundaries, dependencies, purpose, recursion, and bounded expansion before
-CPU or GPU activation. The parity ledger still has 30 disabled rows, including 23 P0/P1 rows; disabled entries remain
-rejected and are not implied by subgraph support.
+CPU or GPU activation. Disabled entries in the [VFX capability ledger](generated/VfxCapabilities.md) remain rejected and are not implied by
+subgraph support. Consult that generated ledger rather than treating a historical node count as current support.
 
 ## Deliberate Gaps
 
-The 0.4.0 source does not provide named reroute declarations or persisted nested local-graph stacks. Cable routing
+The shared canvas does not imply support for named reroute declarations or persisted nested local-graph stacks. Cable routing
 points remain presentation geometry, and reusable executable composition is supplied by the graph-specific function,
 layer, or VFX Subgraph contracts. Documentation and UI should not label either missing feature as complete.
 
-Scene Inspector arrays and lists can preserve and edit existing serialized collection values, but collection
-add/remove/reorder controls are a separate scripting-Inspector gap and are not supplied by graph multi-selection.
+Scene Inspector serialized-field controls are a separate workflow; graph multi-selection does not establish which
+collection-editing actions a managed field exposes.
 
 ## Failure And Undo Guarantees
 

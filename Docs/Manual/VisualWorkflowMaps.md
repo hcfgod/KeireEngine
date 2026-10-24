@@ -25,13 +25,15 @@ and build. A Play Mode edit is not automatically a source-scene edit.
 flowchart TB
     Project["Project source"] --> Scene["Scene<br/>entities and components"]
     Project --> Script["C# assembly<br/>Behaviour and ScriptableObject types"]
-    Project --> Graphs["Visual graphs<br/>Shader, Material, VFX"]
+    Project --> Graphs["Visual graphs<br/>Shader and VFX"]
+    Project --> Materials["Materials<br/>Shader picker and properties"]
     Scene --> Entity["Entity"]
     Entity --> Native["Built-in components<br/>Transform, Collider, Audio Source, UI..."]
     Entity --> Behaviour["Managed Behaviours"]
     Script --> Behaviour
     Script --> Data["ScriptableObject assets"]
-    Graphs --> Assign["Assignable assets<br/>materials and VFX effects"]
+    Graphs --> Assign["Shader-derived materials<br/>and VFX effects"]
+    Materials --> Assign
     Data -. "serialized reference" .-> Behaviour
     Assign -. "Inspector reference" .-> Native
     Assign -. "serialized reference" .-> Behaviour
@@ -86,7 +88,7 @@ the first graph diagnostic before changing unrelated nodes.
 flowchart TD
     Need{"What are you authoring?"}
     Need -->|"Reusable shader stages and reflected contract"| Shader["Shader Graph"]
-    Need -->|"Edit an existing graph-owned surface"| Material["Material Graph compatibility editor"]
+    Need -->|"Set a surface shader, color, or texture"| Material["Material Inspector"]
     Need -->|"Particles and ordered simulation"| Vfx["VFX Graph"]
     Shader --> Surface["Property-only Material"]
     Material --> Renderer["Mesh Renderer material slot"]
@@ -94,5 +96,23 @@ flowchart TD
     Vfx --> Emitter["VFX Emitter component or Vfx.Play"]
 ```
 
-Continue with [Shader Graph Examples](ShaderGraphExamples.md), [Material Graph Examples](MaterialGraphExamples.md),
+Continue with [Shader Graph Examples](ShaderGraphExamples.md), [Material Authoring](MaterialGraph.md),
 and [VFX Graph Examples](VfxGraphExamples.md).
+
+Shader Graph defines reusable shader behavior; the material chooses a shader and edits its exposed properties.
+Legacy graph-backed assets and managed compatibility type names do not make Material Graph a current authoring tool.
+
+## Game UI From Source To Screen
+
+```mermaid
+flowchart LR
+    Tree["UI Document source<br/>.keireui"] --> Builder["UI Builder<br/>layout, controls, bindings"]
+    Style["Style Sheet<br/>.keirestyle"] --> Builder
+    Panel["Panel Settings<br/>.keireuipanel"] --> Document["Scene UI Document component"]
+    Builder -->|"Save and assign Visual Tree"| Document
+    Document --> Game["Game view, Play, player"]
+    Script["Behaviour on document entity"] -->|"Q and SetBindingValue"| Document
+```
+
+Selecting a source asset opens authoring; assigning the asset to a scene component presents it. Screen-overlay UI does
+not render over the 3D Scene viewport. See [Build Your Own Game UI](UiFromScratch.md) for the complete workflow.

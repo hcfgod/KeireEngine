@@ -294,7 +294,8 @@ log, or deliberately skip unavailable presentation. See [Audio](Audio.md), [Anim
 
 Source: [DamageFlash.cs](Examples/DamageFlash.cs).
 
-Expose a float property named `Damage` in the object's shader/material graph and connect it to the visual effect.
+Expose a float property named `Damage` in the object's Shader Graph, connect it to the visual effect, and create/assign
+a material using that shader. The ordinary Material Inspector edits shader properties; it is not a material graph.
 Attach this script to the Mesh Renderer entity. Call `Flash()` from your hit/interaction logic; the value decays to
 zero over roughly one third of a scaled second. During initial testing, invoke it from a temporary input callback.
 

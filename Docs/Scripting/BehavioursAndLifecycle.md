@@ -99,7 +99,7 @@ protected override void FixedUpdate()
 
 protected override void Update()
 {
-    if (Input.Pressed("Interact"))
+    if (Input.Keyboard.Current?.eKey.WasPressedThisFrame == true)
         TryInteract();
 }
 ```
@@ -200,6 +200,11 @@ protected override void OnBeforeReload()
 
 protected override void OnAfterReload()
 {
+    if (!Enabled || !Entity.ActiveInHierarchy)
+    {
+        return;
+    }
+
     GameState.Changed -= HandleGameStateChanged;
     GameState.Changed += HandleGameStateChanged;
     _cursorCapture ??= Cursor.RequestCapture();
@@ -215,6 +220,9 @@ private void ReleaseCursor()
 Use `OnDisable` for relationships that should pause with the component. Use `OnDestroy` for permanent registries that
 were created in `Awake` and must survive an ordinary disable. If registration is reacquired in `OnEnable`, release it
 in `OnDisable`.
+
+`GameState` above represents a game-owned event publisher, not a built-in engine service. Rebinding is idempotent and
+checks active state: reload callbacks can also run for components that should not reacquire active-only ownership.
 
 ## Reload Lifecycle
 

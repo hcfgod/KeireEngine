@@ -1,5 +1,10 @@
 # Shader Graph blackboard, connected creation, and framing
 
+> **Engineering history and acceptance evidence.** Dates, test results, open items, and workflow names below belong
+> to their recorded source revision. They are not a current user tutorial or a guarantee that an old menu still exists.
+> Start with the [current user manual](Manual/README.md) for authoring; use
+> [Materials](Manual/MaterialGraph.md) for today's Inspector-based material workflow.
+
 September 12, 2026. This lane continues the seeded material/shader replacement work.
 It adds connected authoring operations; historical graph history routing, graph layout, previews, and material
 changes remain baseline work. The coordinator transferred this lane's increments from the isolated worktree to

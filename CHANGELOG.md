@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Reconciled the documentation and website with current Hub, Inspector-based materials, Shader Graph, UI Builder,
+  gameplay scripting, and player-build workflows. Added installation/recovery, project maintenance, UI-from-scratch,
+  and gameplay-testing guides; separated current tutorials from dated engineering records.
+
 ## 0.4.8
 
 ### Hot patch — 2026-10-24

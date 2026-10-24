@@ -1,12 +1,34 @@
 # Asset Packages and Project Package Manager
 
-Kéire 0.3.1 introduces a project-content package boundary that is separate from Editor and Build Support
+Kéire has a project-content package boundary that is separate from Editor and Build Support
 distribution. Asset packages use `.keireassetpackage`; Hub and Editor software continues to use `.keirepackage`.
 
 The staged, free-only Marketplace uses these same archive and project contracts; it is not yet generally available
 commerce. Browsing and claims happen on the website, Hub owns account authorization and private downloads, and
 project-specific installation or import happens in the Editor. Unpublished, withdrawn, revoked, unsigned, incompatible,
 or unentitled releases never become installable entries.
+
+## Install Or Import A Package
+
+Save the project first and open Package Manager. Package kind determines the workflow; installing Build Support or an
+Editor archive here is not supported.
+
+1. For a local `.keireassetpackage`, open **Local Packages**, enter its absolute path, and choose **Inspect**.
+2. Review identity, version, kind, and file inventory. For Registry content, choose **Preflight and Install**.
+3. For Asset Import content, review the executable-code consent and **Keep locally modified files on conflicts**,
+   then choose **Review Import...**. Review the affected files before **Import**; Cancel makes no import decision.
+4. Check **In Project**, the resulting assets/mounts, and Console. Compile any approved C# and test the content in a scene.
+
+For Marketplace content, sign in to Hub, acquire an available product through the website, and let Hub prepare the
+verified download. Keep Hub running while using **My Assets**, then **Refresh Hub cache** if needed. A ready Registry
+item offers **Install to Project**; Asset Import offers **Import into Project...**. A stale or unavailable library is not
+proof that an update does not exist. Complete Project content is Hub-owned and cannot be installed into the open project
+through Local Packages.
+
+Registry content is read-only until **Embed** creates an editable project copy. **Revert to Registry** requires the
+verified cache and abandons the embedded workflow; preserve edits you need before proceeding. **Remove** is a package
+operation, not permission to delete shared or modified project files manually. Inspect update/import review messages
+when a file is retained. Local archive inspection verifies structure and hashes; it does not grant Marketplace trust.
 
 ## Archive contract
 
@@ -133,15 +155,14 @@ OAuth access tokens, organization authorization, and signed Storage URLs remain 
 persisted only through the operating system's protected credential facility together with their authentication-flow
 identity. None of these credentials are serialized into the marketplace cache or passed to the Editor. The packaged
 Hub and Editor both carry the public marketplace trust document and the pinned libsodium verifier; only the isolated,
-least-privileged publication signer has the private signing key. Supabase stores and returns the immutable signed
+least-privileged publication signer has the private signing key. The configured service stores and returns the immutable signed
 envelope, but the download-grant service cannot mint or alter a trusted publication proof.
 
 Package C# must be explicitly declared as runtime, Editor, or test code. Import requires explicit executable-code
 consent. The receipt binds that consent to the package's executable-code fingerprint, so a version that changes code
 requires renewed approval. Marketplace validation may compile declared C#
 with the pinned Kéire SDK in a generated no-network build, but it must never execute package code, MSBuild hooks,
-analyzers, source generators, native binaries, or install scripts. Native plugins remain prohibited in the current
-0.3.2 release.
+analyzers, source generators, native binaries, or install scripts. Native plugins remain prohibited by this package policy.
 
 ## Automation
 
@@ -164,8 +185,8 @@ first package upload. That reservation transaction creates a private draft produ
 path-scoped upload grant. **Upload new version** on an existing product pre-fills the same metadata while preserving the
 product identity; published product names are immutable.
 
-The marketplace validator is split into a networked broker and a local-only worker. A dedicated Edge boundary holds
-Supabase service privileges; the broker holds only a scoped queue secret and receives a short-lived URL for its one
+The marketplace validator is split into a networked broker and a local-only worker. The backend service owns privileged
+authorization; the broker holds only a scoped queue secret and receives a short-lived URL for its one
 leased object. It verifies the object's exact size and digest while downloading and exchanges the bytes through a
 private directory. It never invokes package code. The offline worker uses the Core
 parser through `KéireAssetTool`, rejects links, executable modes, native signatures, scripts, publisher MSBuild files,
@@ -236,7 +257,8 @@ Build only this unsigned package with:
 python Scripts/Marketplace/create-official-marketplace-packages.py --package first-person-controller
 ```
 
-Use `--package-version 0.4.5` with a selected package to publish a package-only patch. This changes the archive version
+Use `--package-version <version>` with a selected package to create an unsigned package-only candidate, not publish it.
+This changes the archive version
 without changing its engine or managed API compatibility, which still comes from `Config/Project.conf`.
 
 For local previews before new source files are tracked, add `--include-untracked` and a fresh `--output-directory`.

@@ -28,7 +28,7 @@ For stateful scene-authored playback:
 1. Add an **Audio Source** component to the entity.
 2. Assign a clip, mixer/bus routing, gain, pitch, priority, looping, spatialization, and attenuation as needed.
 3. Add an **Audio Listener** to the active listening entity.
-4. Use `Entity.AudioSource` or `Audio.Play(Entity)` from the script.
+4. Use `GetComponent<AudioSource>()` for stateful control, or `Audio.Play(Entity)` to request playback of the configured clip.
 
 For an individual playback request with explicit clip and options, use `Audio.Play(Entity, clip, options)`.
 
@@ -41,16 +41,12 @@ For an individual playback request with explicit clip and options, use `Audio.Pl
 private AudioClip? _openSound;
 ```
 
-Do not use:
+`[SerializeField]` alone is valid for initial authoring; the explicit stable field ID above also preserves identity
+when you rename the field. Store the direct asset type rather than a legacy `AssetReference<AudioClip>` wrapper.
+Unassigned asset fields are `null`; persistent clips also expose `IsValid`, so guard both:
 
 ```csharp
-[SerializeField] private AudioClip? _openSound;
-```
-
-Unassigned asset fields are `null`; persistent clips also expose `IsValid`:
-
-```csharp
-if (_openSound.IsValid)
+if (_openSound is { IsValid: true })
     Audio.Play(Entity, _openSound);
 ```
 
@@ -62,7 +58,7 @@ or a native voice.
 Equivalent ID form:
 
 ```csharp
-if (_openSound.IsValid)
+if (_openSound is { IsValid: true })
     Audio.Play(Entity, _openSound.Id);
 ```
 
@@ -72,7 +68,7 @@ Get the entity's handle:
 
 ```csharp
 AudioSource? source = GetComponent<AudioSource>();
-if (!source.IsValid)
+if (source is not { IsValid: true })
 {
     Debug.Warn($"{Entity.Name} needs an Audio Source.");
     return;
@@ -211,14 +207,14 @@ component.
 
 ```csharp
 AudioListener? listener = GetComponent<AudioListener>();
-if (listener.IsValid)
+if (listener is { IsValid: true })
 {
     listener.Primary = true;
     listener.VolumeDecibels = -3.0f;
 }
 
 AudioReverbZone? zone = GetComponent<AudioReverbZone>();
-if (zone.IsValid)
+if (zone is { IsValid: true })
 {
     zone.Shape = AudioReverbZoneShape.Box;
     zone.BoxHalfExtent = new Vector3(8.0f, 4.0f, 8.0f);
@@ -246,7 +242,7 @@ private float _footstepVolume = 0.7f;
 
 protected override void OnAnimationEvent(AnimationEvent animationEvent)
 {
-    if (animationEvent.Name == "Footstep" && _footstep.IsValid)
+    if (animationEvent.Name == "Footstep" && _footstep is { IsValid: true })
         Audio.Play(Entity, _footstep.Id, _footstepVolume);
 }
 ```
@@ -262,7 +258,7 @@ private void HandleButtonClicked()
 {
     ToggleMenu();
 
-    if (_openSound.IsValid)
+    if (_openSound is { IsValid: true })
     {
         Audio.Play(Entity, _openSound, new AudioPlaybackOptions
         {
@@ -283,8 +279,8 @@ input handler.
 | Cannot convert `AudioClip` to `AssetId` | An advanced interop API expects an ID | Pass the clip to normal audio APIs, or `.Id` only to the interop API |
 | Clip is `null` | The direct asset field is unassigned or missing | Assign it in the Inspector or guard the call |
 | `Play()` returns `false` | Source, voice, or runtime playback rejected the command | Validate the entity, component, clip, and runtime state |
-| `Audio.Play` throws for the clip | The reference ID is invalid | Guard with `.IsValid` |
-| Audio Source property throws | The handle is invalid or the value is outside its documented range | Check `source.IsValid` and validate the value |
+| `Audio.Play` throws for the clip | The reference is missing or its ID is invalid | Guard with `clip is { IsValid: true }` |
+| Audio Source property throws | Component is absent/invalid or the value is outside its range | Check `source is { IsValid: true }` and validate the value |
 | Options throw | Gain, pitch, priority, bus, or distance range violates the contract | Validate values before constructing the request |
 | Audio is unexpectedly spatial | Default `Spatial` is `true` | Set `Spatial = false` for UI/global audio |
 

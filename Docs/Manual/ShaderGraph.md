@@ -2,8 +2,8 @@
 
 A Shader Graph is a target-based renderer program. It defines legal stages, resources, reflected properties, keywords,
 variant policy, output contract, and generated shaders for UI, Fullscreen, VFX, Custom Graphics, or Compute work. It is
-not directly assignable to a Mesh Renderer. Surface templates provide shader logic for assignable property-only
-materials; existing graph-owned materials remain supported for compatibility.
+not directly assignable to a Mesh Renderer. Surface templates provide shader logic for assignable Materials, whose
+values are edited in the Inspector. Older graph-owned materials remain readable through a compatibility path.
 
 ## Create And Open
 
@@ -22,7 +22,7 @@ compatible-add, endpoint selection, unlink, and deletion actions.
 
 Expose the properties that materials should control, give them durable stable property IDs, and choose clear names.
 Materials bind stable IDs before display names, which keeps compatible renames from silently losing values. Avoid
-duplicating renderer implementation details in every Material Graph; that is the reason the template boundary exists.
+duplicating shader logic just to give two objects different colors; use Materials or Material Instances for values.
 
 Typical graphics-program flow is:
 
@@ -54,8 +54,10 @@ See [worked camera-effect steps](ShaderGraphExamples.md#example-4-camera-tint-ef
 [particle material steps](VfxGraph.md#use-an-authored-particle-material).
 
 Graph edits update the live preview through a validated candidate. Invalid topology reports diagnostics and retains the
-last valid result. Shader and Material Graph documents autosave after 500 ms of inactivity; **Save** immediately flushes
-a still-dirty document. Source changes trigger targeted compilation and hot reload.
+last valid result. Applied Shader Graph document edits have an idle autosave path, but node-property fields can remain
+an unapplied draft. **Save** or **Ctrl+S** applies that draft, waits for compilation, and writes the source. Resolve
+**Node changes pending Save / Apply** before assuming a property rename or default has been published. Source changes
+trigger targeted compilation and hot reload. Reopen the graph to verify persistence.
 
 For surface graphs, check a preview mesh and then assign a material using the graph to real scene geometry. UI and
 Fullscreen use a flat CPU preview with opacity over a checker background; mesh and environment controls are hidden.
@@ -64,19 +66,26 @@ cooking or consumer validation.
 
 ## Reuse
 
-Material Functions provide reusable typed expression bodies callable from Shader Graph and Material Graph. Material
-Layers provide reusable surface contributions for layer stacks. Kéire 0.4.0 does not provide a generic command that
-turns an arbitrary current Shader Graph selection into a new subgraph asset; use Functions/Layers deliberately.
+Shader Functions and Material Functions provide reusable typed expression bodies; Material Layers provide surface
+contributions. The Project menu groups these under **Create > Reusable Material Graphs**—a retained menu label, not
+a requirement to author new Materials on a canvas.
+
+To extract existing shader logic, select expression nodes, right-click, and choose
+**Extract Selection to Shader Function...**. Give the function a name and choose **Extract**. The editor creates a
+function beside the graph and replaces the selected expressions with a call. Output and parameter nodes cannot be
+included in the selection. Extraction validates the boundary; a disabled action or diagnostic is not permission to
+force an incompatible selection. See [Graph Editing](GraphEditing.md#reuse-is-explicit).
 
 ## Troubleshooting
 
 | Symptom | Check |
 | --- | --- |
-| Graph cannot be assigned to Mesh Renderer | Assign a Direct Material, Material Graph, or Material Instance instead. |
+| Graph cannot be assigned to Mesh Renderer | Create a Material from the shader, then assign the Material or a Material Instance. |
 | Connection is refused | The pin types/stages are incompatible; start the palette from the destination pin. |
 | Preview keeps an older image | Fix the reported candidate compile/validation error. |
 | Material value disappeared after a rename | Confirm the Blackboard property's stable ID was preserved. |
 | Build lacks a variant | Check the graph keyword policy and the material's selected canonical permutation. |
+| Changed node metadata is missing after import | Apply or Save the node-property draft; wait for compilation and check diagnostics. |
 
 Use [Graph Editing](GraphEditing.md) for selection, comments, clipboard, and cable routing, and
 [Shaders and Materials](../ShadersAndMaterials.md) for schemas, compilation, reflection, targets, and fallback behavior.

@@ -1,6 +1,6 @@
 # C# API Quick Reference
 
-This page maps common Unity-shaped concepts to Kéire 0.4.4's supported managed types. Use the linked scripting guides
+This page maps common Unity-shaped concepts to Kéire's supported managed types in this checkout. Use the linked scripting guides
 for lifecycle, validation, and failure behavior; this is a navigation aid, not a promise of complete Unity API parity.
 
 ## Objects And Lifecycle
@@ -32,7 +32,7 @@ for lifecycle, validation, and failure behavior; this is a navigation aid, not a
 | Need | Kéire API |
 | --- | --- |
 | Time | `Time.DeltaTime`, `FixedDeltaTime`, `UnscaledDeltaTime`, `Elapsed`, `TimeScale`, `Paused` |
-| Input | `Input.Held/Pressed/Released`, `Axis/Axis2D`, devices, schemes, rumble, rebinding |
+| Input | `InputActionAsset`, `InputActionContext`, `InputAction.ReadValue<T>()`; `Input.Keyboard/Mouse/Gamepad`, schemes, rumble, rebinding |
 | Physics | `Physics.TryRaycast`, `TryCapsuleCast`, `OverlapSphere`; collision/trigger callbacks |
 | Audio | `Audio`, `AudioSource`, `AudioListener`, `AudioReverbZone`, mixer/bus/parameter APIs |
 | Animation | `Animator`, `AnimatorApi`, IK, animation/procedural-motion events |
@@ -44,7 +44,8 @@ for lifecycle, validation, and failure behavior; this is a navigation aid, not a
 
 | Need | Kéire API |
 | --- | --- |
-| Runtime UI | `Keire.UI.UIDocument`, `VisualElement`, controls, queries, events, bindings, and custom elements |
+| Authored runtime UI | `Keire.UI.UIDocument`, `RuntimeVisualElement`, `Q`, binding values, consumptive activation events |
+| Managed UI trees | `VisualElement`, typed controls, queries, event callbacks, bindings, and custom elements |
 | Rendering | `Camera`, `MeshRenderer`, typed lights, `MaterialPropertyBlock`, `DynamicMaterial` |
 | Camera effects | `Camera.EffectBeforeTonemapping`, `EffectAfterTonemapping`, `EffectAfterUi`; nullable Fullscreen materials |
 | Global material data | `MaterialParameterCollection`, `GlobalMaterialParameters` |
@@ -61,7 +62,10 @@ drafts, runtime queries/events, and the current text/accessibility limits.
 - Kéire exposes stable managed handles, not native pointers.
 - A valid asset reference and a held runtime residency lease are different concepts.
 - Runtime scene changes are transactional and limited to cooked player content.
-- Shader Graph is not a material and cannot be assigned directly to a Mesh Renderer.
+- Materials use a Shader picker and property Inspector. Shader Graph defines a shader; assign its material to a Mesh Renderer.
+- Legacy `MaterialGraph` and `MaterialInstance` reference types do not mean a current Material Graph authoring workflow exists.
+- String-based `Input.Axis2D`/`Pressed`/`Held` helpers are obsolete; prefer owned actions or direct controls.
+- Creating a managed `VisualElement` tree does not replace a scene document's source-backed tree.
 - VFX Subgraphs are explicit Operator/Block/System assets; collapsed comments are visual organization only.
 - The current API matrix names unsupported or partial Unity-shaped areas rather than emulating them silently.
 

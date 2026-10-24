@@ -6,10 +6,16 @@ not replace Hub's installation and compatibility view.
 
 ## Create A Project
 
-1. Open Hub and choose **Create Project**.
+1. Open Hub and choose **New project** on Home or **+ New Project** on Projects.
 2. Choose an installed Editor version and one of its available templates.
-3. Enter the project name and destination. The final project directory must not already exist, even if it is empty.
-4. Create the project and allow Hub to register it before opening the Editor.
+3. Enter **Project name** and **Location**. Location is the parent folder: check the displayed **Destination** before
+   continuing. Missing parent folders can be created, but the final project directory must not already exist, even empty.
+4. Leave **Open in the selected editor after creation** enabled if you want to start immediately, then choose
+   **Create project**. The project should appear in Projects and open with the selected Editor.
+
+If no Editor or template is available, first complete [Hub installation and recovery](HubInstallationAndRecovery.md).
+Templates belong to an Editor installation; switching versions can change the choices. A disabled Create action is a
+validation result, not an instruction to create an empty destination yourself. Correct the field identified in the dialog.
 
 A project has one `ProjectSettings/Project.keireproject` descriptor. Keep these boundaries intact:
 
@@ -26,13 +32,17 @@ assets, while derived content is recreated locally.
 
 ## Open And Upgrade
 
-Hub's **Open** action uses the exact or least-disruptive compatible Editor. **Open with** lets you select another
+Hub's **Open** action uses the exact or least-disruptive compatible Editor. **Open with another editor...** lets you select another
 compatible installation explicitly. If a descriptor or content schema needs an upgrade, read the preview before
 confirming: Kéire validates and stages upgrades transactionally, but a newer saved schema may no longer open in an
 older Editor.
 
 An Editor reports the project as locked while another live Editor owns its session. Do not bypass a valid lock. If a
 previous process crashed, let the product's recovery flow prove the owner is gone before continuing.
+
+If Hub reports that the project is already open, switch to its existing Editor window. Do not launch another copy or
+delete its lock to get past the notice. Removing a project from Hub removes its registration, not its files. Use the
+missing-project relocation workflow only when the moved descriptor still identifies the same project.
 
 ## Read The Default Workspace
 
@@ -51,7 +61,7 @@ panels are separate views of the same current authoring session; closing a panel
 
 ## Create And Save A Scene
 
-Create a scene with **File > New Scene**, **Assets > Create/Scene**, or the Project panel's Create menu. Double-click a
+Create a scene with **File > New Scene** or the Project panel's **Create > Scene** menu. Double-click a
 `.keirescene` asset to open it. Use the Hierarchy's **Create Empty**, light entries, and child commands to build the
 entity tree. **Add Component** in the Inspector searches both built-in and successfully compiled managed components.
 
@@ -85,6 +95,17 @@ recoverable transactions where the operation supports them.
 Scene and graph undo contexts are document-local. Text editing retains local text undo. A Play Mode undo never mutates
 Edit Mode history. When an operation is rejected, read the Console before repeating it; rejection is intended to leave
 the document unchanged.
+
+## Replace Template Content Safely
+
+Deleting a template UI entity removes that scene instance, not its visual-tree asset or C# implementation. Save a
+checkpoint first. Remove unwanted scene entities, then identify their assets in Project and check whether another
+scene or prefab still uses them. Remove unneeded scripts separately; shared scripts may still be required by remaining
+components. Wait for compilation and fix missing references before testing again.
+
+Use Project's recoverable asset deletion rather than deleting source and metadata independently in Explorer. Keep
+`.keiremeta` files alongside surviving source assets. Do not delete `ProjectSettings` or package lockfiles as cleanup.
+Test the replacement UI in Game, then test a standalone player: an Editor-only preview is not the final acceptance test.
 
 Continue with [C# Scripting Fundamentals](ScriptingFundamentals.md), or use [Scene Authoring](../SceneAuthoring.md) for
 the complete selection, recovery, lighting, and Play Mode Changes contracts.

@@ -6,6 +6,9 @@ Kéire UI Toolkit is a retained visual-tree system. UI structure, styling, and p
 assets, and a scene references them through one `UIDocument` component. The Editor shell remains ImGui; UI Toolkit is
 for game and tool content authored by a project.
 
+For a first working HUD, follow [Build Your Own Game UI](../Manual/UiFromScratch.md), including Panel Settings setup,
+scene assignment, health binding, input, and player verification. This page is the detailed authoring and API reference.
+
 ## On This Page
 
 - [Asset Model](#asset-model)
@@ -174,6 +177,11 @@ IReadOnlyList<Button> actions = root.Query<Button>(className: "primary-action").
 
 `VisualElement` owns hierarchy, classes, inline style, enablement, focus metadata, user data, and an inherited data
 source. `UQueryBuilder<T>` filters by type, name, and class without exposing native renderer state.
+
+This example creates an independent managed tree; it does not mount it into a scene `UIDocument`. Scene documents are
+source-backed. Their read-only `RootVisualElement` and `Q` return `RuntimeVisualElement` handles, not mutable
+`VisualElement` objects. Use Builder/source assets for document structure and the runtime handle/binding APIs below
+for gameplay updates. Do not assign a newly constructed managed root to `RootVisualElement`.
 
 `BindableElement` adds the authoring `BindingPath` used by fields and custom controls. A binding declared in markup or
 through `SetBinding` still owns its explicit `OneWay`, `TwoWay`, or `OneTime` mode; the path property is stable authoring

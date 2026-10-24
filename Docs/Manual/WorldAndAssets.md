@@ -54,6 +54,19 @@ Prefab creation and save validate the entire subtree before replacing an existin
 for overrides and update handling. Runtime instantiation returns an entity in the current runtime world; destroy it
 with `entity.Destroy()` or `EngineObject.Destroy(entity)`.
 
+### Verify A Prefab Before Reusing It
+
+1. Stop Play and select the hierarchy root you intend to reuse. Keep its required children, components, and asset
+   references together. References to unrelated scene entities cannot be stored as prefab dependencies.
+2. Drag it into a Project folder to create the prefab. Instantiate it back into the scene and verify the result instead
+   of assuming the original hierarchy proves the saved prefab is correct.
+3. Attach `SpawnPoint` to a separate scene entity, assign the prefab in its Inspector, and invoke `Spawn()` from your
+   gameplay controller. This example supplies a method; it does not spawn automatically or choose an input binding.
+4. Enter Play and check component references, child hierarchy, and behavior. Active clones can run `Awake`/`OnEnable`
+   before `Instantiate` returns. Required data should already be authored on the prefab.
+5. Stop and review scene changes, then save only the authored state you intend to keep. Test in a player to validate
+   cooked prefab dependencies.
+
 ## Native Assets And Residency
 
 Asset fields such as `AudioClip`, `Texture`, `Material`, `VfxEffect`, `Prefab`, and `SceneAsset` are direct managed
@@ -117,6 +130,12 @@ private IEnumerator ReplaceScene(SceneAsset scene)
 Single-scene replacement validates and prepares the candidate before retiring the previous active scene. Additive
 loads coexist until explicitly unloaded. `SceneManager.Preserve(entity)`/`EngineObject.DontDestroyOnLoad(entity)` moves
 eligible root content into the persistent world. Scene assets must be included in the player build's ordered scene set.
+
+A successful `Single` transition can destroy its waiting script if that script belongs to the retired scene. Place a
+director in an intentionally preserved root when it must perform post-transition work. Preserve only the hierarchy you
+mean to keep: preserving a child promotes its complete root hierarchy. For temporary additive rooms, give one owner
+responsibility for cancellation/unload; use the [owned additive-room recipe](../Scripting/Cookbook.md#owned-additive-room)
+rather than leaving every loaded room alive.
 
 See [Assets and ScriptableObjects](../Scripting/AssetsAndScriptableObjects.md) and
 [Scenes and Render Settings](../Scripting/ScenesAndRenderSettings.md) for loading, cancellation, fallback, and render

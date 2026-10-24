@@ -99,6 +99,11 @@ protected override void Awake()
     MeshRenderer? renderer = GetComponent<MeshRenderer>();
     if (renderer is not { IsValid: true })
         return;
+    if (_bodyMaterial is not { IsValid: true } || _detailMaterial is not { IsValid: true })
+    {
+        Debug.Warn("Assign both material slots before running this example.");
+        return;
+    }
     renderer.Mesh = _mesh;
     renderer.Materials = [_bodyMaterial, _detailMaterial];
     renderer.Visible = true;
@@ -108,7 +113,9 @@ protected override void Awake()
 ```
 
 Assigning `Materials` replaces the complete material override array in one native transaction. The array is limited to
-256 entries and preserves empty asset IDs when a mesh slot should use its imported default material.
+256 entries. Every supplied entry must be a non-null `Material`; the managed setter reads each entry's ID. Assign an
+empty array (or set `Material = null`) to clear the override array. The managed getter filters out unresolved material
+identities, so do not use it as a lossless editor for an array containing empty native slots.
 
 ## Material Property Blocks
 
@@ -120,7 +127,12 @@ private Texture? _damageMask;
 
 private void ApplyDamagePresentation(float damage)
 {
-    MaterialPropertyBlock properties = Entity.MeshRenderer.PropertyBlock;
+    MeshRenderer? renderer = GetComponent<MeshRenderer>();
+    if (renderer is not { IsValid: true })
+    {
+        return;
+    }
+    MaterialPropertyBlock properties = renderer.PropertyBlock;
     properties.SetFloat("Damage", Math.Clamp(damage, 0.0f, 1.0f));
     properties.SetColor("Emission", new Color(2.0f, 0.15f, 0.02f, 1.0f));
     properties.SetVector("HitDirection", Entity.Transform.Forward);
@@ -128,7 +140,8 @@ private void ApplyDamagePresentation(float damage)
 }
 ```
 
-Names match exposed properties in the compiled Material/Shader Graph. Supported values are `float`, `Vector2`,
+Names match exposed properties in the material's shader contract. Author ordinary materials with a Shader picker and
+property Inspector; use Shader Graph when you need new shader behavior. Supported values are `float`, `Vector2`,
 `Vector3`, `Vector4`, `Color`, and direct `Texture` objects. Each renderer supports at most 64 overrides, and each
 UTF-8 name supports at most 128 bytes. Unknown names and values whose type does not match the compiled shader are
 ignored by that shader; they remain available for a later compatible material assignment.
@@ -196,6 +209,10 @@ lights add color temperature and cookie transform.
 
 ```csharp
 SpotLight? light = GetComponent<SpotLight>();
+if (light is not { IsValid: true })
+{
+    return;
+}
 light.Color = new Color(0.72f, 0.84f, 1.0f, 1.0f);
 light.Intensity = 18.0f;
 light.Range = 32.0f;
@@ -205,10 +222,12 @@ light.Shadows = ShadowQuality.Soft;
 light.ContactShadows = true;
 ```
 
-Material/Shader Graph authoring remains editor-owned. Managed runtime graph construction is intentionally outside the
-gameplay contract. Scripts can hold direct `ShaderGraph`, `ShaderGraphInstance`, `MaterialGraph`, and
-`MaterialInstance` references and use `Assets.LoadRuntime` to observe
-compiled graph readiness without receiving or mutating the graph object. Render textures and custom render-pass
+Material properties and Shader Graph authoring remain editor-owned. Managed runtime graph construction is outside the
+gameplay contract. Scripts can hold `Material` references and use `Assets.LoadRuntime` to observe readiness without
+receiving a native resource or mutable shader graph. `ShaderGraph`, `ShaderGraphInstance`, `MaterialGraph`, and
+`MaterialInstance` asset-reference classes remain declared for their existing asset identities; the legacy material
+type names do not advertise a Material Graph authoring workflow. New materials use the Shader picker/property
+Inspector workflow described in [Material Authoring](../Manual/MaterialGraph.md). Render textures and custom render-pass
 scripting remain tracked in the
 [Managed API Capability Matrix](ManagedApiMatrix.md).
 

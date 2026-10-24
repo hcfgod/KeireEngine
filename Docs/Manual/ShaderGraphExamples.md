@@ -28,7 +28,12 @@ flowchart LR
 2. Add exposed Base Texture, Tint, Tiling, Metallic, and Roughness properties with durable stable IDs.
 3. Scale UV by Tiling, sample Base Texture, multiply its color by Tint, and connect the result to Base Color.
 4. Connect the two scalar controls to the compatible surface pins exposed by the template.
-5. Save, select the shader, choose **Material from Shader**, and assign that material to scene geometry.
+5. Save, wait for compilation, select the shader, choose **Create > Material from Shader**, and assign that material
+   to scene geometry. Tune its exposed values in the Material Inspector and finish each edit.
+
+Start with white Tint, Metallic 0, Roughness 0.6, and Tiling (1, 1). Use a texture with an obvious repeated feature;
+changing Tiling to (4, 4) should repeat it four times per UV axis. A non-white Tint should multiply the texture color.
+Save the scene and reopen both assets to verify the shader logic and Material values separately.
 
 If a pin is named differently for the selected renderer/template, the open Shader Output and compatible picker are
 authoritative. Do not force a conversion simply to reproduce the diagram.
@@ -37,7 +42,7 @@ authoritative. Do not force a conversion simply to reproduce the diagram.
 
 ```mermaid
 flowchart LR
-    Time["Total Time"] --> Speed["Multiply by Speed"]
+    Time["Time"] --> Speed["Multiply by Speed"]
     Speed --> Wave["Sine"]
     Wave --> Remap["Remap -1..1 to 0..1"]
     Remap --> Strength["Multiply by Intensity"]
@@ -46,8 +51,11 @@ flowchart LR
     ColorScale --> Emission["Shader Output<br/>Emission"]
 ```
 
-Expose Speed, Intensity, and Glow Color. Remapping the sine wave prevents negative emission. Keep default values modest,
-then test the material in scene lighting and in the target player; the thumbnail alone is not a lighting validation.
+Expose Speed, Intensity, and Glow Color. Implement the remap as multiply by 0.5 then add 0.5; it prevents negative
+emission. Start Speed and Intensity at 1 and use an obvious Glow Color. Save, create a Material from the shader,
+and assign it to a visible mesh. In a running scene, emission should rise and fall; setting Intensity to 0 should
+remove this contribution. Emission is not a guarantee of bloom or illumination on nearby objects. Test in the target
+player as well as the editor.
 
 ## Example 3: World-Space Height Blend
 
@@ -62,9 +70,10 @@ flowchart LR
     Lerp --> Base["Shader Output<br/>Base Color"]
 ```
 
-This produces a stable vertical transition for terrain, water edges, or stylized props. Guard Blend Width with a safe
-non-zero default. If the desired result must move with the object, choose the corresponding object-space coordinate
-instead of world position.
+Use Blend Start 0, Blend Width 2, and distinct Low/High Colors. Extract the Y component from world position before
+subtracting and dividing. Save and create a Material from the shader. Move assigned geometry vertically: the transition
+should stay at the same world height. Keep Blend Width positive and non-zero. If the transition should move with the
+object instead, use object-space position.
 
 ## Example 4: Camera Tint Effect
 
@@ -75,7 +84,7 @@ instead of world position.
 5. Select the shader in Project and choose **Material from Shader**. Open the material and set Tint to a pale blue.
 6. Select the entity with the Camera component. Under **Fullscreen Effects**, assign the material to **After Tonemapping**.
 7. Open Game view or camera preview. The camera image should become blue-tinted; a white Tint should restore its colors.
-8. Save the material and scene. Reopen the scene and confirm the camera assignment and tint remain.
+8. Finish the material property edit and save the scene. Reopen the scene and confirm the camera assignment and tint remain.
 
 Use **Before Tonemapping** for an operation on linear HDR scene color. **After Tonemapping** changes the tone-mapped
 scene before camera UI. **After UI** also changes camera overlay UI. One material is accepted per stage, with stages
@@ -109,9 +118,10 @@ camera preview; the graph thumbnail has no camera framebuffer and shows only a C
 
 - Rename exposed properties without changing their stable IDs.
 - Keep renderer/stage choices in Shader Graph and object-specific appearance in materials.
-- Move repeated typed expressions into a Material Function; use Material Layers for reusable surface contributions.
+- Use **Extract Selection to Shader Function...** for eligible repeated expressions, or create a reusable function
+  explicitly; use Material Layers for reusable surface contributions.
 - Use keywords only for genuine structural variants, then verify the material's canonical permutation is cooked.
 - Fix the first candidate diagnostic when preview remains on the last-good result.
 
-Continue with [Material Graph Examples](MaterialGraphExamples.md) to turn the shader contract into assignable surfaces,
+Continue with [Material Examples](MaterialGraphExamples.md) to turn the shader contract into assignable surfaces,
 or [Graph Editing](GraphEditing.md) for comments, collapse, clipboard, routing, and reusable assets.

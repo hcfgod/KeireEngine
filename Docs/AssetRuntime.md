@@ -38,8 +38,11 @@ without silent identity collisions.
 
 Before decode, every payload is bounded by `MaximumAssetBytes`, decompressed with the pinned Zstandard build, and
 verified against its catalog SHA-256. Decoder registrations require a non-null fallback whose type exactly matches the
-registration. Binary and UTF-8 text decoders are built in; renderer, texture, audio, model, and scene asset types remain
-future subsystem work.
+registration. Binary and UTF-8 text decoders are built into the core asset service. The Editor and player hosts also
+install the implemented typed decoders for rendering, textures, audio, models, scenes, and other enabled systems.
+A custom host must register the types its catalogs use; a missing decoder is a host/configuration error, not evidence
+that those asset systems are unimplemented. See [Asset Pipeline](AssetPipeline.md) for source import and
+[Desktop Player Builds](PlayerBuilds.md) for the cooked-player boundary.
 
 The default queue capacity is 4096, resident cache budget is 512 MiB, maximum individual asset size is 1 GiB, and
 development catalog path is `Library/AssetCache/Runtime/catalog.json`. `EvictUnused()` only removes ready entries whose

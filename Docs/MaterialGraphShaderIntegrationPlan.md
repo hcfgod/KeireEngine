@@ -1,5 +1,10 @@
 # Material and Shader Graph Overhaul Contract
 
+> **Engineering design record.** The graph-first target architecture below records an earlier implementation phase.
+> New Materials now select a shader and edit properties in the Inspector. Use [Materials](Manual/MaterialGraph.md)
+> for the current workflow and [Shaders and Materials](ShadersAndMaterials.md) for the maintained reference.
+> Legacy graph data and internal class names do not imply a Material Graph creation workflow for new projects.
+
 ## Implemented foundation
 
 The contract below records the graph-overhaul foundation. The current creation workflow is property-first:

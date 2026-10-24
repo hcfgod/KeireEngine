@@ -1,5 +1,10 @@
 # Material/shader revamp benchmark and visual-fixture evidence
 
+> **Engineering history and acceptance evidence.** Dates, test results, open items, and workflow names below belong
+> to their recorded source revision. They are not a current user tutorial or a guarantee that an old menu still exists.
+> Start with the [current user manual](Manual/README.md) for authoring; use
+> [Materials](Manual/MaterialGraph.md) for today's Inspector-based material workflow.
+
 This document is the benchmark/fixture lane record for the material and shader replacement. It does not mark a
 production gate complete. Windows editor interaction and GPU capture are reserved for the validation lane; this lane
 does not run either activity.

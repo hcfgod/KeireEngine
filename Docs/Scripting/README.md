@@ -12,6 +12,8 @@ non-null and report `IsValid == false`.
 | I have never written a Kéire script | [First script walkthrough](GettingStarted.md#your-first-play-mode-check) |
 | I know what I want to build | [Workflow map](WorkflowMap.md#choose-an-api-by-task) |
 | I want an example I can adapt | [Cookbook with compile-checked sources](Cookbook.md) |
+| I need to build a HUD from a clean scene | [Build Your Own Game UI](../Manual/UiFromScratch.md) |
+| My feature compiles; how do I validate it? | [Gameplay testing from Edit to player](../Manual/GameplayTesting.md) |
 | I know a type or method name | [API index](ApiIndex.md), [runtime members](RuntimeReference.md), [Editor members](EditorReference.md) |
 | My script is not working | [Troubleshooting](AsyncReloadAndDiagnostics.md#troubleshooting) |
 | I need to know whether a feature exists | [Capability matrix](ManagedApiMatrix.md) |

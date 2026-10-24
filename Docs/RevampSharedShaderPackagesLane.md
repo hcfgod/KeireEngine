@@ -1,5 +1,10 @@
 # Shared shader package input acceptance
 
+> **Engineering history and acceptance evidence.** Dates, test results, open items, and workflow names below belong
+> to their recorded source revision. They are not a current user tutorial or a guarantee that an old menu still exists.
+> Start with the [current user manual](Manual/README.md) for authoring; use
+> [Materials](Manual/MaterialGraph.md) for today's Inspector-based material workflow.
+
 This lane extends the restored September 12 seed. The existing deterministic six-shader installation, immutable
 source checks, and material identities belong to the seed. This work does not claim a new rendered visual baseline.
 

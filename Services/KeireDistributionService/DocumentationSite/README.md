@@ -5,7 +5,7 @@ Node deployment. Run `npm test` and `npm run build` from this directory. The bui
 syncs canonical documentation, validates local media, generates search, externalizes
 inline content for the production CSP, and checks links and document structure.
 
-## Staged MySQL GitHub authentication
+## MySQL GitHub authentication
 
 GitHub sign-in uses provider identity IDs, single-use browser-bound state, S256
 PKCE, verified provider email, and the account's existing MFA requirements.
@@ -26,9 +26,9 @@ Unit, protected-settings, and MySQL acceptance checks do not prove external GitH
 consent works. Production credentials, callback registration, and a real provider
 sign-in must pass before live activation.
 
-## Staged production MySQL host
+## Production MySQL host
 
-Windows host settings schema 3 selects `platformBackend: "mysql"` and an absolute
+The active Windows deployment uses MySQL. Windows host settings schema 3 selects `platformBackend: "mysql"` and an absolute
 `platformConfigurationPath`; schemas 1/2 and explicit `supabase` retain their
 existing behavior. The MySQL configuration must match the website root, canonical
 HTTPS origin (without trailing slash), and loopback port 4321. Its schema is

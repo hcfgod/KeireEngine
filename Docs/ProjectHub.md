@@ -1,5 +1,24 @@
 # Kéire Hub
 
+## Start Here
+
+For setup, repair, changing installation location, browser sign-in, and reconnecting after an offline test, use
+[Hub Installation And Recovery](Manual/HubInstallationAndRecovery.md). For a new game, follow
+[Projects And The Editor](Manual/ProjectsAndEditor.md), then [Player Builds And Packages](Manual/PlayerBuildsAndPackages.md).
+The sections below provide the product and ownership reference behind those task guides.
+
+### A Practical Session
+
+1. In **Installs**, install a catalog Editor or **Locate existing**. Confirm its health before launch.
+2. In **Projects**, choose **+ New Project**. Choose a template and Editor, enter a project name and parent location,
+   check Destination, then **Create project**. Existing projects can be registered without copying their files.
+3. Use **Open** or **Open with another editor...**. If the project is already open, return to that Editor rather than
+   bypassing its lock. Save and close the Editor before installation/component maintenance.
+4. Review **Tasks and downloads** for completion. **Dismiss** or **Clear finished** removes ended task history;
+   closing the panel alone does not clear it or cancel work.
+5. If you change **Offline mode**, choose **Save settings**. Check the footer and retry a network operation to establish
+   recovery; a visible cached catalog does not prove connectivity.
+
 Opening a project that is already running reports guidance instead of silently ignoring the action. Build Support
 handoffs can identify their requesting Editor with `--build-support <platform> <architecture> [editor-executable]`.
 An explicit requester must match a registered usable installation; running, unhealthy or unregistered targets receive
@@ -36,8 +55,8 @@ logical size is 1280x800, the minimum is 960x640, and the 224-pixel navigation r
 
 The production navigation contains Home, Projects, Installs, Templates, Learn, Resources, Licenses, and Settings. The
 title bar exposes an optional account/profile menu, appearance, tasks/downloads, notifications, documentation, and
-native window controls. Accounts never gate projects, editor downloads, or local Hub use. There are no entitlement,
-marketplace, organization, billing, or cloud-project controls.
+native window controls. Accounts never gate projects, editor downloads, or local Hub use. Optional Marketplace
+authorization and My Assets are separate from local project ownership; feature availability depends on the service.
 
 Home is a live summary of registered projects, installed editors, component health, active tasks, updates, and verified
 featured content. Empty catalog sections stay hidden or show an intentional offline/empty state.
@@ -72,9 +91,10 @@ when installed; otherwise the least newer compatible version is recommended and 
 preferred installation never bypasses these checks. Projects whose exact editor is unavailable link to the real
 Installs/Locate flow rather than a placeholder action.
 
-On Windows, project launch also rejects an elevated Hub process. Explorer cannot deliver file-drop messages to an
-Editor at a higher integrity level, so launching anyway would make Project-panel asset imports fail silently. Reopen
-the Hub normally and launch the same project; no project migration or repair is required.
+On Windows, Hub launches the Editor using the signed-in desktop user's normal-integrity token, even if Hub itself was
+started as administrator. This preserves Explorer file drops. If the same-user/session desktop token cannot be proven,
+launch fails with guidance rather than silently launching an elevated Editor. Directly elevating the Editor still
+prevents normal Explorer drops; reopen it normally through Hub. No project migration or repair is required.
 
 An older project schema is not itself a reason to force an upgrade. When the exact previous Editor or another
 schema-compatible Editor remains installed, **Open** launches it directly and leaves the project unchanged until that
@@ -144,7 +164,8 @@ relationships before any task is queued. Versions with missing or conflicting de
 actionable catalog error but cannot be installed.
 
 The destination remains manually editable and has a native **Browse** action. Folder-picker results pass through the
-same absolute, non-root, writable-location validation as typed paths before the install task can begin.
+same absolute, non-root, safe-path validation as typed paths before the install task can begin. Missing ordinary
+parents are created when installation begins; permission or disk failures can still prevent the operation.
 
 Each healthy editor card exposes **Manage Components** through that installation's typed Asset Tool. Component counts
 come from the installed Build Support inventory and are matched to the editor's exact engine version; the modal then
@@ -279,7 +300,7 @@ minimum length and rotates every accepted token through the platform secure stor
 The Windows installer owns the current user's `keirehub` protocol registration and removes it only when it still points
 to that exact installation. Linux packages declare `x-scheme-handler/keirehub` and pass a single `%u` activation to the
 verified Hub wrapper. The callback page never displays or copies the authorization code: it offers a user-initiated app
-handoff, reports focus/visibility feedback, and directs a missing handler to the catalog-verified Hub download. A
+handoff and offers recovery help and the catalog-verified Hub download. Browser focus/visibility cannot prove success. A
 pending request can be cancelled in Hub before starting another flow; callbacks from cancelled or unrelated flows
 remain rejected by the state check.
 Sign-up correctly
@@ -288,17 +309,15 @@ inventing a session, and reports confirmation-email cooldowns directly. Sign-in,
 and profile display-name updates run on the account worker rather than the UI thread. Retryable refresh and profile
 failures preserve the authenticated UI snapshot and refresh attempts use bounded backoff.
 
-Marketplace profiles, organizations, publisher membership, entitlements, reviews, and device sessions are protected by
-forced row-level security and protected membership tables. Platform roles are evaluated from the database-authoritative
-`platform_staff_members` relation on every operation, so revocation does not wait for JWT refresh. Browser staff reads
-remain RLS-constrained; MFA-protected Edge Functions and service-role-only transactional functions own staff and
-moderation writes.
+Marketplace profiles, publisher membership, entitlements, and device sessions are authorized by the current website
+service. The desktop client does not grant itself staff permissions or use a database credential. Legacy Supabase RLS
+and Edge Function deployment instructions are not the operating procedure for the current MySQL-backed service.
 Windows refresh tokens use DPAPI, Linux uses Secret Service when `secret-tool` is available, and macOS uses Keychain.
 When secure persistence is unavailable, the Hub keeps the session in memory and shows a warning instead of writing a
 plaintext credential. Website cookies and browser refresh tokens never transfer to Hub; Hub sessions can be revoked
 independently. Account tokens, proxy credentials, signing material, and unredacted user paths never enter diagnostics.
 
-Identity and software distribution are separate trust domains. A Supabase session is not an editor-package
+Identity and software distribution are separate trust domains. An account session is not an editor-package
 entitlement, cannot authorize an install or uninstall, and is never used to bypass Ed25519 catalog signatures,
 SHA-256 package identity, managed-install ownership markers, or editor project locks.
 

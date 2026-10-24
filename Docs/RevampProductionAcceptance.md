@@ -1,5 +1,10 @@
 # Material/shader production acceptance
 
+> **Engineering history and acceptance evidence.** Dates, test results, open items, and workflow names below belong
+> to their recorded source revision. They are not a current user tutorial or a guarantee that an old menu still exists.
+> Start with the [current user manual](Manual/README.md) for authoring; use
+> [Materials](Manual/MaterialGraph.md) for today's Inspector-based material workflow.
+
 ## Authored particle shaders and fresh-project interaction — September 23, 2026
 
 VFX graphs now compile mesh, GPU billboard, GPU ribbon, and CPU particle passes. The renderer executes the graph's

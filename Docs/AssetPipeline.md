@@ -72,7 +72,8 @@ declares the historical name and remains type/version compatible. If an extensio
 all registrations and accepts the historical name only when exactly one compatible owner exists; ambiguous matches fail
 closed. This keeps renamed importers usable without letting a historical name select an unrelated importer. It is
 required for the Material overhaul because historical Material Graph metadata used `Keire.MaterialGraph`, while
-historical flat materials used `Keire.Material`, which is now the canonical graph-material importer name.
+historical flat materials used `Keire.Material`, which is now the canonical material importer name. New Materials
+select a shader and store Inspector-edited properties; legacy graph-owned sources remain a compatibility case.
 
 Rename moves source and metadata as one rollback-capable operation. Duplicate copies bytes and creates a new identity.
 Delete is represented by `MoveToTrash()`, which moves both files under `Library/Trash/<asset-id>` for recovery. Public
@@ -105,7 +106,7 @@ objects are cache hits. Contextual importers also persist their validated comple
 records. A new asset-worker process restores the previous source index before scanning, retains its importer-derived
 dependency state, and reruns an importer only when its source, metadata, source-file dependencies, or referenced asset
 source files that it actually read changed. Runtime-only references do not invalidate import output. This lets a
-Material Graph save recompile that graph and its actual dependents without invoking
+Shader Graph save recompile that shader and its actual dependents without invoking
 unrelated graph, shader, model, texture, or audio importers. Targeted editor requests compute the reverse dependency
 closure, cook only those source records and generated subassets, and merge the new entries with unchanged entries from
 the last-good development catalog. Targeted batches index source owners, including generated subassets, rather than

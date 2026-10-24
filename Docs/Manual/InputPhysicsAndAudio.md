@@ -6,26 +6,26 @@ scene components plus asset references. Author the data first, then keep frame a
 ## Input Actions
 
 Create an Input Action asset in the Project panel and open it in the Input Actions editor. Organize actions into maps,
-add bindings and interactions, validate the asset, then assign it in Project Settings. Use the Input Debugger and Listen
-mode to confirm devices and bindings before debugging gameplay code.
+add bindings and interactions, then validate the asset. For script-owned controls, expose an `InputActionAsset` field,
+assign the asset in the Inspector, and create/dispose a private context with the controller. Project Settings assignment
+does not assign a script's serialized asset field. Use the Input Debugger and Listen mode to confirm bindings first.
 
 ```csharp
-protected override void Update()
-{
-    Vector2 move = Input.Axis2D("Move");
-
-    if (Input.Pressed("Jump"))
-        QueueJump();
-    if (Input.Released("Fire"))
-        StopCharging();
-    if (Input.Held("Sprint"))
-        EnableSprint(move);
-}
+Vector2 move = moveAction?.ReadValue<Vector2>() ?? Vector2.Zero;
+bool jumpPressed = jumpAction?.WasPressedThisFrame == true;
+bool fireReleased = fireAction?.WasReleasedThisFrame == true;
+bool sprintHeld = sprintAction?.IsPressed == true;
 ```
 
-`Pressed` and `Released` are one-frame edges; `Held` is the current button state. `Axis` reads the X channel of an
-action and `Axis2D` reads both channels. Read input in `Update`, retain intent, then consume that intent in
-`FixedUpdate` when it drives physics.
+Here `moveAction`, `jumpAction`, `fireAction`, and `sprintAction` are enabled `InputAction` references resolved from the
+owning context. `WasPressedThisFrame` and `WasReleasedThisFrame` are frame edges; `IsPressed` reads the current button
+state. `ReadValue<float>()` and `ReadValue<Vector2>()` read scalar and two-dimensional actions. Read one-shot input in
+`Update`, retain intent, then consume it once in `FixedUpdate` when it drives physics. Several fixed ticks can share
+the same frame snapshot, so polling a press on each tick can repeat a jump or shot.
+
+Follow the complete [ActionMotor recipe](../Scripting/Cookbook.md#fixed-step-action-movement), including its
+`Player/Move` action, Inspector assignment, context disposal, and reload handling. String helpers such as
+`Input.Axis2D("Move")`, `Input.Pressed`, and `Input.Held` are obsolete compatibility APIs.
 
 Runtime device inspection, control-scheme locking, bounded gamepad rumble, interactive rebinding, and named binding-
 override profiles are supported by `Input`. The Input Actions editor is the safer place to build and validate the

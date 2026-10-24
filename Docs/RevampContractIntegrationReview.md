@@ -1,5 +1,10 @@
 # Material/shader revamp contract and integration review
 
+> **Engineering history and acceptance evidence.** Dates, test results, open items, and workflow names below belong
+> to their recorded source revision. They are not a current user tutorial or a guarantee that an old menu still exists.
+> Start with the [current user manual](Manual/README.md) for authoring; use
+> [Materials](Manual/MaterialGraph.md) for today's Inspector-based material workflow.
+
 Reviewed September 12, 2026 against `Docs/MaterialShaderReplacement.md` and the restored working tree. This is a review-lane handoff, not a production-readiness claim. It intentionally does not amend the shared progress document, README, or changelog.
 
 ## September 22 reconciliation

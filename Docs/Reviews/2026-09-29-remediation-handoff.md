@@ -1,5 +1,10 @@
 # Review remediation and validation handoff
 
+> **Engineering history and acceptance evidence.** Dates, test results, open items, and workflow names below belong
+> to their recorded source revision. They are not a current user tutorial or a guarantee that an old menu still exists.
+> Start with the [current user manual](../Manual/README.md) for authoring; use
+> [Materials](../Manual/MaterialGraph.md) for today's Inspector-based material workflow.
+
 This implements changes requested after the [engine/editor review](2026-09-29-engine-editor-review.md). All work stays
 in the existing `master` checkout. Three implementation subagents owned document persistence, bounded reads/evidence,
 and GPU timing/compute respectively. The coordinating chat owns dependency integration and shared documentation.

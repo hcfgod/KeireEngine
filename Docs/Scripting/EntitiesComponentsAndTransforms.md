@@ -105,7 +105,8 @@ their required `Awake` and `OnEnable` callbacks before instantiation returns. A 
 graph.
 
 Prefab creation rejects references from the selected hierarchy to unrelated scene entities. Persisted 0.3.x entity
-and asset-reference records are read by the legacy state reader and normalize to tagged v2 records when next saved.
+and asset-reference records are read by the legacy state reader and normalize to the current managed-state format when
+next saved. See [Serialization and the Inspector](SerializationAndInspector.md) for the v4 writer and supported readers.
 
 ## Built-In Components
 

@@ -1,5 +1,23 @@
 # Editor Panels And Commands
 
+## Find The Right Tool
+
+| Task | Panel or command |
+| --- | --- |
+| Arrange entities and parenting | Hierarchy; Scene for viewport manipulation |
+| Change components or asset properties | Inspector; check its lock if selection appears stuck |
+| Browse/import/create source assets | Project; its filter searches the current folder |
+| Test the active camera and input | Game after Play; click the viewport to give gameplay focus |
+| Diagnose compilation or runtime failures | Console; select/copy errors or use **Open source** |
+| Edit a UI Document | Inspector's **Open Visual Tree in UI Builder** |
+| Configure a standalone player | **Build > Build Settings...** |
+
+Reopen hidden tools from Window; closing a panel does not delete the document or scene. Stop Play before authoring
+lighting. Save authored documents before a standalone build and verify which scene is first enabled in Build Settings.
+See [Projects And The Editor](Manual/ProjectsAndEditor.md) for the first-project loop.
+
+## Panel Ownership Reference
+
 All primary editor panels own their persistent UI state and use narrow document/controller contracts. No panel
 includes, retains, or friends `EditorWorkspaceLayer`, and the workspace exposes no whole-panel draw forwarding.
 
@@ -64,7 +82,7 @@ as `Undo Change Tint` or `Redo Rename Asset`; docking geometry remains outside d
 
 The File menu and keyboard routing share the same scene operations:
 
-- `Ctrl+S` saves the authored scene atomically.
+- `Ctrl/Cmd+S` saves the active document; **File > Save Scene** explicitly saves the authored scene atomically.
 - `Ctrl+Shift+S` opens the asynchronous Save As dialog.
 - Save As is constrained to the project's `Assets` directory, requires `.keirescene`, creates a new metadata identity,
   and switches the editor to the new asset.
@@ -87,7 +105,8 @@ docked content. The Scene overlay contains View/Move/Rotate/Scale tools (`Q/W/E/
 rotation, and scale increments, and Gizmos visibility settings. Camera icons/frustums and Directional Light icons/rays
 remain clickable overlays, while transform handle drags participate in scene undo. Play
 clones the current in-memory edit scene with the same entity IDs. Save always targets the authored scene. Runtime
-changes are discarded on Stop.
+changes do not automatically overwrite authored content on Stop. **Play Mode Changes** offers eligible differences for
+explicit review and application; save the authored scene afterward to retain accepted changes.
 
 The Project Settings panel is opened from the Edit or Window menu. Its Rendering section owns ambient color, ambient
 intensity, exposure, and the custom skybox for both Scene and Game views; settings are saved atomically under the

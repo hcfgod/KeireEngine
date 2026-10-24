@@ -1,8 +1,10 @@
 # Kéire Distribution Service
 
-Local MySQL backend migration is in preparation. See [the migration and acceptance plan](Docs/MySqlMigration.md).
-The provisioning utility creates an isolated empty database; the production website remains on Supabase until the
-account, marketplace, Storage, and client acceptance gates pass.
+The current Windows deployment uses the local MySQL platform backend (`schemaVersion: 3`, `platformBackend: mysql`
+in host settings). Browser and native clients use authenticated HTTPS service routes; they do not connect directly to
+MySQL. See [the migration and acceptance record](Docs/MySqlMigration.md) for implementation history and remaining
+evidence boundaries. Supabase support remains an explicitly selected compatibility backend; its configuration and
+deployment commands below do not describe the active MySQL host.
 
 `KeireDistributionService` is the stateless, read-only origin for Kéire Hub catalogs, learning/resource catalogs, and
 content-addressed Editor packages. It targets the repository's pinned .NET 10 toolchain, binds to `127.0.0.1:5088` by
@@ -13,7 +15,8 @@ surface to Astro.
 
 Astro exposes two distinct website health contracts. `HEAD /health/` is dependency-free process liveness and is the
 only probe Caddy uses to decide whether the Node upstream can accept requests. `GET /health/` is the deeper public
-readiness report for Supabase, distribution, and validator connectivity; degraded dependencies remain observable there
+readiness report for the checks implemented by that route, including configured distribution and validator probes;
+the route's legacy Supabase field is not proof of the active MySQL backend's health. Degraded dependencies remain observable there
 without incorrectly removing a healthy web renderer from service. Caddy requires three consecutive failed liveness
 checks before marking the sole Node upstream unavailable and two consecutive passes before restoring it.
 
