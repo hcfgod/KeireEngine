@@ -22,3 +22,10 @@ foreach ($project in $projects) {
         throw "Managed API tests failed for '$project' with exit code $LASTEXITCODE."
     }
 }
+
+& (Join-Path $root "Scripts/Windows/build-managed.ps1")
+& $dotnet run --project (Join-Path $root "Scripts/Tests/ManagedDesignTimeParity/ManagedDesignTimeParity.csproj") `
+    --configuration $Configuration -- (Join-Path $root "Build/Managed")
+if ($LASTEXITCODE -ne 0) {
+    throw "Managed design-time binary API parity failed with exit code $LASTEXITCODE."
+}

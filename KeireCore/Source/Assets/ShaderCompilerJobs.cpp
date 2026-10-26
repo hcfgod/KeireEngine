@@ -1,6 +1,8 @@
 #include "KeireInternal/Assets/ShaderCompilerJobs.h"
 
 #include "Keire/Assets/Asset.h"
+#include "Keire/Assets/AssetPipeline.h"
+#include "Keire/Assets/RenderingAssets.h"
 #include "Keire/Assets/ShaderCompilation.h"
 
 #include "KeireInternal/Assets/AssetInternal.h"
@@ -20,6 +22,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <thread>
 
 namespace Keire::Detail
 {
@@ -133,6 +136,101 @@ namespace Keire::Detail
         if (error)
             ++result.Ignored;
         return result;
+    }
+
+    void RunShaderCompilerProcess(const std::filesystem::path& compiler, const std::span<const std::string> arguments,
+                                  const std::filesystem::path& workingDirectory,
+                                  const std::chrono::milliseconds timeout, const std::stop_token cancellation,
+                                  ShaderCompilerStatistics* statistics)
+    {
+        if (timeout <= std::chrono::milliseconds::zero())
+        {
+            throw std::invalid_argument("Shader compiler timeout must be positive.");
+        }
+        if (cancellation.stop_requested())
+        {
+            throw AssetOperationCancelled();
+        }
+
+        auto process = ChildProcess::Start(compiler, arguments, workingDirectory);
+        if (statistics)
+        {
+            statistics->NativeStarts.fetch_add(1U, std::memory_order_relaxed);
+        }
+        const auto deadline = std::chrono::steady_clock::now() + timeout;
+        constexpr auto pollInterval = std::chrono::milliseconds(5);
+        for (;;)
+        {
+            if (cancellation.stop_requested())
+            {
+                process.Terminate();
+                throw AssetOperationCancelled();
+            }
+            if (process.Poll())
+            {
+                break;
+            }
+            if (std::chrono::steady_clock::now() >= deadline)
+            {
+                process.Terminate();
+                throw std::runtime_error("Shader compiler timed out after " + std::to_string(timeout.count()) +
+                                         " ms.\n" + process.TakeOutput());
+            }
+            std::this_thread::sleep_for(pollInterval);
+        }
+        if (cancellation.stop_requested())
+        {
+            throw AssetOperationCancelled();
+        }
+        const auto exitCode = process.ExitCode().value_or(-1);
+        if (exitCode != 0)
+        {
+            throw std::runtime_error("Shader compiler failed with exit code " + std::to_string(exitCode) + ".\n" +
+                                     process.TakeOutput());
+        }
+    }
+
+    std::vector<std::byte>
+    CompileShaderStage(const std::filesystem::path& compiler, const std::filesystem::path& source,
+                       const std::string_view destination, const std::string_view stage, const std::string_view entry,
+                       const std::filesystem::path& output, const std::span<const std::filesystem::path> includeRoots,
+                       const std::span<const std::pair<std::string, std::string>> defines,
+                       const ShaderImporterSpecification& specification, const std::filesystem::path& workingDirectory,
+                       const std::stop_token cancellation, ShaderCompilerStatistics* statistics)
+    {
+        // Stable virtual paths keep UUID scratch locations out of compiler-generated metadata.
+        std::vector<std::string> arguments{PathToUtf8(source.lexically_relative(workingDirectory)),
+                                           "-s",
+                                           "HLSL",
+                                           "-d",
+                                           std::string(destination),
+                                           "-t",
+                                           std::string(stage),
+                                           "-e",
+                                           std::string(entry),
+                                           "-o",
+                                           PathToUtf8(output.lexically_relative(workingDirectory))};
+        std::vector<std::filesystem::path> compilerRoots{source.parent_path()};
+        for (const auto& root : includeRoots)
+        {
+            if (std::ranges::find(compilerRoots, root) == compilerRoots.end())
+            {
+                compilerRoots.push_back(root);
+            }
+        }
+        for (const auto& root : compilerRoots)
+        {
+            arguments.emplace_back("-I");
+            arguments.push_back(PathToUtf8(root.lexically_relative(workingDirectory)));
+        }
+        for (const auto& [name, value] : defines)
+        {
+            arguments.push_back("-D" + name + '=' + value);
+        }
+        RunShaderCompilerProcess(compiler, arguments, workingDirectory, specification.Timeout, cancellation,
+                                 statistics);
+        return AnchoredFileSystem(output.parent_path(), AnchoredRootPolicy::RejectLink)
+            .Read(output.filename(), specification.MaximumOutputBytes);
     }
 
     void WriteShaderCompilerJobLease(const std::filesystem::path& jobDirectory, const std::uint64_t processId)
@@ -347,7 +445,9 @@ namespace Keire
                             manifest.Target.Format == ShaderCompileBinaryFormat::Metallib);
         if (!d3d12 && !vulkan && !metal)
             throw std::invalid_argument("Shader compile platform, backend, and binary format are incompatible.");
-        if (manifest.Defines.size() > 64U || manifest.Dependencies.size() > 256U)
+        // A graphics lane supports 128 authored defines plus its optional pass selector.
+        constexpr std::size_t maximumLaneDefines = 129;
+        if (manifest.Defines.size() > maximumLaneDefines || manifest.Dependencies.size() > 256U)
             throw std::invalid_argument("Shader compile manifest exceeds define or dependency limits.");
 
         std::vector<std::string_view> defineNames;

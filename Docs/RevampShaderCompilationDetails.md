@@ -54,6 +54,17 @@ No core ProgramArtifact/reflection contract or public ABI was changed in this la
 
 ## File manifest
 
+### October 25 local implementation follow-up
+
+The historical remaining-gate statements above describe the September lane, not today's implementation. Native
+stage/reflection cancellation, single-read literal include snapshots, and production local graphics-import caching
+have since been integrated. Focused Windows Release/ASan checks now count real compiler starts, including zero-start
+warm hits, invalidation, corruption recovery, concurrent storage, and failed/cancelled work. The host compiler also
+forwards ordered include roots and 128 global defines plus a pass selector. See the
+[current shader compilation workflow](ShadersAndMaterials.md#compilation-and-binding-contracts) for bounds and fallbacks.
+Full preprocessor closure, graph value-edit measurements, packaged consumers, and native cross-platform acceptance
+remain open; these local checks do not close the whole revamp.
+
 - `KeireClient/Source/Editor/ShaderGraphDocument.cpp`: cancellation, executable reuse, manifest/include invalidation.
 - `KeireEditorTests/Source/ShaderGraphDocumentTests.cpp`: the four focused regressions above and explicit test includes.
 - `Docs/RevampShaderCompilationDetails.md`: this evidence and the proposed integration text below.

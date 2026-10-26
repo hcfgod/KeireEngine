@@ -1,11 +1,11 @@
 # Kéire Production Readiness Review
 
-Windows Hub 0.4.8 hot patch and Editor 0.4.8 are published through signed catalog sequence 27. Historical platform evidence below
+Windows Hub 0.4.8 and the Editor 0.4.8 script-handoff hotfix are published through signed catalog sequence 28. Historical platform evidence below
 retains its original version and scope; this historical review is not a certification of the current release.
 
 Review date: 2026-08-25
 
-Documentation reconciliation, October 24, 2026: the maintained inventory contains 114 guides and progress records,
+Documentation reconciliation, October 26, 2026: the maintained inventory contains 116 guides and progress records,
 including 22 user-manual guides. Current material authoring uses shader selection and properties in the Inspector;
 use [Materials](Manual/MaterialGraph.md) for the workflow. This documentation audit does not rerun the historical
 production scenarios or promote their scores into a current product certification.
@@ -21,6 +21,50 @@ another.
 
 Review target: sustained commercial and AAA-team production use. A feature existing in source is not equivalent to a
 validated workflow, and a validated preview is not equivalent to a production-proven 1.0 release.
+
+## October 25 Review Follow-Up
+
+This is a source/workflow reconciliation, not a new numeric grade or a release certification. It separates implemented
+contracts from representative workload and platform evidence. The submitted review's broad feature inventory is not
+an acceptance test for every combination of those features.
+
+| Submitted concern | Current evidence and remaining work |
+| --- | --- |
+| Complexity accumulation | Confirmed at inspection: the original `InspectorPanel.cpp` was 95,445 bytes/1,492 lines and `ShaderGraphPreviewEvaluator.cpp` was 93,187 bytes/1,500 lines. Subsequent October 25 batches below separate their responsibilities and add regressions. Passing size budgets alone is not proof of cohesion; continue reviewing the extracted behavior boundaries and their integration. |
+| Data safety and scene-save conflicts | Current source retains loaded revisions, rejects stale publication, stages reload, and presents explicit conflict decisions. The October 25 focused optimized persistence run passed 15 cases/177 assertions using actual DevDist document objects. Historical September findings must not be read as an assertion that the old unchecked overwrite remains; this focused run is not complete user-workflow or cross-platform proof. |
+| Efficient authoring | Search, drag/drop, multi-edit, and recovery are separate workflow gates, not established by panel count. The narrow Game toolbar had a confirmed overflow; responsive controls and a wrapped camera caption address that specific case. Other panels and cross-document workflows still require their own tests. |
+| Managed Editor parity | The [managed API matrix](Scripting/ManagedApiMatrix.md) correctly remains Partial. Native retained-tree presentation, isolated importer execution, layout restoration, safe-mode UI, and package-stage build invocation are explicit integration gates; SDK declarations alone do not close them. |
+| Material and VFX limits | The [material ledger](MaterialParityMatrix.md) and [VFX manifest](VfxParityManifest.json) retain explicit partial/planned/disabled capabilities. Those are feature-delivery work, not permission to silently approximate unsupported authored data or relabel it complete. Each needs implementation, failure-path tests, authoring guidance, and backend acceptance. |
+| C# compute setup | [GPU Compute From C#](Scripting/Compute.md) correctly requires native compilation and `ScriptSystem.RegisterComputeProgram`. A Shader Graph Asset ID is not a registered compute key. The current frame loop polls completion rather than draining the entire device each presentation, but that alone does not establish end-to-end compute/render performance. |
+| Representative performance and long sessions | The [benchmark fixture record](RevampBenchmarkFixtureEvidence.md) still lacks current named-hardware player measurements. Animation crowds, rapid physics spawning, long audio sessions, and large navigation worlds need bounded reproducible fixtures, workload identities, latency distributions, memory/resource trends, cancellation/teardown checks, and retained results. Functional subsystem tests do not prove acceptable performance for hundreds of enemies or all world sizes. |
+
+For each scale run, record the exact source/build identity, backend/driver/hardware, workload size and seed, warm-up and
+measured durations, CPU/frame/GPU timing source, median/P95/P99, memory baseline/peak/end, failures, and shutdown result.
+Keep individual workload results distinct from a combined game and from long-duration soak evidence. Do not invent a
+universal FPS threshold or promote Windows-only evidence into Linux/Vulkan or macOS/Metal acceptance.
+
+The subsequent October 25 preview-evaluator batch separates traversal/cache ownership from six typed node families.
+The original 1,500-line unit is now a 325-line traversal unit; family implementations range from 77 to 326 lines.
+All 125 original dispatch cases are accounted for. The new catalog test reproduced ten pre-existing missing-input
+failures in the original implementation, then verified their canonical `Input`-pin correction. Focused Release and
+ASan runs each passed 20 cases/15,760 assertions, including 13 existing CPU image-preview cases. Supporting engine
+archives were not ASan-instrumented. This addresses that evaluator's concentration and pin mismatch, not the separate
+large Inspector function, GPU/backend parity, all custom-tool integrations, or representative game/soak performance.
+
+The subsequent October 25 Inspector batch separates panel orchestration, entity metadata, headers/order/clipboard,
+built-in cards, reflected fields, and audio diagnostics behind a synchronous private draw context. The actual-panel
+regression reproduced an existing single-entity/locked-Inspector bug: editing a later repeated component changed its
+first instance. Carrying the displayed ordinal through document edits corrected it. Focused Release and ASan runs each
+passed one actual-panel case/513 assertions across sixteen width/selection/lock/edit combinations, including both
+scalar and Enabled edits, pre-mutation undo callbacks, reordered cards, and invalid locked targets.
+Changed draw units and the fixture were instrumented;
+supporting DevDist archives were not. This is not a complete Editor acceptance run or representative workload evidence.
+The actual DevDist desktop check verified a narrow camera/light Inspector, pinning across Hierarchy selection changes,
+unlocking, and an enabled-state edit reaching the scene and being undone. It also exposed a separate remaining gate:
+the restored scene still showed Unsaved and prompted on exit. Do not treat restoration of a visible field as proof that
+the complete saved scene has been recovered. An isolated Arc Tangent graph with non-default canonical Input values
+showed its colored CPU approximation and clear generated-shader diagnostics; this is not GPU execution or a test of
+every extended node in the desktop UI.
 
 ## Historical 0.4.4 Source Candidate
 
@@ -291,7 +335,7 @@ Windows, DEB, and RPM records and states the native-signing limitations explicit
   distinguishes current source capability from immutable 0.3.2 package evidence; Planned rows remain unsupported.
 - Current content authorities are project schema 4, scene schema 6, mesh schema 5, Shader source schema 5, VFX schema 5,
   Material source schema 5, Animator component schema 7, procedural motion profile schema 1, and cooked runtime-manifest
-  schema 4.
+  schema 5 (legacy schema 4 remains readable with default environment time).
 
 ### Documentation and web platform
 

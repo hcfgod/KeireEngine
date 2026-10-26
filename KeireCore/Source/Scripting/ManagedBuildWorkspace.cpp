@@ -1,5 +1,6 @@
 #include "KeireInternal/Scripting/ManagedBuildWorkspace.h"
 #include "KeireInternal/FileSystem.h"
+#include "KeireInternal/VisualStudioDiscovery.h"
 
 #include <algorithm>
 #include <chrono>
@@ -371,17 +372,23 @@ namespace Keire
                                                    const std::map<AssetId, std::string>& names,
                                                    const std::filesystem::path& projectRoot,
                                                    const std::filesystem::path& managedApiProject,
-                                                   const std::map<AssetId, std::filesystem::path>& designTimeProjects)
+                                                   const std::map<AssetId, std::filesystem::path>& designTimeProjects,
+                                                   const std::uint32_t minimumVisualStudioMajor)
         {
             constexpr std::string_view csharpProject = "{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}";
             constexpr std::string_view managedApiGuid = "{4B454952-4D41-4E41-4745-440000000001}";
 
-            std::string text =
-                "Microsoft Visual Studio Solution File, Format Version 12.00\n"
-                "# Visual Studio Version 17\n"
-                "VisualStudioVersion = 17.0.31903.59\n"
-                "MinimumVisualStudioVersion = 10.0.40219.1\n"
-                "# Visual Studio 2022 design-time solution. Runtime builds use .csproj files (net10.0/C# 14.0).\n";
+            const auto major = minimumVisualStudioMajor != 0 ? minimumVisualStudioMajor
+                               : managedApiProject.empty()   ? ManagedWorkspaceMinimumVisualStudioMajor
+                                                             : ManagedWorkspaceCompatibilityVisualStudioMajor;
+            const auto version = std::to_string(major);
+            const auto minimumVersion =
+                version + (major == ManagedWorkspaceCompatibilityVisualStudioMajor ? ".8.0.0" : ".0.0.0");
+            std::string text = "Microsoft Visual Studio Solution File, Format Version 12.00\n";
+            text += "# Visual Studio Version " + version + '\n';
+            text += "VisualStudioVersion = " + minimumVersion + '\n';
+            text += "MinimumVisualStudioVersion = " + minimumVersion + '\n';
+            text += "# Design-time solution. Runtime builds use .csproj files (net10.0/C# 14.0).\n";
 
             if (!managedApiProject.empty())
             {
@@ -507,11 +514,12 @@ namespace Keire
             const std::filesystem::path& managedApi, const std::filesystem::path& managedApiDesignTimeProject,
             const std::filesystem::path& managedEditorApi, const std::filesystem::path& managedGenerator,
             const std::filesystem::path& projectRoot, const std::filesystem::path& projectDirectory,
-            const std::string_view targetFramework, const std::string_view languageVersion)
+            const std::string_view targetFramework, const std::string_view languageVersion,
+            const std::string_view projectSuffix)
         {
             auto designTimeNames = names;
             for (auto& [id, name] : designTimeNames)
-                name += ".VisualStudio";
+                name += projectSuffix;
             auto text = GenerateProject(assembly, designTimeNames, projectRoot, projectDirectory, managedApi,
                                         managedApiDesignTimeProject, managedEditorApi, managedGenerator,
                                         assembly.Definition.Classification == ManagedAssemblyClassification::Editor,
@@ -522,6 +530,7 @@ namespace Keire
                          "<Project>\n  <PropertyGroup>\n"
                          "    <BaseIntermediateOutputPath>obj/$(MSBuildProjectName)/</BaseIntermediateOutputPath>\n"
                          "    <BaseOutputPath>bin/$(MSBuildProjectName)/</BaseOutputPath>\n"
+                         "    <EnableDefaultNoneItems>false</EnableDefaultNoneItems>\n"
                          "  </PropertyGroup>\n  <Import Project=\"Sdk.props\" Sdk=\"Microsoft.NET.Sdk\" />");
             text.insert(text.rfind("</Project>"), "  <Import Project=\"Sdk.targets\" Sdk=\"Microsoft.NET.Sdk\" />\n");
             return text;

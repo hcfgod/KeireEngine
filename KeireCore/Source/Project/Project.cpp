@@ -799,9 +799,16 @@ float4 PSMain(VertexOutput input) : SV_Target0
             throw std::runtime_error("Project requires a newer Kéire engine version.");
         auto implementation = std::make_unique<Impl>(root, std::move(descriptor), mode);
         if (mode == ProjectOpenMode::Exclusive)
+        {
             (void)Detail::RecoverMaterialMigrationFiles(root);
+            (void)Detail::RecoverProjectSettingsFiles(root);
+        }
         else if (Detail::HasPendingMaterialMigration(root))
             throw std::runtime_error("Open this project exclusively to recover its interrupted material upgrade.");
+        else if (Detail::HasPendingProjectSettingsSave(root))
+        {
+            throw std::runtime_error("Open this project exclusively to recover its interrupted settings save.");
+        }
         return CreateRef<Project>(std::move(implementation));
     }
 
@@ -819,7 +826,7 @@ float4 PSMain(VertexOutput input) : SV_Target0
             const auto root = ResolveRoot(path);
             result.Root = root;
             if (std::filesystem::is_regular_file(root / "Library" / "ProjectUpgrades" / "Active" / "journal.json") ||
-                Detail::HasPendingMaterialMigration(root))
+                Detail::HasPendingMaterialMigration(root) || Detail::HasPendingProjectSettingsSave(root))
                 result.Status = ProjectStatus::RecoveryRequired;
 
             const auto document = Json::parse(Detail::ReadTextFile(MarkerPath(root), MaximumProjectFileBytes));

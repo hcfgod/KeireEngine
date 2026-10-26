@@ -181,6 +181,7 @@ namespace KeireEditor
         m_RawShaderPicker.Clear();
         m_TexturePicker.Clear();
         m_Bookmarks.Clear();
+        m_BookmarkMenu = {};
         m_InspectorComment.clear();
         m_InspectorCommentPinned = false;
         m_InspectorName.clear();
@@ -640,7 +641,11 @@ namespace KeireEditor
         if (DrawArrangeMenu(ui, model.Nodes, model.Connections, model.NodeIdentities, model.ConnectionIdentities))
             return;
         ui.SameLine();
-        (void)DrawGraphBookmarkMenu(ui, m_Bookmarks, m_Canvas);
+        if (m_Bookmarks.Open(m_BookmarkDirectory, document.Asset()))
+        {
+            m_BookmarkMenu = {};
+        }
+        (void)DrawGraphBookmarkMenu(ui, m_Bookmarks, m_Canvas, m_BookmarkMenu);
         ui.SameLine();
         ui.TextColored(
             m_Controller.MaterialGraphTheme().MutedText,

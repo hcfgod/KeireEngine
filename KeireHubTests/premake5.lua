@@ -28,6 +28,8 @@ project(HubTestsTarget)
         "../KeireHub/Source/HubMaintenanceWorkflow.cpp",
         "../KeireHub/Source/HubMarketplaceIntegration.cpp",
         "../KeireHub/Source/HubNoticeUi.cpp",
+        "../KeireHub/Source/HubErrorNotice.cpp",
+        "../KeireHub/Source/HubProductFormatting.cpp",
         "../KeireHub/Source/HubPathMigration.cpp",
         "../KeireHub/Source/HubProjectMetadataWorkflow.cpp",
         "../KeireHub/Source/HubProjectCreationChoices.cpp",

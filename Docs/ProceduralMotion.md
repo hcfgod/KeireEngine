@@ -11,6 +11,13 @@ and stores gait, body, grounding, airborne, joint-limit, response, and normalize
 settings and the stride, lift, roll, pelvis, airborne, landing, and arm-swing curves. Invalid or non-finite settings
 cannot be saved. Saving queues an isolated reimport and hot reload.
 
+Each curve supports **Add key**, per-row **Remove key**, and Constant, Linear, or Cubic **Interpolation**. Cubic
+segments expose endpoint tangent slopes. New keys sample the current value and begin with Linear interpolation and
+zero tangents; review cubic shape changes after insertion. Use the [lifetime-curve editing guide](Manual/VfxGraph.md#shape-size-and-color-over-a-particles-lifetime)
+for the shared controls, but interpret these profile curves according to their gait/body role, not particle lifetime.
+Linear curve/color interpolation and key-time normalization avoid intermediate overflow for finite extreme inputs;
+cubic tangent overshoot can still exceed the representable output range.
+
 Assign the profile, a Skeleton, Skinned Mesh, and Rig Definition to an Animator, then select
 `ProceduralHumanoid`. Required semantic bones are pelvis, spine, and complete left/right upper-leg, lower-leg, and foot
 chains. `High`, `Medium`, and `Low` solve expensive pose/contact work every one, two, or four fixed ticks. `Auto` uses

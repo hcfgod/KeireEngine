@@ -924,7 +924,9 @@ namespace Keire::RenderBackend
                         throw std::runtime_error("SDL_CreateGPUTexture(Irradyn history) failed: " + LastSdlError());
                 }
             }
-            const auto& resourceGraph = deferredResources ? DeferredSceneFrameGraph : SceneFrameGraph;
+            const auto& resourceGraph = surface.RequestedBloom
+                                            ? (deferredResources ? DeferredBloomSceneFrameGraph : BloomSceneFrameGraph)
+                                            : (deferredResources ? DeferredSceneFrameGraph : SceneFrameGraph);
             for (auto& workset : result.Worksets)
             {
                 workset.TransientTextures.resize(resourceGraph.Compiled.TransientAllocations.size());
@@ -968,6 +970,12 @@ namespace Keire::RenderBackend
                     return workset.TransientTextures[allocation];
                 };
                 workset.HdrColor = transientTexture(resourceGraph.HdrScene, "HDR scene color");
+                if (resourceGraph.BloomResult)
+                {
+                    workset.BloomExtracted = transientTexture(resourceGraph.BloomExtracted, "bloom extraction");
+                    workset.BloomHorizontal = transientTexture(resourceGraph.BloomHorizontal, "bloom horizontal blur");
+                    workset.BloomResult = transientTexture(resourceGraph.BloomResult, "bloom filtered HDR");
+                }
                 workset.GBufferVelocity = transientTexture(resourceGraph.GBufferVelocity, "motion vectors");
                 if (resourceGraph.Path == RenderPath::DeferredHybrid)
                 {
@@ -1092,7 +1100,8 @@ namespace Keire::RenderBackend
             return;
         }
         if (surface.Width == surface.RequestedWidth && surface.Height == surface.RequestedHeight &&
-            surface.Resources.PublishedColor() && surface.Resources.PublishedTemporalHistory() &&
+            surface.AllocatedBloom == surface.RequestedBloom && surface.Resources.PublishedColor() &&
+            surface.Resources.PublishedTemporalHistory() &&
             (!DeferredCapability.load(std::memory_order_acquire) || surface.Resources.PublishedIrradynHistory()) &&
             surface.Resources.Worksets.size() == Specification.MaximumFramesInFlight)
         {
@@ -1101,7 +1110,8 @@ namespace Keire::RenderBackend
             return;
         }
         surface.ResourcesAvailable.store(false, std::memory_order_release);
-        if (surface.FailedWidth == surface.RequestedWidth && surface.FailedHeight == surface.RequestedHeight)
+        if (surface.FailedWidth == surface.RequestedWidth && surface.FailedHeight == surface.RequestedHeight &&
+            surface.FailedBloom == surface.RequestedBloom)
         {
             surface.PublishSurfacePropertiesSnapshot();
             return;
@@ -1115,6 +1125,7 @@ namespace Keire::RenderBackend
             surface.Width = surface.RequestedWidth;
             surface.Height = surface.RequestedHeight;
             surface.ActualSamples = FromSdlSampleCount(samples);
+            surface.AllocatedBloom = surface.RequestedBloom;
             surface.FailedWidth = 0;
             surface.FailedHeight = 0;
             ++surface.Generation;
@@ -1141,6 +1152,7 @@ namespace Keire::RenderBackend
             surface.ResourcesAvailable.store(false, std::memory_order_release);
             surface.FailedWidth = surface.RequestedWidth;
             surface.FailedHeight = surface.RequestedHeight;
+            surface.FailedBloom = surface.RequestedBloom;
             surface.PublishSurfacePropertiesSnapshot();
             KEIRE_CORE_ERROR("Could not resize render surface '{}': {}", surface.Specification.Name, error.what());
         }

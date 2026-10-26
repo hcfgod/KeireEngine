@@ -10,11 +10,13 @@
 #include "Keire/ECS/Components/SpotLightComponent.h"
 #include "Keire/ECS/Components/TransformComponent.h"
 #include "Keire/Jobs/JobSystem.h"
+#include "Keire/Rendering/Bloom.h"
 #include "Keire/Rendering/RenderSystem.h"
 #include "Keire/Scenes/Scene.h"
 #include "Keire/Streaming/StreamingSystem.h"
 #include "Keire/Ui/RuntimeUi.h"
 #include "Keire/Vfx/VfxVolumeAsset.h"
+#include "KeireInternal/Rendering/DirectionalShadowPolicyInternal.h"
 #include "KeireInternal/Rendering/FrameGraphInternal.h"
 #include "KeireInternal/Rendering/GpuOcclusionPolicyInternal.h"
 #include "KeireInternal/Rendering/GpuVfxPipelineBatchInternal.h"
@@ -30,6 +32,7 @@
 #include "KeireInternal/Rendering/RuntimeUiRenderTargetInternal.h"
 #include "KeireInternal/Rendering/SpatialLightingInternal.h"
 #include "KeireInternal/Rendering/VfxVisibilityPlanInternal.h"
+#include "KeireInternal/Rendering/VolumetricCloudUniforms.h"
 #include "KeireInternal/Ui/RuntimeUiTextInternal.h"
 #include <SDL3/SDL.h>
 #include <algorithm>
@@ -62,6 +65,7 @@ namespace Keire::Detail
 
 namespace Keire::RenderBackend
 {
+    enum class BloomPass : std::uint32_t;
     struct GpuMeshResources final
     {
         struct ShapeSample final
@@ -566,6 +570,9 @@ namespace Keire::RenderBackend
         Matrix4 UnjitteredProjection;
         Matrix4 PreviousViewProjection;
         RenderEnvironmentSettings Environment;
+        std::array<std::array<double, 2>, MaximumCloudLayers> CloudAdvectionPhase{};
+        double StarTwinklePhase = 0.0;
+        VolumetricCloudUniforms CloudVolume;
         std::map<std::string, MaterialPropertyValue, std::less<>> GlobalMaterialProperties;
         SceneLighting Lighting;
         std::vector<SceneDrawItem> DrawItems;
@@ -582,24 +589,6 @@ namespace Keire::RenderBackend
         std::uint64_t FrameIndex = 0;
         bool TemporalHistoryContinuous = false;
     };
-
-    [[nodiscard]] constexpr std::uint32_t DirectionalShadowResolutionForHint(const std::uint32_t projectResolution,
-                                                                             const ShadowResolutionHint hint) noexcept
-    {
-        const auto baseResolution = std::clamp(projectResolution, 256U, 8192U);
-        switch (hint)
-        {
-        case ShadowResolutionHint::Low:
-            return std::max(baseResolution / 4U, 256U);
-        case ShadowResolutionHint::Medium:
-            return std::max(baseResolution / 2U, 256U);
-        case ShadowResolutionHint::VeryHigh:
-            return std::min(baseResolution * 2U, 8192U);
-        case ShadowResolutionHint::High:
-        default:
-            return baseResolution;
-        }
-    }
 
     [[nodiscard]] inline SceneLighting ResolveLighting(const Ref<Scene>& scene)
     {
@@ -1096,6 +1085,14 @@ namespace Keire::RenderBackend
         [[nodiscard]] SDL_GPUShader* CreateGridShader(bool vertex) const;
         [[nodiscard]] SDL_GPUShader* CreateShadowShader(bool vertex) const;
         [[nodiscard]] SDL_GPUShader* CreateToneMapShader(bool vertex) const;
+        [[nodiscard]] SDL_GPUShader* CreateBloomShader(bool vertex) const;
+        void EnsureBloomPipeline();
+        void EnsureCloudVolumePipeline();
+        void RecordCloudVolume(SDL_GPUCommandBuffer* commands, const RenderSurfaceState& surface,
+                               const SceneRenderPacket& packet);
+        SDL_GPUShader* CreateCloudVolumeShader(bool vertex) const;
+        void RecordBloom(SDL_GPUCommandBuffer* commands, const RenderSurfaceState& surface,
+                         const BloomSettings& settings, BloomPass bloomPass);
         [[nodiscard]] SDL_GPUShader* CreateRuntimeUiShader(bool vertex) const;
         [[nodiscard]] SDL_GPUShader* CreateDeferredGBufferShader(bool vertex) const;
         [[nodiscard]] SDL_GPUShader* CreateDeferredLightingShader(bool vertex) const;
@@ -1328,7 +1325,8 @@ namespace Keire::RenderBackend
         void RecordIrradynComposite(SDL_GPUCommandBuffer* commands, RenderSurfaceState& surface,
                                     const SceneRenderPacket& packet);
         void RecordToneMap(SDL_GPUCommandBuffer* commands, const RenderSurfaceState& surface,
-                           RenderAntiAliasingMode antiAliasing, bool temporalHistoryContinuous);
+                           RenderAntiAliasingMode antiAliasing, bool temporalHistoryContinuous,
+                           float bloomIntensity = 0.0F);
         [[nodiscard]] RenderPipelineSet& PipelinesFor(SDL_GPUSampleCount samples);
         [[nodiscard]] SDL_GPUShader* CreateAssetShader(const ShaderAssetDefinition& definition, bool vertex,
                                                        std::string_view passRole = "primary") const;
@@ -1360,6 +1358,8 @@ namespace Keire::RenderBackend
         SDL_GPUGraphicsPipeline* ShadowPipeline = nullptr;
         SDL_GPUGraphicsPipeline* SceneDepthPipeline = nullptr;
         SDL_GPUGraphicsPipeline* ToneMapPipeline = nullptr;
+        SDL_GPUGraphicsPipeline* BloomPipeline = nullptr;
+        SDL_GPUGraphicsPipeline* CloudVolumePipeline = nullptr;
         SDL_GPUGraphicsPipeline* DeferredGBufferPipeline = nullptr;
         SDL_GPUGraphicsPipeline* DepthVelocityPipeline = nullptr;
         SDL_GPUGraphicsPipeline* DeferredLightingPipeline = nullptr;
@@ -1436,7 +1436,7 @@ namespace Keire::RenderBackend
         std::vector<RuntimeUiDrawCommand> CaptureRuntimeUiCommands;
         std::vector<QueuedSceneRequest> CaptureRequests;
         std::unordered_map<MotionHistoryKey, MotionHistoryEntry, MotionHistoryKeyHash> MotionHistory;
-        std::unordered_map<MotionHistoryKey, MotionHistoryEntry, MotionHistoryKeyHash> CameraMotionHistory;
+        std::unordered_map<MotionHistoryKey, CameraMotionHistoryEntry, MotionHistoryKeyHash> CameraMotionHistory;
         std::unordered_map<MotionHistoryKey, SkinMotionHistoryEntry, MotionHistoryKeyHash> SkinMotionHistory;
         std::shared_ptr<RenderFramePacket> ActiveFrame;
         std::vector<SurfaceResources> PendingRetired;
@@ -1487,6 +1487,8 @@ namespace Keire::RenderBackend
         std::vector<InFlightFrame> InFlight;
         StaticSceneFrameGraph SceneFrameGraph;
         StaticSceneFrameGraph DeferredSceneFrameGraph;
+        StaticSceneFrameGraph BloomSceneFrameGraph;
+        StaticSceneFrameGraph DeferredBloomSceneFrameGraph;
         RenderStatistics Statistics;
         std::uint64_t NextSurfaceId = 1;
         std::uint64_t SkinningStaticBuilds = 0;

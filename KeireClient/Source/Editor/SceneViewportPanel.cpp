@@ -272,6 +272,7 @@ void KeireEditor::SceneViewportPanel::Draw(Keire::UiFrame& ui)
         m_Gizmos->SetOcclusionDebugView(renderSurface->OcclusionDebugView());
         m_Gizmos->SetOcclusionDebugMip(renderSurface->OcclusionDebugMip());
         Keire::SceneRenderRequest renderRequest{renderScene, m_RenderView, !playActive, environment};
+        renderRequest.EvaluatedEnvironment = m_Controller.SceneViewportEnvironmentLighting();
         const auto& materialTime = m_Controller.SceneViewportTime();
         renderRequest.MaterialTimeSeconds = static_cast<float>(materialTime.TimeSinceStartup().Seconds());
         renderRequest.MaterialDeltaSeconds = static_cast<float>(materialTime.DeltaTime().Seconds());
@@ -465,6 +466,7 @@ void KeireEditor::SceneViewportPanel::Draw(Keire::UiFrame& ui)
                 *sceneCamera->Camera, *sceneCamera->Transform, previewAspect);
             m_CameraPreviewView->SetCamera(previewCamera);
             Keire::SceneRenderRequest renderRequest{renderScene, m_CameraPreviewView, false, environment};
+            renderRequest.EvaluatedEnvironment = m_Controller.SceneViewportEnvironmentLighting();
             const auto& materialTime = m_Controller.SceneViewportTime();
             renderRequest.MaterialTimeSeconds = static_cast<float>(materialTime.TimeSinceStartup().Seconds());
             renderRequest.MaterialDeltaSeconds = static_cast<float>(materialTime.DeltaTime().Seconds());

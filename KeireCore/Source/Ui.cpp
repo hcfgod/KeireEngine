@@ -407,9 +407,14 @@ namespace Keire
 
     UiTabItemScope UiFrame::BeginTabItem(std::string_view label, bool* open)
     {
+        return BeginTabItem(label, open, false);
+    }
+
+    UiTabItemScope UiFrame::BeginTabItem(std::string_view label, bool* open, const bool select)
+    {
         m_Impl->RequireActive("BeginTabItem");
         const std::string safeLabel(label);
-        const bool visible = ImGui::BeginTabItem(safeLabel.c_str(), open);
+        const bool visible = ImGui::BeginTabItem(safeLabel.c_str(), open, select ? ImGuiTabItemFlags_SetSelected : 0);
         if (visible)
             m_Impl->OpenScope(UiScope::Kind::TabItem);
         return UiTabItemScope(*this, visible);
@@ -1000,7 +1005,15 @@ namespace Keire
             return;
         if (ImGui::BeginTooltip())
         {
+            constexpr float preferredWidthInEm = 35.0F;
+            const auto* viewport = ImGui::GetWindowViewport();
+            const auto& style = ImGui::GetStyle();
+            const float availableWidth =
+                std::max(1.0F, viewport->WorkSize.x - 2.0F * (style.WindowPadding.x + style.DisplaySafeAreaPadding.x));
+            const float wrapWidth = std::min(ImGui::GetFontSize() * preferredWidthInEm, availableWidth);
+            ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + wrapWidth);
             ImGui::TextUnformatted(text.data(), text.data() + text.size());
+            ImGui::PopTextWrapPos();
             ImGui::EndTooltip();
         }
     }

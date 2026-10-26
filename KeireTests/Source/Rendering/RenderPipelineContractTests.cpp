@@ -466,8 +466,8 @@ namespace
     class DirectionalFallbackLayer final : public Keire::Layer
     {
       public:
-        explicit DirectionalFallbackLayer(DirectionalFallbackProbe& probe)
-            : Layer("directional-fallback"), m_Probe(probe)
+        explicit DirectionalFallbackLayer(DirectionalFallbackProbe& probe, const bool evaluatedEnvironment = false)
+            : Layer("directional-fallback"), m_Probe(probe), m_EvaluatedEnvironment(evaluatedEnvironment)
         {
         }
 
@@ -497,6 +497,11 @@ namespace
                     Keire::RenderSystemInternalAccess::LastCapturedDirectionalLightEntity(*Owner().Renderer()));
             }
             Keire::SceneRenderRequest request{m_Active, m_View};
+            if (m_EvaluatedEnvironment && m_Frame == 0U)
+            {
+                request.EvaluatedEnvironment = Keire::EnvironmentLightingSnapshot{
+                    Keire::AssetId(0x454e5649524f4eULL, 1), 1, Keire::EnvironmentDirectionalLight{}};
+            }
             if (m_Frame == 0U)
                 request.AdditionalScenes = {{m_First, {}}, {m_Reloaded, {}}};
             else
@@ -517,6 +522,7 @@ namespace
 
       private:
         DirectionalFallbackProbe& m_Probe;
+        bool m_EvaluatedEnvironment = false;
         Keire::Ref<Keire::Scene> m_Active;
         Keire::Ref<Keire::Scene> m_First;
         Keire::Ref<Keire::Scene> m_Reloaded;
@@ -1510,6 +1516,18 @@ TEST_CASE("Additive directional lighting falls back in stable contribution and r
     CHECK(application.Run() == 0);
     REQUIRE(probe.CapturedLights.size() == 2U);
     CHECK(probe.CapturedLights[0] == probe.FirstLight);
+    CHECK(probe.CapturedLights[1] == probe.ReloadedLight);
+}
+
+TEST_CASE("Evaluated environment replaces authored directional identity and omission restores fallback")
+{
+    UsePipelineDummyVideoDriver();
+    DirectionalFallbackProbe probe;
+    Keire::Application application(PipelineSpecification(2U));
+    (void)application.PushLayer(std::make_unique<DirectionalFallbackLayer>(probe, true));
+    CHECK(application.Run() == 0);
+    REQUIRE(probe.CapturedLights.size() == 2U);
+    CHECK(probe.CapturedLights[0] == 0U);
     CHECK(probe.CapturedLights[1] == probe.ReloadedLight);
 }
 

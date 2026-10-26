@@ -1,6 +1,11 @@
 #include "Keire/Rendering/RenderSystem.h"
 
+#include "KeireInternal/Environment/AtmosphereRecord.h"
+#include "KeireInternal/Environment/BloomRecord.h"
+#include "KeireInternal/Environment/CloudRecord.h"
+#include "KeireInternal/Environment/StarFieldRecord.h"
 #include "KeireInternal/FileSystem.h"
+#include "KeireInternal/ProjectSettingsSerialization.h"
 
 #include <nlohmann/json.hpp>
 
@@ -192,6 +197,10 @@ namespace Keire
 
         void Validate(const RenderEnvironmentSettings& settings)
         {
+            Detail::ValidateAtmosphere(settings.Atmosphere);
+            Detail::ValidateCloudSettings(settings.Clouds);
+            Detail::ValidateBloomSettings(settings.Bloom);
+            Detail::ValidateStarField(settings.Stars);
             if (settings.SchemaVersion != RenderEnvironmentSettingsSchemaVersion)
                 throw std::invalid_argument("Rendering project settings use an unsupported schema version.");
             if (!ValidColor(settings.AmbientColor))
@@ -297,17 +306,32 @@ namespace Keire
             result.RequestedAntiAliasing = RenderAntiAliasingMode::None;
             result.RequestedDynamicResolution = DynamicResolutionMode::Disabled;
         }
+        if (sourceSchemaVersion >= 6U)
+        {
+            result.Atmosphere = Detail::DecodeAtmosphere(document.at("atmosphere"));
+            result.Clouds = Detail::DecodeCloudSettings(document.at("clouds"));
+        }
+        if (sourceSchemaVersion >= 7U)
+        {
+            result.Bloom = Detail::DecodeBloomSettings(document.at("bloom"));
+        }
+        if (sourceSchemaVersion >= 8U)
+        {
+            result.Stars = Detail::DecodeStarField(document.at("stars"));
+        }
+        else if (document.contains("stars"))
+        {
+            throw std::invalid_argument("Star settings require rendering schema 8.");
+        }
         Validate(result);
         return result;
     }
 
     void ValidateRenderEnvironmentSettings(const RenderEnvironmentSettings& settings) { Validate(settings); }
 
-    void SaveRenderEnvironmentSettings(const std::filesystem::path& projectRoot,
-                                       const RenderEnvironmentSettings& settings)
+    std::string Detail::SerializeRenderEnvironmentSettings(const RenderEnvironmentSettings& settings)
     {
         Validate(settings);
-        std::filesystem::create_directories(SettingsPath(projectRoot).parent_path());
         Json document{{"schemaVersion", settings.SchemaVersion},
                       {"ambientColor",
                        {settings.AmbientColor.Red, settings.AmbientColor.Green, settings.AmbientColor.Blue,
@@ -326,6 +350,10 @@ namespace Keire
             document["directionalShadowResolution"] = settings.DirectionalShadowResolution;
             document["directionalShadowSplitLambda"] = settings.DirectionalShadowSplitLambda;
         }
+        document["atmosphere"] = Detail::EncodeAtmosphere(settings.Atmosphere);
+        document["clouds"] = Detail::EncodeCloudSettings(settings.Clouds);
+        document["bloom"] = Detail::EncodeBloomSettings(settings.Bloom);
+        document["stars"] = Detail::EncodeStarField(settings.Stars);
         document["gpuOcclusion"] = GpuOcclusionModeName(settings.GpuOcclusion);
         document["renderPath"] = RenderPathName(settings.RequestedRenderPath);
         document["antiAliasing"] = AntiAliasingModeName(settings.RequestedAntiAliasing);
@@ -336,7 +364,16 @@ namespace Keire
         document["dynamicResolutionTargetMilliseconds"] = settings.DynamicResolutionTargetMilliseconds;
         document["globalIllumination"] = GlobalIlluminationModeName(settings.RequestedGlobalIllumination);
         document["irradynQuality"] = IrradynQualityName(settings.RequestedIrradynQuality);
-        Detail::WriteTextFileAtomically(SettingsPath(projectRoot), document.dump(2) + '\n');
+        return document.dump(2) + '\n';
+    }
+
+    void SaveRenderEnvironmentSettings(const std::filesystem::path& projectRoot,
+                                       const RenderEnvironmentSettings& settings)
+    {
+        const auto text = Detail::SerializeRenderEnvironmentSettings(settings);
+        const auto path = SettingsPath(projectRoot);
+        std::filesystem::create_directories(path.parent_path());
+        Detail::WriteTextFileAtomically(path, text);
     }
 
     RenderFeatureSelection ResolveRenderFeatureSelection(const RenderEnvironmentSettings& settings,

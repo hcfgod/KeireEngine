@@ -7,6 +7,23 @@
 
 ## Scope and assessment
 
+### October 25 Source Follow-Up
+
+The findings below remain the September record, not a fresh failure list. Current `SceneDocument` uses retained source
+revisions and `DocumentSourcePersistence`; its conflict dialog offers Reload, Save Copy, Overwrite, and Cancel.
+`SceneDocumentPersistenceTests.cpp` covers external modification/deletion, rejected publication, recovery retention,
+and staged reload. On October 25 its actual-source focused optimized run passed 15 cases/177 assertions using DevDist
+document objects; this does not certify the complete UI workflow, SDK packages, or other platforms.
+The current shared `EditorAssetFileService` also bounds reads before allocation and detects incomplete/growing reads.
+
+The current application presentation paths call `ComputeDevice::PollCompletions()`, not the per-frame `WaitIdle()`
+described in R4. That removes the historical whole-device-drain claim from the current frame loop; it does not prove
+GPU overlap, renderer/compute resource-sharing parity, or a measured performance gain. R3's representative timing
+requirement and R5/R6's ownership and platform/workflow acceptance requirements still need their own evidence.
+
+See the [current reconciliation](../ProductionReadinessReview.md#october-25-review-follow-up) for the newly submitted
+maintainability, authoring, extensibility, compute, and workload-scale findings. Historical scores below are unchanged.
+
 **Overall: 7/10. Engine foundations: 8/10. Editor maturity: 7/10. Broad production readiness: 6/10.**
 
 Kéire has substantial working engine and authoring infrastructure, with explicit ownership, dependency boundaries,

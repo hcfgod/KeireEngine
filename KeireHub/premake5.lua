@@ -49,7 +49,7 @@ project(ProjectConfig.HUB_TARGET)
     filter "system:windows"
         links { "Advapi32", "Bcrypt", "Wintrust" }
 
-    filter { "system:windows", "configurations:Dist" }
+    filter { "system:windows", "configurations:Dist or DevDist" }
         kind "WindowedApp"
         entrypoint "mainCRTStartup"
 
@@ -66,7 +66,7 @@ project(ProjectConfig.HUB_TARGET)
                                          commandRepositoryRoot)
             }
 
-        filter { "configurations:Release or Profile or Dist" }
+        filter { "configurations:Release or Profile or Dist or DevDist" }
             postbuildcommands
             {
                 CopyFileIfChangedCommand(postBuildPathPrefix .. DependencyManifest.SodiumReleaseRuntime,

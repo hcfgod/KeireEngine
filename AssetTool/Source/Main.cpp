@@ -24,6 +24,9 @@
 #include "KeireInternal/Build/PlayerSupport.h"
 #include "KeireInternal/Build/PlayerSupportCatalog.h"
 #include "KeireInternal/Build/PlayerSupportPackage.h"
+#include "KeireInternal/Environment/EnvironmentLightingSettingsStore.h"
+#include "KeireInternal/Environment/EnvironmentRuntimeManifest.h"
+#include "KeireInternal/Environment/EnvironmentTimeSettingsStore.h"
 #include "KeireInternal/FileSystem.h"
 #include "KeireInternal/Process.h"
 #include "KeireProjectModules/SourceModulePack.h"
@@ -512,6 +515,8 @@ namespace
         const auto& descriptor = project.Descriptor();
         const auto rendering = Keire::LoadRenderEnvironmentSettings(project.Root());
         const auto authoring = Keire::LoadProjectAuthoringSettings(project.Root());
+        const auto environmentTime = Keire::Detail::EnvironmentTimeSettingsStore::Load(project.Root());
+        const auto environmentLighting = Keire::Detail::EnvironmentLightingSettingsStore::Load(project.Root());
         const auto& build = Keire::GetBuildInfo();
         nlohmann::json physicsLayerNames = nlohmann::json::array();
         nlohmann::json physicsCollisionMatrix = nlohmann::json::array();
@@ -542,7 +547,9 @@ namespace
             throw std::logic_error("Project audio output layout is unsupported.");
         }();
         nlohmann::json manifest{
-            {"schemaVersion", 4},
+            {"schemaVersion", Keire::Detail::EnvironmentRuntimeManifest::CurrentSchema},
+            {"environmentTime", Keire::Detail::EnvironmentClockRecord::Encode(environmentTime)},
+            {"environmentLighting", Keire::Detail::EnvironmentLightingRecord::Encode(environmentLighting)},
             {"startupScene", buildScenes.front().ToString()},
             {"buildScenes", std::move(encodedBuildScenes)},
             {"defaultInput",
@@ -580,6 +587,10 @@ namespace
               {"environmentDiffuseIntensity", rendering.EnvironmentDiffuseIntensity},
               {"environmentSpecularIntensity", rendering.EnvironmentSpecularIntensity},
               {"skyVisible", rendering.SkyVisible},
+              {"atmosphere", Keire::Detail::EncodeAtmosphere(rendering.Atmosphere)},
+              {"clouds", Keire::Detail::EncodeCloudSettings(rendering.Clouds)},
+              {"bloom", Keire::Detail::EncodeBloomSettings(rendering.Bloom)},
+              {"stars", Keire::Detail::EncodeStarField(rendering.Stars)},
               {"directionalShadowDistance", rendering.DirectionalShadowDistance},
               {"directionalShadowCascadeCount", rendering.DirectionalShadowCascadeCount},
               {"directionalShadowResolution", rendering.DirectionalShadowResolution},

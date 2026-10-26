@@ -10,14 +10,14 @@ public sealed class UIController : Behaviour
     public static event Action<bool>? VisibilityChanged;
     public static bool IsAnyUiVisible => s_VisibleControllerCount > 0;
 
-    [SerializeField] private Entity? uiPanel;
+    [SerializeField] private Entity? uiPanel = null;
     [SerializeField] private KeireEvent uiOpened = new();
     [SerializeField] private KeireEvent uiClosed = new();
 
-    [SerializeField] private AudioClip? uiAudioClip;
+    [SerializeField] private AudioClip? uiAudioClip = null;
     [SerializeField, StableFieldId("3f100613-b2cc-4dc0-a7b2-216428d75ae1")]
     [Tooltip("Input Actions asset used to toggle the Sandbox UI.")]
-    private InputActionAsset? _inputActions;
+    private InputActionAsset? _inputActions = null;
 
     private IDisposable? _cursorVisibility;
     private InputActionContext? _inputContext;

@@ -148,7 +148,8 @@ std::filesystem::path EditorWorkspaceLayer::AssetBrowserExternalEditor() const
     const auto profiles = KeireEditor::DiscoverExternalEditorProfiles();
     const auto selected =
         std::ranges::find(profiles, settings.ExternalEditorId, &KeireEditor::ExternalEditorProfile::Id);
-    return selected != profiles.end() && selected->Installed ? selected->Executable : std::filesystem::path{};
+    // An explicitly chosen installation must fail visibly if removed, not silently switch IDE versions.
+    return selected != profiles.end() && selected->Installed ? selected->Executable : settings.ExternalEditorExecutable;
 }
 
 void EditorWorkspaceLayer::ConfigureAssetBrowserExternalEditor()

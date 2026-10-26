@@ -59,6 +59,14 @@ missing-project relocation workflow only when the moved descriptor still identif
 The centered toolbar owns **Play**, **Pause**, **Step**, and **Stop**. The Scene, Game, Hierarchy, Inspector, and Project
 panels are separate views of the same current authoring session; closing a panel does not delete its content.
 
+In **Game**, choose **Preview > Free**, **16:9**, **16:10**, or **4:3**. Free fills the available view; fixed ratios
+are centered with letterboxing. **Maximize On Play** expands Game for play testing. **FPS** toggles the workspace's
+performance overlay, while **GPU Bounds** visualizes visibility decisions for the Game camera, independently of Scene.
+These controls wrap onto more rows as you narrow the dock, and the camera caption wraps below them. Widen a dock that
+cannot fit a single label; make it taller if the controls leave too little room for a drawable preview.
+See [Debugging And Profiling](DebuggingAndProfiling.md)
+for the scope and limitations of the performance and bounds displays.
+
 ## Create And Save A Scene
 
 Create a scene with **File > New Scene** or the Project panel's **Create > Scene** menu. Double-click a
@@ -83,6 +91,12 @@ Use this loop when trying an Inspector value:
 5. Save the source scene again.
 
 ## Assets And Undo
+
+When an entity has repeated components, edit the card for the intended instance. In updated source builds, its fields
+and enabled checkbox target that instance rather than the first component of the same type. Multi-selection matches
+component instances by their order within each type, not by their displayed name. Reorder consistently before applying
+a common edit. Lock the Inspector when you want to pin and edit one entity while changing the Hierarchy selection;
+unlock it to resume selection-wide editing.
 
 The Project panel creates Folder, Scene, Material, C# Script, C# ScriptableObject Class, Managed Assembly, graph, VFX,
 and other supported asset types. The ScriptableObject class template includes stable type identity and

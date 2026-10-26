@@ -60,6 +60,9 @@ namespace KeireEditor
         [[nodiscard]] bool Redo();
         void Close() noexcept;
 
+        void PreviewSnapshot(Keire::AssetId snapshot, float weight);
+        void RestorePreview();
+
         [[nodiscard]] bool IsOpen() const noexcept { return m_Host.IsOpen(); }
         [[nodiscard]] Keire::AssetId Asset() const noexcept { return m_Host.Asset(); }
         [[nodiscard]] std::uint64_t Revision() const noexcept { return m_Host.Revision(); }

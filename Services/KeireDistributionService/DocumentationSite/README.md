@@ -5,6 +5,30 @@ Node deployment. Run `npm test` and `npm run build` from this directory. The bui
 syncs canonical documentation, validates local media, generates search, externalizes
 inline content for the production CSP, and checks links and document structure.
 
+## Local documentation validation
+
+`npm test` also compiles the manual, scripting, and editor C# examples and checks generated API references. It needs
+the .NET SDK selected by `Config/Dependencies.lock`, not just any `dotnet` installed globally. If it reports
+`NETSDK1045`, check `dotnet --version` before changing examples or target frameworks. An engine build provisions the
+locked SDK under `Build/Tools/dotnet`; Windows contributors can select that existing SDK in a fresh PowerShell session
+from the repository root:
+
+```powershell
+$docsDependencyLock = Get-Content -Raw Config/Dependencies.lock | ConvertFrom-StringData
+$docsSdkDirectory = Join-Path (Get-Location) "Build/Tools/dotnet/$($docsDependencyLock.DOTNET_SDK_VERSION)"
+if (-not (Test-Path -LiteralPath (Join-Path $docsSdkDirectory 'dotnet.exe'))) {
+    throw 'Build the managed engine tools first to provision the locked SDK.'
+}
+$env:DOTNET_ROOT = $docsSdkDirectory
+$env:PATH = $docsSdkDirectory + ';' + $env:PATH
+Set-Location Services/KeireDistributionService/DocumentationSite
+npm test
+```
+
+For a quick source-only docs pass, run `node Scripts/Tests/test-website-docs.mjs` from the repository root. This checks
+navigation, local links, diagrams, and selected code/documentation contracts; it does not compile C# examples, render
+the site, or replace `npm test` and `npm run build`. Neither command deploys the website.
+
 ## MySQL GitHub authentication
 
 GitHub sign-in uses provider identity IDs, single-use browser-bound state, S256

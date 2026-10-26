@@ -1,14 +1,61 @@
 #include "KeireClient/Editor/AuthoringWidgets.h"
+#include "KeireClientInternal/Editor/AuthoringValueEditing.h"
 #include "KeireClientInternal/Editor/InspectorFieldLayout.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <cstddef>
+#include <limits>
+#include <optional>
 #include <stdexcept>
+#include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
 namespace KeireEditor
 {
+    namespace
+    {
+        template <typename Enum, std::size_t Size>
+        [[nodiscard]] bool DrawInterpolation(Keire::UiFrame& ui, Enum& value,
+                                             const std::array<std::string_view, Size>& names)
+        {
+            bool changed = false;
+            if (auto combo = ui.BeginCombo("Interpolation", names.at(static_cast<std::size_t>(value))); combo)
+            {
+                for (std::size_t index = 0; index < names.size(); ++index)
+                {
+                    const auto candidate = static_cast<Enum>(index);
+                    if (ui.Selectable(names[index], value == candidate) && value != candidate)
+                    {
+                        value = candidate;
+                        changed = true;
+                    }
+                }
+            }
+            return changed;
+        }
+
+        [[nodiscard]] bool DrawFiniteValue(Keire::UiFrame& ui, const std::string_view label, float& value)
+        {
+            double edited = value;
+            constexpr double maximum = std::numeric_limits<float>::max();
+            if (!ui.DragScalar(label, edited, 0.01, -maximum, maximum) || !std::isfinite(edited))
+            {
+                return false;
+            }
+            const float candidate = static_cast<float>(std::clamp(edited, -maximum, maximum));
+            if (candidate == value)
+            {
+                return false;
+            }
+            value = candidate;
+            return true;
+        }
+    } // namespace
+
     void NodeMenuSelection::Open() noexcept
     {
         m_Selected.clear();
@@ -68,50 +115,84 @@ namespace KeireEditor
                                       const float minimumTime, const float maximumTime)
     {
         if (!std::isfinite(minimumTime) || !std::isfinite(maximumTime) || maximumTime <= minimumTime)
+        {
             throw std::invalid_argument("Curve editor time range must be finite and increasing.");
+        }
+        auto editorId = ui.PushId(label);
         ui.Text(Detail::InspectorVisibleLabel(label));
         std::vector<Keire::CurveKey> keys(value.Keys().begin(), value.Keys().end());
+        std::optional<std::size_t> removed;
         bool changed = false;
         for (std::size_t index = 0; index < keys.size(); ++index)
         {
             auto id = ui.PushId(std::to_string(index));
             double time = keys[index].Time;
-            double keyValue = keys[index].Value;
-            const float lower = index == 0 ? minimumTime : std::nextafter(keys[index - 1].Time, maximumTime);
-            const float upper =
-                index + 1 == keys.size() ? maximumTime : std::nextafter(keys[index + 1].Time, minimumTime);
-            if (ui.DragScalar("Time", time, 0.01, lower, upper))
+            const float lower = index == 0 ? std::min(minimumTime, keys[index].Time)
+                                           : std::nextafter(keys[index - 1].Time, keys[index].Time);
+            const float upper = index + 1 == keys.size() ? std::max(maximumTime, keys[index].Time)
+                                                         : std::nextafter(keys[index + 1].Time, keys[index].Time);
+            if (ui.DragScalar("Time", time, 0.01, lower, upper) && std::isfinite(time))
             {
-                keys[index].Time = static_cast<float>(time);
-                changed = true;
+                const float candidate = static_cast<float>(std::clamp(time, double(lower), double(upper)));
+                changed |= candidate != keys[index].Time;
+                keys[index].Time = candidate;
             }
-            ui.SameLine();
-            if (ui.DragScalar("Value", keyValue, 0.01))
+            changed |= DrawFiniteValue(ui, "Value", keys[index].Value);
+            constexpr std::array names{std::string_view("Constant"), std::string_view("Linear"),
+                                       std::string_view("Cubic")};
+            changed |= DrawInterpolation(ui, keys[index].Interpolation, names);
+            if (keys[index].Interpolation == Keire::CurveInterpolation::Cubic ||
+                (index > 0 && keys[index - 1].Interpolation == Keire::CurveInterpolation::Cubic))
             {
-                keys[index].Value = static_cast<float>(keyValue);
-                changed = true;
+                changed |= DrawFiniteValue(ui, "In Tangent", keys[index].InTangent);
+                changed |= DrawFiniteValue(ui, "Out Tangent", keys[index].OutTangent);
+            }
+            if (ui.Button("Remove key"))
+            {
+                removed = index;
             }
         }
+        if (removed)
+        {
+            keys.erase(keys.begin() + static_cast<std::ptrdiff_t>(*removed));
+            changed = true;
+        }
         if (changed)
+        {
             value.SetKeys(std::move(keys));
+        }
+        const auto insertion =
+            Detail::FindAuthoringKeyTime(value.Keys(), minimumTime, maximumTime, Keire::Curve1D::MaximumKeys);
+        auto disabled = ui.BeginDisabled(!insertion);
+        if (ui.Button("Add key"))
+        {
+            changed |= Detail::InsertAuthoringCurveKey(value, minimumTime, maximumTime);
+        }
         return changed;
     }
 
     bool AuthoringValueEditors::Gradient(Keire::UiFrame& ui, const std::string_view label, Keire::ColorGradient& value)
     {
+        auto editorId = ui.PushId(label);
         ui.Text(Detail::InspectorVisibleLabel(label));
         std::vector<Keire::ColorGradientKey> keys(value.Keys().begin(), value.Keys().end());
-        bool changed = false;
+        auto interpolation = value.Interpolation();
+        constexpr std::array names{std::string_view("Constant"), std::string_view("Linear")};
+        bool changed = DrawInterpolation(ui, interpolation, names);
+        std::optional<std::size_t> removed;
         for (std::size_t index = 0; index < keys.size(); ++index)
         {
             auto id = ui.PushId(std::to_string(index));
             double time = keys[index].Time;
-            const float lower = index == 0 ? 0.0F : std::nextafter(keys[index - 1].Time, 1.0F);
-            const float upper = index + 1 == keys.size() ? 1.0F : std::nextafter(keys[index + 1].Time, 0.0F);
-            if (ui.DragScalar("Time", time, 0.01, lower, upper))
+            const float lower =
+                index == 0 ? std::min(0.0F, keys[index].Time) : std::nextafter(keys[index - 1].Time, keys[index].Time);
+            const float upper = index + 1 == keys.size() ? std::max(1.0F, keys[index].Time)
+                                                         : std::nextafter(keys[index + 1].Time, keys[index].Time);
+            if (ui.DragScalar("Time", time, 0.01, lower, upper) && std::isfinite(time))
             {
-                keys[index].Time = static_cast<float>(time);
-                changed = true;
+                const float candidate = static_cast<float>(std::clamp(time, double(lower), double(upper)));
+                changed |= candidate != keys[index].Time;
+                keys[index].Time = candidate;
             }
             Keire::UiColor color{keys[index].Value.Red, keys[index].Value.Green, keys[index].Value.Blue,
                                  keys[index].Value.Alpha};
@@ -120,9 +201,28 @@ namespace KeireEditor
                 keys[index].Value = {color.Red, color.Green, color.Blue, color.Alpha};
                 changed = true;
             }
+            if (ui.Button("Remove key"))
+            {
+                removed = index;
+            }
+        }
+        if (removed)
+        {
+            keys.erase(keys.begin() + static_cast<std::ptrdiff_t>(*removed));
+            changed = true;
         }
         if (changed)
+        {
             value.SetKeys(std::move(keys));
+            value.SetInterpolation(interpolation);
+        }
+        const auto insertion =
+            Detail::FindAuthoringKeyTime(value.Keys(), 0.0F, 1.0F, Keire::ColorGradient::MaximumKeys);
+        auto disabled = ui.BeginDisabled(!insertion);
+        if (ui.Button("Add key"))
+        {
+            changed |= Detail::InsertAuthoringGradientKey(value);
+        }
         return changed;
     }
 } // namespace KeireEditor

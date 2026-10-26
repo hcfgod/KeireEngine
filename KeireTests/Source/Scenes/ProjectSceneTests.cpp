@@ -1,6 +1,8 @@
 #include "KeireTests/TestSupport.h"
 
 #include "KeireInternal/FileSystem.h"
+#include "KeireInternal/Spatial/FrameRegistry.h"
+#include "KeireInternal/Spatial/SceneRuntimeSpatialAccess.h"
 
 #include "Keire/ECS/Components/CameraComponent.h"
 #include "Keire/ECS/Components/UiDocumentComponent.h"
@@ -556,6 +558,79 @@ namespace
         bool AdditiveActivated = false;
         bool FirstUnloaded = false;
         bool RejectedWithoutReplacingActive = false;
+        std::uint64_t AttachmentsAfterRejection = 0;
+        Keire::WeakRef<Keire::SceneRuntimeWorld> World;
+        int StartupQueries = 0;
+        bool StartupQueriesResolved = true;
+        bool ThrowDuringRejectedStartup = false;
+        bool QueueFromAwake = false;
+        bool NestedLoadDeferred = false;
+        bool RecursiveProcessingRejected = false;
+        bool PauseBeforeLoad = false;
+        bool ActivatedPaused = false;
+        bool PausedTicksIgnored = false;
+        bool LoadedScenesSteppedTogether = false;
+        bool PausePreservedOnFailure = false;
+        int FixedCalls = 0;
+        int UpdateCalls = 0;
+        Keire::Ref<Keire::SceneRuntimeLoadOperation> NestedLoad;
+    };
+
+    class RuntimeWorldStartupProbe final : public Keire::Component
+    {
+      public:
+        explicit RuntimeWorldStartupProbe(std::shared_ptr<RuntimeWorldProbe> probe)
+            : Component(StaticType()), m_Probe(std::move(probe))
+        {
+        }
+
+        static constexpr Keire::ComponentTypeId StaticType() noexcept
+        {
+            return Keire::ComponentTypeId(Keire::AssetId(0x576f726c64537461ULL, 1));
+        }
+
+      protected:
+        void FixedUpdate(float) override { ++m_Probe->FixedCalls; }
+
+        void Update(float) override { ++m_Probe->UpdateCalls; }
+
+        void Awake() override
+        {
+            ++m_Probe->StartupQueries;
+            const auto world = m_Probe->World.Lock();
+            const auto session =
+                world ? world->SessionForWorld(Owner().World()) : Keire::Ref<Keire::SceneRuntimeSession>{};
+            m_Probe->StartupQueriesResolved =
+                m_Probe->StartupQueriesResolved && session && session->RuntimeScene()->FindEntity(Owner().Id());
+            if (world && m_Probe->QueueFromAwake && m_Probe->StartupQueries == 1)
+            {
+                m_Probe->NestedLoad = world->Load(m_Probe->Additive, Keire::SceneLoadMode::Additive);
+                // Force repeated queue growth inside the startup callback.
+                for (int index = 0; index < 64; ++index)
+                {
+                    world->Load(Keire::AssetId::Generate(), Keire::SceneLoadMode::Additive)->Cancel();
+                }
+                const auto active = world->Active();
+                const auto loaded = world->LoadedScenes();
+                try
+                {
+                    world->Process();
+                }
+                catch (const std::logic_error&)
+                {
+                    m_Probe->RecursiveProcessingRejected =
+                        world->Active() == active && world->LoadedScenes() == loaded &&
+                        m_Probe->NestedLoad->State() == Keire::SceneLoadState::Queued;
+                }
+            }
+            if (m_Probe->ThrowDuringRejectedStartup && m_Probe->StartupQueries == 3)
+            {
+                throw std::runtime_error("Rejected scene startup failure");
+            }
+        }
+
+      private:
+        std::shared_ptr<RuntimeWorldProbe> m_Probe;
     };
 
     [[nodiscard]] bool ValidateRuntimeWorldScene(const Keire::Ref<Keire::Scene>& scene)
@@ -576,7 +651,16 @@ namespace
         {
             m_World = Keire::CreateRef<Keire::SceneRuntimeWorld>(
                 Keire::SceneRuntimeWorldSpecification{.Scenes = Owner().Scenes(), .Assets = Owner().Assets()});
+            m_Probe->World = m_World;
+            if (m_Probe->PauseBeforeLoad)
+            {
+                m_World->Pause();
+            }
             m_First = m_World->Load(m_Probe->First);
+            if (m_Probe->QueueFromAwake)
+            {
+                m_World->Load(Keire::AssetId::Generate(), Keire::SceneLoadMode::Additive)->Cancel();
+            }
         }
 
         void OnDetach() noexcept override
@@ -592,7 +676,15 @@ namespace
             if (m_Stage == Stage::First && m_First->State() == Keire::SceneLoadState::Ready)
             {
                 m_Probe->FirstHandle = m_First->Result();
-                m_Additive = m_World->Load(m_Probe->Additive, Keire::SceneLoadMode::Additive);
+                if (m_Probe->QueueFromAwake)
+                {
+                    m_Additive = m_Probe->NestedLoad;
+                    m_Probe->NestedLoadDeferred = m_Additive && m_Additive->State() == Keire::SceneLoadState::Queued;
+                }
+                else
+                {
+                    m_Additive = m_World->Load(m_Probe->Additive, Keire::SceneLoadMode::Additive);
+                }
                 m_Stage = Stage::Additive;
                 return;
             }
@@ -602,6 +694,17 @@ namespace
                 m_Probe->AdditiveActivated =
                     m_Probe->FirstHandle != m_Probe->AdditiveHandle && m_World->Active() == m_Probe->FirstHandle &&
                     m_World->LoadedScenes().size() == 2 && m_World->Find(m_Probe->AdditiveHandle)->Name() == "Additive";
+                if (m_Probe->PauseBeforeLoad)
+                {
+                    m_Probe->ActivatedPaused =
+                        m_World->Session(m_Probe->FirstHandle)->State() == Keire::ScenePlayState::Paused &&
+                        m_World->Session(m_Probe->AdditiveHandle)->State() == Keire::ScenePlayState::Paused;
+                    m_World->FixedUpdate(0.02F);
+                    m_World->Update(0.02F);
+                    m_Probe->PausedTicksIgnored = m_Probe->FixedCalls == 0 && m_Probe->UpdateCalls == 0;
+                    m_Probe->LoadedScenesSteppedTogether =
+                        m_World->Step(0.02F) && m_Probe->FixedCalls == 2 && m_Probe->UpdateCalls == 2;
+                }
                 (void)m_World->SetActive(m_Probe->AdditiveHandle);
                 m_Stage = Stage::ActivateAdditive;
                 return;
@@ -626,6 +729,11 @@ namespace
                 m_Probe->RejectedWithoutReplacingActive = m_World->Active() == m_Probe->AdditiveHandle &&
                                                           m_World->IsLoaded(m_Probe->AdditiveHandle) &&
                                                           m_World->LoadedScenes().size() == 1;
+                const auto& frames = Keire::Detail::SceneRuntimeSpatialAccess::Frames(*m_World);
+                m_Probe->AttachmentsAfterRejection =
+                    frames.AttachmentCount(frames.Find(Keire::Detail::SceneRuntimeSpatialAccess::RootFrame));
+                m_Probe->PausePreservedOnFailure =
+                    m_World->Session(m_Probe->AdditiveHandle)->State() == Keire::ScenePlayState::Paused;
                 Owner().RequestExit();
             }
         }
@@ -1606,19 +1714,38 @@ TEST_CASE("Worker cancellation wins while a scene load is still decoding")
 TEST_CASE("Runtime scene activation failure preserves the previous playable scene transactionally")
 {
     UseDummyVideoDriver();
+    auto probe = std::make_shared<RuntimeWorldProbe>();
+    SUBCASE("validation rejection") {}
+    SUBCASE("startup callback failure") { probe->ThrowDuringRejectedStartup = true; }
+    SUBCASE("loads queued from Awake") { probe->QueueFromAwake = true; }
+    SUBCASE("asynchronous activation inherits world pause") { probe->PauseBeforeLoad = true; }
+    auto components = Keire::ComponentRegistry::CreateDefault();
+    Keire::ComponentRegistration registration;
+    registration.Type = RuntimeWorldStartupProbe::StaticType();
+    registration.Name = "Runtime world startup probe";
+    registration.Factory = [probe]
+    { return Keire::Ref<Keire::Component>(Keire::CreateRef<RuntimeWorldStartupProbe>(probe)); };
+    registration.Serialize = [](const Keire::Component&) { return Keire::ComponentPropertyBag{}; };
+    registration.Deserialize = [](Keire::Component&, const Keire::ComponentPropertyBag&, std::uint32_t) {};
+    components->Register(std::move(registration));
+    const auto definition = [&](const std::string& name)
+    {
+        auto scene = Keire::CreateRef<Keire::Scene>(Keire::AssetId::Generate(),
+                                                    Keire::SceneAsset::EmptyDefinition(name), components);
+        (void)scene->CreateEntity("Startup query").AddComponent<RuntimeWorldStartupProbe>();
+        return Keire::SceneAsset::Encode(scene->Snapshot());
+    };
     TemporaryDirectory directory("SceneRuntimeWorldFailureTests");
     std::filesystem::create_directories(directory.Path / "Assets");
     Keire::AssetDatabaseSpecification databaseSpecification{.ProjectRoot = directory.Path};
     databaseSpecification.Importers.push_back(Keire::CreateSceneAssetImporter());
     auto database = Keire::CreateRef<Keire::AssetDatabase>(std::move(databaseSpecification));
-    const auto first = database->CreateAsset("First.keirescene", Keire::CreateSceneAssetImporter(),
-                                             Keire::SceneAsset::Encode(Keire::SceneAsset::EmptyDefinition("First")));
+    const auto first =
+        database->CreateAsset("First.keirescene", Keire::CreateSceneAssetImporter(), definition("First"));
     const auto additive =
-        database->CreateAsset("Additive.keirescene", Keire::CreateSceneAssetImporter(),
-                              Keire::SceneAsset::Encode(Keire::SceneAsset::EmptyDefinition("Additive")));
+        database->CreateAsset("Additive.keirescene", Keire::CreateSceneAssetImporter(), definition("Additive"));
     const auto rejected =
-        database->CreateAsset("Rejected.keirescene", Keire::CreateSceneAssetImporter(),
-                              Keire::SceneAsset::Encode(Keire::SceneAsset::EmptyDefinition("Rejected")));
+        database->CreateAsset("Rejected.keirescene", Keire::CreateSceneAssetImporter(), definition("Rejected"));
     const auto catalog = database->ImportAll().CatalogPath;
 
     Keire::ApplicationSpecification specification;
@@ -1629,7 +1756,7 @@ TEST_CASE("Runtime scene activation failure preserves the previous playable scen
     specification.Ui.Mode = Keire::UiMode::Disabled;
     specification.ManageLogging = false;
     specification.TargetFrameRate = 240;
-    auto probe = std::make_shared<RuntimeWorldProbe>();
+    specification.Scenes.Components = components;
     probe->First = first;
     probe->Additive = additive;
     probe->Rejected = rejected;
@@ -1640,6 +1767,23 @@ TEST_CASE("Runtime scene activation failure preserves the previous playable scen
     CHECK(probe->AdditiveActivated);
     CHECK(probe->FirstUnloaded);
     CHECK(probe->RejectedWithoutReplacingActive);
+    CHECK(probe->AttachmentsAfterRejection == 1);
+    CHECK(probe->StartupQueries == 3);
+    CHECK(probe->StartupQueriesResolved);
+    if (probe->PauseBeforeLoad)
+    {
+        CHECK(probe->ActivatedPaused);
+        CHECK(probe->PausedTicksIgnored);
+        CHECK(probe->LoadedScenesSteppedTogether);
+        CHECK(probe->PausePreservedOnFailure);
+    }
+    if (probe->QueueFromAwake)
+    {
+        CHECK(probe->NestedLoadDeferred);
+        CHECK(probe->RecursiveProcessingRejected);
+        REQUIRE(probe->NestedLoad);
+        CHECK(probe->NestedLoad->State() == Keire::SceneLoadState::Ready);
+    }
 }
 
 TEST_CASE("Newer scene importers upgrade older metadata revisions but reject future revisions")

@@ -148,7 +148,7 @@ Current ledger: **145 rows — 100 Complete, 9 Partial, and 36 Planned**.
 | ME-PF-002 | Texture resource hard limits | Complete | P0 | Portable material texture budget is validated. |
 | ME-PF-003 | Keyword/variant hard limits | Complete | P0 | Deterministic maximum and explicit diagnostic. |
 | ME-PF-004 | Compile cancellation/supersession | Complete | P0 | Generation-checked background jobs. |
-| ME-PF-005 | Derived-data shader cache | Partial | P0 | Asset import caching is implemented; the canonical ShaderCompileWorkKey helper has no production caller, so full compiler-work-key integration remains. |
+| ME-PF-005 | Derived-data shader cache | Partial | P0 | Production graphics imports now use canonical work keys, retained source/runtime bytes, and bounded validated local storage; real compiler-start tests pass cold/warm/invalidation on Windows. Full preprocessor/toolchain closure, graph value-edit measurements, native platform matrix, and packaged consumer gates remain. |
 | ME-PF-006 | Reference-scene CPU budget | Planned | P0 | Define hardware tiers and measured thresholds. |
 | ME-PF-007 | Reference-scene GPU budget | Planned | P0 | Define hardware tiers and measured thresholds. |
 | ME-PF-008 | Shader compile-time gate | Planned | P0 | Add cold/warm percentile validation. |

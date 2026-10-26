@@ -9,31 +9,33 @@ $dependencyLock = Get-DependencyLock
 $dotnet = Join-Path $root "Build\Tools\dotnet\$($dependencyLock.DOTNET_SDK_VERSION)\dotnet.exe"
 $project = Join-Path $root "KeireEditorManaged\Keire.Editor.Managed.csproj"
 $generatorProject = Join-Path $root "KeireManaged.Generators\Keire.Managed.Generators.csproj"
+$designTimeProject = Join-Path $root "Scripts\ManagedDesignTime\Keire.Editor.Managed.DesignTime.csproj"
 $sourceRoots = @(
     (Join-Path $root "KeireManaged"),
     (Join-Path $root "KeireEditorManaged"),
-    (Join-Path $root "KeireManaged.Generators")
+    (Join-Path $root "KeireManaged.Generators"),
+    (Join-Path $root "Scripts\ManagedDesignTime")
 )
 $output = Join-Path $root "Build\Managed"
 $intermediate = Join-Path $root "Build\Intermediates\Managed\"
 $assembly = Join-Path $output "Keire.Managed.dll"
 $editorAssembly = Join-Path $output "Keire.Editor.Managed.dll"
 $generatorAssembly = Join-Path $output "Keire.Managed.Generators.dll"
+$designTimeOutput = Join-Path $output "DesignTime"
+$designTimeAssembly = Join-Path $designTimeOutput "Keire.Managed.dll"
+$designTimeEditorAssembly = Join-Path $designTimeOutput "Keire.Editor.Managed.dll"
+$requiredOutputs = @($assembly, $editorAssembly, $generatorAssembly, $designTimeAssembly, $designTimeEditorAssembly)
 
-if ((Test-Path -LiteralPath $assembly -PathType Leaf) -and
-    (Test-Path -LiteralPath $editorAssembly -PathType Leaf) -and
-    (Test-Path -LiteralPath $generatorAssembly -PathType Leaf)) {
-    $assemblyWriteTime = @(
-        (Get-Item -LiteralPath $assembly).LastWriteTimeUtc,
-        (Get-Item -LiteralPath $editorAssembly).LastWriteTimeUtc,
-        (Get-Item -LiteralPath $generatorAssembly).LastWriteTimeUtc
-    ) | Sort-Object | Select-Object -First 1
+if (@($requiredOutputs | Where-Object { -not (Test-Path -LiteralPath $_ -PathType Leaf) }).Count -eq 0) {
+    $assemblyWriteTime = $requiredOutputs | ForEach-Object {
+        (Get-Item -LiteralPath $_).LastWriteTimeUtc
+    } | Sort-Object | Select-Object -First 1
     $managedInputs = @()
     foreach ($sourceRoot in $sourceRoots) {
         $managedInputs += @((Get-Item -LiteralPath $sourceRoot))
         $managedInputs += @(Get-ChildItem -LiteralPath $sourceRoot -Recurse -Force | Where-Object {
                 $_.FullName -notmatch '[\\/](?:bin|obj|Build)(?:[\\/]|$)' -and
-                ($_.PSIsContainer -or $_.Extension -in @(".cs", ".csproj"))
+                ($_.PSIsContainer -or $_.Extension -in @(".cs", ".csproj", ".props", ".targets", ".md"))
             })
     }
     $newerInput = $managedInputs | Where-Object {
@@ -65,17 +67,17 @@ if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
 }
 
-if (-not (Test-Path -LiteralPath $assembly -PathType Leaf)) {
-    throw "The managed runtime API build did not produce: $assembly"
-}
-if (-not (Test-Path -LiteralPath $editorAssembly -PathType Leaf)) {
-    throw "The managed editor API build did not produce: $editorAssembly"
-}
-if (-not (Test-Path -LiteralPath $generatorAssembly -PathType Leaf)) {
-    throw "The managed generator build did not produce: $generatorAssembly"
+& $dotnet build $designTimeProject --nologo --configuration Release --output $designTimeOutput
+if ($LASTEXITCODE -ne 0) {
+    exit $LASTEXITCODE
 }
 
-(Get-Item -LiteralPath $assembly).LastWriteTimeUtc = [DateTime]::UtcNow
-(Get-Item -LiteralPath $editorAssembly).LastWriteTimeUtc = [DateTime]::UtcNow
-(Get-Item -LiteralPath $generatorAssembly).LastWriteTimeUtc = [DateTime]::UtcNow
+foreach ($requiredOutput in $requiredOutputs) {
+    if (-not (Test-Path -LiteralPath $requiredOutput -PathType Leaf)) {
+        throw "The managed build did not produce: $requiredOutput"
+    }
+}
+foreach ($requiredOutput in $requiredOutputs) {
+    (Get-Item -LiteralPath $requiredOutput).LastWriteTimeUtc = [DateTime]::UtcNow
+}
 $global:LASTEXITCODE = 0

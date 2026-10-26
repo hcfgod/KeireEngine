@@ -39,10 +39,18 @@ target_directory="$root/Build/Bin/$configuration-$system-$output_architecture/$t
 [[ -d "$target_directory" ]] || exit 0
 
 coral_configuration=Debug
-[[ "$configuration" == Release || "$configuration" == Profile || "$configuration" == Dist ]] && coral_configuration=Release
+[[ "$configuration" == Release || "$configuration" == Profile || "$configuration" == Dist || "$configuration" == DevDist ]] && coral_configuration=Release
 coral_directory="$root/Build/Dependencies/coral/Build/$coral_configuration"
 managed_directory="$target_directory/Managed"
 dotnet_root="$root/Build/Dependencies/dotnet-sdk"
+if [[ "$include_editor_api" == true ]]; then
+  for file in Keire.Managed.dll Keire.Editor.Managed.dll; do
+    [[ -f "$root/Build/Managed/DesignTime/$file" ]] || {
+      printf 'The managed design-time API is missing: %s\n' "$file" >&2
+      exit 1
+    }
+  done
+fi
 files=(Coral.Managed.dll Coral.Managed.deps.json Coral.Managed.runtimeconfig.json)
 for file in "${files[@]}"; do
   [[ -f "$coral_directory/$file" ]] || {
@@ -60,6 +68,9 @@ if [[ "$include_editor_api" == true ]]; then
     "$managed_directory/Keire.Editor.Managed.dll"
   copy_file_if_changed "$root/Build/Managed/Keire.Managed.Generators.dll" \
     "$managed_directory/Keire.Managed.Generators.dll"
+  for file in Keire.Managed.dll Keire.Editor.Managed.dll; do
+    copy_file_if_changed "$root/Build/Managed/DesignTime/$file" "$managed_directory/DesignTime/$file"
+  done
 fi
 
 hostfxr_directory="$(find "$dotnet_root/host/fxr" -mindepth 1 -maxdepth 1 -type d -print | sort | tail -n 1)"
@@ -77,5 +88,7 @@ mkdir -p "$bundled_host" "$bundled_runtime"
 copy_tree_if_changed "$hostfxr_directory" "$bundled_host"
 copy_tree_if_changed "$core_runtime_directory" "$bundled_runtime"
 for notice in LICENSE.txt ThirdPartyNotices.txt; do
-  [[ -f "$dotnet_root/$notice" ]] && copy_file_if_changed "$dotnet_root/$notice" "$bundled_root/$notice"
+  if [[ -f "$dotnet_root/$notice" ]]; then
+    copy_file_if_changed "$dotnet_root/$notice" "$bundled_root/$notice"
+  fi
 done

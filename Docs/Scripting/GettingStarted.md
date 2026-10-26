@@ -240,6 +240,36 @@ script open, so new, renamed, moved, or failing sources remain part of their ass
 The editor's Visual Studio authoring façade may use a compatibility target for design-time support. Runtime gameplay
 builds still use the engine's .NET 10 and C# 14 policy.
 
+Visual Studio 2022 (17.8 or newer) and Visual Studio 2026 are supported choices. The Editor uses the executable you
+configured; automatic selection prefers the newest compatible installed Visual Studio. Other configured supported
+external editors keep their own opening workflow.
+
+Choose **Edit > Project Settings > Code Editor > External Editor**. Installed Visual Studio versions have separate
+entries with their edition and version; **Visual Studio (latest installed)** follows the newest supported installation.
+For another installation or editor, select **Custom Executable**, enter its executable path, and leave the field or
+choose **Use Custom Editor**. Invalid paths report an error without replacing the saved selection. Use **Rescan Editors**
+after installing an IDE. Choosing a specific Visual Studio installation does not silently switch to another version
+if that installation is later removed.
+Project Settings Undo/Redo restores the displayed editor choice and executable path along with the preference.
+An unfinished custom path remains a draft until validated; unrelated settings changes do not replace that draft.
+
+Visual Studio 2026 uses the primary project-root solution. Visual Studio 2022 uses a generated companion solution
+under `Library/Ide/VisualStudio2022`, with the same assigned script inventory and engine/editor API surface compiled
+from the same engine sources for .NET 8. Its local SDK selection uses an installed .NET 8 SDK, separate from the runtime
+project's .NET 10 SDK selection. Install Visual Studio's C#/.NET development tools and a .NET 8 SDK when using VS 2022;
+C++ tooling alone does not provide C# IntelliSense. The compatibility workspace uses C# 12 for design-time analysis;
+authoring features specific to newer C# versions need a newer IDE. Runtime gameplay builds remain .NET 10/C# 14.
+
+Opening a script waits for its loaded C# project and resolved engine reference, then opens the project-owned item.
+Only scripts assigned to an assembly appear in that design-time project; unrelated `.cs` files and asset metadata
+are not added as miscellaneous content to every project. Engine types should resolve in Quick Info, completion,
+and **Go To Definition** after the workspace loads; semantic colors depend on your IDE theme.
+
+If the selected executable is too old or the VS 2022 workspace is unavailable, the Editor reports guidance rather
+than launching an unsupported IDE or opening a loose file. Regenerate project files or repair the Editor installation
+if its design-time APIs are missing. Do not edit generated target frameworks to hide a reference error: runtime
+compilation and IDE design-time support are separate contracts.
+
 ## Build Output And Last-Good Behavior
 
 Successful builds are published below:

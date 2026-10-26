@@ -974,6 +974,26 @@ function Get-WindowsExecutableSubsystem {
     }
 }
 
+function Read-WindowsCapturedOutput {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    # Start-Process redirection can retain its writer briefly after the child exits. Keep exclusive
+    # read semantics so we never return a partially written stream; retry only sharing/lock violations.
+    $deadline = [Diagnostics.Stopwatch]::StartNew()
+    while ($true) {
+        try {
+            return [IO.File]::ReadAllText($Path)
+        }
+        catch [IO.IOException] {
+            $nativeError = $_.Exception.HResult -band 0xFFFF
+            if ($nativeError -notin @(32, 33) -or $deadline.Elapsed.TotalSeconds -ge 5.0) {
+                throw
+            }
+            Start-Sleep -Milliseconds 20
+        }
+    }
+}
+
 function Invoke-WindowsExecutableCapture {
     param(
         [Parameter(Mandatory = $true)][string]$Path,
@@ -1034,8 +1054,8 @@ function Invoke-WindowsExecutableCapture {
         $process = $null
         return [pscustomobject]@{
             ExitCode = $exitCode
-            StandardOutput = [IO.File]::ReadAllText($standardOutput)
-            StandardError = [IO.File]::ReadAllText($standardError)
+            StandardOutput = Read-WindowsCapturedOutput -Path $standardOutput
+            StandardError = Read-WindowsCapturedOutput -Path $standardError
         }
     }
     finally {
@@ -1503,11 +1523,11 @@ function Remove-IncompatibleBuildBinaries {
     if ($preserveOutputs) { return }
 
     $outputArchitecture = Get-ArchitectureOutputName $normalizedArchitecture
-    $targets = @("Debug", "Release", "Profile", "Dist", "DebugASan", "DebugUBSan", "DebugTSan", "Coverage") |
+    $targets = @("Debug", "Release", "Profile", "Dist", "DevDist", "DebugASan", "DebugUBSan", "DebugTSan", "Coverage") |
         ForEach-Object { Join-Path $Root "Build\Bin\$_-windows-$outputArchitecture" } |
         Where-Object { Get-Item -LiteralPath $_ -Force -ErrorAction SilentlyContinue }
     $intermediateBase = Join-Path $Root "Build\Intermediates"
-    $intermediateTargets = @("Debug", "Release", "Profile", "Dist", "DebugASan", "DebugUBSan", "DebugTSan", "Coverage") |
+    $intermediateTargets = @("Debug", "Release", "Profile", "Dist", "DevDist", "DebugASan", "DebugUBSan", "DebugTSan", "Coverage") |
         ForEach-Object { Join-Path $intermediateBase "$_-windows-$outputArchitecture-$Toolset" } |
         Where-Object { Get-Item -LiteralPath $_ -Force -ErrorAction SilentlyContinue }
     if ($targets.Count -eq 0 -and $intermediateTargets.Count -eq 0) { return }

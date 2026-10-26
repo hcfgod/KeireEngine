@@ -5,6 +5,8 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
+#include <ostream>
 #include <ranges>
 #include <span>
 #include <stdexcept>
@@ -233,4 +235,93 @@ TEST_CASE("Audio Mixer stable-ID removals clean dependent authored state")
                                [](const auto& parameter) { return parameter.Target == Id(20); }));
     CHECK(document.Definition().Ducking.empty());
     CHECK_THROWS_AS((void)document.RemoveBus(Id(1)), std::invalid_argument);
+}
+
+TEST_CASE("Audio Mixer snapshot audition blends from the draft without dirtying or accumulating")
+{
+    auto undoService = Keire::CreateRef<Keire::UndoService>();
+    auto undo = undoService->CreateContext({.Name = "Snapshot audition"});
+    Keire::AudioMixerDefinition preview;
+    std::vector<std::byte> persisted;
+    std::size_t stops = 0;
+    KeireEditor::AudioMixerDocument document(
+        {.Preview = [&](Keire::AssetId, const Keire::AudioMixerDefinition& value) { preview = value; },
+         .StopPreview = [&](Keire::AssetId) { ++stops; },
+         .Persist = [&](Keire::AssetId, const std::span<const std::byte> bytes)
+         { persisted.assign(bytes.begin(), bytes.end()); }});
+    const auto authored = Definition();
+    document.Open(Id(104), authored, 3, undo);
+    document.PreviewSnapshot(Id(30), 0.5F);
+    CHECK(preview.Buses[1].Gain == doctest::Approx(0.875F));
+    CHECK(document.Definition() == authored);
+    CHECK_FALSE(document.Dirty());
+    CHECK_FALSE(undo->CanUndo());
+    CHECK(persisted.empty());
+    document.PreviewSnapshot(Id(30), 0.5F);
+    CHECK(preview.Buses[1].Gain == doctest::Approx(0.875F));
+    document.PreviewSnapshot(Id(30), 0.0F);
+    CHECK(preview == authored);
+    document.PreviewSnapshot(Id(30), 1.0F);
+    CHECK(preview.Buses[1].Gain == doctest::Approx(0.75F));
+    document.RestorePreview();
+    CHECK(preview == authored);
+
+    REQUIRE(document.Edit("Authored gain", [](Keire::AudioMixerDefinition& value) { value.Buses[1].Gain = 0.5F; }));
+    const auto historyBytes = undo->EstimatedBytes();
+    document.PreviewSnapshot(Id(30), 0.5F);
+    CHECK(preview.Buses[1].Gain == doctest::Approx(0.625F));
+    CHECK(document.Definition().Buses[1].Gain == doctest::Approx(0.5F));
+    CHECK(document.Dirty());
+    CHECK(undo->EstimatedBytes() == historyBytes);
+    REQUIRE(document.Undo());
+    CHECK(preview == authored);
+    REQUIRE(document.Redo());
+    CHECK(preview == document.Definition());
+    document.PreviewSnapshot(Id(30), 1.0F);
+    document.Save();
+    CHECK(Keire::AudioMixerAsset::Decode(persisted)->Definition() == document.Definition());
+    CHECK_FALSE(document.Dirty());
+    CHECK(document.Revision() == 3);
+    document.RestorePreview();
+    CHECK(preview == document.Definition());
+    document.Close();
+    CHECK(stops == 1);
+    CHECK_THROWS_AS(document.PreviewSnapshot(Id(30), 1.0F), std::logic_error);
+    undoService->Close();
+}
+
+TEST_CASE("Audio Mixer snapshot audition rejects invalid requests and rolls back failed publication")
+{
+    Keire::AudioMixerDefinition preview;
+    std::size_t callbacks = 0;
+    bool failAudition = false;
+    KeireEditor::AudioMixerDocument document({.Preview =
+                                                  [&](Keire::AssetId, const Keire::AudioMixerDefinition& value)
+                                              {
+                                                  ++callbacks;
+                                                  preview = value;
+                                                  if (failAudition && value.Buses[1].Gain < 1.0F)
+                                                  {
+                                                      throw std::runtime_error("Mixer audition publication failed.");
+                                                  }
+                                              },
+                                              .Persist = [](Keire::AssetId, std::span<const std::byte>) {}});
+    const auto authored = Definition();
+    document.Open(Id(105), authored, 1);
+    for (const float weight :
+         {-0.1F, 1.1F, std::numeric_limits<float>::quiet_NaN(), std::numeric_limits<float>::infinity()})
+    {
+        CHECK_THROWS_AS(document.PreviewSnapshot(Id(30), weight), std::invalid_argument);
+    }
+    CHECK_THROWS_AS(document.PreviewSnapshot(Id(999), 1.0F), std::invalid_argument);
+    CHECK(callbacks == 1);
+    failAudition = true;
+    CHECK_THROWS_WITH(document.PreviewSnapshot(Id(30), 1.0F), "Mixer audition publication failed.");
+    CHECK(callbacks == 3);
+    CHECK(preview == authored);
+    CHECK(document.Definition() == authored);
+    CHECK_FALSE(document.Dirty());
+    CHECK(document.Diagnostic() == "Mixer audition publication failed.");
+    document.RestorePreview();
+    CHECK(document.Diagnostic().empty());
 }

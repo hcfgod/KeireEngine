@@ -15,7 +15,13 @@ $distributionPackageGates = @(
 if ($runFast) { & (Join-Path $PSScriptRoot "test-run-routing-windows.ps1") }
 if ($runFast) { & (Join-Path $PSScriptRoot "test-package-runtime-wait-windows.ps1") }
 if ($runFast) { & (Join-Path $PSScriptRoot "test-patched-dependency-cache-windows.ps1") }
+if ($runFast) {
+    & python (Join-Path $PSScriptRoot "test-shader-compiler-overlay.py")
+    if ($LASTEXITCODE -ne 0) { throw "Shader compiler overlay regressions failed." }
+}
 if ($runFast) { & (Join-Path $PSScriptRoot "test-build-parallelism-windows.ps1") }
+if ($runFast) { & (Join-Path $PSScriptRoot "test-editor-development-windows.ps1") }
+if ($runFast) { & (Join-Path $PSScriptRoot "test-managed-build-cache-windows.ps1") }
 if ($runFast) { & (Join-Path $PSScriptRoot "test-pinned-dotnet-windows.ps1") }
 if ($runFast) { & (Join-Path $PSScriptRoot "test-dotnet-sdk-selection-windows.ps1") }
 $Windows = Resolve-Path (Join-Path $PSScriptRoot "..\Windows")
@@ -751,7 +757,7 @@ Assert-True ($menuScript.Contains('"package-editor"') -and $menuScript.Contains(
 Assert-True ($menuScript.Contains('"stage-editor"') -and $menuScript.Contains('"stage-hub"') -and
              $menuScript.Contains('-DevelopmentStage') -and $menuScript.Contains('-StageOnly') -and
              $menuScript.Contains('-not $GeneratorWasProvided') -and $menuScript.Contains('$Generator = "ninja"')) `
-    "Fast Dist product staging commands default to Ninja and bypass archive publication"
+    "Development product staging commands default to Ninja and bypass archive publication"
 Assert-True ($menuScript.Contains('Invoke-IsolatedWindowsPowerShell $arguments') -and
              $menuScript.Contains('"-AllowDirty", "-DevelopmentStage"') -and
              $menuScript.Contains('"-AllowDirty", "-StageOnly", "-DevelopmentStage"')) `
@@ -822,11 +828,17 @@ param([string]$Generator, [string]$Architecture, [string]$Toolset, [switch]$CI, 
 if ($Generator -cne 'ninja' -or -not $AllowDirty -or -not $DevelopmentStage) { exit 24 }
 exit 0
 '@ | Set-Content (Join-Path $launcherFixture "Scripts\Windows\package-editor.ps1") -Encoding UTF8
+    @'
+param([string]$Generator, [string]$Architecture, [string]$Toolset, [switch]$CI, [switch]$Update,
+      [switch]$Generate)
+if ($Generator -cne 'ninja') { exit 26 }
+exit 0
+'@ | Set-Content (Join-Path $launcherFixture "Scripts\Windows\stage-editor.ps1") -Encoding UTF8
     $editorStageLauncher = Start-Process -FilePath (Get-Command powershell.exe).Source -ArgumentList @(
         "-NoProfile", "-NonInteractive", "-File", (Join-Path $launcherFixture "Scripts\project.ps1"),
         "stage-editor", "-Architecture", "x86_64", "-Toolset", "msc"
     ) -Wait -PassThru -WindowStyle Hidden
-    Assert-Equal $editorStageLauncher.ExitCode 0 "Fast Editor staging defaults to Ninja development mode"
+    Assert-Equal $editorStageLauncher.ExitCode 0 "Fast Editor staging defaults to Ninja DevDist mode"
 
     @'
 param([string]$Generator, [string]$Architecture, [string]$Toolset, [switch]$CI, [switch]$Update,
@@ -1095,6 +1107,13 @@ Assert-True ($dependencyLock.Contains('CORAL_URL=https://github.com/hcfgod/Coral
              -not (Test-Path (Join-Path (Get-RepositoryRoot) 'Patches\Coral'))) `
     "Coral consumes the tested fork commit without a repository-local patch set"
 $premakePolicy = Get-Content (Join-Path (Get-RepositoryRoot) "Scripts\Premake\Common.lua") -Raw
+Assert-True ($premakePolicy.Contains('/MANIFEST:EMBED') -and $premakePolicy.Contains('/MANIFESTINPUT:') -and
+             $premakePolicy.Contains('Config/WindowsApplication.manifest')) "MSVC application manifest wiring"
+[xml] $applicationManifest = Get-Content (Join-Path (Get-RepositoryRoot) 'Config/WindowsApplication.manifest') -Raw
+$manifestNamespaces = [Xml.XmlNamespaceManager]::new($applicationManifest.NameTable)
+$manifestNamespaces.AddNamespace('settings', 'http://schemas.microsoft.com/SMI/2016/WindowsSettings')
+Assert-True ($applicationManifest.SelectSingleNode('//settings:longPathAware', $manifestNamespaces).InnerText -eq 'true') `
+    "Windows application manifest enables long paths"
 $distributionPublisherProject = Get-Content `
     (Join-Path (Get-RepositoryRoot) `
         "Services\KeireDistributionService\Source\KeireDistributionPublisher\KeireDistributionPublisher.csproj") -Raw
@@ -1539,7 +1558,7 @@ Assert-True ($editorDevPremake.Contains('ProjectConfig.PROJECT_NAMESPACE .. "Edi
              $windowsRun.Contains('$editorDevTarget')) "Complete editor development aggregate"
 Assert-True ($windowsBuild.Contains('Resolve-CompilerCache') -and
              $windowsBuild.Contains('ProfileBuild') -and
-             $windowsBuild.Contains('    $dependencyConfiguration = if ($Configuration -in @("Release", "Profile", "Dist"))') -and
+             $windowsBuild.Contains('    $dependencyConfiguration = if ($Configuration -in @("Release", "Profile", "Dist", "DevDist"))') -and
              $windowsBuild.Contains('/p:PreferredToolArchitecture=x64') -and
              (Test-Path (Join-Path (Get-RepositoryRoot) 'Scripts\patch-ninja-compiler-cache.py'))) `
     "Optional compiler cache, build profiling, and native x64 MSVC host tools"
@@ -1554,7 +1573,8 @@ try {
         (Join-Path $managedFixture "Config"),
         (Join-Path $managedFixture "KeireManaged"), (Join-Path $managedFixture "KeireEditorManaged"),
         (Join-Path $managedFixture "KeireManaged.Generators"),
-        (Join-Path $managedFixture "Build\Managed") | Out-Null
+        (Join-Path $managedFixture "Scripts\ManagedDesignTime"),
+        (Join-Path $managedFixture "Build\Managed\DesignTime") | Out-Null
     Copy-Item (Join-Path $Windows "build-managed.ps1") (Join-Path $managedFixture "Scripts\Windows\build-managed.ps1")
     Copy-Item (Join-Path $Windows "common.ps1") (Join-Path $managedFixture "Scripts\Windows\common.ps1")
     $managedLock = Join-Path $managedFixture "Config\Dependencies.lock"
@@ -1564,17 +1584,22 @@ try {
     $managedAssembly = Join-Path $managedFixture "Build\Managed\Keire.Managed.dll"
     $managedEditorAssembly = Join-Path $managedFixture "Build\Managed\Keire.Editor.Managed.dll"
     $managedGeneratorAssembly = Join-Path $managedFixture "Build\Managed\Keire.Managed.Generators.dll"
+    $managedDesignAssembly = Join-Path $managedFixture "Build\Managed\DesignTime\Keire.Managed.dll"
+    $managedDesignEditorAssembly = Join-Path $managedFixture "Build\Managed\DesignTime\Keire.Editor.Managed.dll"
     "source" | Set-Content $managedSource -Encoding ASCII
     "assembly" | Set-Content $managedAssembly -Encoding ASCII
     "editor" | Set-Content $managedEditorAssembly -Encoding ASCII
     "generator" | Set-Content $managedGeneratorAssembly -Encoding ASCII
+    "design-api" | Set-Content $managedDesignAssembly -Encoding ASCII
+    "design-editor-api" | Set-Content $managedDesignEditorAssembly -Encoding ASCII
     (Get-Item (Join-Path $managedFixture "Scripts\Windows\build-managed.ps1")).LastWriteTimeUtc =
         [DateTime]::UtcNow.AddMinutes(-3)
     (Get-Item $managedSource).LastWriteTimeUtc = [DateTime]::UtcNow.AddMinutes(-2)
-    foreach ($sourceRoot in @("KeireManaged", "KeireEditorManaged", "KeireManaged.Generators")) {
+    foreach ($sourceRoot in @("KeireManaged", "KeireEditorManaged", "KeireManaged.Generators", "Scripts\ManagedDesignTime")) {
         (Get-Item (Join-Path $managedFixture $sourceRoot)).LastWriteTimeUtc = [DateTime]::UtcNow.AddMinutes(-2)
     }
-    foreach ($assembly in @($managedAssembly, $managedEditorAssembly, $managedGeneratorAssembly)) {
+    foreach ($assembly in @($managedAssembly, $managedEditorAssembly, $managedGeneratorAssembly,
+            $managedDesignAssembly, $managedDesignEditorAssembly)) {
         (Get-Item $assembly).LastWriteTimeUtc = [DateTime]::UtcNow.AddMinutes(-1)
     }
     $global:LASTEXITCODE = 37
@@ -1621,6 +1646,9 @@ Assert-True ($corePremake.Contains('prepare-generated-content.ps1') -and
              $builtinShaderScript.Contains('BuiltinIrradyn')) `
     "First-party built-in shader generation"
 Assert-True ($builtinShaderScript.Contains('BuiltinLighting.hlsli') -and
+             $builtinShaderScript.Contains('VolumeTransport.hlsli') -and
+             $builtinShaderScript.Contains('BuiltinCloudVolume.hlsl') -and
+             $builtinShaderScript.Contains('CloudVolumeGeometry.hlsli') -and
              $builtinShaderScript.Contains('+ $Includes') -and
              $builtinShaderScript.Contains("'-I', `$Temporary")) `
     "Shared built-in lighting includes are fingerprinted and passed to the compiler"

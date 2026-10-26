@@ -207,6 +207,9 @@ namespace Keire::RenderBackend
         FrameGraph Graph;
         CompiledFrameGraph Compiled;
         FrameGraphResource HdrScene;
+        FrameGraphResource BloomExtracted;
+        FrameGraphResource BloomHorizontal;
+        FrameGraphResource BloomResult;
         FrameGraphResource SceneDepth;
         FrameGraphResource SampledDepth;
         FrameGraphResource GBufferBaseColorMetallic;
@@ -246,6 +249,10 @@ namespace Keire::RenderBackend
         FrameGraphPass Transparency;
         FrameGraphPass IrradynTrace;
         FrameGraphPass IrradynComposite;
+        FrameGraphPass HdrPreparation;
+        FrameGraphPass BloomExtraction;
+        FrameGraphPass BloomHorizontalBlur;
+        FrameGraphPass BloomVerticalBlur;
         FrameGraphPass ToneMap;
         FrameGraphPass Overlays;
         FrameGraphPass Readback;
@@ -254,4 +261,5 @@ namespace Keire::RenderBackend
 
     [[nodiscard]] StaticSceneFrameGraph BuildStaticSceneFrameGraph();
     [[nodiscard]] StaticSceneFrameGraph BuildStaticSceneFrameGraph(RenderPath path);
+    [[nodiscard]] StaticSceneFrameGraph BuildStaticSceneFrameGraph(RenderPath path, bool bloomEnabled);
 } // namespace Keire::RenderBackend

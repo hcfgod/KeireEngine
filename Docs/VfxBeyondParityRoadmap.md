@@ -7,6 +7,9 @@ The [parity manifest](VfxParityManifest.json) measures node-catalog compatibilit
 can operate a VFX-heavy shipped game for years. The work below is intentionally separate: closing one of these items
 must not change a manifest row or inflate the Unity parity score.
 
+The proposed [large-world and environment plan](LargeWorldAndEnvironmentPlan.md) coordinates future spatial frames,
+planetary traversal, origin-stable effects, weather, and cloud work. It does not close any acceptance row here.
+
 ## Priority Backlog
 
 | Priority | Kéire production feature | Current evidence | Production acceptance |

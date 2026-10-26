@@ -49,7 +49,8 @@ namespace Keire
         [[nodiscard]] std::string
         GenerateSolution(const ManagedBuildRequest& request, const std::map<AssetId, std::string>& names,
                          const std::filesystem::path& projectRoot, const std::filesystem::path& managedApiProject,
-                         const std::map<AssetId, std::filesystem::path>& designTimeProjects = {});
+                         const std::map<AssetId, std::filesystem::path>& designTimeProjects = {},
+                         std::uint32_t minimumVisualStudioMajor = 0);
         [[nodiscard]] std::string GenerateManagedBuildAggregator(const ManagedBuildRequest& request);
         [[nodiscard]] std::string GenerateManagedIdeAggregator(const ManagedBuildRequest& request,
                                                                std::string_view targetFramework);
@@ -61,7 +62,15 @@ namespace Keire
             const std::filesystem::path& managedApi, const std::filesystem::path& managedApiDesignTimeProject,
             const std::filesystem::path& managedEditorApi, const std::filesystem::path& managedGenerator,
             const std::filesystem::path& projectRoot, const std::filesystem::path& projectDirectory,
-            std::string_view targetFramework, std::string_view languageVersion);
+            std::string_view targetFramework, std::string_view languageVersion,
+            std::string_view projectSuffix = ".VisualStudio");
+        [[nodiscard]] bool GenerateManagedCompatibilityWorkspace(const ManagedBuildRequest& request,
+                                                                 const std::map<AssetId, std::string>& names,
+                                                                 const std::filesystem::path& projectRoot,
+                                                                 const std::filesystem::path& primarySolution,
+                                                                 const std::filesystem::path& runtimeManagedApi,
+                                                                 const std::filesystem::path& runtimeManagedEditorApi,
+                                                                 const std::filesystem::path& managedGenerator);
 
     } // namespace Detail
 } // namespace Keire

@@ -20,4 +20,11 @@ namespace Keire::Detail
                                        std::span<const ProjectFileReplacement> files);
     [[nodiscard]] bool HasPendingMaterialMigration(const std::filesystem::path& root);
     [[nodiscard]] std::size_t RecoverMaterialMigrationFiles(const std::filesystem::path& root);
+
+    /// Publishes reviewed settings snapshots with recoverable rollback, not multi-file atomic visibility.
+    /// Only Rendering, Authoring, EnvironmentTime and EnvironmentLighting settings are accepted.
+    /// Completed settings journals are discarded; interrupted journals remain until recovery succeeds.
+    void PublishProjectSettingsFiles(const std::filesystem::path& root, std::span<const ProjectFileReplacement> files);
+    [[nodiscard]] bool HasPendingProjectSettingsSave(const std::filesystem::path& root);
+    [[nodiscard]] std::size_t RecoverProjectSettingsFiles(const std::filesystem::path& root);
 } // namespace Keire::Detail

@@ -10,10 +10,13 @@ Texture2D TemporalHistoryTexture : register(t1, space2);
 SamplerState TemporalHistorySampler : register(s1, space2);
 Texture2D VelocityTexture : register(t2, space2);
 SamplerState VelocitySampler : register(s2, space2);
+Texture2D BloomTexture : register(t3, space2);
+SamplerState BloomSampler : register(s3, space2);
 
 cbuffer ToneMapData : register(b0, space3)
 {
     float4 ToneMapParameters;
+    float4 BloomParameters;
 };
 
 VertexOutput VSMain(const uint vertexId : SV_VertexID)
@@ -31,9 +34,19 @@ float3 AcesFitted(const float3 color)
     return saturate(numerator / denominator);
 }
 
+float3 ComposeBloom(const float2 uv, const float3 scene)
+{
+    if (BloomParameters.x <= 0.0F)
+    {
+        return max(scene, 0.0F.xxx);
+    }
+    const float3 bloom = BloomTexture.SampleLevel(BloomSampler, uv, 0.0F).rgb;
+    return min(max(scene, 0.0F.xxx) + max(bloom, 0.0F.xxx) * BloomParameters.x, 65504.0F.xxx);
+}
+
 float3 SampleToneMapped(const float2 uv)
 {
-    return AcesFitted(max(HdrSceneTexture.SampleLevel(HdrSceneSampler, uv, 0.0F).rgb, 0.0F.xxx));
+    return AcesFitted(ComposeBloom(uv, HdrSceneTexture.SampleLevel(HdrSceneSampler, uv, 0.0F).rgb));
 }
 
 float Luminance(const float3 color)
@@ -144,7 +157,7 @@ float4 PSMain(const VertexOutput input) : SV_Target0
 {
     const bool taa = ToneMapParameters.z > 1.5F;
     const float4 hdr = HdrSceneTexture.SampleLevel(HdrSceneSampler, input.UV, 0.0F);
-    const float3 toneMapped = AcesFitted(max(hdr.rgb, 0.0F.xxx));
+    const float3 toneMapped = AcesFitted(ComposeBloom(input.UV, hdr.rgb));
     const float3 color = taa ? ApplyTaa(input.UV, toneMapped)
                              : ToneMapParameters.z > 0.5F ? ApplyFxaa(input.UV, toneMapped) : toneMapped;
     return float4(color, saturate(hdr.a));

@@ -30,6 +30,11 @@ namespace
     {
       public:
         std::map<std::wstring, IDispatch*> Objects;
+        std::vector<IDispatch*> Items;
+        std::wstring ReferenceName;
+        std::wstring ReferencePath;
+        LONG ReportedCount = -1;
+        unsigned ItemReads = 0;
         std::wstring ProjectPath;
         bool Resolved = false;
         unsigned Opens = 0;
@@ -76,8 +81,8 @@ namespace
             return DISP_E_UNKNOWNNAME;
         }
 
-        HRESULT STDMETHODCALLTYPE Invoke(DISPID id, REFIID, LCID, WORD, DISPPARAMS*, VARIANT* result, EXCEPINFO*,
-                                         UINT*) override
+        HRESULT STDMETHODCALLTYPE Invoke(DISPID id, REFIID, LCID, WORD, DISPPARAMS* parameters, VARIANT* result,
+                                         EXCEPINFO*, UINT*) override
         {
             if (id < 0 || static_cast<std::size_t>(id) >= Names.size())
             {
@@ -105,6 +110,35 @@ namespace
                 result->boolVal = Resolved ? VARIANT_TRUE : VARIANT_FALSE;
                 return S_OK;
             }
+            if (name == L"Name" || name == L"Path")
+            {
+                result->vt = VT_BSTR;
+                result->bstrVal = SysAllocString((name == L"Name" ? ReferenceName : ReferencePath).c_str());
+                return S_OK;
+            }
+            if (name == L"Count")
+            {
+                result->vt = VT_I4;
+                result->lVal = ReportedCount >= 0 ? ReportedCount : static_cast<LONG>(Items.size());
+                return S_OK;
+            }
+            if (name == L"Item")
+            {
+                ++ItemReads;
+                if (!parameters || parameters->cArgs != 1U || parameters->rgvarg[0].vt != VT_I4)
+                {
+                    return DISP_E_TYPEMISMATCH;
+                }
+                const auto index = parameters->rgvarg[0].lVal;
+                if (index < 1 || static_cast<std::size_t>(index) > Items.size() || !Items[index - 1])
+                {
+                    return DISP_E_BADINDEX;
+                }
+                result->vt = VT_DISPATCH;
+                result->pdispVal = Items[index - 1];
+                result->pdispVal->AddRef();
+                return S_OK;
+            }
             const auto object = Objects.find(std::wstring(name));
             if (object == Objects.end() || !object->second)
             {
@@ -121,11 +155,19 @@ namespace
         }
 
       private:
-        static constexpr std::array<std::wstring_view, 9> Names{L"FindProjectItem", L"ContainingProject",
-                                                                L"FullName",        L"Object",
-                                                                L"References",      L"Find",
-                                                                L"Resolved",        L"Open",
-                                                                L"Activate"};
+        static constexpr std::array<std::wstring_view, 13> Names{L"FindProjectItem",
+                                                                 L"ContainingProject",
+                                                                 L"FullName",
+                                                                 L"Object",
+                                                                 L"References",
+                                                                 L"Find",
+                                                                 L"Resolved",
+                                                                 L"Open",
+                                                                 L"Activate",
+                                                                 L"Count",
+                                                                 L"Item",
+                                                                 L"Name",
+                                                                 L"Path"};
     };
 } // namespace
 
@@ -146,7 +188,8 @@ TEST_CASE("Visual Studio handoff waits for project membership and a resolved eng
     project.ProjectPath = (root / "Assembly-CSharp.VisualStudio.csproj").wstring();
     project.Objects[L"Object"] = &language;
     language.Objects[L"References"] = &references;
-    references.Objects[L"Find"] = &engine;
+    references.Items = {&engine};
+    engine.ReferenceName = L"Keire.Managed";
     item.Objects[L"Open"] = &window;
     CHECK_FALSE(open());
     CHECK(item.Opens == 0);
@@ -160,6 +203,38 @@ TEST_CASE("Visual Studio handoff waits for project membership and a resolved eng
     CHECK(item.Opens == 1);
     CHECK(window.Activations == 1);
     CHECK(diagnostic.empty());
+
+    SUBCASE("assembly identity lookup is not required for a resolved named reference")
+    {
+        CHECK(references.Objects.find(L"Find") == references.Objects.end());
+        CHECK(references.ItemReads > 0U);
+    }
+    SUBCASE("an unrelated resolved reference never permits opening the script")
+    {
+        engine.ReferenceName = L"Unrelated";
+        CHECK_FALSE(open());
+        CHECK(item.Opens == 1U);
+    }
+    SUBCASE("a facade project reference can identify the engine API by resolved assembly path")
+    {
+        engine.ReferenceName = L"Keire.Managed.VisualStudio";
+        engine.ReferencePath = L"C:/References/Keire.Managed.dll";
+        CHECK(open());
+        CHECK(item.Opens == 2U);
+    }
+    SUBCASE("missing collection entries can be skipped without opening a loose file")
+    {
+        references.Items = {nullptr, &engine};
+        CHECK(open());
+    }
+    SUBCASE("oversized reference collections are rejected before enumeration")
+    {
+        references.ReportedCount = 1025;
+        const auto before = references.ItemReads;
+        CHECK_FALSE(open());
+        CHECK(references.ItemReads == before);
+        CHECK(item.Opens == 1U);
+    }
 }
 #endif
 
@@ -227,6 +302,44 @@ TEST_CASE("Child process captures output and preserves a nonzero exit code")
     REQUIRE(process.ExitCode());
     CHECK(*process.ExitCode() == 23);
     CHECK(process.TakeOutput().find("child-process-output") != std::string::npos);
+}
+
+TEST_CASE("Child process output remains bounded without losing normal completion diagnostics")
+{
+    std::string probe;
+    std::size_t expectedSize = 0;
+    bool expectTail = false;
+    SUBCASE("output larger than one poll retains its final standard-error diagnostic")
+    {
+        probe = "--child-process-large-output";
+        expectedSize = std::size_t{384} * 1024U;
+        expectTail = true;
+    }
+    SUBCASE("output beyond the retention cap still drains and exits normally")
+    {
+        probe = "--child-process-capped-output";
+        expectedSize = std::size_t{4} * 1024U * 1024U;
+    }
+
+    const std::array arguments{probe};
+    auto process = Keire::Detail::ChildProcess::Start(KeireTests::TestExecutable, arguments,
+                                                      KeireTests::TestExecutable.parent_path());
+    REQUIRE(process.WaitFor(std::chrono::seconds(15)));
+    REQUIRE(process.ExitCode());
+    CHECK(*process.ExitCode() == 37);
+    CHECK_FALSE(process.Running());
+    const auto output = process.TakeOutput();
+    if (expectTail)
+    {
+        REQUIRE(output.size() > expectedSize);
+        CHECK(output.substr(0, expectedSize) == std::string(expectedSize, 'x'));
+        CHECK(output.substr(expectedSize).find("diagnostic-tail") != std::string::npos);
+    }
+    else
+    {
+        CHECK(output == std::string(expectedSize, 'x'));
+    }
+    CHECK(process.TakeOutput().empty());
 }
 
 #if defined(_WIN32)

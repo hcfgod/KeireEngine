@@ -61,6 +61,7 @@ namespace KeireEditor
         Keire::AssetId m_SelectedDucking;
         std::unordered_map<Keire::AssetId, std::string> m_NameBuffers;
         std::string m_Message;
+        double m_SnapshotPreviewWeight = 1.0;
         bool m_WasVisible = false;
     };
 } // namespace KeireEditor

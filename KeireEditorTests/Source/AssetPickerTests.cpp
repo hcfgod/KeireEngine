@@ -62,6 +62,13 @@ TEST_CASE("Inspector field layout stacks narrow controls and reserves inline act
     CHECK_FALSE(boundary.Stacked);
     CHECK(boundary.ControlWidth == 0.0F);
 
+    const auto descriptive =
+        ResolveInspectorFieldLayout(324.0F, 24.0F, KeireEditor::Detail::InspectorInlineActionSpacing,
+                                    KeireEditor::Detail::InspectorDescriptiveFieldWidth);
+    CHECK(descriptive.Stacked);
+    CHECK(descriptive.ControlWidth == doctest::Approx(292.0F));
+    CHECK(descriptive.ControlWidth + 24.0F + KeireEditor::Detail::InspectorInlineActionSpacing <= 324.0F);
+
     const auto tiny = ResolveInspectorFieldLayout(-50.0F, 24.0F);
     CHECK(tiny.Stacked);
     CHECK(tiny.ControlWidth == 1.0F);

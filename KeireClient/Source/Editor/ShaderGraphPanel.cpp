@@ -297,6 +297,7 @@ namespace KeireEditor
         m_NodeMenuOpen = false;
         m_OpenFunctionExtractionPopup = false;
         m_Bookmarks.Clear();
+        m_BookmarkMenu = {};
         m_Canvas.CancelInteractions();
         m_Canvas.Select(std::nullopt);
         m_Canvas.SelectConnection(std::nullopt);
@@ -999,8 +1000,11 @@ namespace KeireEditor
             return;
         if (!compact)
             ui.SameLine();
-        ui.SetNextItemWidth(std::max(40.0F, std::min(180.0F, ui.ContentAvailable().Width - 90.0F)));
-        (void)DrawGraphBookmarkMenu(ui, m_Bookmarks, m_Canvas);
+        if (m_Bookmarks.Open(m_BookmarkDirectory, document.Asset()))
+        {
+            m_BookmarkMenu = {};
+        }
+        (void)DrawGraphBookmarkMenu(ui, m_Bookmarks, m_Canvas, m_BookmarkMenu);
         ui.TextColoredWrapped(
             m_Controller.ShaderGraphTheme().MutedText,
             "Right-click canvas or items for actions  |  drag pins to connect  |  double-click cable routes");

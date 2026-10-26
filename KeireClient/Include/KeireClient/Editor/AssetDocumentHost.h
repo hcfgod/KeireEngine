@@ -136,6 +136,18 @@ namespace KeireEditor
             return EditImpl(name, std::move(candidate), false);
         }
 
+        // Audition a validated value without changing source, dirty state, revision, or undo history.
+        // A failed audition restores the authored draft, not a previous transient audition.
+        void PreviewTransient(const Definition& definition)
+        {
+            RequireOpen();
+            m_Specification.Validate(definition);
+            ApplyPreviewWithRollback(definition);
+            m_Diagnostic.clear();
+        }
+
+        void RestorePreview() { PreviewTransient(m_Draft); }
+
         void Save()
         {
             RequireOpen();
@@ -249,37 +261,42 @@ namespace KeireEditor
                 m_Specification.Preview(m_Asset, definition);
         }
 
+        void ApplyPreviewWithRollback(const Definition& definition)
+        {
+            try
+            {
+                ApplyPreview(definition);
+            }
+            catch (...)
+            {
+                const auto failure = std::current_exception();
+                try
+                {
+                    ApplyPreview(m_Draft);
+                }
+                catch (...)
+                {
+                    // Preserve the original failure even when best-effort restoration also fails.
+                    (void)0;
+                }
+                try
+                {
+                    std::rethrow_exception(failure);
+                }
+                catch (const std::exception& error)
+                {
+                    m_Diagnostic = error.what();
+                    throw;
+                }
+            }
+        }
+
         void Apply(const Definition& definition, const bool updatePreview = true)
         {
             m_Specification.Validate(definition);
             if (updatePreview)
             {
-                try
-                {
-                    ApplyPreview(definition);
-                }
-                catch (...)
-                {
-                    const auto failure = std::current_exception();
-                    try
-                    {
-                        ApplyPreview(m_Draft);
-                    }
-                    catch (...)
-                    {
-                        // Preserve the original preview failure even when best-effort restoration also fails.
-                        (void)0;
-                    }
-                    try
-                    {
-                        std::rethrow_exception(failure);
-                    }
-                    catch (const std::exception& error)
-                    {
-                        m_Diagnostic = error.what();
-                        throw;
-                    }
-                }
+                ApplyPreviewWithRollback(definition);
             }
             m_Draft = definition;
             m_Diagnostic.clear();

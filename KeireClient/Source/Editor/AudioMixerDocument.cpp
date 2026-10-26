@@ -84,6 +84,13 @@ namespace KeireEditor
 
     void AudioMixerDocument::Save() { m_Host.Save(); }
 
+    void AudioMixerDocument::PreviewSnapshot(const Keire::AssetId snapshot, const float weight)
+    {
+        m_Host.PreviewTransient(Keire::BlendAudioMixerSnapshot(m_Host.Draft(), snapshot, weight));
+    }
+
+    void AudioMixerDocument::RestorePreview() { m_Host.RestorePreview(); }
+
     void AudioMixerDocument::Discard()
     {
         m_Host.Discard();

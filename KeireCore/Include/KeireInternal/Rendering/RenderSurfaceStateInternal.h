@@ -294,6 +294,9 @@ namespace Keire::RenderBackend
         // Scratch textures are owned by TransientTextures and scoped to this frame workset.
         std::array<SDL_GPUTexture*, 2> FullscreenInputs{};
         SDL_GPUTexture* HdrColor = nullptr;
+        SDL_GPUTexture* BloomExtracted = nullptr;
+        SDL_GPUTexture* BloomHorizontal = nullptr;
+        SDL_GPUTexture* BloomResult = nullptr;
         SDL_GPUTexture* MultisampleHdrColor = nullptr;
         SDL_GPUTexture* GBufferBaseColorMetallic = nullptr;
         SDL_GPUTexture* GBufferNormalRoughness = nullptr;
@@ -363,6 +366,9 @@ namespace Keire::RenderBackend
         std::uint32_t FailedWidth = 0;
         std::uint32_t FailedHeight = 0;
         RenderSampleCount ActualSamples = RenderSampleCount::One;
+        bool RequestedBloom = false;
+        bool AllocatedBloom = false;
+        bool FailedBloom = false;
         RenderSurfacePropertySnapshot PublishedProperties;
         mutable std::mutex SurfacePropertyPublicationMutex;
         Color FrameClearColor;

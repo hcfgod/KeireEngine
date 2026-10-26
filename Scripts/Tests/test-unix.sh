@@ -50,6 +50,8 @@ sha256_file() {
 
 load_project_config "$ROOT"
 if [[ $run_fast -eq 1 ]]; then
+assert_equal "$(normalize_configuration devdist)" DevDist 'DevDist configuration normalization'
+assert_equal "$(normalize_configuration Dist)" Dist 'Shipping Dist configuration preserved'
 assert_false is_generated_package_path 'include/Keire/Build/PlayerBuild.h'
 assert_true is_generated_package_path 'include/Keire/Build/Library/cache.bin'
 assert_false is_generated_package_path 'bin/Managed/Dotnet/sdk/10.0/Build/tasks.dll'
@@ -501,7 +503,9 @@ assert_true grep -Fq '@distribution_api path /v1 /v1/* /v2 /v2/* /health/live /h
   "$ROOT/Services/KeireDistributionService/Deployment/Caddyfile.example"
 python3 "$ROOT/Scripts/Tests/test-supabase-config.py"
 python3 "$ROOT/Scripts/Tests/test-patch-ninja-depfiles.py"
+python3 "$ROOT/Scripts/Tests/test-shader-compiler-overlay.py"
 python3 "$ROOT/Scripts/Tests/test-ninja-compiler-cache.py"
+bash "$ROOT/Scripts/Tests/test-managed-compatibility-unix.sh"
 bash "$ROOT/Scripts/Tests/test-installer-unix.sh"
 bash "$ROOT/Scripts/Tests/test-hub-installer-unix.sh"
 bash "$ROOT/Scripts/Tests/test-macos-packaging-unix.sh"
@@ -510,7 +514,7 @@ managed_fixture="$(mktemp -d)"
 trap 'rm -rf "$managed_fixture"' EXIT
 mkdir -p "$managed_fixture/Scripts/Unix" "$managed_fixture/Build/Dependencies/dotnet-sdk" \
   "$managed_fixture/KeireManaged" "$managed_fixture/KeireEditorManaged" \
-  "$managed_fixture/KeireManaged.Generators"
+  "$managed_fixture/KeireManaged.Generators" "$managed_fixture/Scripts/ManagedDesignTime"
 cp "$ROOT/Scripts/Unix/build-managed.sh" "$managed_fixture/Scripts/Unix/build-managed.sh"
 printf '%s\n' marker-one > "$managed_fixture/KeireManaged/RuntimeApi.cs"
 cat > "$managed_fixture/Build/Dependencies/dotnet-sdk/dotnet" <<'EOF'
@@ -536,6 +540,10 @@ case "$project" in
   *Keire.Managed.Generators.csproj)
     printf '%s\n' generator > "$output/Keire.Managed.Generators.dll"
     ;;
+  *Keire.Editor.Managed.DesignTime.csproj)
+    printf '%s\n' design-api > "$output/Keire.Managed.dll"
+    printf '%s\n' design-editor-api > "$output/Keire.Editor.Managed.dll"
+    ;;
   *) exit 2 ;;
 esac
 printf '%s\n' invoked >> "$root/invocations"
@@ -550,7 +558,7 @@ bash "$managed_fixture/Scripts/Unix/build-managed.sh"
 assert_equal "$(cat "$managed_fixture/Build/Managed/Keire.Managed.dll")" marker-two \
   'managed runtime API rebuild after source edit'
 bash "$managed_fixture/Scripts/Unix/build-managed.sh"
-assert_equal "$(wc -l < "$managed_fixture/invocations" | tr -d ' ')" 4 \
+assert_equal "$(wc -l < "$managed_fixture/invocations" | tr -d ' ')" 6 \
   'incremental managed runtime API launcher invocation count'
 sleep 1
 mkdir "$managed_fixture/KeireManaged/Gameplay"
@@ -560,7 +568,7 @@ sleep 1
 rm "$managed_fixture/KeireManaged/Gameplay/Extra.cs"
 rmdir "$managed_fixture/KeireManaged/Gameplay"
 bash "$managed_fixture/Scripts/Unix/build-managed.sh"
-assert_equal "$(wc -l < "$managed_fixture/invocations" | tr -d ' ')" 8 \
+assert_equal "$(wc -l < "$managed_fixture/invocations" | tr -d ' ')" 12 \
   'managed runtime API source inventory invocation count'
 rm -rf "$managed_fixture"
 trap - EXIT
@@ -1128,6 +1136,9 @@ assert_true grep -q 'BuiltinDeferredGBuffer' "$ROOT/Scripts/Unix/builtin-shaders
 assert_true grep -q 'BuiltinDeferredLighting' "$ROOT/Scripts/Windows/builtin-shaders.ps1"
 assert_true grep -q 'BuiltinIrradyn' "$ROOT/Scripts/Unix/builtin-shaders.sh"
 assert_true grep -F -q 'BuiltinLighting.hlsli' "$ROOT/Scripts/Unix/builtin-shaders.sh"
+assert_true grep -F -q 'VolumeTransport.hlsli' "$ROOT/Scripts/Unix/builtin-shaders.sh"
+assert_true grep -F -q 'BuiltinCloudVolume.hlsl' "$ROOT/Scripts/Unix/builtin-shaders.sh"
+assert_true grep -F -q 'CloudVolumeGeometry.hlsli' "$ROOT/Scripts/Unix/builtin-shaders.sh"
 assert_true grep -F -q '"${source_files[@]}" "${include_files[@]}"' "$ROOT/Scripts/Unix/builtin-shaders.sh"
 assert_true grep -F -q -- '-I "$ROOT/KeireCore/Shaders"' "$ROOT/Scripts/Unix/builtin-shaders.sh"
 assert_true grep -F -q 'builtin-occlusion.sh' "$ROOT/KeireCore/premake5.lua"
@@ -1215,7 +1226,7 @@ assert_true grep -q 'buildoutputs { managedOutput, managedEditorOutput, managedG
   "$ROOT/Scripts/Premake/Managed.lua"
 assert_true grep -q 'linkbuildoutputs "Off"' "$ROOT/Scripts/Premake/Managed.lua"
 assert_true grep -q 'Scripts/Unix/build-managed.sh' "$ROOT/Scripts/Premake/Managed.lua"
-assert_true grep -F -q -- '-newer "$assembly"' "$ROOT/Scripts/Unix/build-managed.sh"
+assert_true grep -F -q -- '-newer "$oldest_output"' "$ROOT/Scripts/Unix/build-managed.sh"
 assert_true test -f "$ROOT/Scripts/Premake/ManagedBuildAnchor.cpp"
 assert_false grep -q 'Scripts/Unix/build-managed.sh' "$ROOT/Scripts/Linux/build.sh"
 assert_false grep -q 'Scripts/Unix/build-managed.sh' "$ROOT/Scripts/Mac/build.sh"

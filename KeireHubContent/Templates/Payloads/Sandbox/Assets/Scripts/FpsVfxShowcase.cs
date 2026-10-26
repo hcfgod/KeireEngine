@@ -12,7 +12,7 @@ public sealed class FpsVfxShowcase : Behaviour
 {
     [SerializeField, StableFieldId("73616e64-626f-4078-8000-000000000051")]
     [Tooltip("Input Actions asset used to fire the Sandbox VFX showcase.")]
-    private InputActionAsset? _inputActions;
+    private InputActionAsset? _inputActions = null;
 
     // VfxEffect.keirevfx: "Energy Color".
     private static readonly AssetId EnergyColor =

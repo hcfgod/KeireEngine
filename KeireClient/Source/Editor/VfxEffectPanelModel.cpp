@@ -36,6 +36,16 @@ namespace KeireEditor
             }
         } // namespace
 
+        Keire::AssetId ResolveVfxGraphSystem(const std::span<const Keire::VfxGraphSystem> systems,
+                                             const Keire::AssetId selected) noexcept
+        {
+            if (selected && std::ranges::find(systems, selected, &Keire::VfxGraphSystem::Id) != systems.end())
+            {
+                return selected;
+            }
+            return systems.empty() ? Keire::AssetId{} : systems.front().Id;
+        }
+
         [[nodiscard]] std::string_view ModuleName(const Keire::VfxModulePayload& payload)
         {
             return std::visit(

@@ -12,6 +12,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <filesystem>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -54,6 +55,7 @@ namespace KeireEditor
 
         void Attach(Keire::UiWorkspace& workspace);
         void SetJobSystem(Keire::Ref<Keire::JobSystem> jobs);
+        void SetBookmarkDirectory(std::filesystem::path directory) { m_BookmarkDirectory = std::move(directory); }
         void Draw(Keire::UiFrame& ui);
         void RequestSave();
         void UpdatePendingSave();
@@ -155,6 +157,8 @@ namespace KeireEditor
         std::vector<Keire::AssetId> m_FunctionExtractionSelection;
         NodeMenuSelection m_NodeMenuSelection;
         GraphBookmarkSet m_Bookmarks;
+        GraphBookmarkMenuState m_BookmarkMenu;
+        std::filesystem::path m_BookmarkDirectory;
         std::optional<Keire::Vector2> m_NodeCreationPosition;
         std::optional<NodeGraphContextRequest> m_GraphContext;
         std::string m_Message;

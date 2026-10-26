@@ -18,3 +18,7 @@ projects=(
 for project in "${projects[@]}"; do
     "$dotnet" run --project "$project" --configuration "$configuration" --nologo
 done
+
+bash "$root/Scripts/Unix/build-managed.sh"
+"$dotnet" run --project "$root/Scripts/Tests/ManagedDesignTimeParity/ManagedDesignTimeParity.csproj" \
+    --configuration "$configuration" -- "$root/Build/Managed"

@@ -2,7 +2,7 @@
 param(
     [Parameter(Mandatory = $true)][string]$Root,
     [Parameter(Mandatory = $true)]
-    [ValidateSet("Debug", "Release", "Profile", "Dist", "DebugASan", "DebugUBSan", "DebugTSan", "Coverage")]
+    [ValidateSet("Debug", "Release", "Profile", "Dist", "DevDist", "DebugASan", "DebugUBSan", "DebugTSan", "Coverage")]
     [string]$Configuration,
     [Parameter(Mandatory = $true)][string]$Architecture,
     [Parameter(Mandatory = $true)][string]$Target,
@@ -23,12 +23,13 @@ if (-not (Test-Path -LiteralPath $targetDirectory)) {
     throw "The managed host target directory does not exist: $targetDirectory"
 }
 
-$coralConfiguration = if ($Configuration -in @("Release", "Profile", "Dist")) { "Release" } else { "Debug" }
+$coralConfiguration = if ($Configuration -in @("Release", "Profile", "Dist", "DevDist")) { "Release" } else { "Debug" }
 $coralDirectory = Join-Path $resolvedRoot "Build\Dependencies\coral\Build\$coralConfiguration"
 $netHost = Join-Path $resolvedRoot "Build\Dependencies\coral-nethost\nethost.dll"
 $managedAssembly = Join-Path $resolvedRoot "Build\Managed\Keire.Managed.dll"
 $managedEditorAssembly = Join-Path $resolvedRoot "Build\Managed\Keire.Editor.Managed.dll"
 $managedGeneratorAssembly = Join-Path $resolvedRoot "Build\Managed\Keire.Managed.Generators.dll"
+$designTimeDirectory = Join-Path $resolvedRoot "Build\Managed\DesignTime"
 $dotnetRoot = Join-Path $resolvedRoot "Build\Dependencies\dotnet-sdk"
 $coralFiles = @("Coral.Managed.dll", "Coral.Managed.deps.json", "Coral.Managed.runtimeconfig.json")
 
@@ -79,6 +80,13 @@ if ($IncludeEditorApi -and -not (Test-Path -LiteralPath $managedEditorAssembly))
 if ($IncludeEditorApi -and -not (Test-Path -LiteralPath $managedGeneratorAssembly)) {
     throw "The Keire.Managed.Generators analyzer is missing."
 }
+if ($IncludeEditorApi) {
+    foreach ($file in @("Keire.Managed.dll", "Keire.Editor.Managed.dll")) {
+        if (-not (Test-Path -LiteralPath (Join-Path $designTimeDirectory $file) -PathType Leaf)) {
+            throw "The managed design-time API is missing: $file"
+        }
+    }
+}
 
 $runtimeConfig = Get-Content -LiteralPath (Join-Path $coralDirectory "Coral.Managed.runtimeconfig.json") -Raw |
     ConvertFrom-Json
@@ -105,6 +113,10 @@ if ($IncludeEditorApi) {
         -Destination (Join-Path $managedDirectory "Keire.Editor.Managed.dll")
     Copy-FileIfChanged -Source $managedGeneratorAssembly `
         -Destination (Join-Path $managedDirectory "Keire.Managed.Generators.dll")
+    foreach ($file in @("Keire.Managed.dll", "Keire.Editor.Managed.dll")) {
+        Copy-FileIfChanged -Source (Join-Path $designTimeDirectory $file) `
+            -Destination (Join-Path $managedDirectory "DesignTime\$file")
+    }
 }
 Copy-FileIfChanged -Source $netHost -Destination (Join-Path $targetDirectory "nethost.dll")
 Copy-TreeIfChanged -Source $hostFxr.FullName -Destination $bundledHost

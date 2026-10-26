@@ -7,6 +7,8 @@ try {
     New-Item -ItemType Directory -Force $windows | Out-Null
     Copy-Item (Join-Path $PSScriptRoot "..\Windows\run.ps1") (Join-Path $windows "run.ps1")
     Copy-Item (Join-Path $PSScriptRoot "..\Windows\run-staged.ps1") (Join-Path $windows "run-staged.ps1")
+    Copy-Item (Join-Path $PSScriptRoot "..\Windows\ffmpeg-runtime-contract.ps1") (Join-Path $windows "ffmpeg-runtime-contract.ps1")
+    Copy-Item (Join-Path $PSScriptRoot "..\Windows\editor-development-stage.ps1") (Join-Path $windows "editor-development-stage.ps1")
     @'
 function Get-ProjectConfig {
     return [pscustomobject]@{ CLIENT_TARGET = "Client"; HUB_TARGET = "Hub"; PROJECT_NAMESPACE = "Fixture"; ARTIFACT_PREFIX = "fixture" }
@@ -30,6 +32,19 @@ public static class RunRoutingFixture
 {
     public static int Main(string[] args)
     {
+        if (args.Length == 3 && args[0] == "--locked-output")
+        {
+            using (var stream = new FileStream(args[1], FileMode.Create, FileAccess.Write, FileShare.None))
+            using (var writer = new StreamWriter(stream))
+            {
+                writer.Write("first");
+                writer.Flush();
+                File.WriteAllText(args[2], "ready");
+                System.Threading.Thread.Sleep(500);
+                writer.Write("-complete");
+            }
+            return 0;
+        }
         if (args.Length > 0 && args[0] == "--echo-arguments")
         {
             for (int index = 1; index < args.Length; ++index)
@@ -56,6 +71,24 @@ public static class RunRoutingFixture
     & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $fixture "compile.ps1") -Destination $client
     if ($LASTEXITCODE -ne 0) { throw "Could not compile the run-routing fixture." }
     Copy-Item -LiteralPath $client -Destination (Join-Path $hubDirectory "Hub.exe")
+    $lockedOutput = Join-Path $fixture 'locked-output.txt'
+    $lockReady = Join-Path $fixture 'lock-ready.txt'
+    $lockProcess = Start-Process -FilePath $client -WindowStyle Hidden -PassThru -ArgumentList @(
+        '--locked-output', ('"' + $lockedOutput + '"'), ('"' + $lockReady + '"'))
+    try {
+        $readyDeadline = [DateTime]::UtcNow.AddSeconds(5)
+        while (-not (Test-Path -LiteralPath $lockReady)) {
+            if ([DateTime]::UtcNow -ge $readyDeadline) { throw 'Output lock fixture did not become ready.' }
+            Start-Sleep -Milliseconds 10
+        }
+        $captured = Read-WindowsCapturedOutput -Path $lockedOutput
+        if ($captured -cne 'first-complete') { throw 'Output capture returned an incomplete locked stream.' }
+        $lockProcess.WaitForExit()
+    }
+    finally {
+        if (-not $lockProcess.HasExited) { $lockProcess.Kill() }
+        $lockProcess.Dispose()
+    }
     $env:KEIRE_RUN_ROUTING_TRACE = Join-Path $fixture "trace.txt"
     $unicodeName = 'Caf' + [char]0x00e9 + ' Project'
     $rawArguments = @('', 'two words', '"quoted"', 'C:\folder with spaces\', '\\"', "tab`tvalue", $unicodeName)
@@ -95,15 +128,27 @@ public static class RunRoutingFixture
     }
     $projectPath = Join-Path $fixture $unicodeName
     New-Item -ItemType Directory -Path $projectPath | Out-Null
-    foreach ($kind in @("editor", "hub")) {
+    foreach ($stageCase in @(
+            @{ Kind = 'editor'; Configuration = 'DevDist'; Explicit = $false },
+            @{ Kind = 'editor'; Configuration = 'Dist'; Explicit = $true },
+            @{ Kind = 'hub'; Configuration = 'Dist'; Explicit = $false })) {
+        $kind = $stageCase.Kind
         $target = if ($kind -eq "editor") { "Client" } else { "Hub" }
-        $stageBin = Join-Path $fixture "Build\Distributions\fixture-$kind-windows-x86_64-Dist\bin"
+        $configuration = $stageCase.Configuration
+        $stageBin = Join-Path $fixture "Build\Distributions\fixture-$kind-windows-x86_64-$configuration\bin"
         New-Item -ItemType Directory -Force $stageBin | Out-Null
         Copy-Item -LiteralPath $client -Destination (Join-Path $stageBin "$target.exe")
+        if ($configuration -eq 'DevDist') {
+            $identity = [ordered]@{ schemaVersion = 1; configuration = 'DevDist'; developmentArtifact = $true;
+                portable = $false; stageStatus = 'ready'; workingDirectory = $fixture }
+            [IO.File]::WriteAllText((Join-Path (Split-Path $stageBin) 'development-stage.json'),
+                ($identity | ConvertTo-Json))
+        }
         [IO.File]::WriteAllText($env:KEIRE_RUN_ROUTING_TRACE, "")
         $arguments = @("-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File",
             (Join-Path $windows "run-staged.ps1"))
         if ($kind -eq "editor") { $arguments += @("-Editor", "-ProjectPath", $projectPath) }
+        if ($stageCase.Explicit) { $arguments += @('-Configuration', $configuration) }
         $result = Invoke-WindowsExecutableCapture -Path (Get-Command powershell.exe).Source -Arguments $arguments
         $deadline = [DateTime]::UtcNow.AddSeconds(5)
         do {
@@ -114,6 +159,17 @@ public static class RunRoutingFixture
         $expectedTrace = if ($kind -eq "editor") { "Client --project $projectPath`n" } else { "Hub `n" }
         if ($result.ExitCode -ne 0 -or $trace -cne $expectedTrace) {
             throw "Staged $kind must launch without building and preserve the project path: $trace $($result.StandardError)"
+        }
+        if ($configuration -eq 'DevDist') {
+            $incomplete = Join-Path (Split-Path $stageBin) 'development-stage.incomplete'
+            [IO.File]::WriteAllText($incomplete, 'interrupted fixture')
+            [IO.File]::WriteAllText($env:KEIRE_RUN_ROUTING_TRACE, '')
+            $blocked = Invoke-WindowsExecutableCapture -Path (Get-Command powershell.exe).Source -Arguments $arguments
+            if ($blocked.ExitCode -eq 0 -or $blocked.StandardError -notmatch 'update did not finish' -or
+                [IO.File]::ReadAllText($env:KEIRE_RUN_ROUTING_TRACE)) {
+                throw 'An interrupted DevDist update must be rejected before any executable is launched.'
+            }
+            Remove-Item -LiteralPath $incomplete
         }
         Remove-Item -LiteralPath (Join-Path $stageBin "$target.exe")
         $missing = Invoke-WindowsExecutableCapture -Path (Get-Command powershell.exe).Source -Arguments $arguments

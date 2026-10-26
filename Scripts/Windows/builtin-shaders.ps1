@@ -6,17 +6,23 @@ $Compiler = Join-Path $Root "Build\Tools\ShaderCompiler\KeireShaderCompiler.exe"
 $Sources = @(
     @{ Prefix = "BuiltinUnlit"; Path = (Join-Path $Root "KeireCore\Shaders\BuiltinUnlit.hlsl") },
     @{ Prefix = "BuiltinSky"; Path = (Join-Path $Root "KeireCore\Shaders\BuiltinSky.hlsl") },
+    @{ Prefix = "BuiltinCloudVolume"; Path = (Join-Path $Root "KeireCore\Shaders\BuiltinCloudVolume.hlsl") },
     @{ Prefix = "BuiltinGrid"; Path = (Join-Path $Root "KeireCore\Shaders\BuiltinGrid.hlsl") },
     @{ Prefix = "BuiltinDepthVelocity"; Path = (Join-Path $Root "KeireCore\Shaders\BuiltinDepthVelocity.hlsl") },
     @{ Prefix = "BuiltinShadow"; Path = (Join-Path $Root "KeireCore\Shaders\BuiltinShadow.hlsl") },
     @{ Prefix = "BuiltinToneMap"; Path = (Join-Path $Root "KeireCore\Shaders\BuiltinToneMap.hlsl") },
+    @{ Prefix = "BuiltinBloom"; Path = (Join-Path $Root "KeireCore\Shaders\BuiltinBloom.hlsl") },
     @{ Prefix = "BuiltinRuntimeUi"; Path = (Join-Path $Root "KeireCore\Shaders\BuiltinRuntimeUi.hlsl") },
     @{ Prefix = "BuiltinDeferredGBuffer"; Path = (Join-Path $Root "KeireCore\Shaders\BuiltinDeferredGBuffer.hlsl") },
     @{ Prefix = "BuiltinDeferredLighting"; Path = (Join-Path $Root "KeireCore\Shaders\BuiltinDeferredLighting.hlsl") },
     @{ Prefix = "BuiltinIrradyn"; Path = (Join-Path $Root "KeireCore\Shaders\BuiltinIrradyn.hlsl") }
 )
 $Generated = Join-Path $Root "Build\Generated\Keire\BuiltinUnlitShaders.h"
-$Includes = @((Join-Path $Root "KeireCore\Shaders\BuiltinLighting.hlsli"))
+$Includes = @((Join-Path $Root "KeireCore\Shaders\BuiltinLighting.hlsli"),
+              (Join-Path $Root "KeireCore\Shaders\CloudLayered.hlsl"),
+              (Join-Path $Root "KeireCore\Shaders\CloudVolume.hlsli"),
+              (Join-Path $Root "KeireCore\Shaders\CloudVolumeGeometry.hlsli"),
+              (Join-Path $Root "KeireCore\Shaders\VolumeTransport.hlsli"))
 $Stamp = Join-Path $Root "Build\Generated\Keire\BuiltinRenderingShaders.stamp"
 $CacheHelper = Join-Path $PSScriptRoot "generated-content-cache.ps1"
 . $CacheHelper

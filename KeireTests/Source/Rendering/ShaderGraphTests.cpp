@@ -117,7 +117,7 @@ TEST_CASE("Shader Graph source and cooked assets preserve stable graph identity"
 
     const auto importer = Keire::CreateShaderGraphAssetImporter();
     CHECK(importer.Name == "Keire.ShaderGraph");
-    CHECK(importer.Version == 28);
+    CHECK(importer.Version == 29);
     CHECK(importer.Extensions == std::vector<std::string>{".keireshadergraph"});
 }
 
@@ -558,7 +558,7 @@ TEST_CASE("Shader Graph generated HLSL compiles through the production shader im
     context.ReadProjectFile = [root = directory.Path](const std::filesystem::path& relative)
     { return ReadBytes(root / relative); };
     const auto importer = Keire::CreateShaderAssetImporter();
-    CHECK(importer.Version == 9);
+    CHECK(importer.Version == 11);
     REQUIRE(importer.ContextualImport);
     const auto imported = importer.ContextualImport(context, ReadBytes(manifest));
     const auto shader = Keire::ShaderAsset::Decode(imported.Bytes);

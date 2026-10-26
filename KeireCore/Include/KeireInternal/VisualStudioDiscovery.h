@@ -11,6 +11,7 @@
 namespace Keire::Detail
 {
     inline constexpr std::uint32_t ManagedWorkspaceMinimumVisualStudioMajor = 18;
+    inline constexpr std::uint32_t ManagedWorkspaceCompatibilityVisualStudioMajor = 17;
 
     struct VisualStudioInstallation final
     {
@@ -27,6 +28,12 @@ namespace Keire::Detail
                                              std::uint32_t minimumMajor);
     [[nodiscard]] bool IsCompatibleVisualStudioDteMoniker(std::wstring_view moniker,
                                                           std::uint32_t minimumMajor) noexcept;
+    [[nodiscard]] std::uint32_t ReadVisualStudioSolutionMinimumMajor(const std::filesystem::path& solution) noexcept;
+    [[nodiscard]] std::filesystem::path SelectManagedVisualStudioSolution(const std::filesystem::path& primarySolution,
+                                                                          std::uint32_t visualStudioMajor);
+    [[nodiscard]] bool IsVisualStudioExecutableCompatible(const std::filesystem::path& executable,
+                                                          std::uint32_t minimumMajor) noexcept;
+    [[nodiscard]] std::vector<VisualStudioInstallation> DiscoverVisualStudioInstallations() noexcept;
     [[nodiscard]] std::filesystem::path ResolveCompatibleVisualStudioExecutable(
         std::uint32_t minimumMajor = ManagedWorkspaceMinimumVisualStudioMajor) noexcept;
 } // namespace Keire::Detail

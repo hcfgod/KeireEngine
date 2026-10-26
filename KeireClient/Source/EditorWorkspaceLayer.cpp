@@ -11,6 +11,7 @@
 #include "KeireClient/Editor/AssetOperationService.h"
 #include "KeireClient/Editor/AudioMixerDocument.h"
 #include "KeireClient/Editor/AudioMixerPanel.h"
+#include "KeireClient/Editor/AudioMixerPreviewSession.h"
 #include "KeireClient/Editor/ConsolePanel.h"
 #include "KeireClient/Editor/DiagnosticsPanel.h"
 #include "KeireClient/Editor/EditorAssetOperationCoordinator.h"
@@ -48,6 +49,7 @@
 #include "KeireClient/Editor/VfxEffectDocument.h"
 #include "KeireClient/Editor/VfxEffectPanel.h"
 #include "KeireClient/Editor/ViewportAssetDropRouter.h"
+#include "KeireClientInternal/Editor/EnvironmentPreviewClock.h"
 #include "KeireClientInternal/Editor/PhysicsPropertyDrawers.h"
 #include "KeireClientInternal/Editor/VfxPropertyDrawers.h"
 
@@ -65,10 +67,8 @@
 #include <exception>
 #include <filesystem>
 #include <functional>
-#include <limits>
 #include <optional>
 #include <span>
-#include <sstream>
 #include <stdexcept>
 #include <unordered_set>
 #include <utility>
@@ -348,6 +348,7 @@ EditorWorkspaceLayer::EditorWorkspaceLayer(const bool smoke, const bool initiali
       m_ShaderGraphDocument(m_ConstructedDocuments->ShaderGraph.get()),
       m_MaterialGraphDocument(m_ConstructedDocuments->MaterialGraph.get()),
       m_ProjectSettingsDocument(m_ConstructedDocuments->ProjectSettings.get()),
+      m_EnvironmentPreview(std::make_unique<KeireEditor::EnvironmentPreviewClock>()),
       m_MaterialDocument(m_ConstructedDocuments->Material.get()),
       m_UiBuilderDocument(std::make_unique<KeireEditor::UiBuilderDocument>()),
       m_UiBuilderStyleSheetDocument(std::make_unique<KeireEditor::UiBuilderStyleSheetDocument>()),
@@ -687,7 +688,7 @@ EditorWorkspaceLayer::EditorWorkspaceLayer(const bool smoke, const bool initiali
                    !m_PlayStartPending;
         });
     m_CommandRouter->Bind(
-        KeireEditor::EditorCommand::Pause, [this] { m_SceneDocument->PlaySession()->TogglePause(); },
+        KeireEditor::EditorCommand::Pause, [this] { TogglePlayPause(); },
         [this]
         {
             return m_SceneDocument->PlaySession() &&
@@ -914,6 +915,10 @@ void EditorWorkspaceLayer::OnAttach()
             if (!m_AssetDatabase)
                 m_AssetDatabase = Keire::CreateRef<Keire::AssetDatabase>(std::move(databaseSpecification));
             m_EditorSessionPath = project->WorkspaceDirectory() / "EditorSession.state";
+            const auto graphViews = project->WorkspaceDirectory() / "GraphViews";
+            m_ShaderGraphPanel->SetBookmarkDirectory(graphViews / "Shader");
+            m_MaterialGraphPanel->SetBookmarkDirectory(graphViews / "Material");
+            m_VfxEffectPanel->SetBookmarkDirectory(graphViews / "Vfx");
             const auto editorSession = KeireEditor::LoadEditorSessionState(m_EditorSessionPath);
             const auto restoredScene = editorSession.LastScene;
             m_MaximizeGameOnPlay = editorSession.MaximizeGameOnPlay;
@@ -1125,42 +1130,8 @@ void EditorWorkspaceLayer::OnUpdate(const Keire::Time& time)
                 m_PlayModeCoordinator->UpdateRuntime(time.DeltaTime().Seconds(), time.InterpolationAlpha());
                 break;
             case Phase::EditModePreview:
-                if (m_SceneDocument->PlaySession())
-                {
-                    StopEditModeVfxPreviews();
-                }
-                else
-                {
-                    try
-                    {
-                        SynchronizeEditModeVfxPreviews();
-                    }
-                    catch (const std::exception& error)
-                    {
-                        StopEditModeVfxPreviews();
-                        ReportError("VFX",
-                                    std::string("Edit-mode VFX preview synchronization failed: ") + error.what());
-                    }
-                    if (m_VfxEffectPreviewWorld)
-                    {
-                        const auto deltaSeconds =
-                            static_cast<float>(std::clamp(time.UnscaledDeltaTime().Seconds(), 0.0, 0.1));
-                        m_VfxEffectPreviewWorld->Update(deltaSeconds);
-                        if (m_VfxEffectPreviewAutoRestart && m_VfxEffectPreviewEffect &&
-                            !m_VfxEffectPreviewWorld->IsAlive(m_VfxEffectPreviewHandle))
-                        {
-                            m_VfxEffectPreviewHandle = m_VfxEffectPreviewWorld->Activate(
-                                {m_VfxEffectPreviewEffect, m_VfxEffectPreviewRevision, m_VfxEffectPreviewPosition,
-                                 m_VfxEffectPreviewRotation, m_VfxEffectPreviewSeedOffset});
-                            if (m_VfxEffectPreviewHandle)
-                            {
-                                m_VfxEffectPreviewWorld->SetSimulationSpeed(
-                                    m_VfxEffectPreviewHandle,
-                                    m_VfxEffectPreviewPaused ? 0.0F : m_VfxEffectPreviewSpeed);
-                            }
-                        }
-                    }
-                }
+                UpdateEnvironmentPreview(time.UnscaledDeltaTime().Seconds());
+                UpdateEditModeVfxPreviews(time.UnscaledDeltaTime().Seconds());
                 break;
             case Phase::PendingFileDialogs:
                 CompleteSaveSceneAs();
@@ -1478,7 +1449,7 @@ void EditorWorkspaceLayer::OnUi(Keire::UiFrame& ui)
         m_MaterialGraphPanel->Draw(ui);
         m_UiBuilderPanel->Draw(ui);
         DrawInputDebugger(ui);
-        m_ProjectSettingsPanel->Draw(ui, m_Theme);
+        m_ProjectSettingsPanel->DrawPanels(ui, m_Theme);
         m_LightingPanel->Draw(ui, m_Theme);
         m_PackageManagerPanel->Draw(ui, m_Theme);
     }

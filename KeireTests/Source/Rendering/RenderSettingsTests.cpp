@@ -131,6 +131,42 @@ TEST_CASE("Rendering settings schema five round trips pipeline temporal and GI c
     }
 }
 
+TEST_CASE("rendering schema six persists atmosphere while legacy schemas keep it disabled")
+{
+    TemporaryDirectory directory;
+    Keire::RenderEnvironmentSettings settings;
+    settings.Atmosphere.Enabled = true;
+    settings.Atmosphere.PlanetCenter = {1.0e12, -6'360'000.0, 123.25};
+    settings.Atmosphere.MieAnisotropy = -0.4;
+    settings.Atmosphere.ViewSamples = 48;
+    Keire::SaveRenderEnvironmentSettings(directory.Path, settings);
+    CHECK(Keire::LoadRenderEnvironmentSettings(directory.Path) == settings);
+    std::ifstream input(directory.Path / "ProjectSettings" / "Rendering.keiresettings");
+    const auto saved = nlohmann::json::parse(input);
+    input.close();
+    CHECK(saved.at("schemaVersion") == Keire::RenderEnvironmentSettingsSchemaVersion);
+    CHECK(saved.at("atmosphere").at("enabled") == true);
+    for (const auto schema : {1U, 2U, 3U, 4U, 5U})
+    {
+        auto legacy = saved;
+        legacy["schemaVersion"] = schema;
+        legacy.erase("atmosphere");
+        legacy.erase("stars");
+        WriteSettings(directory.Path, legacy);
+        const auto migrated = Keire::LoadRenderEnvironmentSettings(directory.Path);
+        CHECK(migrated.SchemaVersion == Keire::RenderEnvironmentSettingsSchemaVersion);
+        CHECK(migrated.Atmosphere == Keire::AtmosphereSettings{});
+    }
+    auto malformed = saved;
+    malformed["atmosphere"]["viewSamples"] = 1;
+    WriteSettings(directory.Path, malformed);
+    CHECK_THROWS((void)Keire::LoadRenderEnvironmentSettings(directory.Path));
+    malformed = saved;
+    malformed.erase("atmosphere");
+    WriteSettings(directory.Path, malformed);
+    CHECK_THROWS((void)Keire::LoadRenderEnvironmentSettings(directory.Path));
+}
+
 TEST_CASE("global illumination modes select distinct renderer channels")
 {
     using Keire::GlobalIlluminationMode;

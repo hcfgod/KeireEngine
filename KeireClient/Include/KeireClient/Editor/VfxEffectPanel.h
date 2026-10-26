@@ -9,6 +9,7 @@
 #include "KeireClient/Editor/GraphNavigation.h"
 
 #include <cstddef>
+#include <filesystem>
 #include <functional>
 #include <optional>
 #include <span>
@@ -65,6 +66,7 @@ namespace KeireEditor
         explicit VfxEffectPanel(IVfxEffectPanelController& controller) noexcept : m_Controller(controller) {}
 
         void Attach(Keire::UiWorkspace& workspace);
+        void SetBookmarkDirectory(std::filesystem::path directory) { m_BookmarkDirectory = std::move(directory); }
         void Draw(Keire::UiFrame& ui);
         void SetMessage(std::string message) { m_Message = std::move(message); }
         void ResetTransientState() noexcept;
@@ -78,6 +80,7 @@ namespace KeireEditor
         void DrawHeader(Keire::UiFrame& ui);
         void DrawPreviewToolbar(Keire::UiFrame& ui);
         void DrawEffectSettings(Keire::UiFrame& ui);
+        void SelectGraphSystem(Keire::AssetId system);
         void DrawGraphEditor(Keire::UiFrame& ui);
         void DrawGraphSystems(Keire::UiFrame& ui);
         void DrawGraphCanvas(Keire::UiFrame& ui);
@@ -125,6 +128,7 @@ namespace KeireEditor
         GraphCommentEditorState m_CommentEditor;
         Keire::UiPanelRegistration m_Registration;
         Keire::AssetId m_SelectedModule;
+        bool m_RevealSelectedModule = false;
         Keire::AssetId m_SelectedSystem;
         Keire::AssetId m_SelectedNode;
         std::vector<Keire::AssetId> m_SelectedNodes;
@@ -140,6 +144,8 @@ namespace KeireEditor
         std::string m_InspectorComment;
         NodeMenuSelection m_NodeMenuSelection;
         GraphBookmarkSet m_GraphBookmarks;
+        GraphBookmarkMenuState m_BookmarkMenu;
+        std::filesystem::path m_BookmarkDirectory;
         Keire::AssetId m_InspectorCommentNode;
         bool m_InspectorCommentPinned = false;
         std::string m_Message;

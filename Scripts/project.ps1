@@ -3,7 +3,7 @@ param(
     [ValidateSet("menu", "bootstrap", "generate", "build", "test", "run", "run-staged-editor", "run-staged-hub", "clean", "coverage", "stage-editor", "stage-hub", "package", "package-editor", "package-hub", "package-installer", "package-hub-installer", "doctor", "rename", "vendor-update", "help")]
     [string]$Command = "menu",
     [string]$Generator = "vs2022",
-    [ValidateSet("Debug", "Release", "Profile", "Dist", "DebugASan", "DebugUBSan", "DebugTSan", "Coverage")]
+    [ValidateSet("Debug", "Release", "Profile", "Dist", "DevDist", "DebugASan", "DebugUBSan", "DebugTSan", "Coverage")]
     [string]$Configuration = "Debug",
     [string]$Architecture = "",
     [ValidateSet("default", "msc", "gcc", "clang")]
@@ -47,9 +47,12 @@ $Project = Get-ProjectConfig
 $Target = if ($Target) { $Target } else { $Project.CLIENT_TARGET }
 $Architecture = if ($Architecture) { Normalize-Architecture $Architecture } else { Get-NativeArchitecture }
 if ($Command -eq "package" -and -not $ConfigurationWasProvided) { $Configuration = "Release" }
-if ($Command -in @("stage-editor", "stage-hub", "package-editor", "package-hub", "package-installer",
+if ($Command -in @("stage-hub", "package-editor", "package-hub", "package-installer",
         "package-hub-installer")) {
     $Configuration = "Dist"
+}
+if ($Command -in @("stage-editor", "run-staged-editor") -and -not $ConfigurationWasProvided) {
+    $Configuration = "DevDist"
 }
 if ($Command -in @("stage-editor", "stage-hub") -and -not $GeneratorWasProvided) { $Generator = "ninja" }
 
@@ -95,7 +98,7 @@ function Invoke-ProjectCommand {
         switch ($SelectedCommand) {
         { $_ -in @("run-staged-editor", "run-staged-hub") } {
             & (Join-Path $WindowsScripts "run-staged.ps1") -Editor:($SelectedCommand -eq "run-staged-editor") `
-                -Architecture $Architecture -ProjectPath $ProjectPath
+                -Architecture $Architecture -ProjectPath $ProjectPath -Configuration $Configuration
         }
         "bootstrap" {
             Invoke-CheckedCommand {
@@ -140,6 +143,16 @@ function Invoke-ProjectCommand {
             } "Coverage"
         }
         "stage-editor" {
+            if ($Configuration -notin @("DevDist", "Dist")) {
+                throw "stage-editor supports DevDist (fast local iteration) or Dist (shipping optimization)."
+            }
+            if ($Configuration -eq "DevDist") {
+                Invoke-CheckedCommand {
+                    & (Join-Path $WindowsScripts "stage-editor.ps1") -Generator $Generator `
+                        -Architecture $Architecture -Toolset $Toolset -CI:$CI -Update:$Update -Generate:$Force
+                } "Fast DevDist editor stage"
+                break
+            }
             Invoke-CheckedCommand {
                 $arguments = @(
                     "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
@@ -240,7 +253,7 @@ Commands: bootstrap, generate, build, test, run, clean, coverage, stage-editor, 
 
 Common options:
   -Generator <vs2026|vs2022|vs2019|ninja|gmake|compilecommands>
-  -Configuration <Debug|Release|Profile|Dist|DebugASan|DebugUBSan|DebugTSan|Coverage>
+  -Configuration <Debug|Release|Profile|Dist|DevDist|DebugASan|DebugUBSan|DebugTSan|Coverage>
   -Architecture <x86_64|ARM64>  -Toolset <default|msc|gcc|clang>
   -CompilerCache <auto|off|sccache> (Ninja builds; auto uses sccache when installed)
   -AllowDirty (package commands only; emits a local development artifact and is rejected in CI)
@@ -249,9 +262,10 @@ Common options:
   -SmokeProject (run the sample project editor and exit after several frames)
   -Editor -ProjectPath <path> (open the editor directly instead of the project hub)
   -CleanScope <full|build|generated> (clean only; full removes the complete Build directory)
-  stage-editor incrementally updates a runnable Dist editor without release tests or archive validation
+  stage-editor defaults to fast DevDist (no LTO); -Configuration Dist stages shipping-optimized code
   stage-hub incrementally updates a runnable Dist Hub without creating or extracting an archive
-  run-staged-editor and run-staged-hub launch existing Dist stages without building (-ProjectPath for editor)
+  run-staged-editor defaults to DevDist; use -Configuration Dist to launch the full stage without building
+  run-staged-hub launches the existing Dist Hub without building (-ProjectPath is Editor-only)
   development staging defaults to Ninja unless -Generator is supplied explicitly
   package-editor writes a ready-to-run Dist editor under Build\Distributions and an archive under Artifacts
   package-hub writes a standalone Dist Hub under Build\Distributions and an archive under Artifacts
@@ -274,7 +288,7 @@ function Read-BuildSettings([bool]$IncludeConfiguration) {
     $updateChoice = Read-Setting "Update installed prerequisites (yes, no)" $updateDefault
     $script:Update = $updateChoice -match '^(y|yes)$'
     if ($IncludeConfiguration) {
-        $script:Configuration = Read-Setting "Configuration (Debug, Release, Profile, Dist, DebugASan, DebugUBSan, DebugTSan, Coverage)" $Configuration
+        $script:Configuration = Read-Setting "Configuration (Debug, Release, Profile, Dist, DevDist, DebugASan, DebugUBSan, DebugTSan, Coverage)" $Configuration
     }
 }
 
@@ -288,7 +302,7 @@ function Show-Menu {
         Write-Host "4. Run tests"
         Write-Host "5. Run $($Project.HUB_TARGET)"
         Write-Host "6. Coverage report"
-        Write-Host "7. Stage Editor for quick Dist testing"
+        Write-Host "7. Stage Editor for fast DevDist testing (no LTO)"
         Write-Host "8. Stage Hub for quick Dist testing"
         Write-Host "9. Package SDK"
         Write-Host "10. Package Editor (Dist)"
@@ -312,9 +326,9 @@ function Show-Menu {
                 "4" { Read-BuildSettings $true; Invoke-ProjectCommand test }
                 "5" { Read-BuildSettings $true; Invoke-ProjectCommand run }
                 "6" { Read-BuildSettings $false; Invoke-ProjectCommand coverage }
-                "7" { $script:Generator = "ninja"; Read-BuildSettings $false; Invoke-ProjectCommand stage-editor }
+                "7" { $script:Configuration = "DevDist"; $script:Generator = "ninja"; Read-BuildSettings $false; Invoke-ProjectCommand stage-editor }
                 "8" { $script:Generator = "ninja"; Read-BuildSettings $false; Invoke-ProjectCommand stage-hub }
-                "19" { Invoke-ProjectCommand run-staged-editor }
+                "19" { $script:Configuration = "DevDist"; Invoke-ProjectCommand run-staged-editor }
                 "20" { Invoke-ProjectCommand run-staged-hub }
                 "9" { Read-BuildSettings $false; $script:Configuration=Read-Setting "Package configuration (Release, Dist)" "Release"; Invoke-ProjectCommand package }
                 "10" { Read-BuildSettings $false; Invoke-ProjectCommand package-editor }

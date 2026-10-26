@@ -137,10 +137,30 @@ namespace Keire
         return ImGui::Button(safeLabel.c_str(), {size.Width, size.Height});
     }
 
-    bool UiFrame::Checkbox(std::string_view label, bool& value)
+    bool UiFrame::Checkbox(std::string_view label, bool& value) { return Checkbox(label, value, {}); }
+
+    bool UiFrame::Checkbox(std::string_view label, bool& value, const UiCheckboxOptions options)
     {
         RequireActive("Checkbox");
         const std::string safeLabel(label);
+        if (options.ContinueRow)
+        {
+            const auto labelSize = ImGui::CalcTextSize(safeLabel.c_str(), nullptr, true);
+            const auto& style = ImGui::GetStyle();
+            const float controlWidth =
+                ImGui::GetFrameHeight() + (labelSize.x > 0.0F ? style.ItemInnerSpacing.x + labelSize.x : 0.0F);
+            auto* window = ImGui::GetCurrentWindow();
+            const float nextX = window->DC.CursorPosPrevLine.x + style.ItemSpacing.x;
+            const float contentRight = ImGui::GetCursorScreenPos().x + ImGui::GetContentRegionAvail().x;
+            if (nextX + controlWidth <= contentRight)
+            {
+                ImGui::SameLine();
+            }
+            else if (window->DC.IsSameLine)
+            {
+                ImGui::NewLine();
+            }
+        }
         const bool changed = ImGui::Checkbox(safeLabel.c_str(), &value);
         const auto minimum = ImGui::GetItemRectMin();
         const float size = ImGui::GetFrameHeight();

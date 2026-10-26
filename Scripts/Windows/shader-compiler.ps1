@@ -41,10 +41,12 @@ $cmakeSdlInstall = Join-Path $asciiRoot "Build\Dependencies\windows-$OutputArchi
 $hostToolset = "msc"
 Enter-WindowsToolEnvironment "ninja" $hostToolset $Architecture | Out-Null
 $compilerIdentity = "MSVC $env:VCToolsVersion WindowsSDK $env:WindowsSDKVersion"
-$key = @($Lock.SDL_SHADERCROSS_COMMIT, $Lock.SDL_SHADERCROSS_DXC_COMMIT,
+$dependencyKey = @($Lock.SDL_SHADERCROSS_COMMIT, $Lock.SDL_SHADERCROSS_DXC_COMMIT,
     $Lock.SDL_SHADERCROSS_SPIRV_CROSS_COMMIT, $Lock.SDL_SHADERCROSS_SPIRV_HEADERS_COMMIT,
     $Lock.SDL_SHADERCROSS_SPIRV_TOOLS_COMMIT, $Lock.SDL_COMMIT, $Architecture, $Toolset,
     $compilerIdentity, "short-workspace-v2") -join "|"
+$overlay = Join-Path $Root 'Scripts/Dependencies/ShaderCompilerOverlay.cmake'
+$key = $dependencyKey + '|host-overlay:' + (Get-FileHash -LiteralPath $overlay -Algorithm SHA256).Hash
 
 $cacheItem = Get-Item -LiteralPath $cacheRoot -Force -ErrorAction SilentlyContinue
 if ($cacheItem -and (-not $cacheItem.PSIsContainer -or
@@ -67,7 +69,7 @@ if (Test-Path -LiteralPath $cacheRoot) {
     }
     $configuredKey = if (Test-Path $configureStamp) { (Get-Content $configureStamp -Raw).Trim() } else { "" }
     $mustReplace = $Force -or -not (Test-Path (Join-Path $cacheRoot "CMakeCache.txt")) -or
-        -not $configuredKey -or $configuredKey -ne $key
+        -not $configuredKey -or $configuredKey -ne $dependencyKey
     if ($mustReplace) {
         Remove-KeireGeneratedDirectory -RepositoryRoot $Root `
             -AllowedRoot (Join-Path $Root "Build\Tools\ShaderCompiler\Cache") -Path $cacheRoot `
@@ -93,12 +95,13 @@ $options = @(
     "-DSDLSHADERCROSS_INSTALL=ON",
     "-DSDLSHADERCROSS_INSTALL_RUNTIME=ON",
     "-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreadedDLL"
+    "-DCMAKE_PROJECT_INCLUDE=$(Join-Path $asciiRoot 'Scripts/Dependencies/ShaderCompilerOverlay.cmake')"
 )
 Write-Host "==> Configuring the pinned host shader compiler"
 & cmake -S (Join-Path $asciiRoot "Vendor\SDL_shadercross") -B $cmakeCacheRoot -G Ninja `
     "-DCMAKE_MAKE_PROGRAM=$Ninja" @options
 if ($LASTEXITCODE -ne 0) { throw "KeireShaderCompiler configuration failed." }
-[IO.File]::WriteAllText($configureStamp, "$key`n", [Text.UTF8Encoding]::new($false))
+[IO.File]::WriteAllText($configureStamp, "$dependencyKey`n", [Text.UTF8Encoding]::new($false))
 & cmake --build $cmakeCacheRoot --target install --parallel $BuildJobs
 if ($LASTEXITCODE -ne 0) { throw "KeireShaderCompiler build failed." }
 

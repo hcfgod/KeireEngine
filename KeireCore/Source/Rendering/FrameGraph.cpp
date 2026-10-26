@@ -336,6 +336,11 @@ namespace Keire::RenderBackend
 
     StaticSceneFrameGraph BuildStaticSceneFrameGraph(const RenderPath path)
     {
+        return BuildStaticSceneFrameGraph(path, false);
+    }
+
+    StaticSceneFrameGraph BuildStaticSceneFrameGraph(const RenderPath path, const bool bloomEnabled)
+    {
         if (path != RenderPath::ForwardPlus && path != RenderPath::DeferredHybrid)
             throw std::invalid_argument("A static scene frame graph requires a resolved render path.");
 
@@ -517,8 +522,35 @@ namespace Keire::RenderBackend
                                       {result.HdrScene, irradynComplete}});
             toneMapDependency = irradynComplete;
         }
-        result.ToneMap = result.Graph.AddPass(
-            {"ACES tone map", {result.HdrScene, result.GBufferVelocity, toneMapDependency}, {toneMapped}});
+        const auto hdrPrepared =
+            result.Graph.AddResource({"HDR preparation complete", FrameGraphResourceKind::Buffer, true});
+        // World-space UI and HDR camera effects must finish before any HDR post-processing samples the scene.
+        result.HdrPreparation = result.Graph.AddPass(
+            {"HDR world UI and camera effects", {result.HdrScene, toneMapDependency}, {hdrPrepared}});
+        std::vector toneMapInputs{result.HdrScene, result.GBufferVelocity, hdrPrepared};
+        if (bloomEnabled)
+        {
+            const auto addBloomTexture = [&result](const char* name)
+            {
+                auto description =
+                    TextureResource(name, FrameGraphTextureFormat::Rgba16Float,
+                                    FrameGraphResourceUsage::ColorAttachment | FrameGraphResourceUsage::Sampled);
+                description.Texture.WidthScaleDenominator = 2U;
+                description.Texture.HeightScaleDenominator = 2U;
+                return result.Graph.AddResource(std::move(description));
+            };
+            result.BloomExtracted = addBloomTexture("Bloom extracted HDR");
+            result.BloomHorizontal = addBloomTexture("Bloom horizontal blur");
+            result.BloomResult = addBloomTexture("Bloom filtered HDR");
+            result.BloomExtraction =
+                result.Graph.AddPass({"Bloom extraction", {result.HdrScene, hdrPrepared}, {result.BloomExtracted}});
+            result.BloomHorizontalBlur =
+                result.Graph.AddPass({"Bloom horizontal blur", {result.BloomExtracted}, {result.BloomHorizontal}});
+            result.BloomVerticalBlur =
+                result.Graph.AddPass({"Bloom vertical blur", {result.BloomHorizontal}, {result.BloomResult}});
+            toneMapInputs.push_back(result.BloomResult);
+        }
+        result.ToneMap = result.Graph.AddPass({"ACES tone map", std::move(toneMapInputs), {toneMapped}});
         result.Overlays =
             result.Graph.AddPass({"Editor overlays",
                                   {toneMapped, result.GpuOcclusionPyramid, result.GpuOcclusionIndirectArguments},

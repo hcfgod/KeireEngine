@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <iterator>
+#include <limits>
 #include <stdexcept>
 #include <string>
 
@@ -42,16 +43,33 @@ namespace Keire
                     throw std::invalid_argument("Gradient keys must contain finite colors.");
         }
 
-        [[nodiscard]] float Hermite(const CurveKey& left, const CurveKey& right, const float alpha)
+        [[nodiscard]] double NormalizedTime(const float time, const float start, const float end) noexcept
         {
-            const auto span = right.Time - left.Time;
+            // Authored endpoints can be finite even when their float difference overflows.
+            return (static_cast<double>(time) - start) / (static_cast<double>(end) - start);
+        }
+
+        [[nodiscard]] float Hermite(const CurveKey& left, const CurveKey& right, const double alpha)
+        {
+            const double span = static_cast<double>(right.Time) - left.Time;
             const auto alphaSquared = alpha * alpha;
             const auto alphaCubed = alphaSquared * alpha;
             const auto h00 = 2.0F * alphaCubed - 3.0F * alphaSquared + 1.0F;
             const auto h10 = alphaCubed - 2.0F * alphaSquared + alpha;
             const auto h01 = -2.0F * alphaCubed + 3.0F * alphaSquared;
             const auto h11 = alphaCubed - alphaSquared;
-            return h00 * left.Value + h10 * span * left.OutTangent + h01 * right.Value + h11 * span * right.InTangent;
+            const double result =
+                h00 * left.Value + h10 * span * left.OutTangent + h01 * right.Value + h11 * span * right.InTangent;
+            constexpr double maximum = std::numeric_limits<float>::max();
+            if (result > maximum)
+            {
+                return std::numeric_limits<float>::infinity();
+            }
+            if (result < -maximum)
+            {
+                return -std::numeric_limits<float>::infinity();
+            }
+            return static_cast<float>(result);
         }
 
     } // namespace
@@ -85,13 +103,14 @@ namespace Keire
 
         const auto right = std::ranges::upper_bound(m_Keys, time, {}, &CurveKey::Time);
         const auto left = std::prev(right);
-        const auto alpha = (time - left->Time) / (right->Time - left->Time);
+        const double alpha = NormalizedTime(time, left->Time, right->Time);
         switch (left->Interpolation)
         {
         case CurveInterpolation::Constant:
             return left->Value;
         case CurveInterpolation::Linear:
-            return left->Value + (right->Value - left->Value) * alpha;
+            return static_cast<float>(
+                std::lerp(static_cast<double>(left->Value), static_cast<double>(right->Value), alpha));
         case CurveInterpolation::Cubic:
             return Hermite(*left, *right, alpha);
         }
@@ -132,8 +151,8 @@ namespace Keire
         const auto left = std::prev(right);
         if (m_Interpolation == GradientInterpolation::Constant)
             return left->Value;
-        const auto alpha = (time - left->Time) / (right->Time - left->Time);
-        return Math::Lerp(left->Value, right->Value, alpha);
+        const double alpha = NormalizedTime(time, left->Time, right->Time);
+        return Math::Lerp(left->Value, right->Value, static_cast<float>(alpha));
     }
 
     void ColorGradient::SetKeys(std::vector<ColorGradientKey> keys)

@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <LangVersion>12.0</LangVersion>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>Keire.Managed.Generators.Production.Tests</AssemblyName>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../../KeireManaged.Generators.Tests/Program.cs" Link="Program.cs" />
+    <Reference Include="Keire.Managed">
+      <HintPath>../../../Build/Managed/DesignTime/Keire.Managed.dll</HintPath>
+    </Reference>
+    <Analyzer Include="../../../Build/Managed/Keire.Managed.Generators.dll" />
+  </ItemGroup>
+</Project>

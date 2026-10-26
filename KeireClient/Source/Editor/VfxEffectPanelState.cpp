@@ -2,9 +2,34 @@
 
 namespace KeireEditor
 {
+    void VfxEffectPanel::SelectGraphSystem(const Keire::AssetId system)
+    {
+        if (m_SelectedSystem == system)
+        {
+            return;
+        }
+        m_SelectedSystem = system;
+        m_SelectedNode = {};
+        m_SelectedNodes.clear();
+        m_SelectedBlock = {};
+        m_SelectedConnection = {};
+        m_ContextNode = {};
+        m_ContextBlock = {};
+        m_ContextPin = {};
+        m_ContextConnection = {};
+        m_InspectorCommentNode = {};
+        m_InspectorComment.clear();
+        m_InspectorCommentPinned = false;
+        m_GraphCanvas.CancelInteractions();
+        m_GraphCanvas.Select(std::nullopt);
+        m_GraphCanvas.SelectBlock(std::nullopt);
+        m_GraphCanvas.SelectConnection(std::nullopt);
+    }
+
     void VfxEffectPanel::ResetTransientState() noexcept
     {
         m_SelectedModule = {};
+        m_RevealSelectedModule = false;
         m_SelectedSystem = {};
         m_SelectedNode = {};
         m_SelectedBlock = {};
@@ -18,6 +43,7 @@ namespace KeireEditor
         m_NodePaletteSearch.clear();
         m_SelectedNodes.clear();
         m_GraphBookmarks.Clear();
+        m_BookmarkMenu = {};
         m_InspectorCommentNode = {};
         m_InspectorComment.clear();
         m_InspectorCommentPinned = false;

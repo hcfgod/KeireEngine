@@ -3,6 +3,8 @@
 Review date: 2026-08-09  
 Initiative: KE-019, phase 1
 
+Editor authoring follow-up: 2026-10-25 (development changes; acceptance is tracked separately).
+
 This audit separates working contracts from later production work. It also tracks the earlier mixer/reverb defect as a
 runtime fix: broad roadmap language is not evidence that a critical audio path works.
 
@@ -23,8 +25,9 @@ mixer snapshot and reverb-send scale apply together. Leaving the zone restores t
 Invalid or unavailable mixer content never partially replaces the last registered routing snapshot.
 
 The Audio Mixer editor publishes unsaved routing/fader changes transiently for live device preview. Its **Mix Console**
-provides channel faders, mute/solo state, and live peak meters, while **Channel Inspector** owns graph routing, ordered
-effects, sends, snapshots, and ducking. Effect racks use named, bounded controls with unit-aware presentation instead
+provides channel faders, mute/solo state, and live peak meters. **Routing** shows the bus hierarchy and connection graph;
+**Channel Inspector** edits the selected bus output, ordered effects, and sends. **Snapshots** and **Ducking** have
+their own tabs. Effect racks use named, bounded controls with unit-aware presentation instead
 of anonymous parameter numbers. The Inspector resolves inherited Default Mixer routing and presents named bus and
 snapshot selectors rather than stable-ID text fields. Headless previews and tests exercise the DSP path and meters.
 
@@ -32,6 +35,28 @@ Project Settings owns the playback device, mix sample rate, period size, mono/st
 virtual voice budgets. A missing saved device falls back safely to the system default and reports that fallback in the
 Profiler. Cooked players receive the portable audio format and voice settings but deliberately exclude the authoring
 workstation's hardware device ID.
+
+## Snapshot Audition In The Editor
+
+In **Snapshots**, select a snapshot and set **Preview Weight** from zero (the current authored draft) to one (the full
+snapshot). Choose **Audition Snapshot** to publish that blend for live preview. Change the weight and audition again
+to compare positions in the blend. Every audition starts from the draft, not the last audition, so repeated previews
+do not accumulate gain changes. Mute, solo, and bypass overrides switch at weight 0.5 rather than interpolating.
+
+**Restore Authored Mix** returns preview to the current draft, including any unsaved authoring changes. Audition does
+not change dirty state, source bytes, revision, or undo history. Save persists authored values, never the auditioned
+blend. Successful content edits and Undo/Redo publish their authored state again. A failed audition attempts to restore
+the draft and reports the original failure even if restoration also fails; do not assume that a failed preview changed
+the device. This is manual blend audition, not a timed transition editor or an audio playback source. Route a playing
+source through this mixer to hear it; a snapshot alone does not start a voice.
+
+Live preview resolves impulse-response resources before publishing a candidate mix. If publication or device submission
+fails, the Editor attempts to restore the last successfully previewed mix; the document also attempts to restore its
+authored draft and keeps the original error. Closing the panel restores the latest readable saved source. If the source
+has become unreadable or its new impulse responses are unavailable, the Editor uses its retained saved baseline and
+decoded resources instead. A failed restore retains the session for retry; reopen and close the mixer to retry it.
+Saving prepares the retained baseline before writing, then advances it only after a successful atomic source write.
+These safeguards do not guarantee device recovery after a hardware failure or make audition a timed transition.
 
 ## Phase 1 Migration
 
@@ -71,7 +96,7 @@ Parameter-only mixer updates, including continuously blended Reverb Zone weights
 convolution state. The owner thread publishes bounded atomic control snapshots to native effects and send volumes;
 topology, bypass, ducking, or impulse-resource changes deliberately rebuild the affected routing.
 Device hot-plug while the editor is already running,
-platform-specific latency tuning, effect-specific visualization, snapshot transition controls, accessibility review,
+platform-specific latency tuning, effect-specific visualization, timed snapshot transition controls, accessibility review,
 and long-run Windows/Linux/macOS packaged matrices also remain acceptance work.
 
 Future work must preserve callback-thread constraints: no game callback, asset load, file I/O, locks, or unbounded

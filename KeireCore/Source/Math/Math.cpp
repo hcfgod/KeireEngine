@@ -66,8 +66,8 @@ namespace Keire::Math
     Color Lerp(const Color from, const Color to, const float alpha) noexcept
     {
         const auto clamped = std::clamp(alpha, 0.0F, 1.0F);
-        return {from.Red + (to.Red - from.Red) * clamped, from.Green + (to.Green - from.Green) * clamped,
-                from.Blue + (to.Blue - from.Blue) * clamped, from.Alpha + (to.Alpha - from.Alpha) * clamped};
+        return {std::lerp(from.Red, to.Red, clamped), std::lerp(from.Green, to.Green, clamped),
+                std::lerp(from.Blue, to.Blue, clamped), std::lerp(from.Alpha, to.Alpha, clamped)};
     }
     bool IsFinite(const Matrix4& value) noexcept
     {

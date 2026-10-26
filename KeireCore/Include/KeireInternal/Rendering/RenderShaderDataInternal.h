@@ -2,7 +2,11 @@
 
 #include "Keire/Animation/Skinning.h"
 #include "Keire/Assets/RenderingAssets.h"
+#include "KeireInternal/Rendering/AtmosphereUniforms.h"
+#include "KeireInternal/Rendering/CloudLightingUniforms.h"
+#include "KeireInternal/Rendering/CloudUniforms.h"
 #include "KeireInternal/Rendering/IrradynSceneCacheInternal.h"
+#include "KeireInternal/Rendering/StarFieldUniforms.h"
 
 #include <SDL3/SDL.h>
 
@@ -388,7 +392,13 @@ namespace Keire::RenderBackend
         Matrix4 InverseProjection;
         Matrix4 InverseView;
         Vector4 Parameters;
+        AtmosphereUniforms Atmosphere;
+        CloudUniforms Clouds;
+        CloudLightingUniforms CloudLighting;
+        StarFieldUniforms Stars;
     };
+
+    static_assert(sizeof(SkyUniforms) == sizeof(float) * 124);
 
     struct GridUniforms final
     {

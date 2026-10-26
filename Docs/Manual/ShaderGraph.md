@@ -67,6 +67,12 @@ Fullscreen use a flat CPU preview with opacity over a checker background; mesh a
 That preview does not execute a UI document or sample the scene framebuffer. Preview success does not replace target
 cooking or consumer validation.
 
+In source builds with the extended-math preview fix, Arc Tangent, Hyperbolic Sine/Cosine/Tangent, Degrees To Radians,
+Radians To Degrees, Negate, Exponential, Logarithm, and Scale And Bias read their declared **Input** values in the CPU
+preview for scalar, vector, and color types. Older preview evaluators incorrectly looked for **Value** and could report
+"missing a canonical input" for these valid nodes. Do not rename graph pins or rewrite source data to work around
+that error; use an Editor build containing the fix. Runtime shader generation and the graph schema are unchanged.
+
 ## Reuse
 
 Shader Functions and Material Functions provide reusable typed expression bodies; Material Layers provide surface
@@ -89,6 +95,7 @@ force an incompatible selection. See [Graph Editing](GraphEditing.md#reuse-is-ex
 | Material value disappeared after a rename | Confirm the Blackboard property's stable ID was preserved. |
 | Build lacks a variant | Check the graph keyword policy and the material's selected canonical permutation. |
 | Changed node metadata is missing after import | Apply or Save the node-property draft; wait for compilation and check diagnostics. |
+| Custom include fails before compilation | Use literal include names inside the project; check declared root order, missing files, cycles, and the aggregate source-size limit. Macro-computed includes are unsupported. |
 
 Use [Graph Editing](GraphEditing.md) for selection, comments, clipboard, and cable routing, and
 [Shaders and Materials](../ShadersAndMaterials.md) for schemas, compilation, reflection, targets, and fallback behavior.

@@ -6,14 +6,18 @@ cache_helper="$ROOT/Scripts/Unix/generated-content-cache.sh"
 source "$cache_helper"
 compiler="$ROOT/Build/Tools/ShaderCompiler/KeireShaderCompiler"
 source_files=("$ROOT/KeireCore/Shaders/BuiltinUnlit.hlsl" "$ROOT/KeireCore/Shaders/BuiltinSky.hlsl" \
+  "$ROOT/KeireCore/Shaders/BuiltinCloudVolume.hlsl" \
   "$ROOT/KeireCore/Shaders/BuiltinGrid.hlsl" \
   "$ROOT/KeireCore/Shaders/BuiltinDepthVelocity.hlsl" \
   "$ROOT/KeireCore/Shaders/BuiltinShadow.hlsl" "$ROOT/KeireCore/Shaders/BuiltinToneMap.hlsl" \
+  "$ROOT/KeireCore/Shaders/BuiltinBloom.hlsl" \
   "$ROOT/KeireCore/Shaders/BuiltinRuntimeUi.hlsl" "$ROOT/KeireCore/Shaders/BuiltinDeferredGBuffer.hlsl" \
   "$ROOT/KeireCore/Shaders/BuiltinDeferredLighting.hlsl" "$ROOT/KeireCore/Shaders/BuiltinIrradyn.hlsl")
-prefixes=(BuiltinUnlit BuiltinSky BuiltinGrid BuiltinDepthVelocity BuiltinShadow BuiltinToneMap BuiltinRuntimeUi \
+prefixes=(BuiltinUnlit BuiltinSky BuiltinCloudVolume BuiltinGrid BuiltinDepthVelocity BuiltinShadow BuiltinToneMap BuiltinBloom BuiltinRuntimeUi \
   BuiltinDeferredGBuffer BuiltinDeferredLighting BuiltinIrradyn)
-include_files=("$ROOT/KeireCore/Shaders/BuiltinLighting.hlsli")
+include_files=("$ROOT/KeireCore/Shaders/BuiltinLighting.hlsli" "$ROOT/KeireCore/Shaders/CloudLayered.hlsl"
+               "$ROOT/KeireCore/Shaders/CloudVolume.hlsli" "$ROOT/KeireCore/Shaders/CloudVolumeGeometry.hlsli"
+               "$ROOT/KeireCore/Shaders/VolumeTransport.hlsli")
 generated="$ROOT/Build/Generated/Keire/BuiltinUnlitShaders.h"
 stamp="$ROOT/Build/Generated/Keire/BuiltinRenderingShaders.stamp"
 lock="$ROOT/Build/Generated/.locks/builtin-rendering.lock"

@@ -29,7 +29,7 @@ project(RuntimeTarget)
     AddKeireManagedRuntimeDependency()
     AddKeireManagedHostStaging(false)
 
-    filter { "system:windows", "configurations:Dist" }
+    filter { "system:windows", "configurations:Dist or DevDist" }
         kind "WindowedApp"
         entrypoint "mainCRTStartup"
 

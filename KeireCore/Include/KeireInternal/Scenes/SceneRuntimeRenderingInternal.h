@@ -4,6 +4,7 @@
 #include "Keire/ECS/Components/TransformComponent.h"
 #include "Keire/Rendering/RenderSystem.h"
 #include "Keire/Scenes/SceneRuntimeWorld.h"
+#include "KeireInternal/Environment/SceneRuntimeEnvironmentAccess.h"
 
 #include <cstddef>
 #include <functional>
@@ -149,7 +150,10 @@ namespace Keire::Internal
             ++contributionIndex;
         }
         if (request)
+        {
             request->DrawSceneContributions = drawSceneContributions;
+            request->EvaluatedEnvironment = Detail::SceneRuntimeEnvironmentAccess::CaptureLighting(*world);
+        }
         return request;
     }
 } // namespace Keire::Internal

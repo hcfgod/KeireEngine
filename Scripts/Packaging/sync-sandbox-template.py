@@ -137,14 +137,14 @@ def _expected_manifest(files: dict[Path, Path]) -> dict[str, object]:
         "compatibleEditors": ">=0.4.7 <2.0.0",
         "projectSchema": 4,
         "description": (
-            "The complete Kéire production Sandbox with twelve paired Shader Graph and Material Graph examples, "
+            "The Kéire learning Sandbox with twelve paired Shader Graph and legacy Material Graph examples, "
             "a curated VFX gallery, reusable gameplay scripts, rendering, physics, UI, audio, meshes, and textures."
         ),
         "tags": [
             "Sample",
             "Learning",
             "Shader Graph",
-            "Material Graph",
+            "Materials",
             "VFX",
             "Scripting",
         ],

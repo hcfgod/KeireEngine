@@ -7,6 +7,7 @@
 #include "KeireClient/Editor/ExternalEditorProfiles.h"
 #include "KeireClient/Editor/InspectorTransformUndo.h"
 #include "KeireClient/Editor/ViewportInputRouting.h"
+#include "KeireClientInternal/Editor/SettingsEditSurfaceTracker.h"
 #include "KeireInternal/Rendering/DynamicResolutionInternal.h"
 
 #include <cstdint>
@@ -21,6 +22,7 @@
 
 namespace KeireEditor
 {
+    class EnvironmentPreviewClock;
     enum class EditorViewportTarget : std::uint8_t
     {
         Scene,
@@ -63,6 +65,10 @@ namespace KeireEditor
         [[nodiscard]] virtual Keire::Ref<Keire::AssetSystem> SceneViewportAssetSystem() const noexcept = 0;
         [[nodiscard]] virtual Keire::Ref<Keire::RenderSystem> SceneViewportRenderer() const noexcept = 0;
         [[nodiscard]] virtual const Keire::RenderEnvironmentSettings& SceneViewportSettings() const noexcept = 0;
+        [[nodiscard]] virtual std::optional<Keire::EnvironmentLightingSnapshot> SceneViewportEnvironmentLighting()
+        {
+            return std::nullopt;
+        }
         [[nodiscard]] virtual Keire::Ref<Keire::WindowSystem> SceneViewportWindows() const noexcept = 0;
         [[nodiscard]] virtual Keire::WindowId SceneViewportWindow() const noexcept = 0;
         [[nodiscard]] virtual float SceneViewportDisplayScale() const noexcept = 0;
@@ -223,6 +229,7 @@ namespace KeireEditor
         virtual void SetProjectManagedSdk(ManagedSdkPreference preference) = 0;
         [[nodiscard]] virtual Keire::RenderFeatureCapabilities ProjectRenderFeatureCapabilities() const noexcept = 0;
         virtual void ApplyProjectAuthoringSettings(const Keire::ProjectAuthoringSettings& settings) = 0;
+        [[nodiscard]] virtual EnvironmentPreviewClock* ProjectEnvironmentPreview() { return nullptr; }
     };
 
     class SceneViewportPanel final
@@ -345,6 +352,8 @@ namespace KeireEditor
         }
 
       private:
+        class EntityDrawContext;
+
         struct ComponentClipboard final
         {
             Keire::ComponentTypeId Type;
@@ -440,13 +449,24 @@ namespace KeireEditor
         ~ProjectSettingsPanel();
         void Attach(Keire::UiWorkspace& workspace);
         void Draw(Keire::UiFrame& ui, const Keire::UiThemeDefinition& theme);
+        void DrawPanels(Keire::UiFrame& ui, const Keire::UiThemeDefinition& theme);
+        [[nodiscard]] Keire::UiPanelRegistration& EnvironmentRegistration() noexcept
+        {
+            return m_EnvironmentRegistration;
+        }
+
         [[nodiscard]] Keire::UiPanelRegistration& Registration() noexcept { return m_Registration; }
 
       private:
+        void ObserveEditSurface(Detail::SettingsEditSurface surface, bool visible, bool focused);
+        void DrawEnvironment(Keire::UiFrame& ui, const Keire::UiThemeDefinition& theme);
+
         ProjectSettingsDocument& m_Document;
         IProjectSettingsController& m_Controller;
         std::unique_ptr<AssetPicker> m_AssetPicker;
         Keire::UiPanelRegistration m_Registration;
+        Keire::UiPanelRegistration m_EnvironmentRegistration;
+        Detail::SettingsEditSurfaceTracker m_EditSurfaces;
         std::string m_Error;
         std::string m_AudioDeviceError;
         std::string m_CustomSdkPath;
@@ -454,8 +474,14 @@ namespace KeireEditor
         std::vector<Keire::AudioDeviceInfo> m_AudioPlaybackDevices;
         std::string m_SelectedExternalEditorId;
         std::string m_CustomEditorPath;
+        std::string m_ObservedExternalEditorId;
+        std::filesystem::path m_ObservedExternalEditorExecutable;
+        std::uint64_t m_ExternalEditorDraftRevision = 0;
         bool m_SdkInitialized = false;
         bool m_EditorsInitialized = false;
         bool m_AudioDevicesInitialized = false;
+        int m_SettingsCategory = -1;
+        int m_EnvironmentCategory = -1;
+        std::size_t m_EnvironmentSelectedKey = 0;
     };
 } // namespace KeireEditor

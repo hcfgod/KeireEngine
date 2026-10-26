@@ -1,55 +1,80 @@
 #include "KeireClient/Editor/GraphNavigation.h"
 
 #include <algorithm>
-#include <cmath>
-#include <stdexcept>
+#include <string>
 
 namespace KeireEditor
 {
-    void GraphBookmarkSet::Save(const std::string_view name, const NodeGraphViewport viewport)
+
+    bool DrawGraphBookmarkMenu(Keire::UiFrame& ui, GraphBookmarkSet& bookmarks, StableNodeGraphCanvas& canvas,
+                               GraphBookmarkMenuState& state)
     {
-        if (name.empty() || name.size() > 64U)
-            throw std::invalid_argument("Graph bookmark name must contain 1 to 64 characters.");
-        if (!std::isfinite(viewport.Pan.X) || !std::isfinite(viewport.Pan.Y) || !std::isfinite(viewport.Zoom) ||
-            viewport.Zoom < 0.2F || viewport.Zoom > 2.5F)
-            throw std::invalid_argument("Graph bookmark viewport is invalid.");
-        if (const auto found = std::ranges::find(m_Bookmarks, name, &GraphBookmark::Name); found != m_Bookmarks.end())
+        const auto label = bookmarks.Bookmarks().empty()
+                               ? std::string("No saved views")
+                               : std::to_string(bookmarks.Bookmarks().size()) +
+                                     (bookmarks.Diagnostic().empty() ? " saved" : " views (session only)");
+        if (ui.Button("Bookmarks"))
         {
-            found->Viewport = viewport;
-            return;
+            ui.OpenPopup("GraphBookmarkActions");
         }
-        if (m_Bookmarks.size() >= MaximumBookmarks)
-            throw std::invalid_argument("Graph bookmark limit is 9.");
-        m_Bookmarks.push_back({std::string(name), viewport});
-    }
-
-    std::optional<NodeGraphViewport> GraphBookmarkSet::Find(const std::string_view name) const noexcept
-    {
-        const auto found = std::ranges::find(m_Bookmarks, name, &GraphBookmark::Name);
-        return found == m_Bookmarks.end() ? std::nullopt : std::optional(found->Viewport);
-    }
-
-    bool DrawGraphBookmarkMenu(Keire::UiFrame& ui, GraphBookmarkSet& bookmarks, StableNodeGraphCanvas& canvas)
-    {
-        const auto label = bookmarks.Bookmarks().empty() ? std::string("No saved views")
-                                                         : std::to_string(bookmarks.Bookmarks().size()) + " saved";
-        if (auto menu = ui.BeginCombo("Bookmarks", label); menu)
+        ui.SameLine();
+        ui.Text(label);
+        if (auto menu = ui.BeginPopup("GraphBookmarkActions"); menu)
         {
-            if (auto disabled = ui.BeginDisabled(bookmarks.Bookmarks().size() >= GraphBookmarkSet::MaximumBookmarks);
-                disabled)
-                if (ui.Selectable("Save Current View"))
+            ui.SetNextItemWidth(240.0F);
+            (void)ui.InputTextWithHint("Name", "Name this view (optional)...", state.Name);
+            const auto saveName = state.Name.empty() ? bookmarks.NextName() : state.Name;
+            const bool canSave =
+                GraphBookmarkSet::ValidName(saveName) &&
+                (bookmarks.Find(saveName) || bookmarks.Bookmarks().size() < GraphBookmarkSet::MaximumBookmarks);
+            {
+                auto disabled = ui.BeginDisabled(!canSave);
+                if (ui.Selectable(bookmarks.Find(saveName) ? "Update Current View" : "Save Current View"))
                 {
-                    const auto name = "Bookmark " + std::to_string(bookmarks.Bookmarks().size() + 1U);
-                    bookmarks.Save(name, canvas.Viewport());
+                    bookmarks.Save(saveName, canvas.Viewport());
+                    state.Name = saveName;
+                    state.Selected = saveName;
                 }
+            }
             if (!bookmarks.Bookmarks().empty())
                 ui.Separator();
-            for (const auto& bookmark : bookmarks.Bookmarks())
-                if (ui.Selectable(bookmark.Name))
+            {
+                auto entries = ui.PushId("SavedViews");
+                for (const auto& bookmark : bookmarks.Bookmarks())
                 {
-                    canvas.RestoreViewport(bookmark.Viewport);
-                    return true;
+                    if (ui.Selectable(bookmark.Name, state.Selected == bookmark.Name))
+                    {
+                        state.Selected = bookmark.Name;
+                        state.Name = bookmark.Name;
+                        canvas.RestoreViewport(bookmark.Viewport);
+                        return true;
+                    }
                 }
+            }
+            const bool selected = bookmarks.Find(state.Selected).has_value();
+            const bool canRename = selected && GraphBookmarkSet::ValidName(state.Name) &&
+                                   state.Name != state.Selected && !bookmarks.Find(state.Name);
+            {
+                auto disabled = ui.BeginDisabled(!canRename);
+                if (ui.Selectable("Rename Selected"))
+                {
+                    (void)bookmarks.Rename(state.Selected, state.Name);
+                    state.Selected = state.Name;
+                }
+            }
+            {
+                auto disabled = ui.BeginDisabled(!selected);
+                if (ui.Selectable("Remove Selected"))
+                {
+                    (void)bookmarks.Remove(state.Selected);
+                    state.Selected.clear();
+                    state.Name.clear();
+                }
+            }
+        }
+        if (!bookmarks.Diagnostic().empty())
+        {
+            ui.TextWrapped(bookmarks.Diagnostic());
         }
         return false;
     }

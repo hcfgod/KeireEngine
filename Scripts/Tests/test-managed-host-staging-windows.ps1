@@ -69,7 +69,7 @@ try {
         (Join-Path $fixture "Build\Dependencies\coral-nethost"),
         (Join-Path $fixture "Build\Dependencies\dotnet-sdk\host\fxr\10.0.1"),
         (Join-Path $fixture "Build\Dependencies\dotnet-sdk\shared\Microsoft.NETCore.App\10.0.1"),
-        (Join-Path $fixture "Build\Managed") | Out-Null
+        (Join-Path $fixture "Build\Managed\DesignTime") | Out-Null
     Copy-Item (Join-Path $root "Scripts\Windows\common.ps1") (Join-Path $fixture "Scripts\Windows\common.ps1")
     Copy-Item (Join-Path $root "Scripts\Windows\stage-managed-host.ps1") `
         (Join-Path $fixture "Scripts\Windows\stage-managed-host.ps1")
@@ -89,6 +89,8 @@ try {
     "managed-api" | Set-Content (Join-Path $fixture "Build\Managed\Keire.Managed.dll") -Encoding ASCII
     "editor-api" | Set-Content (Join-Path $fixture "Build\Managed\Keire.Editor.Managed.dll") -Encoding ASCII
     "generators" | Set-Content (Join-Path $fixture "Build\Managed\Keire.Managed.Generators.dll") -Encoding ASCII
+    "design-api" | Set-Content (Join-Path $fixture "Build\Managed\DesignTime\Keire.Managed.dll") -Encoding ASCII
+    "design-editor-api" | Set-Content (Join-Path $fixture "Build\Managed\DesignTime\Keire.Editor.Managed.dll") -Encoding ASCII
     "hostfxr" | Set-Content `
         (Join-Path $fixture "Build\Dependencies\dotnet-sdk\host\fxr\10.0.1\hostfxr.dll") -Encoding ASCII
     "coreclr" | Set-Content `
@@ -122,7 +124,8 @@ try {
     }
     & (Join-Path $fixture "Scripts\Windows\stage-managed-host.ps1") -Root $fixture `
         -Configuration Release -Architecture x86_64 -Target KeireClient -IncludeEditorApi
-    foreach ($relativePath in @("Managed\Keire.Editor.Managed.dll", "Managed\Keire.Managed.Generators.dll")) {
+    foreach ($relativePath in @("Managed\Keire.Editor.Managed.dll", "Managed\Keire.Managed.Generators.dll",
+            "Managed\DesignTime\Keire.Managed.dll", "Managed\DesignTime\Keire.Editor.Managed.dll")) {
         Assert-StagingState (Test-Path (Join-Path $target $relativePath)) `
             "Editor managed-host staging omitted $relativePath."
     }

@@ -7,6 +7,15 @@
 #include <ranges>
 #include <utility>
 
+void EditorWorkspaceLayer::TogglePlayPause()
+{
+    const auto session = m_SceneDocument->PlaySession();
+    if (m_PlayRuntimeWorld && session)
+    {
+        m_PlayRuntimeWorld->Pause(session->State() != Keire::ScenePlayState::Paused);
+    }
+}
+
 void EditorWorkspaceLayer::CompletePendingPlayTransition()
 {
     if (m_PendingPlayTransition == PendingPlayTransition::None)

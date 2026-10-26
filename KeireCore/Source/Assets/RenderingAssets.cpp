@@ -6,6 +6,8 @@
 #include "KeireInternal/Assets/RenderingAssetValidation.h"
 #include "KeireInternal/Assets/ShaderAssetCodecInternal.h"
 #include "KeireInternal/Assets/ShaderCompilerJobs.h"
+#include "KeireInternal/Assets/ShaderImportCache.h"
+#include "KeireInternal/Assets/ShaderSourceSnapshot.h"
 #include "KeireInternal/FileSystem.h"
 #include "KeireInternal/Process.h"
 #include "KeireInternal/Rendering/MaterialPropertyReflection.h"
@@ -38,7 +40,6 @@ namespace Keire
         using Json = nlohmann::json;
 
         constexpr std::size_t MaximumDefines = 128;
-        constexpr std::size_t MaximumIncludeRoots = 16;
 
         struct ResolvedShaderGraphVariant final
         {
@@ -448,50 +449,12 @@ namespace Keire
         };
 
         void RunCompiler(const std::filesystem::path& compiler, std::vector<std::string> arguments,
-                         const std::filesystem::path& workingDirectory, const std::chrono::milliseconds timeout)
+                         const std::filesystem::path& workingDirectory,
+                         const ShaderImporterSpecification& specification, const std::stop_token cancellation,
+                         Detail::ShaderCompilerStatistics* statistics = nullptr)
         {
-            const auto result = Detail::RunProcess(compiler, arguments, workingDirectory, timeout);
-            if (result.TimedOut)
-                throw std::runtime_error("Shader compiler timed out after " + std::to_string(timeout.count()) +
-                                         " ms.\n" + result.Output);
-            if (result.ExitCode != 0)
-                throw std::runtime_error("Shader compiler failed with exit code " + std::to_string(result.ExitCode) +
-                                         ".\n" + result.Output);
-        }
-
-        [[nodiscard]] std::vector<std::byte>
-        Compile(const std::filesystem::path& compiler, const std::filesystem::path& source,
-                const std::string_view destination, const std::string_view stage, const std::string_view entry,
-                const std::filesystem::path& output, const std::span<const std::filesystem::path> includeRoots,
-                const std::span<const std::pair<std::string, std::string>> defines,
-                const ShaderImporterSpecification& specification, const std::filesystem::path& workingDirectory)
-        {
-            std::vector<std::string> arguments{Utf8Path(source),
-                                               "-s",
-                                               "HLSL",
-                                               "-d",
-                                               std::string(destination),
-                                               "-t",
-                                               std::string(stage),
-                                               "-e",
-                                               std::string(entry),
-                                               "-o",
-                                               Utf8Path(output)};
-            for (const auto& root : includeRoots)
-            {
-                arguments.emplace_back("-I");
-                arguments.push_back(Utf8Path(root));
-            }
-            for (const auto& [name, value] : defines)
-            {
-                auto argument = std::string("-D");
-                argument += name;
-                argument += '=';
-                argument += value;
-                arguments.push_back(std::move(argument));
-            }
-            RunCompiler(compiler, std::move(arguments), workingDirectory, specification.Timeout);
-            return ReadFile(output, specification.MaximumOutputBytes);
+            Detail::RunShaderCompilerProcess(compiler, arguments, workingDirectory, specification.Timeout, cancellation,
+                                             statistics);
         }
 
         void ValidateReflection(const Json& vertex, const Json& fragment, const ShaderAssetDefinition& definition)
@@ -666,20 +629,16 @@ namespace Keire
             return false;
         }
 
-        [[nodiscard]] std::vector<std::filesystem::path> ParseIncludeRoots(const Json& manifest,
-                                                                           const AssetImportContext& context)
+        [[nodiscard]] std::vector<std::filesystem::path> ParseIncludeRoots(const Json& manifest)
         {
             const auto& source = manifest.value("includeRoots", Json::array());
-            if (!source.is_array() || source.size() > MaximumIncludeRoots)
+            if (!source.is_array() || source.size() > Detail::MaximumShaderIncludeRoots)
                 throw std::invalid_argument("Shader includeRoots must be a bounded array.");
             std::vector<std::filesystem::path> result;
             for (const auto& value : source)
             {
                 const std::filesystem::path relative = value.get<std::string>();
-                const auto normalized = relative.lexically_normal();
-                if (relative.empty() || relative.is_absolute() || normalized.generic_string().starts_with(".."))
-                    throw std::invalid_argument("Shader include roots must be confined project-relative paths.");
-                result.push_back(context.ProjectRoot / normalized);
+                result.push_back(Detail::ConfinedShaderSourcePath(relative, true));
             }
             return result;
         }
@@ -701,11 +660,7 @@ namespace Keire
             return result;
         }
 
-        struct ShaderPassCompileLane final
-        {
-            std::string Role;
-            std::optional<std::string> Define;
-        };
+        using Detail::ShaderPassCompileLane;
 
         [[nodiscard]] std::vector<ShaderPassCompileLane> ParseShaderPasses(const Json& manifest)
         {
@@ -733,63 +688,6 @@ namespace Keire
                 result.push_back(std::move(lane));
             }
             return result;
-        }
-
-        void DiscoverDependencies(const AssetImportContext& context, const std::filesystem::path& relative,
-                                  const std::span<const std::filesystem::path> includeRoots,
-                                  std::vector<AssetSourceDependency>& output, std::set<std::string>& visiting,
-                                  std::set<std::string>& visited)
-        {
-            const auto normalized = relative.lexically_normal();
-            const auto comparable = normalized.generic_string();
-            if (normalized.is_absolute() || comparable.starts_with(".."))
-                throw std::invalid_argument("Shader dependencies must remain inside the project.");
-            if (visiting.contains(comparable))
-                throw std::invalid_argument("Shader include graph contains a cycle at " + comparable + ".");
-            if (!visited.insert(comparable).second)
-                return;
-            if (visited.size() > Detail::MaximumShaderDependencies)
-                throw std::invalid_argument("Shader include graph exceeds its dependency limit.");
-
-            visiting.insert(comparable);
-            const auto bytes = context.ReadProjectFile(normalized);
-            output.push_back({normalized, Detail::DigestToString(Detail::Sha256(bytes))});
-            const std::string text = Text(bytes);
-            static const std::regex includePattern(R"((?:^|\n)\s*#\s*include\s*[\"<]([^\">]+)[\">])");
-            for (auto match = std::sregex_iterator(text.begin(), text.end(), includePattern);
-                 match != std::sregex_iterator(); ++match)
-            {
-                const std::filesystem::path include = (*match)[1].str();
-                if (include.is_absolute())
-                    throw std::invalid_argument("Shader includes may not use absolute paths.");
-                std::vector<std::filesystem::path> candidates{normalized.parent_path() / include};
-                for (const auto& root : includeRoots)
-                {
-                    const auto relativeRoot = std::filesystem::relative(root, context.ProjectRoot).lexically_normal();
-                    const auto includeText = include.lexically_normal().generic_string();
-                    const auto rootText = relativeRoot.generic_string();
-                    if (rootText == "." || includeText == rootText || includeText.starts_with(rootText + '/'))
-                        candidates.push_back(include);
-                    candidates.push_back(relativeRoot / include);
-                }
-                std::optional<std::filesystem::path> resolved;
-                for (const auto& candidate : candidates)
-                {
-                    try
-                    {
-                        (void)context.ReadProjectFile(candidate.lexically_normal());
-                        resolved = candidate.lexically_normal();
-                        break;
-                    }
-                    catch (const std::exception&)
-                    {
-                    }
-                }
-                if (!resolved)
-                    throw std::invalid_argument("Shader include could not be resolved: " + include.generic_string());
-                DiscoverDependencies(context, *resolved, includeRoots, output, visiting, visited);
-            }
-            visiting.erase(comparable);
         }
 
         [[nodiscard]] ShaderAssetDefinition ParseShaderManifest(const Json& manifest)
@@ -1233,6 +1131,20 @@ namespace Keire
 
     AssetImporterRegistration CreateShaderAssetImporter(ShaderImporterSpecification specification)
     {
+        return Detail::CreateCancellableShaderAssetImporter(std::move(specification), {});
+    }
+
+    AssetImporterRegistration Detail::CreateCancellableShaderAssetImporter(ShaderImporterSpecification specification,
+                                                                           const std::stop_token cancellation)
+    {
+        return CreateCancellableShaderAssetImporter(std::move(specification), cancellation, {});
+    }
+
+    AssetImporterRegistration
+    Detail::CreateCancellableShaderAssetImporter(ShaderImporterSpecification specification,
+                                                 const std::stop_token cancellation,
+                                                 std::shared_ptr<ShaderCompilerStatistics> statistics)
+    {
         if (specification.Timeout.count() <= 0 || specification.MaximumOutputBytes == 0 ||
             specification.MaximumOutputBytes > 256ULL * 1024ULL * 1024U)
             throw std::invalid_argument("Shader importer limits are invalid.");
@@ -1247,53 +1159,86 @@ namespace Keire
             throw std::invalid_argument("Shader importer formats must be unique and include SPIR-V reflection data.");
         AssetImporterRegistration result;
         result.Name = "Keire.Shader";
-        result.Version = 9;
+        result.Version = 11;
         result.Type = ShaderAsset::StaticType();
         result.Extensions = {".keireshader"};
         result.ContextualImport =
-            [specification = std::move(specification)](const AssetImportContext& context,
-                                                       const std::span<const std::byte> bytes) -> AssetImportOutput
+            [specification = std::move(specification), cancellation, statistics = std::move(statistics)](
+                const AssetImportContext& context, const std::span<const std::byte> bytes) -> AssetImportOutput
         {
+            if (cancellation.stop_requested())
+            {
+                throw AssetOperationCancelled();
+            }
             const auto manifest = Json::parse(Text(bytes));
             auto definition = ParseShaderManifest(manifest);
-            const auto compiler = ResolveCompiler(specification);
+            auto compiler = ResolveCompiler(specification);
             if (compiler.empty() || !std::filesystem::is_regular_file(compiler))
                 throw std::runtime_error(
                     "KeireShaderCompiler is unavailable. Run project bootstrap or set KEIRE_SHADER_COMPILER.");
 
-            const auto includeRoots = ParseIncludeRoots(manifest, context);
+            const auto includeRoots = ParseIncludeRoots(manifest);
             const auto defines = ParseDefines(manifest);
             const auto passLanes = ParseShaderPasses(manifest);
-            std::set<std::string> visiting;
-            std::set<std::string> visited;
-            DiscoverDependencies(context, definition.Source, includeRoots, definition.Dependencies, visiting, visited);
+            const auto snapshot = Detail::CaptureShaderSourceSnapshot(context, definition.Source, includeRoots);
 
             TemporaryShaderDirectory temporary;
             const auto stagedRoot = temporary.Path() / "Source";
             bool hasInstanceAddressingAbiV2Binding = false;
-            for (const auto& dependency : definition.Dependencies)
+            for (const auto& file : snapshot)
             {
-                const auto destination = stagedRoot / dependency.RelativePath;
+                definition.Dependencies.push_back(file.Dependency);
+                const auto destination = stagedRoot / file.Dependency.RelativePath;
                 std::filesystem::create_directories(destination.parent_path());
-                const auto dependencyBytes = context.ReadProjectFile(dependency.RelativePath);
+                const auto& dependencyBytes = file.Bytes;
                 if (definition.InstanceAddressingAbiVersion == 2U)
                     hasInstanceAddressingAbiV2Binding |= ContainsInstanceAddressingAbiV2Binding(Text(dependencyBytes));
-                std::ofstream output(destination, std::ios::binary | std::ios::trunc);
-                if (!output ||
-                    (!dependencyBytes.empty() && !output.write(reinterpret_cast<const char*>(dependencyBytes.data()),
-                                                               static_cast<std::streamsize>(dependencyBytes.size()))))
-                    throw std::runtime_error("Could not stage a shader dependency for compilation.");
+                Detail::WriteFileAtomically(destination, dependencyBytes);
             }
             if (definition.InstanceAddressingAbiVersion == 2U && !hasInstanceAddressingAbiV2Binding)
             {
                 throw std::invalid_argument(
                     "Shader instance-addressing ABI v2 requires uint4 InstanceParameters at vertex b2/space1.");
             }
+            auto cache = Detail::ShaderImportCache::TryCreate(compiler, context, definition, specification, passLanes,
+                                                              snapshot, includeRoots, defines, bytes);
+            if (cancellation.stop_requested())
+            {
+                throw AssetOperationCancelled();
+            }
+            if (cache)
+            {
+                auto cached = cache->TryRead(definition, specification, passLanes);
+                if (!cached.empty())
+                {
+                    if (cancellation.stop_requested())
+                    {
+                        throw AssetOperationCancelled();
+                    }
+                    if (statistics)
+                    {
+                        statistics->CacheHits.fetch_add(1U, std::memory_order_relaxed);
+                    }
+                    return {std::move(cached), definition.Dependencies};
+                }
+                if (statistics)
+                {
+                    statistics->CacheMisses.fetch_add(1U, std::memory_order_relaxed);
+                }
+                try
+                {
+                    compiler = cache->StageCompiler(temporary.Path() / "Compiler");
+                }
+                catch (const std::exception&)
+                {
+                    cache.reset();
+                }
+            }
             const auto source = stagedRoot / definition.Source;
             std::vector<std::filesystem::path> stagedIncludeRoots;
             stagedIncludeRoots.reserve(includeRoots.size());
             for (const auto& includeRoot : includeRoots)
-                stagedIncludeRoots.push_back(stagedRoot / std::filesystem::relative(includeRoot, context.ProjectRoot));
+                stagedIncludeRoots.push_back(stagedRoot / includeRoot);
             for (const auto& passLane : passLanes)
             {
                 auto laneDefines = defines;
@@ -1322,17 +1267,19 @@ namespace Keire
                     auto vertex = std::async(std::launch::async,
                                              [&, name, vertexPath]
                                              {
-                                                 return Compile(compiler, source, name, "vertex",
-                                                                definition.VertexEntry, vertexPath, stagedIncludeRoots,
-                                                                laneDefines, specification, temporary.Path());
+                                                 return Detail::CompileShaderStage(
+                                                     compiler, source, name, "vertex", definition.VertexEntry,
+                                                     vertexPath, stagedIncludeRoots, laneDefines, specification,
+                                                     temporary.Path(), cancellation, statistics.get());
                                              });
-                    auto fragment = std::async(
-                        std::launch::async,
-                        [&, name, fragmentPath]
-                        {
-                            return Compile(compiler, source, name, "fragment", definition.FragmentEntry, fragmentPath,
-                                           stagedIncludeRoots, laneDefines, specification, temporary.Path());
-                        });
+                    auto fragment = std::async(std::launch::async,
+                                               [&, name, fragmentPath]
+                                               {
+                                                   return Detail::CompileShaderStage(
+                                                       compiler, source, name, "fragment", definition.FragmentEntry,
+                                                       fragmentPath, stagedIncludeRoots, laneDefines, specification,
+                                                       temporary.Path(), cancellation, statistics.get());
+                                               });
                     stages.emplace_back(std::move(vertex), std::move(fragment));
                 }
                 for (std::size_t index = 0; index < stages.size(); ++index)
@@ -1374,21 +1321,22 @@ namespace Keire
                        static_cast<std::streamsize>(spirv->Fragment.size()));
             const auto vertexReflection = temporary.Path() / "vertex.json";
             const auto fragmentReflection = temporary.Path() / "fragment.json";
-            auto vertexReflectionTask = std::async(std::launch::async,
-                                                   [&]
-                                                   {
-                                                       RunCompiler(compiler,
-                                                                   {Utf8Path(vertexSpirv), "-s", "SPIRV", "-d", "JSON",
-                                                                    "-t", "vertex", "-o", Utf8Path(vertexReflection)},
-                                                                   temporary.Path(), specification.Timeout);
-                                                   });
+            auto vertexReflectionTask =
+                std::async(std::launch::async,
+                           [&]
+                           {
+                               RunCompiler(compiler,
+                                           {Utf8Path(vertexSpirv), "-s", "SPIRV", "-d", "JSON", "-t", "vertex", "-o",
+                                            Utf8Path(vertexReflection)},
+                                           temporary.Path(), specification, cancellation, statistics.get());
+                           });
             std::exception_ptr fragmentReflectionFailure;
             try
             {
                 RunCompiler(compiler,
                             {Utf8Path(fragmentSpirv), "-s", "SPIRV", "-d", "JSON", "-t", "fragment", "-o",
                              Utf8Path(fragmentReflection)},
-                            temporary.Path(), specification.Timeout);
+                            temporary.Path(), specification, cancellation, statistics.get());
             }
             catch (...)
             {
@@ -1401,7 +1349,20 @@ namespace Keire
                                Json::parse(Text(ReadFile(fragmentReflection, specification.MaximumOutputBytes))),
                                definition);
             Detail::ValidateShaderDefinition(definition, specification.Formats.size() == 3);
-            return {Detail::EncodeCanonicalShaderAsset(definition), definition.Dependencies};
+            if (cancellation.stop_requested())
+            {
+                throw AssetOperationCancelled();
+            }
+            auto artifact = Detail::EncodeCanonicalShaderAsset(definition);
+            if (cache)
+            {
+                cache->TryStore(artifact);
+            }
+            if (cancellation.stop_requested())
+            {
+                throw AssetOperationCancelled();
+            }
+            return {std::move(artifact), definition.Dependencies};
         };
         result.Cook = [](const std::span<const std::byte> bytes, const AssetTargetPlatform requested)
         {

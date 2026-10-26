@@ -5,8 +5,8 @@ authoring, runtime, scripting, packaging, and release workflows implemented by t
 [Kéire documentation site](https://keireengine.duckdns.org/docs/) is generated from these exact Markdown files; GitHub
 and the website therefore present one maintained body of documentation rather than parallel copies.
 
-The source tree is currently version 0.4.8 and pre-1.0. Signed catalog sequence 27 publishes the Windows
-x86-64 Hub 0.4.8 hot patch, retains Editor 0.4.8, and retains the independently validated Linux x86-64 0.4.2 packages. Guides
+The source tree is currently version 0.4.8 and pre-1.0. Signed catalog sequence 28 publishes the Windows
+x86-64 Editor 0.4.8 script-handoff hotfix, retains Hub 0.4.8, and retains the independently validated Linux x86-64 0.4.2 packages. Guides
 describe the checked-in implementation and identify unfinished work honestly. Roadmap
 material is labeled as roadmap material and does not redefine the supported API or activate a release.
 
@@ -47,10 +47,11 @@ structural and API drift; they do not establish that every prose claim or UI wor
 | Read a dated review | [September 29 engine and editor review](Reviews/2026-09-29-engine-editor-review.md) | Source-specific evidence and its original acceptance scope. |
 | Follow a historical handoff | [September 29 remediation handoff](Reviews/2026-09-29-remediation-handoff.md) | Recorded findings and follow-up requirements. |
 | Understand readiness criteria | [Production Readiness Review](ProductionReadinessReview.md) | [Performance Gates](PerformanceGates.md), [Maintainability](Maintainability.md). |
+| Plan large worlds and dynamic environments | [Large Worlds, Planets, Space, and Dynamic Environments](LargeWorldAndEnvironmentPlan.md) | Proposed delivery and acceptance plan, not currently supported-feature documentation. |
 
 ## Complete Guide Library
 
-All 114 published guides and progress records are listed below. User workflows, technical references, and dated
+All 116 published guides and progress records are listed below. User workflows, technical references, and dated
 engineering records have different purposes; use the manual for a current authoring task.
 
 ### Start Here
@@ -184,6 +185,8 @@ actions; a planned row or historical graph-first architecture is not a supported
 | [September 29 engine and editor review](Reviews/2026-09-29-engine-editor-review.md) | Source-specific evidence and remaining acceptance requirements. |
 | [September 29 remediation handoff](Reviews/2026-09-29-remediation-handoff.md) | Source-specific evidence and remaining acceptance requirements. |
 | [Production Readiness Review](ProductionReadinessReview.md) | Evidence-based subsystem grades, known gaps, release blockers, and closure criteria. |
+| [Large Worlds and Environments Plan](LargeWorldAndEnvironmentPlan.md) | Proposed high-precision open worlds, planets, space, day/night, clouds, weather, migration, and qualification gates. |
+| [Cloud and Weather Implementation](CloudWeatherImplementation.md) | Experimental layered-cloud integration, numerical weather foundations, and outstanding rendered acceptance. |
 | [Maintainability Boundaries](Maintainability.md) | First-party source budgets, exclusions, decomposition seams, and enforcement. |
 
 ### Material and Shader Progress Records

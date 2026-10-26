@@ -83,6 +83,49 @@ private void PlayFootstep()
 state, seek, play, pause, resume, and stop controls. Use the Audio Mixer and Mix Console for buses, parameters,
 snapshots, and typed live editing. Reverb Zone components blend eligible snapshots by priority and distance.
 
+### Build A Mixer Without Changing Scene State
+
+1. Create or open a `.keiremixer` asset from the Project panel. In **Routing**, select Master and use **+ Bus** to add
+   a child channel. Give channels purpose-based names such as `Music`, `SFX`, and `Dialogue`.
+2. Select a channel, then use **Channel Inspector** to set its output and effect rack. Effects process in the listed
+   order; **Move Up** and **Move Down** change that order. Use the named parameter controls rather than guessing a
+   numeric parameter index.
+3. In **Mix Console**, adjust volume in dB and check peak meters. `0 dB` preserves the original level; positive values
+   boost it. A clipping warning means lower this channel or its upstream sources. Mute is separate from the fader.
+4. For a shared reverb return, use **Create Reverb Return**. It adds a wet reverb effect and sends from existing child
+   buses. If you create source buses afterward, add their sends explicitly in Channel Inspector. Do not route a return
+   back into its own upstream path: cyclic routing is rejected.
+5. Choose **Validate**, then **Save**. Live authoring preview is transient; it is not a substitute for saving the mixer
+   asset, assigning it to the source's routing, or configuring the project's Default Mixer.
+
+### Author Snapshots And Ducking
+
+In **Snapshots**, use **+ Snapshot**, give it a descriptive name, and add a parameter with **+ Bus Gain**. Each row's
+**Type** selects bus gain/mute/solo, send gain, effect bypass, or an effect parameter; **Target** identifies the bus,
+send, or effect. Create the required send or effect first. Effect parameter indices are zero-based and depend on the
+effect type. A snapshot is a set of overrides, not an independent mixer or a new bus hierarchy.
+
+To compare the result, set **Preview Weight** and choose **Audition Snapshot** while a source routed through this mixer
+is playing. Zero uses the authored draft; one uses the full snapshot. Change the weight and audition again to compare;
+this is not an automatic timed transition. **Restore Authored Mix** restores the draft, including unsaved edits.
+Audition never changes the saved asset or adds an undo command. Saving writes your authored values, not the audition
+blend. Successful content edits and Undo/Redo also restore authored preview state.
+
+Closing the mixer restores its saved source, not an unsaved preview. If that file becomes unreadable, a retained saved
+mix and its decoded impulse responses provide the fallback. If restoration reports a failure, reopen and close the
+mixer to retry. Missing impulse responses are reported before a new preview is published; if saving cannot prepare the
+saved baseline, resolve that resource error and save again. Hardware/device failures still require separate diagnosis.
+
+In **Ducking**, use **+ Rule** after creating at least two buses. Choose the signal-detecting **Sidechain** and the
+channel to attenuate as **Target**. Set threshold and ratio, then attack, hold, and release to control the response.
+These time controls are in seconds. Keep the sidechain and target distinct, and check the result with actual audio
+rather than judging the rule from its values alone.
+
+Mixer edits participate in the document's **Undo**/**Redo** history. **Discard** restores the saved baseline;
+**Reload** refuses to replace unsaved local changes. Back up source assets before a migration. Device hot-plug,
+platform latency, and long-running underrun behavior still need hardware acceptance; a successful asset save does not
+prove those runtime properties. See [Audio Production](../AudioProduction.md) for the remaining acceptance work.
+
 ## Timing And Diagnostics
 
 - `Time.DeltaTime` is scaled variable-frame time.

@@ -68,7 +68,7 @@ project(ProjectConfig.CLIENT_TARGET)
                                          commandRepositoryRoot)
             }
 
-        filter { "configurations:Release or Profile or Dist" }
+        filter { "configurations:Release or Profile or Dist or DevDist" }
             postbuildcommands
             {
                 CopyFileIfChangedCommand(postBuildPathPrefix .. DependencyManifest.SodiumReleaseRuntime,
@@ -78,7 +78,7 @@ project(ProjectConfig.CLIENT_TARGET)
             }
     end
 
-    filter { "system:windows", "configurations:Dist" }
+    filter { "system:windows", "configurations:Dist or DevDist" }
         kind "WindowedApp"
         entrypoint "mainCRTStartup"
 

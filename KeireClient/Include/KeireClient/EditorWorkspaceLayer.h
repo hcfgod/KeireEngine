@@ -42,6 +42,7 @@ namespace KeireEditor
     class AssetOperationService;
     class AnimatorControllerDocument;
     class AudioMixerDocument;
+    class AudioMixerPreviewSession;
     class VfxEffectDocument;
     struct AssetMutationUndoState;
     enum class AssetMutationPhase : std::uint8_t;
@@ -74,6 +75,7 @@ namespace KeireEditor
     class HierarchyPanel;
     class ProjectSettingsPanel;
     class ProjectSettingsDocument;
+    class EnvironmentPreviewClock;
     class PropertyDrawerRegistry;
     class SceneDocument;
     class SceneViewportPanel;
@@ -194,6 +196,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     [[nodiscard]] Keire::Ref<Keire::RenderSystem> UiBuilderRenderer() const noexcept override;
     [[nodiscard]] float UiBuilderDisplayScale() const noexcept override;
     [[nodiscard]] const Keire::RenderEnvironmentSettings& SceneViewportSettings() const noexcept override;
+    [[nodiscard]] std::optional<Keire::EnvironmentLightingSnapshot> SceneViewportEnvironmentLighting() override;
     [[nodiscard]] Keire::Ref<Keire::WindowSystem> SceneViewportWindows() const noexcept override;
     [[nodiscard]] Keire::WindowId SceneViewportWindow() const noexcept override;
     [[nodiscard]] float SceneViewportDisplayScale() const noexcept override;
@@ -433,6 +436,8 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     void SetProjectManagedSdk(KeireEditor::ManagedSdkPreference preference) override;
     [[nodiscard]] Keire::RenderFeatureCapabilities ProjectRenderFeatureCapabilities() const noexcept override;
     void ApplyProjectAuthoringSettings(const Keire::ProjectAuthoringSettings& settings) override;
+    [[nodiscard]] KeireEditor::EnvironmentPreviewClock* ProjectEnvironmentPreview() override;
+    void UpdateEnvironmentPreview(double elapsedSeconds);
     [[nodiscard]] KeireEditor::SceneDocument& LightingSceneDocument() noexcept override;
     [[nodiscard]] bool LightingBakeBusy() const noexcept override;
     [[nodiscard]] std::optional<Keire::AssetOperationProgress> LightingBakeProgress() const noexcept override;
@@ -597,6 +602,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     void EnsureEditorVfxPreviewWorld(std::uint32_t minimumParticleCapacity);
     void ResetEditorVfxPreviewWorld() noexcept;
     void SynchronizeEditModeVfxPreviews();
+    void UpdateEditModeVfxPreviews(double elapsedSeconds);
     void StopEditModeVfxPreviews() noexcept;
     void OpenInputActions(Keire::AssetId asset);
     void RefreshInputActionsContext();
@@ -799,6 +805,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     [[nodiscard]] Keire::Ref<Keire::Scene> ActiveScene() const noexcept;
     [[nodiscard]] bool ProjectRequiresManagedRuntime() const noexcept;
     void BeginPlayMode();
+    void TogglePlayPause();
     void ContinuePendingPlayMode();
     void CompletePendingPlayTransition();
     void UpdatePlayRuntime(double deltaSeconds, double interpolationAlpha);
@@ -850,6 +857,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     std::unique_ptr<KeireEditor::AssetBrowserPanel> m_AssetBrowserPanel;
     std::unique_ptr<KeireEditor::ConsolePanel> m_ConsolePanel;
     std::unique_ptr<KeireEditor::DiagnosticsPanel> m_DiagnosticsPanel;
+    std::unique_ptr<KeireEditor::AudioMixerPreviewSession> m_AudioMixerPreview;
     std::unique_ptr<KeireEditor::EditorDocumentWorkspaceDocuments> m_ConstructedDocuments;
     KeireEditor::SceneDocument* m_SceneDocument = nullptr;
     std::unique_ptr<KeireEditor::SceneDocument> m_PrefabReturnDocument;
@@ -867,6 +875,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     KeireEditor::ShaderGraphDocument* m_ShaderGraphDocument = nullptr;
     KeireEditor::MaterialGraphDocument* m_MaterialGraphDocument = nullptr;
     KeireEditor::ProjectSettingsDocument* m_ProjectSettingsDocument = nullptr;
+    std::unique_ptr<KeireEditor::EnvironmentPreviewClock> m_EnvironmentPreview;
     KeireEditor::MaterialDocument* m_MaterialDocument = nullptr;
     std::vector<Keire::AssetId> m_PendingMaterialSelectionImports;
     std::unique_ptr<KeireEditor::UiBuilderDocument> m_UiBuilderDocument;
@@ -1021,7 +1030,6 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     Keire::UiItemRect m_GameViewportRect;
     Keire::UiSize m_GameLogicalViewportSize;
     Keire::AudioVoiceId m_InspectorAudioPreviewVoice;
-    Keire::AssetId m_AudioMixerPreviewAsset;
     Keire::AssetId m_VfxEffectPreviewAsset;
     Keire::Ref<Keire::VfxWorld> m_VfxEffectPreviewWorld;
     Keire::VfxHandle m_VfxEffectPreviewHandle;

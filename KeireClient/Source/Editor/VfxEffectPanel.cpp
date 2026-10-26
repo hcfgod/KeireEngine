@@ -1,6 +1,7 @@
 #include "KeireClientInternal/Editor/VfxEffectPanelInternal.h"
 
 #include <algorithm>
+#include <utility>
 
 namespace KeireEditor
 {
@@ -48,7 +49,9 @@ namespace KeireEditor
         {
             if (auto graph = ui.BeginTabItem("Graph"); graph)
                 DrawGraphEditor(ui);
-            if (auto modules = ui.BeginTabItem("Runtime Modules"); modules)
+            if (auto modules =
+                    ui.BeginTabItem("Runtime Modules", nullptr, std::exchange(m_RevealSelectedModule, false));
+                modules)
                 DrawModules(ui);
             if (auto blackboard = ui.BeginTabItem("Blackboard"); blackboard)
                 DrawBlackboard(ui);
@@ -284,6 +287,9 @@ namespace KeireEditor
 
     void VfxEffectPanel::DrawGraphEditor(Keire::UiFrame& ui)
     {
+        // Compact layout may never draw Systems, so selection reconciliation must precede either layout.
+        SelectGraphSystem(
+            Detail::ResolveVfxGraphSystem(m_Controller.VfxEffectState().Definition().Systems, m_SelectedSystem));
         const auto available = ui.ContentAvailable();
         if (available.Width < 780.0F)
         {
@@ -319,16 +325,6 @@ namespace KeireEditor
         auto& document = m_Controller.VfxEffectState();
         const auto& definition = document.Definition();
         const auto& theme = m_Controller.VfxEffectTheme();
-        if (!m_SelectedSystem || std::ranges::find(definition.Systems, m_SelectedSystem, &Keire::VfxGraphSystem::Id) ==
-                                     definition.Systems.end())
-        {
-            m_SelectedSystem = definition.Systems.empty() ? Keire::AssetId{} : definition.Systems.front().Id;
-            m_SelectedNode = {};
-            m_SelectedBlock = {};
-            m_SelectedConnection = {};
-            m_GraphCanvas.CancelInteractions();
-        }
-
         ui.TextColored(theme.Accent, "SYSTEMS");
         ui.TextColored(theme.MutedText, "Schema v" + std::to_string(definition.SchemaVersion));
         ui.TextColoredWrapped(definition.ExecutionSource == Keire::VfxExecutionSource::Graph ? theme.Success
@@ -342,14 +338,7 @@ namespace KeireEditor
             const auto label = system.Name + "  [" + std::to_string(system.Nodes.size()) + "]";
             if (ui.Selectable(label, system.Id == m_SelectedSystem))
             {
-                m_SelectedSystem = system.Id;
-                m_SelectedNode = {};
-                m_SelectedBlock = {};
-                m_SelectedConnection = {};
-                m_GraphCanvas.CancelInteractions();
-                m_GraphCanvas.Select(std::nullopt);
-                m_GraphCanvas.SelectBlock(std::nullopt);
-                m_GraphCanvas.SelectConnection(std::nullopt);
+                SelectGraphSystem(system.Id);
             }
         }
         const bool executableGraph = definition.ExecutionSource == Keire::VfxExecutionSource::Graph;
@@ -364,9 +353,7 @@ namespace KeireEditor
                 if (ApplyAction("Added VFX graph system", [&document, system = std::move(system)]() mutable
                                 { return document.AddSystem(std::move(system)); }))
                 {
-                    m_SelectedSystem = id;
-                    m_SelectedNode = {};
-                    m_SelectedBlock = {};
+                    SelectGraphSystem(id);
                     return;
                 }
             }
@@ -377,11 +364,7 @@ namespace KeireEditor
             if (ui.Button("Remove") && ApplyAction("Removed VFX graph system", [&document, system = m_SelectedSystem]
                                                    { return document.RemoveSystem(system); }))
             {
-                m_SelectedSystem = {};
-                m_SelectedNode = {};
-                m_SelectedBlock = {};
-                m_SelectedConnection = {};
-                m_GraphCanvas.CancelInteractions();
+                SelectGraphSystem({});
                 return;
             }
         }

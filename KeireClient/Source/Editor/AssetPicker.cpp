@@ -215,7 +215,9 @@ namespace KeireEditor
         const auto original = value;
         {
             auto id = ui.PushId(options.Label);
-            const auto layout = Detail::ResolveInspectorFieldLayout(ui.ContentAvailable().Width, 24.0F);
+            const auto layout = Detail::ResolveInspectorFieldLayout(ui.ContentAvailable().Width, 24.0F,
+                                                                    Detail::InspectorInlineActionSpacing,
+                                                                    Detail::InspectorDescriptiveFieldWidth);
             if (layout.Stacked)
             {
                 const auto visibleLabel = Detail::InspectorVisibleLabel(options.Label);

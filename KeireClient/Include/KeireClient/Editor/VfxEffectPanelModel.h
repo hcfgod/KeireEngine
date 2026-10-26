@@ -5,6 +5,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <span>
 #include <string>
 #include <string_view>
 
@@ -12,6 +13,8 @@ namespace KeireEditor
 {
     namespace Detail
     {
+        [[nodiscard]] Keire::AssetId ResolveVfxGraphSystem(std::span<const Keire::VfxGraphSystem> systems,
+                                                           Keire::AssetId selected) noexcept;
         [[nodiscard]] std::string_view ModuleName(const Keire::VfxModulePayload& payload);
         [[nodiscard]] std::size_t BurstCount(const Keire::VfxEffectDefinition& definition);
         [[nodiscard]] StableNodeId PreferredCanvasId(Keire::AssetId id, std::uint64_t salt) noexcept;

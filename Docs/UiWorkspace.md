@@ -14,6 +14,30 @@ windows. Modal keyboard handlers can use it to defer Enter/Escape to a child sel
 previous and current frame when dismissing or submitting a parent modal, so a selector's closing key does not also
 activate the newly refocused parent.
 
+## Responsive Checkbox Rows
+
+The existing `Checkbox(label, value)` starts a normal new item row. For a compact toolbar, opt into continuing the
+previous row only when the complete checkbox and its visible label fit:
+
+```cpp
+bool maximizeOnPlay = false;
+bool showFps = false;
+(void)ui.Checkbox("Maximize On Play", maximizeOnPlay);
+(void)ui.Checkbox("FPS", showFps, {.ContinueRow = true});
+```
+
+`ContinueRow` uses the active font, theme frame padding, item spacing, and current window/child/table content boundary.
+When the next control does not fit, it keeps normal next-line placement; it neither truncates the label nor changes
+the value. A `##` identity suffix does not contribute visible width. Like any single control, a label wider than the
+entire content region still requires a wider region or a shorter label. Use this after a preceding item; an earlier
+`SameLine()` request does not prevent overflow wrapping. No object-size changes are required for existing clients.
+
+## Tooltip Readability
+
+`UiFrame::SetTooltip` wraps long help text at a font-relative preferred width, capped by the current viewport's usable
+width after theme padding and safe-area margins. Existing immediate and delayed hover behavior is unchanged. This
+keeps long explanations readable on narrow windows without requiring each panel to insert manual line breaks.
+
 ## Enable The Workspace
 
 Configure the workspace before constructing the application runtime:
@@ -90,6 +114,23 @@ their current document, entity, or asset context until unlocked. Lock state is i
 objects are never restored across project launches.
 
 ## Layout Workflow
+
+### Reveal A Tab From Another View
+
+Panel visibility, panel focus, and the selected tab are separate states. When an action such as **Edit Payload**
+targets controls in another tab, first select the target object, make its panel visible with `SetVisible(true)`, and
+request panel focus with `RequestFocus()` if it is in another panel. Retain a one-time tab-selection request on the
+owning controller; consume it when drawing the destination tab, not when the panel is hidden or collapsed.
+
+Use `UiFrame::BeginTabItem(label, open, select)` with `select` true for that request. Submit false on later frames so
+the user can navigate away. The existing `BeginTabItem(label, open)` overload is unchanged and does not force
+selection. Keep each tab's scope inside its own block: close the first tab scope before opening the next one.
+Only the visible tab should draw its contents. This is navigation, not an asset edit or an undo command.
+
+The VFX graph's **Edit Payload** action uses this mechanism to select its module and reveal **Runtime Modules**.
+It does not convert the effect or change its execution source.
+
+### Save And Restore Layouts
 
 `Layouts()` returns snapshots suitable for menus. Each entry provides its strong ID, name, built-in status, active
 status, and whether Default has live modifications.

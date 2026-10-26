@@ -62,6 +62,23 @@ validation failure leaves all committed runtime sessions running. Unloading the 
 load its replacement with Single mode instead. Every loaded session receives fixed/update ticks and
 owns its own physics, audio, VFX, UI, and managed-behaviour state; all sessions participate in rendering.
 
+### Pause And Single-Step
+
+Use `SceneRuntimeWorld::Pause(true)` to pause all loaded and persistent sessions together, and `Pause(false)` to
+resume them. Sessions adopted or activated while the world is paused inherit that pause. Normal world fixed/update
+calls do not advance paused gameplay. Pausing one `SceneRuntimeSession` directly only affects that session; use the
+world operation when coordinating additive content.
+
+`SceneRuntimeWorld::Step(seconds)` requires a finite, positive duration and every participating session to be paused.
+It advances each session by one fixed tick and one complete frame while leaving it paused. Empty worlds or mixed
+session states return `false` without advancing anything. Calls must run on the world owner thread; recursive Step
+calls from gameplay callbacks are rejected.
+
+If a gameplay callback fails during Step, that session becomes faulted and Step returns `false`. Other eligible
+sessions finish the current step; already executed gameplay is not rolled back. Inspect the faulted session's
+`Diagnostic()` before recovery. Further steps are rejected while a faulted session remains. In the Editor, use the
+reported Play Mode error to correct the script and restart Play rather than assuming the failed step was undone.
+
 Queries require an explicit `SceneQueryScope`: `Active`, all `Loaded` scenes, a `Specific` stable handle, or
 `Persistent` carriers. This prevents a lookup from silently changing meaning when additive content is present.
 

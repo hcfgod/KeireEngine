@@ -407,7 +407,8 @@ namespace KeireEditor
     void AudioMixerPanel::DrawMixConsole(Keire::UiFrame& ui)
     {
         auto& document = m_Controller.AudioMixerState();
-        const auto& definition = document.Definition();
+        // Document edits replace nested storage; keep rows stable for the complete draw traversal.
+        const auto definition = document.Definition();
         const auto& theme = m_Controller.AudioMixerTheme();
         const auto meters = m_Controller.AudioMixerMeters();
         ui.TextColored(theme.Accent, "LIVE MIX CONSOLE");
@@ -535,7 +536,7 @@ namespace KeireEditor
     void AudioMixerPanel::DrawSelectedBus(Keire::UiFrame& ui)
     {
         auto& document = m_Controller.AudioMixerState();
-        const auto& definition = document.Definition();
+        const auto definition = document.Definition();
         const auto selected = document.SelectedBus().value_or(definition.MasterBus);
         const auto found = FindBus(definition, selected);
         if (!found)
@@ -869,7 +870,7 @@ namespace KeireEditor
     void AudioMixerPanel::DrawSnapshots(Keire::UiFrame& ui)
     {
         auto& document = m_Controller.AudioMixerState();
-        const auto& definition = document.Definition();
+        const auto definition = document.Definition();
         const auto& theme = m_Controller.AudioMixerTheme();
         if (!m_SelectedSnapshot ||
             std::ranges::find(definition.Snapshots, m_SelectedSnapshot, &Keire::AudioMixerSnapshotDefinition::Id) ==
@@ -930,6 +931,30 @@ namespace KeireEditor
                 return;
             }
             const auto& snapshot = *current;
+            (void)ui.DragScalar("Preview Weight", m_SnapshotPreviewWeight, 0.01, 0.0, 1.0);
+            if (ui.Button("Audition Snapshot"))
+            {
+                run("Auditioning snapshot (source unchanged)",
+                    [&]
+                    {
+                        document.PreviewSnapshot(snapshot.Id, static_cast<float>(m_SnapshotPreviewWeight));
+                        return true;
+                    });
+            }
+            ui.SameLine();
+            if (ui.Button("Restore Authored Mix"))
+            {
+                run("Restored authored mixer preview",
+                    [&]
+                    {
+                        document.RestorePreview();
+                        return true;
+                    });
+            }
+            ui.TextColoredWrapped(theme.MutedText,
+                                  "Audition affects live preview only. Change Weight and audition again to compare. "
+                                  "Edits and Undo/Redo restore the authored mix; Save never bakes audition values.");
+            ui.Separator();
             auto& name = m_NameBuffers.try_emplace(snapshot.Id, snapshot.Name).first->second;
             (void)ui.InputText("Name", name);
             const auto nameState = ui.LastItemState();
@@ -1135,12 +1160,16 @@ namespace KeireEditor
                                         { RequireSnapshot(mixer, snapshotId).Parameters.at(index).Value = value; });
                 }
                 if (ui.Button("Remove Parameter"))
+                {
                     (void)ApplyEdit("Remove Audio Mixer snapshot parameter",
                                     [snapshotId = snapshot.Id, index](Keire::AudioMixerDefinition& mixer)
                                     {
                                         auto& parameters = RequireSnapshot(mixer, snapshotId).Parameters;
                                         parameters.erase(parameters.begin() + static_cast<std::ptrdiff_t>(index));
                                     });
+                    // Later indices belong to the old row snapshot after erasure.
+                    break;
+                }
                 ui.Separator();
             }
             if (ui.Button("+ Bus Gain"))
@@ -1176,7 +1205,7 @@ namespace KeireEditor
     void AudioMixerPanel::DrawDucking(Keire::UiFrame& ui)
     {
         auto& document = m_Controller.AudioMixerState();
-        const auto& definition = document.Definition();
+        const auto definition = document.Definition();
         const auto& theme = m_Controller.AudioMixerTheme();
         if (!m_SelectedDucking ||
             std::ranges::find(definition.Ducking, m_SelectedDucking, &Keire::AudioMixerDuckingDefinition::Id) ==
@@ -1315,6 +1344,7 @@ namespace KeireEditor
         m_SelectedDucking = {};
         m_NameBuffers.clear();
         m_Message.clear();
+        m_SnapshotPreviewWeight = 1.0;
     }
 
     void AudioMixerPanel::StopTransientPreview() noexcept

@@ -172,6 +172,21 @@ namespace KeireEditor
             m_Dependencies.WriteSceneRecovery();
     }
 
+    void EditorDocumentWorkspaceCoordinator::SaveProjectSettingsBeforeExit()
+    {
+        m_Lifetime.RequireOwnerThread("save project settings before exit");
+        if (!m_Documents.ProjectSettings->Dirty())
+        {
+            return;
+        }
+        if (!m_Dependencies.ProjectWritable())
+        {
+            throw std::runtime_error("Cannot close the editor with unsaved Project Settings while the project is "
+                                     "read-only. Restore write access and save the settings before exiting.");
+        }
+        m_Documents.ProjectSettings->Save();
+    }
+
     void EditorDocumentWorkspaceCoordinator::CloseProjectSettings() noexcept
     {
         if (m_ProjectSettingsClosed)

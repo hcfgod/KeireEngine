@@ -1,5 +1,7 @@
 #include "KeireClient/Editor/ExternalEditorProfiles.h"
 
+#include "KeireInternal/Assets/AssetInternal.h"
+#include "KeireInternal/FileSystem.h"
 #include "KeireInternal/VisualStudioDiscovery.h"
 
 #include <algorithm>
@@ -163,11 +165,40 @@ namespace KeireEditor
         AddDiscovered(profiles, "clion", "JetBrains CLion", {"clion64.exe", "clion.exe"},
                       {local / "Programs", local / "JetBrains/Toolbox/apps", programFiles / "JetBrains"},
                       {"clion64.exe", "clion.exe"});
-        const auto visualStudio = Keire::Detail::ResolveCompatibleVisualStudioExecutable();
+        auto installations = Keire::Detail::DiscoverVisualStudioInstallations();
+        std::erase_if(installations,
+                      [](const auto& installation)
+                      {
+                          return !Keire::Detail::IsVisualStudioExecutableCompatible(
+                              installation.Executable, Keire::Detail::ManagedWorkspaceCompatibilityVisualStudioMajor);
+                      });
+        const auto selected = Keire::Detail::SelectCompatibleVisualStudioInstallation(
+            installations, Keire::Detail::ManagedWorkspaceCompatibilityVisualStudioMajor);
+        const auto visualStudio = selected ? selected->Executable : std::filesystem::path{};
         profiles.push_back({.Id = "visual-studio",
-                            .DisplayName = "Visual Studio",
+                            .DisplayName = "Visual Studio (latest installed)",
                             .Executable = visualStudio,
                             .Installed = !visualStudio.empty()});
+        for (const auto& installation : installations)
+        {
+            const auto executable = std::filesystem::absolute(installation.Executable).lexically_normal();
+            const auto identity = Keire::Detail::PathToUtf8(executable);
+            // Profile IDs share the settings format's 64-byte bound; paths are stored separately.
+            const auto digest =
+                Keire::Detail::DigestToString(Keire::Detail::Sha256(std::as_bytes(std::span(identity))));
+            const auto id = "visual-studio:" + digest.substr(0, 32U);
+            if (std::ranges::find(profiles, id, &ExternalEditorProfile::Id) != profiles.end())
+            {
+                continue;
+            }
+            const auto major = installation.Version[0];
+            const auto release = major == 17U ? "2022" : major == 18U ? "2026" : std::to_string(major);
+            const auto edition =
+                Keire::Detail::PathToUtf8(executable.parent_path().parent_path().parent_path().filename());
+            const auto label = "Visual Studio " + std::string(release) + " " + edition + " (" + std::to_string(major) +
+                               "." + std::to_string(installation.Version[1]) + ")";
+            profiles.push_back({.Id = id, .DisplayName = label, .Executable = executable, .Installed = true});
+        }
         Add(profiles, "sublime", "Sublime Text", {"sublime_text.exe"});
         Add(profiles, "neovim", "Neovim", {"nvim.exe"});
 #elif defined(__APPLE__)

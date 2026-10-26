@@ -152,7 +152,7 @@ assert(fallbackLanding.includes(`<span data-doc-count>${allDocSources.length} do
     "Fallback documentation count is stale.");
 for (const [fragment, count] of [
     ["user-manual", 22], ["getting-projects", 5], ["editor-authoring", 11], ["engine-systems", 13], ["assets-builds", 4],
-    ["vfx", 4], ["csharp", 21], ["production", 13], ["material-shader-progress", 13], ["diagnostics", 5],
+    ["vfx", 4], ["csharp", 21], ["production", 15], ["material-shader-progress", 13], ["diagnostics", 5],
 ]) {
     assert(new RegExp(`<a href="#${fragment}">[^<]*<span>[^<]+</span><b>${count}</b></a>`).test(fallbackLanding),
     `Fallback documentation category count is stale: ${fragment}.`);
@@ -223,7 +223,12 @@ const proceduralMotionSchemaMatch = proceduralMotionHeader.match(
 assert(proceduralMotionSchemaMatch, "Could not locate the procedural motion profile schema.");
 const proceduralMotionSchema = Number.parseInt(proceduralMotionSchemaMatch[1], 10);
 const runtimeSource = await readFile(path.join(repositoryRoot, "KeireRuntime", "Source", "RuntimeApplication.cpp"), "utf8");
-const runtimeSchemaMatch = runtimeSource.match(/supported schema:\s*(\d+)/);
+const runtimeManifestHeader = await readFile(
+    path.join(repositoryRoot, "KeireCore", "Include", "KeireInternal", "Environment", "EnvironmentRuntimeManifest.h"),
+    "utf8",
+);
+assert(runtimeSource.includes("EnvironmentRuntimeManifest::DecodeState(source)"), "Runtime must use the shared time/lighting manifest decoder.");
+const runtimeSchemaMatch = runtimeManifestHeader.match(/CurrentSchema\s*=\s*(\d+)/);
 assert(runtimeSchemaMatch, "Could not locate the cooked runtime manifest schema.");
 const runtimeSchema = Number.parseInt(runtimeSchemaMatch[1], 10);
 
@@ -245,9 +250,13 @@ const shaderGeneratorVersion = parseUnsignedConstant(shaderGraphHeader, "ShaderG
 const shaderImporterSource = await readFile(path.join(repositoryRoot, "KeireCore", "Source", "Rendering", "ShaderGraphImporters.cpp"), "utf8");
 const shaderImporterVersion = /CreateShaderGraphAssetImporter\(\)[\s\S]*?result\.Version\s*=\s*(\d+)/.exec(shaderImporterSource)?.[1];
 assert(shaderImporterVersion, "Could not locate the Shader Graph importer version.");
+const codeShaderImporterSource = await readFile(path.join(repositoryRoot, "KeireCore", "Source", "Assets", "RenderingAssets.cpp"), "utf8");
+const codeShaderImporterVersion = /CreateShaderAssetImporter\([^)]*\)[\s\S]*?result\.Version\s*=\s*(\d+)/.exec(codeShaderImporterSource)?.[1];
+assert(codeShaderImporterVersion, "Could not locate the code-shader importer version.");
 versionContracts.push(
     ["ShadersAndMaterials.md", new RegExp(`Shader Graph generator version is ${shaderGeneratorVersion}\\b`)],
     ["ShadersAndMaterials.md", new RegExp(`Shader Graph importer version is ${shaderImporterVersion}\\b`)],
+    ["ShadersAndMaterials.md", new RegExp(`code-shader importer version is ${codeShaderImporterVersion}\\b`)],
 );
 for (const [sourcePath, contract] of versionContracts) {
     const source = await readMarkdown(path.join(docsRoot, ...sourcePath.split("/")));
@@ -261,6 +270,23 @@ const renderingGuide = await readMarkdown(path.join(docsRoot, "Rendering.md"));
 assert(renderingGuide.includes(`Material schema v${materialSchema} owns`) &&
     !renderingGuide.includes("authored transparency requires a future explicit surface mode"),
     "Rendering guide contains a stale material schema or transparency claim.");
+
+const graphNavigationHeader = await readFile(path.join(repositoryRoot, "KeireClient", "Include", "KeireClient",
+    "Editor", "GraphNavigation.h"), "utf8");
+const maximumGraphBookmarks = parseUnsignedConstant(graphNavigationHeader, "MaximumBookmarks");
+const graphViewContracts = [
+    ["GraphAuthoring.md", `Each graph can retain up to ${maximumGraphBookmarks} named viewport bookmarks`],
+    ["Manual/GraphEditing.md", `Each graph supports ${maximumGraphBookmarks} views`],
+];
+for (const [sourcePath, capacityContract] of graphViewContracts) {
+    const source = await readMarkdown(path.join(docsRoot, ...sourcePath.split("/")));
+    assert(source.includes(capacityContract), `Graph bookmark capacity is stale: Docs/${sourcePath}.`);
+    assert(!/bookmarks are panel-session view state/i.test(source),
+        `Graph bookmark guide still describes session-only storage: Docs/${sourcePath}.`);
+    for (const action of ["Save Current View", "Update Current View", "Rename Selected", "Remove Selected"]) {
+        assert(source.includes(action), `Graph bookmark guide omits ${action}: Docs/${sourcePath}.`);
+    }
+}
 
 const materialMatrix = await readMarkdown(path.join(docsRoot, "MaterialParityMatrix.md"));
 const materialRows = [...materialMatrix.matchAll(/^\| ME-[A-Z]{2}-\d{3} \|.*?\| (Complete|Partial|Planned) \|/gm)];
@@ -842,4 +868,4 @@ for (const style of [".staff-console", ".staff-metrics", ".staff-review-card", "
     assert(platformStyles.includes(style), `Staff operations styling is missing ${style}.`);
 }
 
-console.log(`Documentation source validation passed for ${allDocSources.length} canonical guides, ${docGroups.length} navigation groups, ${mermaidCount} Mermaid diagrams, local links, and ${versionContracts.length} schema contracts.`);
+console.log(`Documentation source validation passed for ${allDocSources.length} canonical guides, ${docGroups.length} navigation groups, ${mermaidCount} Mermaid diagrams, local links, ${versionContracts.length} schema contracts, and ${graphViewContracts.length} graph-view contracts.`);

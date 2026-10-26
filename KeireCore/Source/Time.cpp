@@ -42,6 +42,13 @@ namespace Keire
 
     void Time::AdvanceFrame(const TimeStep rawDeltaTime, const bool suspendSimulation)
     {
+        auto proposed = *this;
+        proposed.AdvanceFrameChecked(rawDeltaTime, suspendSimulation);
+        *this = proposed;
+    }
+
+    void Time::AdvanceFrameChecked(const TimeStep rawDeltaTime, const bool suspendSimulation)
+    {
         if (m_PendingFixedSteps != 0)
         {
             throw std::logic_error("All pending fixed steps must be consumed before advancing another frame.");
@@ -73,14 +80,26 @@ namespace Keire
         m_RealtimeSinceStartup += m_RawDeltaTime;
         m_UnscaledTime += m_UnscaledDeltaTime;
         m_TimeSinceStartup += m_DeltaTime;
-        ++m_FrameCount;
-
         m_FixedAccumulator += m_DeltaTime;
-        const auto availableSteps = static_cast<std::uint64_t>(
-            std::floor(m_FixedAccumulator.Seconds() / m_Specification.FixedDeltaTime.Seconds()));
+        const auto available = std::floor(m_FixedAccumulator / m_Specification.FixedDeltaTime);
+        constexpr double exclusiveStepLimit = 18446744073709551616.0;
+        if (!std::isfinite(m_RealtimeSinceStartup.Seconds()) || !std::isfinite(m_UnscaledTime.Seconds()) ||
+            !std::isfinite(m_TimeSinceStartup.Seconds()) || !std::isfinite(m_SmoothDeltaTime.Seconds()) ||
+            !std::isfinite(available) || available < 0.0 || available >= exclusiveStepLimit ||
+            m_FrameCount == std::numeric_limits<std::uint64_t>::max())
+        {
+            throw std::overflow_error("Frame advancement exceeds the supported clock or step range.");
+        }
+        ++m_FrameCount;
+        const auto availableSteps = static_cast<std::uint64_t>(available);
         const auto stepsToRun = std::min<std::uint64_t>(availableSteps, m_Specification.MaximumFixedStepsPerFrame);
         const auto droppedSteps = availableSteps - stepsToRun;
         m_PendingFixedSteps = static_cast<std::uint32_t>(stepsToRun);
+        if (m_FixedTickCount > std::numeric_limits<std::uint64_t>::max() - stepsToRun ||
+            !std::isfinite((m_FixedTime + m_Specification.FixedDeltaTime * static_cast<double>(stepsToRun)).Seconds()))
+        {
+            throw std::overflow_error("Scheduled fixed steps exceed the supported simulation clock range.");
+        }
 
         if (availableSteps > 0)
         {
@@ -89,6 +108,10 @@ namespace Keire
         if (droppedSteps > 0)
         {
             m_DroppedSimulationTime += m_Specification.FixedDeltaTime * static_cast<double>(droppedSteps);
+        }
+        if (!std::isfinite(m_DroppedSimulationTime.Seconds()))
+        {
+            throw std::overflow_error("Dropped simulation time exceeds the supported clock range.");
         }
         m_InterpolationAlpha = std::clamp(m_FixedAccumulator / m_Specification.FixedDeltaTime, 0.0, 1.0);
     }

@@ -1,6 +1,7 @@
 #include "Keire/Project/ProjectAuthoringSettings.h"
 
 #include "KeireInternal/FileSystem.h"
+#include "KeireInternal/ProjectSettingsSerialization.h"
 
 #include <nlohmann/json.hpp>
 
@@ -165,8 +166,7 @@ namespace Keire
         return result;
     }
 
-    void SaveProjectAuthoringSettings(const std::filesystem::path& projectRoot,
-                                      const ProjectAuthoringSettings& settings)
+    std::string Detail::SerializeProjectAuthoringSettings(const ProjectAuthoringSettings& settings)
     {
         ValidateProjectAuthoringSettings(settings);
         nlohmann::json names = nlohmann::json::array();
@@ -191,6 +191,13 @@ namespace Keire
             {"externalEditorExecutable", Detail::PathToUtf8(settings.ExternalEditorExecutable)},
             {"physicsLayerNames", std::move(names)},
             {"physicsCollisionMatrix", std::move(matrix)}};
-        Detail::WriteTextFileAtomically(SettingsPath(projectRoot), document.dump(2) + '\n');
+        return document.dump(2) + '\n';
+    }
+
+    void SaveProjectAuthoringSettings(const std::filesystem::path& projectRoot,
+                                      const ProjectAuthoringSettings& settings)
+    {
+        const auto text = Detail::SerializeProjectAuthoringSettings(settings);
+        Detail::WriteTextFileAtomically(SettingsPath(projectRoot), text);
     }
 } // namespace Keire

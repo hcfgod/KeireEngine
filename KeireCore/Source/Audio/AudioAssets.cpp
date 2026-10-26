@@ -859,7 +859,7 @@ namespace Keire
         if (source == definition.Snapshots.end())
             throw std::invalid_argument("Audio mixer snapshot is unavailable.");
         auto result = definition;
-        const auto blend = [weight](const float base, const float target) { return base + (target - base) * weight; };
+        const auto blend = [weight](const float base, const float target) { return std::lerp(base, target, weight); };
         for (const auto& parameter : source->Parameters)
         {
             switch (parameter.Type)

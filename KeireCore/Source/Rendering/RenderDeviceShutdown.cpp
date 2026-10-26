@@ -310,6 +310,16 @@ namespace Keire::RenderBackend
             if (ToneMapPipeline)
                 SDL_ReleaseGPUGraphicsPipeline(Device, ToneMapPipeline);
             ToneMapPipeline = nullptr;
+            if (BloomPipeline)
+            {
+                SDL_ReleaseGPUGraphicsPipeline(Device, BloomPipeline);
+            }
+            BloomPipeline = nullptr;
+            if (CloudVolumePipeline)
+            {
+                SDL_ReleaseGPUGraphicsPipeline(Device, CloudVolumePipeline);
+            }
+            CloudVolumePipeline = nullptr;
             if (const auto pipeline = std::exchange(RuntimeUiPipeline, nullptr))
                 SDL_ReleaseGPUGraphicsPipeline(Device, pipeline);
             if (const auto pipeline = std::exchange(RuntimeUiCameraOverlayPipeline, nullptr))

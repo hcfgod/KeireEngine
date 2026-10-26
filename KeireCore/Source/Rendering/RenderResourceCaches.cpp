@@ -7,6 +7,10 @@
 #include "Keire/Log.h"
 
 #include "KeireInternal/RenderInternal.h"
+#include "KeireInternal/Rendering/CloudVolumePacket.h"
+#include "KeireInternal/Rendering/EnvironmentLightingApplication.h"
+#include "KeireInternal/Rendering/EnvironmentLightingValidation.h"
+#include "KeireInternal/Rendering/MaterialPropertyValidation.h"
 #include "KeireInternal/Rendering/RenderGeometryMathInternal.h"
 #include "KeireInternal/Rendering/TemporalAntiAliasingInternal.h"
 
@@ -18,28 +22,11 @@
 #include <iterator>
 #include <limits>
 #include <stdexcept>
-#include <type_traits>
 
 namespace Keire::RenderBackend
 {
     namespace
     {
-        [[nodiscard]] bool ValidGlobalMaterialProperty(const MaterialPropertyValue& value) noexcept
-        {
-            return std::visit(
-                [](const auto& property) noexcept
-                {
-                    using Value = std::decay_t<decltype(property)>;
-                    if constexpr (std::is_same_v<Value, AssetId>)
-                        return true;
-                    else if constexpr (std::is_same_v<Value, float>)
-                        return std::isfinite(property);
-                    else
-                        return Math::IsFinite(property);
-                },
-                value);
-        }
-
         void ReleaseRetiredSurfaceLeases(RenderFramePacket& frame) noexcept
         {
             frame.Requests.clear();
@@ -397,6 +384,12 @@ namespace Keire::RenderBackend
             if (!surface)
                 throw std::logic_error("A captured render-surface epoch expired before frame execution.");
             surface->ActiveWorksetSlot = frame->FrameSlot;
+            const auto surfaceRequest = std::ranges::find_if(
+                frame->Requests, [&token](const auto& candidate)
+                { return candidate.Surface.Id == token.Id && candidate.Surface.Epoch == token.Epoch; });
+            surface->RequestedBloom = surfaceRequest != frame->Requests.end() &&
+                                      surfaceRequest->Packet.Environment.Bloom.Enabled &&
+                                      surfaceRequest->Packet.Environment.Bloom.Intensity > 0.0;
             surface->Submitted = false;
             surface->FrameClearColor = surface->Specification.ClearColor;
             EnsureSurface(*surface);
@@ -475,6 +468,7 @@ namespace Keire::RenderBackend
         if (request.PrimaryContributionIndex > request.AdditionalScenes.size())
             throw std::invalid_argument("SceneRenderRequest primary contribution index is out of range.");
         ValidateRenderEnvironmentSettings(request.Environment);
+        Keire::Detail::ValidateEnvironmentLighting(request.EvaluatedEnvironment);
         if (std::ranges::any_of(request.AdditionalScenes,
                                 [](const SceneRenderContribution& contribution) { return !contribution.Scene; }))
         {
@@ -545,6 +539,7 @@ namespace Keire::RenderBackend
         if (!Math::IsFinite(camera.View) || !Math::IsFinite(camera.Projection) || !ValidColor(camera.ClearColor))
             throw std::invalid_argument("SceneRenderRequest camera contains invalid values.");
         ValidateRenderEnvironmentSettings(request.Environment);
+        Keire::Detail::ValidateEnvironmentLighting(request.EvaluatedEnvironment);
         if (!std::isfinite(request.MaterialTimeSeconds) || request.MaterialTimeSeconds < 0.0F ||
             !std::isfinite(request.MaterialDeltaSeconds) || request.MaterialDeltaSeconds < 0.0F ||
             request.MaterialDeltaSeconds > 1.0F)
@@ -649,13 +644,21 @@ namespace Keire::RenderBackend
         const auto viewProjection = Math::Multiply(packet.Camera.Projection, packet.Camera.View);
         const MotionHistoryKey cameraHistoryKey{{}, {}, surfaceToken.Id, surfaceToken.Epoch};
         const auto previousCamera = CameraMotionHistory.find(cameraHistoryKey);
+        const auto cameraHistory = MakeCameraMotionHistory(unjitteredViewProjection, acceptedFrameId,
+                                                           request.Environment, request.EvaluatedEnvironment);
+        const bool environmentDirectional = request.EvaluatedEnvironment && request.EvaluatedEnvironment->Directional;
         packet.TemporalHistoryContinuous = previousCamera != CameraMotionHistory.end() && acceptedFrameId != 0U &&
-                                           previousCamera->second.Frame == acceptedFrameId - 1U;
+                                           previousCamera->second.Frame == acceptedFrameId - 1U &&
+                                           previousCamera->second.HasContinuousEnvironment(cameraHistory);
         packet.PreviousViewProjection = packet.TemporalHistoryContinuous
                                             ? TemporalAntiAliasing::ApplyTemporalProjectionJitter(
                                                   previousCamera->second.Transform, temporalJitterNdc)
                                             : viewProjection;
         packet.Environment = request.Environment;
+        Detail::ApplyEnvironment(packet.Environment, packet.CloudAdvectionPhase, packet.StarTwinklePhase,
+                                 request.EvaluatedEnvironment);
+        packet.CloudVolume =
+            CaptureCloudVolume(packet.Camera, packet.Environment.Clouds.Volume, request.EvaluatedEnvironment);
         packet.GlobalMaterialProperties = std::move(request.GlobalMaterialProperties);
         if (request.DrawSceneContributions)
         {
@@ -671,6 +674,19 @@ namespace Keire::RenderBackend
                 }
             }
             packet.BakedLighting = primaryContribution->BakedLighting();
+            if (environmentDirectional)
+            {
+                const auto& light = *request.EvaluatedEnvironment->Directional;
+                packet.Lighting = {};
+                packet.Lighting.Direction = {light.Direction[0], light.Direction[1], light.Direction[2], 0.0F};
+                packet.Lighting.ColorAndIntensity = {light.LinearColor[0], light.LinearColor[1], light.LinearColor[2],
+                                                     light.Intensity};
+                packet.Lighting.Enabled = true;
+                packet.Lighting.Shadows = light.Shadows.Quality;
+                packet.Lighting.ShadowResolution = light.Shadows.Resolution;
+                packet.Lighting.ShadowStrength = light.Shadows.Strength;
+                packet.Lighting.ShadowBias = light.Shadows.Bias;
+            }
         }
 #if defined(KEIRE_ENABLE_TEST_HOOKS)
         LastCapturedDirectionalLightEntity.store(packet.Lighting.Entity.Value().Low(), std::memory_order_relaxed);
@@ -872,12 +888,11 @@ namespace Keire::RenderBackend
         }
         const auto previousCameraHistory = CameraMotionHistory.find(cameraHistoryKey);
         const auto cameraRollback = previousCameraHistory != CameraMotionHistory.end()
-                                        ? std::optional<MotionHistoryEntry>{previousCameraHistory->second}
+                                        ? std::optional<CameraMotionHistoryEntry>{previousCameraHistory->second}
                                         : std::nullopt;
         try
         {
-            CameraMotionHistory.insert_or_assign(cameraHistoryKey,
-                                                 MotionHistoryEntry{unjitteredViewProjection, acceptedFrameId});
+            CameraMotionHistory.insert_or_assign(cameraHistoryKey, cameraHistory);
             for (const auto& update : motionUpdates)
                 MotionHistory.insert_or_assign(update.Key, update.Next);
             for (const auto& update : skinMotionUpdates)

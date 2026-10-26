@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <stdexcept>
 
 namespace Keire
@@ -19,6 +20,20 @@ namespace Keire
             if (const auto* value = std::get_if<T>(&found->second))
                 return *value;
             throw std::invalid_argument("Transform component property has an incompatible type.");
+        }
+
+        [[nodiscard]] Quaternion RestoreSerializedRotation(const Quaternion value)
+        {
+            const double squaredLength =
+                static_cast<double>(value.X) * value.X + static_cast<double>(value.Y) * value.Y +
+                static_cast<double>(value.Z) * value.Z + static_cast<double>(value.W) * value.W;
+            constexpr double unitRoundoffTolerance = 4.0 * std::numeric_limits<float>::epsilon();
+            // Re-normalizing stored unit floats can oscillate between adjacent values and dirty an Undo savepoint.
+            if (std::isfinite(squaredLength) && std::abs(squaredLength - 1.0) <= unitRoundoffTolerance)
+            {
+                return value;
+            }
+            return Math::Normalize(value);
         }
 
         [[nodiscard]] Quaternion MultiplyRotation(const Quaternion left, const Quaternion right)
@@ -309,7 +324,7 @@ namespace Keire
                 throw std::invalid_argument("Unsupported Transform component schema version.");
             auto& transform = dynamic_cast<TransformComponent&>(component);
             const auto position = Read(values, "position", Vector3{});
-            const auto rotation = Math::Normalize(Read(values, "rotation", Quaternion{}));
+            const auto rotation = RestoreSerializedRotation(Read(values, "rotation", Quaternion{}));
             const auto scale = Read(values, "scale", Vector3{1.0F, 1.0F, 1.0F});
             if (!Math::IsFinite(position) || !TransformComponent::IsValidLocalScale(scale))
                 throw std::invalid_argument("Transform component contains invalid position or scale values.");

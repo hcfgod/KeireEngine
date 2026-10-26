@@ -1,6 +1,6 @@
 # Getting Started
 
-Windows Hub 0.4.8 hot patch and Editor 0.4.8 are published through signed catalog sequence 27. The catalog retains independently validated
+Windows Hub 0.4.8 hot patch and Editor 0.4.8 are published through signed catalog sequence 28. The catalog retains independently validated
 Linux 0.4.2 packages. Historical platform evidence below retains its original version and scope.
 
 ## Choose Your Starting Point
@@ -21,8 +21,9 @@ Scripts\project.bat stage-editor -Toolset msc
 Scripts\project.bat stage-hub -Toolset msc
 ```
 
-These commands incrementally build Dist and update runnable folders under `Build\Distributions`. They do not create
-a release archive or run the full release validation matrix. After staging, launch without rebuilding:
+Editor staging defaults to `DevDist`, an isolated distribution-behavior profile without whole-program optimization.
+Hub staging still uses `Dist`. Both update runnable folders under `Build\Distributions` without creating a release
+archive or running the full release validation matrix. After staging, launch without rebuilding:
 
 ```bat
 Scripts\project.bat run-staged-hub
@@ -323,22 +324,61 @@ bash Scripts/project.sh run --smoke-project
 bash Scripts/project.sh run --editor --project /projects/MyGame
 ```
 
-### Fast Windows Dist staging
+### Fast Windows Editor Iteration
 
-Use the development staging commands when testing optimized Editor or Hub behavior from the installed distribution
-layout:
+Use the development staging commands after a batch of changes:
 
 ```powershell
 .\Scripts\project.bat stage-editor
 .\Scripts\project.bat stage-hub
 ```
 
-These commands build the real `Dist` targets and update the normal runnable layouts under `Build\Distributions`, but
-skip the release test/smoke matrix, SDK consumer builds, archive creation, extraction, and extracted-archive validation.
-They default to Ninja unless `-Generator` is supplied explicitly. Editor staging reuses the bundled .NET SDK and
-unchanged Build Support already in the layout; a newer Dist player runtime automatically refreshes all Build Support
-variants. Run `package-editor` or `package-hub` before release, and after packaging-layout or dependency removals, to
-recreate the distribution from an empty stage and execute the complete release gate.
+The Editor uses `DevDist`: release dependencies, `NDEBUG`, and distribution code paths, but no link-time optimization.
+It retains symbols and speed optimization. Objects and binaries live in separate `DevDist-*` directories, and its
+layout is `Build\Distributions\keire-editor-windows-<architecture>-DevDist`. The initial build is cold; later runs reuse
+those objects. Ninja is the default. Do not clean between ordinary changes. Group related fixes before building.
+
+The fast stage copies changed runtime files and reuses the repository's pinned SDK. It does not merge SDK archives,
+build the standalone Hub executable or installer, recreate all player Build Support variants, or produce a release
+package manifest. It is a **repository-local development layout**, not a portable download. Use it for authoring/UI acceptance
+and narrow native regressions, not shipping-performance measurements or a packaged-player release claim.
+If staging is interrupted during copying, both launch methods reject the incomplete update. Rerun `stage-editor`
+to finish it; do not remove the guard file to force a partially updated Editor to launch. A failed native build before
+copying starts leaves the previously completed layout alone.
+
+For tests, build the affected target once, then run only its relevant cases. For example:
+
+```powershell
+.\Scripts\project.ps1 build -Generator ninja -Configuration DevDist -Toolset msc -Target KeireEditorTests
+& .\Build\Bin\DevDist-windows-x86_64\KeireEditorTests\KeireEditorTests.exe '--test-case=Graph bookmark*,UI requested tab*'
+```
+
+Use `stage-editor -Configuration Dist` for the existing shipping-optimized development layout, then
+`run-staged-editor -Configuration Dist -ProjectPath "D:\Projects\My Game"` to launch it. That path also refreshes
+packaged Build Support when its Dist runtime changes. `stage-hub` remains Dist. Run `package-editor` or `package-hub`
+before release, and after packaging-layout or dependency removals, to recreate the distribution from an empty stage
+and execute the complete release gate. Linux/macOS can build or run `--configuration DevDist`; the thin staging
+launcher described here is Windows-only.
+
+### When A Small Change Takes Too Long
+
+Keep the same configuration, generator, architecture, and toolset between iterations. Switching between Dist and
+DevDist selects different object caches; the first build of either profile is not representative of a small edit.
+Changing a widely included header or precompiled header legitimately recompiles its consumers. Group those changes
+into one batch instead of building after each declaration. Source additions/removals also require graph regeneration;
+an ordinary source-inventory change preserves compatible compiled outputs.
+
+Filter test execution after building the affected executable. A doctest `--test-case` filter does not reduce the
+number of translation units or link work needed to produce that executable. Use DevDist for the iteration build,
+then select the cases that cover the batch. Keep sanitizers and shipping-profile checks at appropriate integration
+boundaries; a fast UI check does not replace them.
+
+`stage-editor` records its native build profile at
+`Build\Reports\BuildProfiles\latest-ninja-KeireEditorDev-DevDist.json`, including success and elapsed milliseconds.
+For a direct build, add `-ProfileBuild` to collect the same target-specific report. Compare an unchanged run and a
+small edit, not just a cold build. Avoid routine `clean`, `-Update`, or forced regeneration. Compiler parallelism is
+bounded by default; `KEIRE_BUILD_JOBS` can override it, but increasing it beyond available memory can cause paging
+or failures instead of a faster build.
 
 ## Configurations
 
@@ -346,7 +386,9 @@ recreate the distribution from an empty stage and execute the complete release g
 | --- | --- |
 | `Debug` | Normal development, assertions, symbols, and debug dependency variants |
 | `Release` | Optimized validation with `NDEBUG` and symbols |
+| `Profile` | Speed optimization and symbols with opt-in profiling telemetry |
 | `Dist` | Fully optimized, link-time-optimized, stripped distribution behavior |
+| `DevDist` | Distribution behavior without LTO; isolated fast iteration outputs with symbols; never a release package |
 | `DebugASan` | Address and lifetime error detection |
 | `DebugUBSan` | Undefined-behavior detection with supported GCC/Clang toolchains |
 | `DebugTSan` | Data-race detection with supported GCC/Clang toolchains |

@@ -161,7 +161,7 @@ function LinkKeireCore()
         }
         LinkDependencies(DependencyManifest.RecastDebugLibraries)
 
-    filter { "configurations:Release or Profile or Dist" }
+    filter { "configurations:Release or Profile or Dist or DevDist" }
         LinkDependencies
         {
             DependencyManifest.AssimpReleaseLibrary,
@@ -269,7 +269,7 @@ function LinkSDL3()
     filter { "configurations:Debug or DebugASan or DebugUBSan or DebugTSan or Coverage" }
         LinkDependency(DependencyManifest.SDL3DebugLibrary)
 
-    filter { "configurations:Release or Profile or Dist" }
+    filter { "configurations:Release or Profile or Dist or DevDist" }
         LinkDependency(DependencyManifest.SDL3ReleaseLibrary)
 
     filter {}
@@ -307,6 +307,15 @@ function ApplyCommonProjectSettings(repositoryRoot)
     targetdir (repositoryRoot .. "/Build/Bin/" .. OutputDir .. "/%{prj.name}")
     objdir (repositoryRoot .. "/Build/Intermediates/" .. IntermediateOutputDir .. "/%{prj.name}")
     debugdir (repositoryRoot)
+
+    -- Opt executable hosts into Windows long paths; asset pack names can exceed MAX_PATH inside valid projects.
+    -- Generation uses a temporary root alias, so do not bake its absolute path into linker options.
+    local manifestRoot = _ACTION == "ninja" and "." or repositoryRoot
+    local applicationManifest = path.join(manifestRoot, "Config/WindowsApplication.manifest")
+    filter { "system:windows", "toolset:msc", "kind:ConsoleApp or WindowedApp" }
+        linkoptions { "/MANIFEST:EMBED", '/MANIFESTINPUT:"' .. applicationManifest .. '"' }
+
+    filter {}
 
     -- Premake's Ninja backend prefixes a nested project's location twice when it resolves that project's PCH
     -- input. Keep the forced include below each PCH-owning project, but compile it as a normal header on Unix
@@ -352,7 +361,7 @@ function ApplyCommonProjectSettings(repositoryRoot)
         buildoptions { "-fms-runtime-lib=dll_dbg" }
         linkoptions { "-fms-runtime-lib=dll_dbg" }
 
-    filter { "system:windows", "toolset:clang", "configurations:Release or Profile or Dist" }
+    filter { "system:windows", "toolset:clang", "configurations:Release or Profile or Dist or DevDist" }
         buildoptions { "-fms-runtime-lib=dll" }
         linkoptions { "-fms-runtime-lib=dll" }
 
@@ -407,6 +416,20 @@ function ApplyCommonProjectSettings(repositoryRoot)
         {
             "NDEBUG",
             "KEIRE_DISTRIBUTION",
+            "KEIRE_COMPILED_LOG_LEVEL=2"
+        }
+
+    -- Distribution code paths with independent objects and no whole-program relink for local iteration.
+    filter "configurations:DevDist"
+        runtime "Release"
+        optimize "speed"
+        symbols "on"
+        linktimeoptimization "Off"
+        defines
+        {
+            "NDEBUG",
+            "KEIRE_DISTRIBUTION",
+            "KEIRE_DEVELOPMENT_ARTIFACT",
             "KEIRE_COMPILED_LOG_LEVEL=2"
         }
 

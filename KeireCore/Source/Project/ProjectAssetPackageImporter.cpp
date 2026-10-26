@@ -636,7 +636,19 @@ namespace Keire
                                   .VerifySignature = m_Impl->Specification.VerifyMarketplaceSignature}}));
 
             if (request.ApplyRenderingSettings)
-                static_cast<void>(LoadRenderEnvironmentSettings(extraction));
+            {
+                const auto renderingEntry =
+                    std::ranges::find(plan.Entries, std::filesystem::path("ProjectSettings/Rendering.keiresettings"),
+                                      &ProjectAssetImportPlanEntry::PackagePath);
+                if (renderingEntry == plan.Entries.end())
+                {
+                    throw std::runtime_error("The selected rendering settings are not included in this import.");
+                }
+                const auto& settingsRoot = renderingEntry->Disposition == ProjectAssetImportDisposition::KeepLocal
+                                               ? m_Impl->Specification.ProjectRoot
+                                               : extraction;
+                static_cast<void>(LoadRenderEnvironmentSettings(settingsRoot));
+            }
             AssetId defaultInputMap;
             if (request.DefaultInput)
             {

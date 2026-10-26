@@ -1,5 +1,28 @@
 # Architecture
 
+Shader Graph CPU previews retain one request-local private evaluator state. Callers own graph/property/texture
+storage; synchronous preview requests borrow stable views, while the evaluator owns indexes, per-sample values, and
+traversal flags. `ShaderGraphPreviewEvaluator.cpp` owns graph traversal and cache invalidation. A direct typed switch
+dispatches to Math, Sampling, Geometry, Procedural, Surface, and Control node implementations; these use the same
+private input/coercion boundary rather than owning another cache or scheduling callbacks. The state definition lives
+in `ShaderGraphPreviewEvaluatorState.h`, not the public API. Output pins are borrowed references valid during the
+dispatch call. Lazy branch selection and traversal-error cleanup stay in the traversal owner. Extended unary nodes
+explicitly select their canonical `Input` pin; older `Value`-pin nodes retain their original helper default.
+
+The Editor workspace keeps Game viewport presentation in `EditorWorkspaceGameViewport.cpp`, separate from scene
+authoring, Play transitions, and undo orchestration in `EditorWorkspaceScene.cpp`. Camera selection, render-surface
+sizing, runtime UI routing, and performance overlays remain workspace-owned; the split changes no public contract.
+The additive `UiFrame::Checkbox(label, value, {.ContinueRow = true})` overload measures the active font, checkbox frame,
+inner spacing, and current content boundary inside KeireCore before continuing a row. It wraps rather than clipping;
+the original overload preserves next-line layout. The Game toolbar uses it without introducing backend dependencies
+into the Editor. Its camera caption wraps before the remaining drawable preview area is calculated.
+Hub task/notification popovers live in `HubActivityUi.cpp`; shared byte/task text formatting stays in the private
+`HubProductFormatting` boundary. `HubErrorNotice` synchronously updates the visible banner and best-effort notification
+persistence, retaining consecutive-message deduplication and retry after storage failure. `HubApplication.cpp` keeps
+orchestration rather than owning those details inline. Dedicated thumbnail tests use uniquely acquired scratch roots
+and release blocked provider work before asserting replacement enqueue success, so parallel runs and failed assertions
+cannot contend over fixed fixture directories or leave that provider blocked during shutdown.
+
 Console diagnostic navigation remains a panel/controller boundary: the panel identifies source coordinates and queues
 an external-editor request; the workspace performs the launch outside panel drawing. Build Support activation carries
 an optional requesting executable through the single-instance channel, and Hub resolves that installation explicitly
@@ -185,6 +208,22 @@ every destination and backup before rollback, refusing to overwrite external edi
 prepared transactions before assets load; read-only open refuses pending recovery. The reviewed apply overload rejects
 changed source, metadata, or extracted program inputs. Shared default shaders, migration editor integration, catalog
 publication, and the remaining replacement acceptance gates are pending.
+
+Project Settings uses the same internal publication mechanism with a separate `Library/ProjectSettingsSave` journal,
+lock, and exact four-file destination allowlist. Pure serializers prepare Rendering, Authoring, EnvironmentTime and
+EnvironmentLighting bytes before filesystem publication. Settings reuse bounded staging and remove known completed
+payloads; material migration retains its diagnostic journals. Unknown staging files are preserved and block reuse.
+Exclusive project open recovers prepared settings before consumers load them; read-only open refuses pending
+recovery. Document opens with caller-supplied values also reject pending recovery rather than mixing stale arguments
+with recovered files. The document retains bounded original bytes or absence from Open and advances that baseline
+only after successful publication. Retry Save recovers an earlier prepared publication before comparing against
+that baseline, while retaining pending document edits. External changes since Open or the previous successful save
+reject publication. Recovery preflights the group and rechecks each destination before mutation; it cannot provide
+an atomic compare-and-replace against writers that ignore the lock.
+`ApplicationSpecification::LoadProjectAudioSettings` defaults false; the Editor opts in so all six project audio
+fields are read after project open/recovery and before audio initialization. Malformed authoring retains the supplied
+audio specification. General clients keep explicit audio configuration unless they opt in. File replacement is
+atomic individually; grouped publication does not promise simultaneous visibility or extra power-loss durability.
 
 `ShaderGraphSaveState` owns staged node metadata and a save request bound to one document identity. The panel and
 keyboard shortcut share this state. Applying metadata is one document edit; saving waits for compilation and clears
@@ -1021,6 +1060,26 @@ suppresses update callbacks, Step advances one fixed tick and one complete frame
 exceptions fault only their session and preserve the edit scene. Detailed contracts live in
 [ECS And Components](ECSAndComponents.md).
 
+Editor Pause and Step route through `SceneRuntimeWorld`, coordinating loaded and persistent sessions. New adopted
+or activated sessions inherit world pause. World Step snapshots its owned session references and preflights that
+every session is paused; an empty or mixed-state world returns false without stepping any session. Recursive Step
+and non-owner calls are rejected. Callback failures fault their session and return failure for the world step, but
+completed simulation callbacks are not rolled back; other eligible sessions finish that step. Subsequent steps are
+rejected until faulted sessions are removed or recovered.
+
+Each runtime world owns an internal environment clock. Owner-thread access returns value copies; restoration rejects
+closed worlds and active fixed-tick/step callbacks. Normal fixed updates advance once when the world is unpaused and
+has a playing session; manual steps advance once after all-session eligibility checks. Variable updates do not advance
+it. Invalid or overflowing advancement fails before callbacks, while gameplay callback faults do not roll back already
+accepted time. Recursive fixed ticks and steps are rejected. This private foundation is not yet a persisted planetary
+time authority, celestial lighting system, or public Editor/managed API.
+
+The private Editor `EnvironmentPreviewClock` owns a separate transient clock copied from authored state. Binding and
+reset freeze playback; preview speed is independent of the saved rate/pause flags. It discards hidden and Play Mode
+frame deltas instead of catching up later. Its apply candidate copies only the preview day/time into the authored
+baseline; Apply Time to Project records that change through document Undo. The model does not own documents or runtime
+worlds. Workspace controls drive it, and Edit view requests consume its evaluated directional-light snapshots.
+
 `SceneRuntimeSession::Step` shares the normal per-frame update path after advancing one fixed tick. It preserves the
 paused state while updating gameplay, animation/IK, LateUpdate, VFX, and presentation exactly once. Paused host updates
 do not overwrite the stepped pose's interpolation state; invalid step durations are rejected before callbacks run.
@@ -1100,6 +1159,25 @@ traversal. `SceneRuntimeSession::Play` publishes the cloned scene before invokin
 name, tag, component, rendering, audio, physics, and UI queries all resolve through the same world contract from the
 first lifecycle callback onward. Managed callback failures retained by `ScriptSystem` are advanced through a
 per-service cursor and published once to the Editor Console with their generation, type, callback, entity, and message.
+
+Asynchronously loaded runtime sessions are also registered before Play invokes startup callbacks, allowing the
+new scene's entities to resolve their owning session during Awake. A startup or validation failure stops and removes
+the prepared session and restores the previous active handle before reporting failure. Previously loaded sessions
+are retired only after successful activation; an additive load does not replace the existing active scene.
+Load processing retains an owned snapshot of the current operation queue. Startup callbacks may request more scenes
+without invalidating that traversal; newly queued operations are processed on a later pass, not recursively drained.
+Recursive `SceneRuntimeWorld::Process` calls from lifecycle callbacks throw before changing queued or loaded state.
+The processing guard is released on normal return and exception unwinding, allowing the next owner-thread pass.
+
+The runtime world privately owns a spatial frame registry. Each registered scene retains one attachment to its root
+frame; ordinary erasure releases it, while retired scenes with persistent entities retain it until their session is
+removed. World closure invalidates live frame handles, including handles retained by external work. Private access
+checks owner-thread affinity and open state. This is a migration foundation: logical keys are context-local defaults,
+not globally unique serialized identities, and normal Transform coordinates and entity bindings remain unchanged.
+Private entity-to-frame resolution validates a live entity against the exact runtime scene instance before returning
+its scene's root frame. Matching stable entity IDs alone is insufficient: Edit/Play clones and previous Play sessions
+must not resolve interchangeably. Persistent scene entities remain resolvable after their loaded scene is retired;
+destroyed entities and entities from other runtime worlds are rejected. Frame handles do not extend entity lifetimes.
 
 Play-stop decisions are queued from UI callbacks and executed at the next update safe boundary. Render submission
 captures camera, lighting, transforms, mesh/material identities, and tint into an immutable frame-local packet, so
@@ -1203,14 +1281,50 @@ and is invalidated with surface resize, camera discontinuity, path changes, and 
 scene-card cache is surface-owned and render-thread-affine; bounded rolling updates keep transformed opaque/masked/WPO
 bounds plus low-density transparent, hair, volume, and VFX aggregates without exposing renderer implementation state
 through the public API.
-`ProjectSettingsDocument` owns the editor draft, validation, dirty lifecycle, atomic save, and coalesced undo command;
+`ProjectSettingsDocument` owns the editor draft, validation, dirty lifecycle, per-file atomic saves, and coalesced undo command.
+Normal editor exit invokes the owner-thread-affine document coordinator's `SaveProjectSettingsBeforeExit` before
+closing the scene or requesting application exit. Failed saves and dirty read-only projects reject that transition;
+the existing transition failure path reports the error and permits retry. Mandatory teardown remains best effort,
+so this gate does not promise recovery after crashes or direct forced application shutdown.
+Runtime worlds separately own their private daily-lighting profile. Combined clock/profile restore checks owner
+thread, open lifetime and tick exclusion, prepares the new clock before publication, then moves the validated
+profile. Profile reads return value copies rather than borrowing world lifetime. Editor Play and player startup
+restore time and lighting together before scenes start. Shared runtime requests carry evaluated snapshots; editor
+Scene/camera views select runtime snapshots during Play and workspace preview snapshots during Edit. Preview profile
+and clock revisions are combined without resetting unchanged playback; project close clears the source identity.
+Directional submissions also own validated shadow quality, resolution hint, strength and bias. Capture copies these
+after clearing authored entity/cookie bindings; it does not borrow the previous light's shadow configuration.
+Daily profiles retain these fields through copy/move and key edits, and evaluation forwards them to submissions.
+Lighting record version 2 stores the shadow configuration; version 1 reads with disabled defaults. Optional ambient
+tracks use version 3, with all keys carrying validated color/intensity. Legacy tracks preserve project ambient values.
+Evaluated ambient samples are copied into the render packet without mutating request settings; world/preview profile
+revision changes invalidate temporal history. Older record readers reject version 3 rather than dropping its data.
+Environment-tab controls edit these values through the settings document. The daylight/ambient batch has bounded
+desktop Edit/Play and Undo/Redo acceptance; broader backend, standalone rendering and long-session gates remain open.
+The project document snapshots include rendering, authoring, environment time and the private daily-lighting profile. Snapshot copies
+finish before restoration mutates the document; cancelling moves the owned baseline without allocating a copy.
+Lighting is validated before replacing an open project, and failed saves retain dirty state. The four settings files
+use prepared publication with a recovery journal and external-change checks, not filesystem-wide atomic replacement.
+Schema-7 cooked manifests preserve lighting, atmosphere and cloud settings, but this does not imply rendered acceptance;
 the workspace consumes its immutable settings for Scene and Game submissions instead of retaining a mutable copy.
+Rendering settings schema 6 also owns the opt-in experimental atmosphere settings. Validation and JSON decoding
+remain private; the public value type contains metre-valued planet geometry and inverse-metre optical coefficients.
+Sky submission subtracts planet center in double precision, then packs kilometre-scaled immutable uniforms. The
+selected directional-light direction drives single-scattering integration. This leaves float camera/Transform
+precision unchanged and does not update texture-based IBL, baked lighting or scene aerial perspective.
 Every primary editor panel owns its registration and persistent UI state. `SceneViewportPanel` owns its render view,
 camera, framing, picking, marquee selection, gizmos, toolbar, and viewport drops; `HierarchyPanel` owns traversal and
 structural commands; `InspectorPanel` owns component inspection while its `AssetInspectorPanel` composition owns asset
 dispatch, diagnostics, naming actions, and material content; and the input-actions, project-settings,
 asset-browser, console, and diagnostics panels own their respective tools. Panels receive document data, frame-value
 snapshots, and named commands through narrow contracts; none retain, friend, or inspect `EditorWorkspaceLayer`.
+The Inspector's entry point handles panel lifetime, selection locks, history focus, and asset fallback. Its private
+`EntityDrawContext` exists for one synchronous entity draw and borrows the panel, UI frame, scene, entity, theme, and
+asset-record views. It owns that draw's edit-target and component-order snapshots; it never escapes through a callback.
+Metadata, headers/order/clipboard actions, built-in cards, reflected properties, and audio diagnostics have separate
+implementations. Sticky headers execute synchronously while their expansion-map references and component registrations
+remain valid. Property, enabled-state, and reset operations carry the displayed type-instance ordinal even for a single
+target, using the existing document validation paths; undo callbacks still precede mutation.
 Viewport-local overlays are invoked by the owning panel before its RAII scope ends, so backend draw-list ownership cannot
 fall through to an implicit debug window. Scene and Game pass their own camera-local visibility diagnostics into those
 overlays. FPS, profiler categories, dispatch/indirect totals, recording timings, and CPU preparation remain one completed
@@ -1233,6 +1347,10 @@ click. Clicking the Game image restores runtime ownership without warping the po
 move the editor camera while gameplay owns input.
 The workspace implementation is kept below 1,500 lines and is limited to service construction, frame order, command
 binding, notices, and modal arbitration.
+Edit-mode VFX frame advancement lives in `EditorWorkspaceVfxPreviewUpdate.cpp`; the workspace update phase invokes
+it after environment preview. It preserves Play-session suspension, synchronization error reporting, bounded preview
+steps and authored auto-restart/speed behavior without adding another lifecycle owner.
+
 `EditorWorkspaceLayer` remains the owner-thread composition root, while non-copyable internal coordinators own document
 transitions and close conflicts, packages, replay/profiling presentation, managed-runtime build scheduling, Play Mode
 orchestration, asset-operation admission, and build/cook lifecycle. Each coordinator accepts narrow callbacks or
@@ -1441,6 +1559,12 @@ with source authoring metadata but never enter shader, material, or VFX runtime 
 persisted nested local-graph stacks are not part of the 0.4.0 contract; cable routing remains presentation geometry.
 See [Unified Graph Authoring](GraphAuthoring.md) for the interaction and migration contract.
 
+VFX panel system selection is reconciled before choosing compact tabs or the wide three-pane layout. Existing valid
+system identity is retained; absent or removed identity falls back to the first remaining system, or none for an empty
+definition. A system transition clears canvas/node/block/cable, comment, and context-menu selection together without
+editing the document. Systems-pane visibility therefore cannot determine whether the graph is usable after opening
+or source reload.
+
 Shader schema 6 retains the renderer-neutral resource declarations and displacement bound introduced by schemas 4 and
 5, while Material schema 7 carries the same portable sampler, Texture2D-array/cube/3D, and bounded
 read-only structured/byte-address buffer declarations through encoding, reflection, dependency extraction, and typed
@@ -1526,6 +1650,8 @@ The asset database implementation is divided into source indexing/import prepara
 source mutation/trash transactions, and dependency cooking. Public methods acquire one non-recursive operation mutex;
 explicit private unlocked helpers are used only while that boundary is already held, so nested publication no longer
 depends on recursive-lock behavior. `AssetPipeline.cpp` remains the small stable API facade.
+Worker source-index creation, publication, reload and targeted-import entry points live in
+`AssetDatabaseWorkerAccess.cpp`; this separation does not change their locking or recovery contracts.
 Scene picking consumes catalog metadata through `AssetSystem` and does not own an importer or source-model cache.
 `SceneCameraController` owns navigation persistence and entity locking. `ViewportAssetDropRouter` dispatches scene,
 input, prefab, mesh, material, and VFX Effect drops through narrow commands, leaving the workspace responsible for
@@ -1590,7 +1716,7 @@ UI setters synchronize only their target element, avoiding a document-wide trave
 
 Player build scene policy is a separate schema-1 value document under `ProjectSettings/BuildScenes.keiresettings`.
 Rows retain stable Scene asset IDs, enablement, and user-authored order; the first enabled row is startup. AssetTool
-validates every enabled ID after import, roots strict cooking at all of them, and writes the same order into schema-4
+validates every enabled ID after import, roots strict cooking at all of them, and writes the same order into schema-6
 `runtime-manifest.json`. Runtime validates uniqueness, bounds, and agreement between the startup field and first build
 scene before mounting content. Projects without the new file derive a non-mutating default from the descriptor startup
 scene for compatibility.
@@ -1703,6 +1829,10 @@ players. Generated input wrappers use ordinary folder-independent managed-script
 `Assets/Scripts/Generated` belong to the predefined runtime assembly.
 
 ## Event And Time Runtime
+
+Frame advancement is transactional: invalid input, exhausted counters, nonfinite accumulated clocks, or a fixed-step
+count outside the supported integer range throw without publishing partial time state. This is a bounded application
+simulation clock, not the large-world environment calendar or a shader-time epoch contract.
 
 `EventBus` uses exact C++ payload types without a base-event hierarchy. Typed and generic listeners share one priority/registration order; inactive tombstones allow safe unsubscribe and nested dispatch without allocating on the immediate path. Owner-thread dispatch and subscription keep callback mutation deterministic. A bounded mutex-protected queue accepts owned events from any thread, rejects overflow without blocking, and drains a fixed snapshot so producers cannot starve a frame. Closing a bus makes retained references and subscription tokens safely inert.
 
@@ -2071,9 +2201,25 @@ generation-safe commands applied by the scene presentation runtime.
 
 ## Shared Asset Documents
 
+`UiFrame::BeginTabItem(label, open, select)` supports one-frame programmatic tab selection without exposing backend
+flags. The original two-argument overload remains available and retains user-controlled selection. VFX graph payload
+navigation consumes one selection request to reveal Runtime Modules; it does not force that tab on subsequent frames.
+
 `AssetDocumentHost<T>` owns typed draft/baseline state, bounded undo/redo, validation, preview, atomic persistence,
 discard, and revision-aware reload conflict handling. The host never owns runtime objects: system-specific documents
 translate validated definitions into development-asset previews and cancel transient preview state when they close.
+`PreviewTransient` validates and auditions a definition without replacing draft/baseline, revision, or undo state.
+`RestorePreview` republishes the current draft. The common preview failure path attempts to restore the draft and
+preserves the original exception and diagnostic when restoration also fails. Audio snapshot audition uses this path;
+it is distinct from authoring an edit and from time-based runtime snapshot transitions.
+The workspace's owner-thread `AudioMixerPreviewSession` preflights immutable mixer/resource values before publishing.
+It retains separate saved-baseline and last-good preview values, including decoded impulse responses. Publication
+callbacks can fail after committing, so failure attempts to restore both shared asset and device consumers while
+preserving the original exception. Reentrant preview mutations from publication callbacks are rejected. Stop prefers
+fresh valid source, falls back to retained saved state, and releases ownership only after successful restoration;
+noexcept workspace shutdown records a failed restore and leaves the session available for retry while services live.
+Persistence prepares recovery state before the atomic write and updates the retained baseline without throwing after
+commit. This editor transaction preserves the existing transactional `AudioSystem::SubmitMixer` device implementation.
 Stable local IDs, rather than display names, identify authored graph nodes and connections. `Curve1D`,
 `ColorGradient`, stable-node canvases, and selection-aware scene handles are shared value/editor primitives; ImGui and
 backend implementation types remain inside KeireClient.
@@ -2081,6 +2227,58 @@ backend implementation types remain inside KeireClient.
 Builtin importer and decoder construction is centralized in `BuiltinAssetRegistry`. The editor, isolated worker,
 AssetTool, runtime catalog, and tests request the same registrations, preventing an authored extension from importing
 in one process but failing in another.
+
+Graphics shader imports capture their supported literal-include dependency graph once per import. `ShaderSourceSnapshot`
+retains each successfully read project's file contents and digest; compiler staging consumes the retained bytes rather
+than rereading live files. Comment removal follows line splicing, preserving header-name text. Ordered root lookup,
+project confinement, a 256-file limit, and the context's aggregate byte budget bound capture. Failed probes are retained
+only for that import; budget and allocation failures are not treated as missing headers. Atomic staging completes
+before native compilation starts. This is neither a filesystem-wide transaction nor a full macro/conditional
+preprocessor or persistent compile cache. Shader and generated-graph importer
+version changes invalidate prior derived data without changing cooked shader schemas or native public ABI.
+
+`ShaderCompileIdentity` supplies a private local-import key that wraps canonical compile-unit keys with the exact
+source virtual path, ordered include roots, and authored manifest digest. It does not add fields to the public
+schema-2 manifest. The canonical validator accepts 129 unique defines so the 128 authored graphics defines and an
+optional pass selector remain representable. Toolchain capture owns the supplied flat bundle's bytes, enforces an
+aggregate budget, and hashes sorted file names/digests plus executable identity. Staging validates the snapshot before
+writing confined entries through `AnchoredFileSystem` with owner-only staging permissions. Runtime-library changes
+therefore change toolchain identity independently of the compiler executable. The caller remains responsible for
+supplying the complete runtime bundle.
+
+`ShaderImportCache` connects these identities to complete validated graphics imports. It captures the flat bundled
+compiler and local runtime libraries, stages those retained bytes on misses, and bypasses native stage/reflection
+execution on validated hits. Source/include arguments are scratch-relative. The envelope retains the full work key
+and payload checksum; decoded hits must satisfy dependency, target/pass inventory, and per-output bounds. A project-root
+`AnchoredFileSystem` rejects links for cache reads and atomic writes. Sixty-four hash slots bound committed entries to
+512 MiB (8 MiB per slot including headers); collisions safely miss/replace rather than sharing artifacts. Temporary
+atomic writes are additional transient space. Storage failures preserve compilation, large outputs skip storage, and
+volatile time macros or loader overrides skip reuse. Owned optional per-importer counters observe successful native
+process starts and cache hits/misses without process-global instrumentation. Public importer specification/layout and
+compile-manifest ABI stay unchanged; importer version 11 and an internal cache-contract version invalidate old work.
+
+`Scripts/Dependencies/ShaderCompilerOverlay.cmake` generates adapted CLI/library copies inside the host-tool build
+tree. It checks pinned source anchors before replacing only those target source paths, carries ordered roots through
+private SDL properties without changing the upstream HLSL-info layout, and raises the native define bound to 129.
+The source directory is an implicit first root; 16 additional authored roots retain their order. Windows and Unix
+bootstrap fingerprints include the overlay digest, while dependency-object invalidation retains a separate base key.
+
+The internal `Detail::CreateCancellableShaderAssetImporter` factory retains the original public factory and
+specification layout. Live Shader Graph compilation copies its job context's stop token into this importer. Each
+native stage and reflection job owns a `ChildProcess`, checks stop before launch and between bounded polls, and
+terminates that process on cancellation or timeout. Future joins retain staged source storage until jobs finish;
+the generation guard still rejects obsolete results. Process output is retained up to 4 MiB, with bounded drain work
+per poll so a continuously writing child cannot prevent cancellation checks. This does not cancel arbitrary file
+readers, add a synchronous Save cancellation UI, or claim descendant-process-tree management.
+
+### Asset Change Monitor Adoption
+
+Asset change-monitor adoption merges imported dependency/derived fields into matching discovery records before
+replacing the record store. Source-only edits retain the last-good import graph while reimport is pending. All scans
+require an unchanged metadata digest and the same importer name/version. Cheap scans hash the metadata bytes already
+read for contract decoding while deferring source hashing; identical atomic metadata rewrites do not discard imported
+fields. A metadata content change invalidates that carry-forward. This keeps Inspector data and
+targeted dependency invalidation stable without adding file I/O to record queries or changing monitor ownership.
 
 ## Physics Runtime And Authoring
 
@@ -2245,9 +2443,11 @@ registration. Device playback builds a private miniaudio node graph per immutabl
 effect racks, pre/post sends, faders, mute, solo, and sidechain ducking, then reattaches live voices transactionally.
 Reverb Zones scale return sends when a conventional effect-return bus exists and scale wet parameters only for
 direct-insert reverbs, preventing a return from being attenuated twice. The editor's typed `AudioMixerDocument` publishes
-transient live routing/fader previews. Its Mix Console exposes per-bus peak meters, dB faders, mute, solo, output
-routes, ordered effect racks, sends, snapshots, and sidechain ducking without exposing stable IDs as the normal
-authoring path. Effect names commit at the end of a text edit so the surrounding tree remains stable. Mixer, graph,
+transient live routing/fader previews. Its Mix Console exposes per-bus peak meters, dB faders, mute, and solo; separate
+Routing, Channel Inspector, Snapshots, and Ducking tabs own their respective authoring controls. Snapshot audition
+blends from the current draft without changing source or history. Editable row traversals retain value snapshots
+instead of references into document storage that an edit can replace. Effect names commit at the end of a text edit
+so the surrounding tree remains stable. Mixer, graph,
 and device execution share one stateful effect processor so Equalizer bands and convolution tails cannot drift between
 the three paths. Equalizer coefficients and dB gains are compiled before processing, with inverted crossovers normalized
 to low-to-high order. Convolution uses a 128-frame bounded direct path for short responses and allocation-free uniform
@@ -2260,7 +2460,7 @@ changes rebuild the graph and intentionally reset its state.
 Project authoring-settings schema 2 owns the desktop mix sample rate, callback period, mono/stereo/5.1/7.1 output
 layout, audible and virtual voice budgets, and an optional editor playback-device identity. The editor falls back to
 the system default when that device is unavailable and reports the fallback in the Profiler. Hardware identity is not
-copied into cooked content. Cooking instead writes the portable format and capacity fields into the schema-4 runtime
+copied into cooked content. Cooking instead writes the portable format and capacity fields into the schema-6 runtime
 manifest; the player validates and applies those fields before constructing `AudioSystem`. A schema-1 project-settings
 document migrates in memory to the schema-2 defaults and is written canonically on the next save.
 
@@ -2340,6 +2540,48 @@ Game-view and player screen overlays are submitted as camera overlays, not redra
 The renderer scales captured UI geometry and scissor rectangles from the logical viewport to the render surface.
 This keeps shader execution and camera after-UI effects in the same pipeline at every render scale.
 
+### Process execution and external-editor handoff
+
+`Process.cpp` owns child-process capture, bounded polling, termination, detached launch, and executable identity.
+`ExternalEditor.cpp` owns source/solution targeting and the Windows-only Visual Studio COM handoff. The latter
+still waits for project membership and a resolved `Keire.Managed` reference before opening a C# project item;
+its extraction does not change the readiness deadline, configured editor selection, or source navigation contract.
+Both implementations remain behind `KeireInternal/Process.h`; no public SDK process or editor API is introduced.
+
+Generated solutions publish their actual minimum IDE version: 17.8 for .NET 8 compatibility projects, or 18 for
+.NET 10 assembly references. `ManagedIdeCompatibility.cpp` generates the VS 2022 companion below
+`Library/Ide/VisualStudio2022`, with a local SDK 8 policy, isolated intermediates, source links and project references,
+and copied same-source Core/Editor compatibility APIs. Runtime projects and their SDK 10 policy remain untouched.
+A readiness marker is cleared before publication and set only after all companion inputs and documents are written;
+missing references or failed publication cannot select a partially regenerated workspace. Generated design-time
+projects disable implicit None items so another assembly's scripts cannot appear as non-Compile project items.
+
+Editor profiles retain an automatic newest-installed option and stable per-executable Visual Studio choices. A selected
+installation is persisted with its executable so removal fails visibly instead of selecting a different version.
+Profile identifiers use bounded path digests rather than embedding paths into the settings identifier field.
+Custom-path controls capture input deactivation before subsequent widgets replace the item state, validate before
+publication, and provide an explicit apply action.
+The handoff enumerates a bounded reference collection by simple name or resolved engine-assembly path; it does not
+confuse the automation API's full reference identity with a simple assembly name. The matched reference must resolve
+before the project-owned source is opened.
+
+The managed build helpers produce .NET 10 runtime APIs, .NET 8 design-time APIs, and a netstandard2.0 generator using
+the Roslyn minimum pinned in `Config/Dependencies.lock`. Host staging includes compatibility APIs only with editor
+tooling, never in the player runtime. Up-to-date checks cover all five API/generator outputs plus compatibility project
+and analyzer release-tracking inputs. The generator uses the same implementation in old/new IDEs and runtime builds.
+
+External-editor routing selects the companion for VS 2022 and the primary solution for newer versions, verifies the
+executable's version resource, and matches both executable and solution before reusing DTE. Windows reads version
+resources through the system-directory version library, not an executable search-path load. Missing, malformed,
+ambiguous, or truncated solution headers retain the conservative VS 18 default; registry/association fallbacks cannot
+bypass that check. Other configured external editors retain their own source-opening path. No process-global handoff
+state or public SDK layout is added.
+
+Child-process capture retains at most 4 MiB between output retrievals, but keeps draining excess output so a verbose
+compiler cannot block on a full pipe. Each running-process poll drains a bounded chunk before checking completion,
+allowing cancellation and timeout callers to regain control. Normal completion drains a bounded final chunk before
+closing the owned handles. Standard output and standard error share the captured stream.
+
 ### Incremental managed compiler workspace
 
 ScriptSystem owns mutable compiler inputs and outputs under Library/ScriptAssemblies/Intermediate. API references
@@ -2393,3 +2635,42 @@ the renderer thread, waits for backend GPU work, and publishes the new mode only
 last successfully selected mode. A request during immediate-mode UI authoring is rejected to avoid waiting on renderer
 packets that need the owner-held UI context lock; editor menus defer changes to the next update. A same-mode request is
 a successful no-op. The editor currently disables detached ImGui viewports, so its single presentation window is covered.
+
+### Native Editor iteration versus release packaging
+
+Premake owns a separate `DevDist` configuration: release dependency ABI, `NDEBUG`, distribution feature selection,
+speed optimization, symbols, and no link-time optimization. Configuration-qualified object/binary paths isolate it
+from `Dist`; the shipping profile retains full optimization and LTO. Windows `stage-editor` defaults to this profile
+and builds the existing EditorDev aggregate (Client, AssetTool, AssetWorker, Runtime), not the SDK/package graph.
+Content-aware copies update a repository-local layout and retain the pinned SDK in its cache. The stage records
+explicit development provenance and does not create `editor-package.json` or regenerate shipping Build Support.
+An incomplete-update marker covers file copying and is removed only after metadata and the launcher are written.
+The staged launch command validates ready provenance and repository identity; the generated launcher also rejects
+the incomplete marker. An interrupted copy therefore requires a staging retry, not a launch of mixed binaries.
+The Dist stage and full package commands remain distinct acceptance and release gates. Development timings cannot
+substitute for shipping performance, player-support, sanitizer, or cross-platform package evidence.
+
+### HDR post-processing boundary
+
+Both scene render paths expose an explicit HDR preparation pass after transparency (and after Irradyn compositing
+in Deferred Hybrid). This pass records world-space runtime UI followed by the camera's HDR fullscreen effect.
+An ordering-only completion token makes tone mapping depend on this finished HDR image. Bloom extraction
+consumes that dependency rather than sampling the scene before those contributors are recorded. Tone mapping
+still precedes the camera's LDR effect and camera-space UI. This boundary does not itself enable bloom.
+
+The experimental star field shares the sky draw and adds no render target. Authored settings travel through rendering
+schema 8 and runtime manifest 9; packet capture evaluates a bounded twinkle phase from the environment clock.
+Camera history includes authored star settings. Sky uniforms preserve seed bits as integers. The shader evaluates
+seeded candidates on a thin spherical shell, applies solar-elevation fading and atmospheric view transmittance,
+then composites cloud sheets over the result before exposure. No mutable render-thread star clock is introduced.
+
+The opt-in bloom graph variant declares three half-resolution RGBA16F targets for extraction and separable blur.
+Extraction waits on HDR preparation; tone mapping reads the final filtered target. Adjacent blur inputs and outputs
+must never share a physical allocation while their lifetimes overlap. The renderer selects this variant when bloom
+is enabled with positive intensity; disabled or zero-intensity settings select the non-bloom graph. Surface resource
+matching includes the selected bloom variant, so toggling it recreates the transient workset through the existing
+retirement path. Tone mapping adds filtered bloom before ACES, including its anti-aliasing neighborhood samples.
+
+The initial integrated DevDist build, settings/capture tests and enabled-bloom cook/player parity checks passed.
+Those checks do not establish final visual quality, every GPU backend, resize recovery or long-session stability;
+these remain acceptance gates rather than implied production guarantees.

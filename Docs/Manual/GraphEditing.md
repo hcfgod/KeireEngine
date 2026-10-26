@@ -22,6 +22,22 @@ anchors cannot be deleted or duplicated. Batch operations apply only where every
 The **Arrange** menu aligns edges/centers, distributes selected nodes, and straightens cables whose endpoints are both
 inside the selection. Arrange operations are deterministic and create one undo command.
 
+## Save And Manage Views
+
+1. Pan/zoom to an area you return to often, then choose the **Bookmarks** button. The saved-view count appears beside it.
+2. Enter a readable **Name**, such as `Lighting overview`, and choose **Save Current View**. Leaving the name empty
+   creates the next available `Bookmark N`.
+3. Choose a saved entry to return to it. To replace its view, pan/zoom again, reopen **Bookmarks**, and choose
+   **Update Current View** without changing Name. Do not choose the saved entry again first; that restores its old view.
+4. To rename a saved entry, choose it, reopen **Bookmarks**, change Name, and use **Rename Selected**.
+   **Save Current View** with a different unused name creates another view instead. **Remove Selected** removes only
+   the selected saved view, not graph content.
+
+Each graph supports 9 views; VFX systems keep separate sets. Saving views does not dirty the graph or add graph
+undo commands. They persist as local project preferences through Editor restarts, but are removed if you delete the
+project's Library directory. If a saved-state warning appears, session navigation still works; follow the recovery
+instructions in [Graph Authoring](../GraphAuthoring.md#framing-bookmarks-and-diagnostics) before removing any local file.
+
 ## Comments, Annotations, And Collapse
 
 Create a comment around the selection or at an empty canvas position. A comment stores title, description, tint/alpha,

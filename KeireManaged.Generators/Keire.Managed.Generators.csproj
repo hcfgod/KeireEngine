@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
-    <LangVersion>latest</LangVersion>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <LangVersion>12.0</LangVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>disable</ImplicitUsings>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
@@ -9,18 +9,20 @@
     <ContinuousIntegrationBuild>true</ContinuousIntegrationBuild>
     <DebugType>portable</DebugType>
     <IsRoslynComponent>true</IsRoslynComponent>
+    <EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
+    <KeireDependencyLock>$([System.IO.File]::ReadAllText('$(MSBuildThisFileDirectory)../Config/Dependencies.lock'))</KeireDependencyLock>
+    <KeireRoslynCompatibilityVersion>$([System.Text.RegularExpressions.Regex]::Match('$(KeireDependencyLock)', '(?m)^ROSLYN_COMPATIBILITY_VERSION=([^\r\n]+)').Groups[1].Value)</KeireRoslynCompatibilityVersion>
     <AssemblyName>Keire.Managed.Generators</AssemblyName>
     <RootNamespace>Keire.Generators</RootNamespace>
     <DefaultItemExcludes>$(DefaultItemExcludes);obj/**</DefaultItemExcludes>
   </PropertyGroup>
   <ItemGroup>
-    <Reference Include="Microsoft.CodeAnalysis">
-      <HintPath>$(MSBuildSDKsPath)\..\Roslyn\bincore\Microsoft.CodeAnalysis.dll</HintPath>
-      <Private>false</Private>
-    </Reference>
-    <Reference Include="Microsoft.CodeAnalysis.CSharp">
-      <HintPath>$(MSBuildSDKsPath)\..\Roslyn\bincore\Microsoft.CodeAnalysis.CSharp.dll</HintPath>
-      <Private>false</Private>
-    </Reference>
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="[$(KeireRoslynCompatibilityVersion)]" PrivateAssets="all" />
+    <AdditionalFiles Include="AnalyzerReleases.Shipped.md" />
+    <AdditionalFiles Include="AnalyzerReleases.Unshipped.md" />
   </ItemGroup>
+  <Target Name="ValidateKeireRoslynCompatibilityVersion" BeforeTargets="CollectPackageReferences">
+    <Error Condition="'$(KeireRoslynCompatibilityVersion)' == ''"
+           Text="Config/Dependencies.lock must pin ROSLYN_COMPATIBILITY_VERSION." />
+  </Target>
 </Project>

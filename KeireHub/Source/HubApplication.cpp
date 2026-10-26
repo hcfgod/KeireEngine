@@ -38,6 +38,7 @@
 #include "KeireHub/HubUpdateIntegration.h"
 #include "KeireHub/HubWindowVisibility.h"
 #include "KeireHub/HubWorkflowError.h"
+#include "KeireHubInternal/HubErrorNotice.h"
 #include "KeireHubInternal/HubNoticeUi.h"
 #include "KeireHubRuntime/EditorProcessTracker.h"
 #include "KeireHubRuntime/HubUpdateManager.h"
@@ -47,7 +48,6 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
-#include <cstdio>
 #include <filesystem>
 #include <memory>
 #include <optional>
@@ -1134,45 +1134,13 @@ namespace
             m_PackageTaskTemporaryRoot = m_ProductSnapshot.Settings.TemporaryRoot;
             m_PackageTaskConcurrentDownloads = m_ProductSnapshot.Settings.ConcurrentDownloads;
         }
+
         void SetError(const std::string& message) noexcept
         {
-            try
-            {
-                m_Notice = message;
-                m_NoticeError = true;
-            }
-            catch (...)
-            {
-            }
-            if (m_Controller && message != m_LastPersistedError)
-            {
-                try
-                {
-                    const auto status =
-                        m_Controller->Notifications().Add({.Id = "hub-error-" + Keire::AssetId::Generate().ToString(),
-                                                           .Severity = KeireHub::NotificationSeverity::Error,
-                                                           .Title = "Hub action needs attention",
-                                                           .Message = message,
-                                                           .CreatedUnixSeconds = KeireHub::HubNowUnixSeconds()});
-                    if (status)
-                        m_LastPersistedError = message;
-                    else
-                        KEIRE_CLIENT_WARN("[Project Hub] Error notification could not be persisted: {}",
-                                          status.Error().Message);
-                }
-                catch (...)
-                {
-                }
-            }
-            try
-            {
-                KEIRE_CLIENT_ERROR("[Project Hub] {}", message);
-            }
-            catch (...)
-            {
-                std::fprintf(stderr, "[Project Hub] %s\n", message.c_str());
-            }
+            KeireHub::Detail::PublishHubErrorNotice(m_Controller.get(), message, m_Notice, m_NoticeError,
+                                                    m_LastPersistedError);
         }
+
         void HideHub(const bool hiddenForEditorLaunch = false)
         {
             const auto window = Owner().MainWindow();

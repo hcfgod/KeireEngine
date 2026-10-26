@@ -99,6 +99,11 @@ each other's prepared cook inputs. Optional stop tokens and operation progress c
 publication and report scanning, importing, cooking, and publication without exposing editor implementation types.
 Snapshot queries use only the record-store lock and never wait for the operation boundary, so Project Browser drawing,
 thumbnail lookup, and editor selection remain responsive while a scene save triggers background catalog work.
+Background scans retain the last imported source dependencies, asset dependencies, and derived display/bounds metadata
+while the importer and metadata contract are unchanged. Source-only edits still queue reimport without erasing those
+last-good fields. All scans compare metadata content hashes using the bytes already read for contract decoding;
+cheap scans defer source hashing. Identical atomic metadata rewrites retain imported data, while a changed
+metadata/importer contract does not inherit the previous imported fields.
 
 `ImportAll()` hashes sources with SHA-256 and stores immutable raw objects below `Library/AssetCache/Objects`. Existing
 objects are cache hits. Contextual importers also persist their validated complete output below
@@ -116,7 +121,7 @@ and duplicate-owner coalescing remain unchanged. Metadata refresh builds its sub
 Full imports move the owned source snapshot into their work list instead of making a second complete copy.
 Unchanged content-addressed packs are reused in place while the complete merged
 catalog is validated and published atomically. `PollChangedAssets()` uses file signatures and a
-250 ms default stability window; hashing and import happen only after a stable change. The editor remounts the published
+250 ms default stability window; source hashing and import happen only after a stable change. The editor remounts the published
 catalog and requests last-good reloads
 for changed IDs. Interactive material authoring first publishes an immutable development asset revision directly to
 loaded handles, then autosaves the source after 500 ms without another edit. The source-change monitor remains the sole
@@ -197,6 +202,11 @@ a sibling temporary directory, immutable packs are installed, and the catalog is
 Transactional cook and runtime-staging names use compact 80-bit tokens so nested content-addressed filenames remain
 below the legacy Windows path limit in normal package layouts. The native Windows rename boundary also accepts
 extended-length paths for user-selected roots that exceed that limit.
+MSVC-built Windows executable hosts also embed `Config/WindowsApplication.manifest` to opt into long-path
+handling during ordinary file inspection, not only renames. The focused publication regression covers both
+repository-root and deeply nested working directories. Verify built binaries with
+`Scripts/Tests/test-windows-application-manifest.ps1 -Executable <paths>`; this check does not establish support
+for every Windows toolchain, filesystem or external tool used by a project.
 
 `AssetCooker::Validate()` independently checks schema, identity uniqueness, dependency closure/cycles, pack headers,
 ranges, decompression sizes, and SHA-256. Distribution tooling should validate immediately after cooking and ship only

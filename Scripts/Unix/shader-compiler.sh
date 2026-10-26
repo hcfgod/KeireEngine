@@ -48,7 +48,9 @@ stamp="$cache_root/keire-shader-compiler.stamp"
 configure_stamp="$cache_root/keire-shader-compiler.configure"
 lock="$ROOT/Config/Dependencies.lock"
 macos_deployment_target="$(config_value "$lock" MACOS_DEPLOYMENT_TARGET)"
-key="$(config_value "$lock" SDL_SHADERCROSS_COMMIT)|$(config_value "$lock" SDL_SHADERCROSS_DXC_COMMIT)|$(config_value "$lock" SDL_SHADERCROSS_SPIRV_CROSS_COMMIT)|$(config_value "$lock" SDL_SHADERCROSS_SPIRV_HEADERS_COMMIT)|$(config_value "$lock" SDL_SHADERCROSS_SPIRV_TOOLS_COMMIT)|$(config_value "$lock" SDL_COMMIT)|flat-runtime-v4|$macos_deployment_target|$architecture|$toolset|$host_bison_version|$($CXX --version | head -n 1)"
+dependency_key="$(config_value "$lock" SDL_SHADERCROSS_COMMIT)|$(config_value "$lock" SDL_SHADERCROSS_DXC_COMMIT)|$(config_value "$lock" SDL_SHADERCROSS_SPIRV_CROSS_COMMIT)|$(config_value "$lock" SDL_SHADERCROSS_SPIRV_HEADERS_COMMIT)|$(config_value "$lock" SDL_SHADERCROSS_SPIRV_TOOLS_COMMIT)|$(config_value "$lock" SDL_COMMIT)|flat-runtime-v4|$macos_deployment_target|$architecture|$toolset|$host_bison_version|$($CXX --version | head -n 1)"
+overlay="$ROOT/Scripts/Dependencies/ShaderCompilerOverlay.cmake"
+key="$dependency_key|host-overlay:$(cmake -E sha256sum "$overlay" | awk '{print $1}')"
 if [[ "$force" != 1 && -x "$published_compiler" && -f "$stamp" && "$(tr -d '\r\n' < "$stamp")" == "$key" ]] &&
    "$published_compiler" --help >/dev/null 2>&1; then
   printf '==> KeireShaderCompiler cache is current\n'
@@ -58,7 +60,7 @@ fi
 allowed="$ROOT/Build/Tools/ShaderCompiler/Cache/"
 [[ "$cache_root/" == "$allowed"* ]] || { printf 'Refusing to replace shader compiler cache outside %s.\n' "$allowed" >&2; exit 1; }
 configured_key=""; [[ -f "$configure_stamp" ]] && configured_key="$(tr -d '\r\n' < "$configure_stamp")"
-if [[ "$force" == 1 || ! -f "$cache_root/CMakeCache.txt" || ( -n "$configured_key" && "$configured_key" != "$key" ) ]]; then
+if [[ "$force" == 1 || ! -f "$cache_root/CMakeCache.txt" || ( -n "$configured_key" && "$configured_key" != "$dependency_key" ) ]]; then
   rm -rf "$cache_root"
 fi
 mkdir -p "$cache_root"
@@ -67,7 +69,8 @@ options=(-DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$install_root" -DCMA
   -DSDLSHADERCROSS_VENDORED=ON -DSDLSHADERCROSS_DXC=ON -DSDLSHADERCROSS_SHARED=OFF
   -DSDLSHADERCROSS_STATIC=ON -DSDLSHADERCROSS_SPIRVCROSS_SHARED=OFF -DSDLSHADERCROSS_CLI=ON
   -DSDLSHADERCROSS_CLI_STATIC=ON -DSDLSHADERCROSS_TESTS=OFF -DSDLSHADERCROSS_INSTALL=ON
-  -DSDLSHADERCROSS_INSTALL_RUNTIME=ON -DSPIRV_WERROR=OFF)
+  -DSDLSHADERCROSS_INSTALL_RUNTIME=ON -DSPIRV_WERROR=OFF
+  "-DCMAKE_PROJECT_INCLUDE=$overlay")
 if [[ "$platform" == Mac ]]; then
   cmake_architecture=x86_64; [[ "$architecture" == ARM64 ]] && cmake_architecture=arm64
   options+=("-DCMAKE_OSX_ARCHITECTURES=$cmake_architecture"
@@ -77,7 +80,7 @@ else
 fi
 printf '==> Configuring the pinned host shader compiler\n'
 cmake -S "$ROOT/Vendor/SDL_shadercross" -B "$cache_root" -G Ninja "${options[@]}"
-printf '%s\n' "$key" > "$configure_stamp"
+printf '%s\n' "$dependency_key" > "$configure_stamp"
 cmake --build "$cache_root" --target install --parallel "$(build_parallel_jobs)"
 built_compiler="$(find "$install_root" -type f -name shadercross -print -quit)"
 [[ -n "$built_compiler" ]] || { printf 'SDL_shadercross did not install its command-line compiler.\n' >&2; exit 1; }

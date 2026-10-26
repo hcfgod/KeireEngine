@@ -21,6 +21,7 @@ namespace KeireEditor
         [[nodiscard]] ArrangeRequest DrawRequest(Keire::UiFrame& ui, const std::size_t selectionCount)
         {
             ArrangeRequest result;
+            ui.SetNextItemWidth(std::clamp(ui.ContentAvailable().Width - 65.0F, 40.0F, 180.0F));
             if (auto menu = ui.BeginCombo("Arrange", "Selection..."); menu)
             {
                 if (auto disabled = ui.BeginDisabled(selectionCount < 2); disabled)

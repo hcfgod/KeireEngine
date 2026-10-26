@@ -410,6 +410,18 @@ namespace
                 {
                     std::string name = "Long scene Caf\xc3\xa9.keirescene";
                     const auto bounds = ui.ContentRect();
+                    {
+                        KeireEditor::AssetPicker picker;
+                        Keire::AssetId selection;
+                        KeireEditor::AssetPickerOptions options;
+                        options.Label = "Default Input Actions";
+                        const auto before = ui.CursorPosition();
+                        CHECK_FALSE(picker.Draw(ui, {}, selection, options));
+                        const auto revealBounds = ui.LastItemRect();
+                        CHECK(revealBounds.Minimum.X >= bounds.Minimum.X);
+                        CHECK(revealBounds.Maximum.X <= bounds.Maximum.X);
+                        CHECK(ui.CursorPosition().Y - before.Y > revealBounds.Maximum.Y - revealBounds.Minimum.Y);
+                    }
                     const float addComponentWidth = ui.ContentAvailable().Width;
                     ui.SetNextItemWidth(std::max(ui.ContentAvailable().Width, 1.0F));
                     {

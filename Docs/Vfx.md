@@ -1030,9 +1030,16 @@ linearly interpolates adjacent samples and applies the same zero clamp. This bou
 constant, linear, and cubic curves without changing particle state layout. The maximum temporal quantization interval
 is `1 / 63` of normalized lifetime.
 
-The current Inspector lists each existing curve key as editable **Time** and **Value** fields. Key times remain ordered
-and are clamped between their neighbors. The UI does not yet add/remove keys or expose interpolation/tangent editing;
-multi-key curves created through the native asset API or existing source remain preserved and editable by value.
+The Inspector exposes **Time**, **Value**, and per-key **Interpolation**: Constant, Linear, or Cubic. Cubic segments
+also expose **In Tangent** and **Out Tangent** on their endpoint keys. Interpolation on a key controls the segment
+leading to the next key; tangent values are slopes in value units per unit of time.
+
+Use **Add key** to populate an empty curve, add a missing range endpoint, or split the widest available interval.
+The new key samples the current curve and starts with Linear interpolation and zero tangents; inserting into a cubic
+segment can therefore change its shape until you adjust its tangents and interpolation. **Remove key** removes that
+row; removing every key produces the engine's empty-curve value of zero. Times stay strictly ordered, including for
+neighboring floating-point times. Add key is disabled at the 4,096-key limit or when no distinct time fits. These edits
+use the containing VFX document's normal undo/redo and save workflow; other shared curve fields use the same controls.
 
 ### Color Over Lifetime
 
@@ -1041,9 +1048,12 @@ gradient. GPU snapshots sample the authoritative gradient at 64 uniformly spaced
 adjacent colors in compute. Multi-key and constant-interpolation gradients therefore remain bounded and deterministic;
 sharp transitions are quantized to at most one `1 / 63` lifetime interval.
 
-The current Inspector lists each existing gradient key as **Time** plus **Color**. Times remain ordered from zero to one.
-The UI does not yet add/remove gradient keys or expose gradient interpolation selection. Use alpha in existing keys to
-fade particles in or out; multi-key gradients authored through the native asset API remain preserved.
+The Inspector lists each gradient key as **Time** plus **Color**, with **Remove key** for each row. **Add key** samples
+the current gradient at a missing endpoint or in the widest available interval from zero to one. Choose Constant or
+Linear **Interpolation** for the whole gradient. Use alpha to fade particles in or out. Removing every key produces
+the engine's empty-gradient color: opaque white. Add key is disabled at the 4,096-key limit or when no distinct time
+fits. Existing imported key data and the chosen interpolation remain intact when adding keys. VFX document undo/redo
+and Save apply to these controls as they do to the other module properties.
 
 ### Collision
 

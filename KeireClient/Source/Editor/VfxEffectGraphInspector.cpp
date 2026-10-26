@@ -696,7 +696,10 @@ namespace KeireEditor
                         ui.TextColored(theme.Error, "The referenced Runtime Module payload is missing.");
                     else if (ui.Selectable("Edit Payload: " + std::string(ModuleName(module->Payload)),
                                            module->Id == m_SelectedModule))
+                    {
                         m_SelectedModule = module->Id;
+                        m_RevealSelectedModule = true;
+                    }
                 }
 
                 ui.Separator();
@@ -960,7 +963,10 @@ namespace KeireEditor
             if (module == definition.Modules.end())
                 ui.TextColored(theme.Error, "The referenced Runtime Module is missing.");
             else if (ui.Selectable(std::string(ModuleName(module->Payload)), module->Id == m_SelectedModule))
+            {
                 m_SelectedModule = module->Id;
+                m_RevealSelectedModule = true;
+            }
         }
         else if (selected->Kind == Keire::VfxGraphNodeKind::Parameter)
         {

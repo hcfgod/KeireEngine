@@ -440,8 +440,8 @@ namespace Keire
             {
                 const auto bytes = files.Read(record.RelativePath, maximumSourceBytes);
                 record.SourceDigest = Detail::DigestToString(Detail::Sha256(bytes));
-                record.MetadataDigest = Detail::DigestToString(Detail::Sha256(metadataBytes));
             }
+            record.MetadataDigest = Detail::DigestToString(Detail::Sha256(metadataBytes));
             return record;
         }
 

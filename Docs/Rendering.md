@@ -1,5 +1,106 @@
 # Rendering
 
+## Experimental Planetary Atmosphere
+
+In the development editor, open **Project Settings > Environment > Planetary Atmosphere (Experimental)** and
+enable **Atmosphere Sky**. The selected directional light—including the daily-light track—sets the sun direction.
+The existing sky visibility switch still applies. Disabling atmosphere restores the texture skybox path.
+Earth-like defaults place the surface at local Y = 0; changing radius does not automatically move the planet center.
+
+Controls expose planet geometry, exponential molecular/aerosol density, RGB scattering and absorption coefficients,
+the absorption layer, solar irradiance, angular sun diameter in degrees and view/light sample budgets. The
+Earth-like sun-size reset restores approximately 0.536 degrees diameter; storage remains angular radius in radians.
+Sun size changes the disk, not lens glare. The development bloom integration is described below. Distances are metres;
+coefficients are inverse metres. Increasing both sample counts multiplies GPU work. Settings use the existing
+Undo/Save transaction and schema 8; versions 1–5 migrate with atmosphere disabled. Use matching development binaries
+after saving newer settings. Focused mathematical/packing tests, shader compilation, earlier DevDist staging and cooked-player
+field parity have passed. Windows Edit preview has shown noon/dusk sky and scene-lighting changes; full sun,
+cross-view, backend and rendered standalone acceptance remain pending.
+
+Within each view segment, constant extinction is integrated analytically with a stable optically thin limit.
+Density and incoming sun lighting still use midpoint samples: this reduces attenuation error at low sample budgets,
+but does not make a coarse march equivalent to a high-quality integration through varying density or shadows.
+
+This is a single-scattering sky, not a completed weather renderer. Ambient, baked illumination and texture-based
+reflections remain independent. It does not yet provide aerial perspective on geometry, multiple scattering,
+LUT acceleration, volumetric clouds or planetary-frame gameplay precision. Solar radiance is capped at the finite
+RGBA16F target range before storage to prevent infinities entering temporal processing.
+
+### Experimental Stars
+
+In matching development builds, open **Window > Environment > Sky > Star Field (Experimental)**, or the star
+section in **Project Settings > Environment**. Enable stars, then preview midnight with daily lighting enabled.
+The selected sun direction determines visibility; changing the clock alone does not rotate an authored scene sun.
+The global sky visibility switch also applies. Stars default disabled, including for migrated projects.
+
+If the default field is too faint, choose **Apply Bright Night Appearance** as an artistic starting point.
+It sets HDR intensity to 21, restores neutral tint, density and apparent size, and disables twinkle without
+changing the seed, rotation or night-visibility thresholds. Preview at midnight and tune intensity for your
+exposure and viewport resolution. This is not a physically calibrated night-sky preset. Applying it uses the
+normal settings save/Undo workflow; existing projects are never silently brightened.
+
+- Seed changes placement and color variation; density changes the fraction of retained candidates.
+- Intensity is linear HDR radiance before scene exposure. Tint uses linear RGB. Color variation blends white
+  toward a seeded warm/cool distribution; this is an artistic field, not a catalog of astronomical objects.
+- Angular diameter controls apparent size, not world-space size. Rotation is about scene Y and is independent of
+  the environment texture rotation. Planetary reference-frame rotation remains future work.
+- Twinkle is off by default. Amplitude zero removes modulation; frequency is cycles per simulation second.
+  Preview pause freezes the phase. A missing environment clock produces a stationary pattern.
+- Fade thresholds are solar elevation angles: full visibility must be below the fade-start elevation. With the
+  atmosphere enabled, local up is radial from the planet center; otherwise scene Y defines up.
+
+Stars are composed behind the layered clouds and attenuated by the single-scattering atmosphere's view-path
+extinction; the opaque planet blocks them. Small stars use approximate energy-preserving pixel filtering, and
+very coarse pixel footprints fade out rather than alias. The bounded procedural search visits 27 candidates
+normally and up to 125 for large footprints/discs. GPU budgets, motion stability, night appearance, Play/player
+parity and backend visual acceptance are not yet qualified. This does not add moons, sky-color tracks or volumetric fog.
+
+### Layered Clouds
+
+**Environment > Layered Clouds** exposes two independent artistic sheets with enable, altitude, pattern size,
+coverage, opacity, softness, horizon fade, wind, appearance mode, pattern seed and linear HDR tint. These use a local world-zero anchor and an
+east/up/north identity basis, not planetary curvature. Enabled sheets are composited by hit distance over the sky;
+when atmosphere is enabled its planet occludes sheets behind the ground. Beyond the supported local coordinate
+domain (one billion metres per axis), cloud contribution is suppressed while the atmosphere/sky path remains.
+
+The shared environment clock supplies cloud advection in Edit preview, Play and player submissions. Day and
+fraction are evaluated separately; pause, reverse playback and scrubbing do not depend on float material time.
+The day-zero epoch and constant authored wind define phase. Changing wind, pattern size or day length changes that
+mapping and invalidates camera history. This retains local-time detail at distant dates but does not promise exact
+astronomical phase or bit-identical math across platforms. Missing clock snapshots use zero advection.
+
+Cloud record version 2 adds an explicit appearance mode and unsigned 32-bit seed. Version-1 cloud records retain
+**Legacy unlit**, including their fixed color and original repeating pattern. Select **Natural lit** to opt an older
+layer into the new pattern and environment-lighting response; this is an undoable settings change. New layers and
+Reset Layer use Natural lit with seed 1. Seed changes the pattern, not its wind speed. The new mode's rendered
+quality acceptance is still pending; the earlier legacy sheet appearance failed the visual-quality review.
+
+Rendering schema 6 and later persists authored sheets; current runtime manifest 9 carries atmosphere, clouds, bloom
+and the in-development star-field record. The experimental star shader and controls are implemented;
+build integration and visual acceptance are still being validated.
+Manifests before schema 7 load with atmosphere/clouds disabled; schema 7 retains its skies with bloom disabled.
+Older runtimes reject newer manifest versions. Cook/player checks do not establish
+rendered quality or performance. Sheets do not provide volumetric interiors, self/ground shadows or automatic weather. See the
+[implementation checkpoint](CloudWeatherImplementation.md) for these limits and remaining work.
+
+## Development HDR Bloom
+
+The current source exposes **Project Settings > Environment > HDR Bloom**. It is disabled by default; enabling it
+adds half-resolution HDR extraction and separable Gaussian blur after world-space UI and the HDR camera effect.
+Tone mapping combines the filtered glow before ACES, including FXAA/TAA neighborhood samples. Bloom affects bright
+scene pixels, not only the sun, and does not illuminate geometry or provide lens flare.
+
+- **Glow Intensity** scales the additive result; zero skips bloom work.
+- **HDR Threshold** operates on exposed linear HDR, so changing exposure changes which pixels contribute.
+- **Soft Knee** smooths the extraction threshold; zero uses a hard cutoff.
+- **Radius** is Gaussian sigma in half-resolution pixels, not metres or angular sun diameter.
+- **Reset Bloom** restores values while preserving enabled state. Changes use the shared settings Undo/save flow.
+
+Rendering schema 7 stores the versioned bloom record; older settings migrate with it disabled. Runtime manifest 8
+carries the same values. A matching editor/player rebuild is required. The integrated DevDist build and subsequent
+GPU visual, resize/toggle, anti-aliasing, and device-recovery acceptance are still pending. Unit tests and shader
+compilation do not establish production visual quality or backend performance.
+
 ## Real-time shadows
 
 Opaque scene geometry with `Cast Shadows` enabled is submitted to stabilized directional cascade maps and a bounded
@@ -96,6 +197,96 @@ between texture publication and metadata publication.
 
 ## Static-scene submission contracts
 
+The optional `SceneRenderRequest::EvaluatedEnvironment` carries evaluated directional and optional ambient lighting.
+Its source ID identifies a world/preview lifetime; its nonzero revision changes on discontinuities, not ordinary
+time progression. An omitted snapshot preserves authored light selection. A snapshot without a directional sample
+also preserves authored selection while tracking environment history. Directions must be normalized, RGB finite
+and within [0, 1], and intensity finite and nonnegative. Capture rejects invalid values.
+Optional ambient samples replace only ambient color and intensity in the captured render packet, not the caller's
+project settings. Ambient RGB must be finite in [0, 1] and intensity in [0, 16]. Omission preserves project ambient
+settings. Image-based light, sky, exposure and baked lighting remain separate.
+
+Automatic samples replace the directional slot with no authored entity/cookie. Their shadow configuration explicitly
+supplies quality, resolution hint, strength and bias; it does not inherit these from the replaced authored light.
+Quality and resolution enums are validated, and strength/bias must be finite in [0, 1], including when disabled.
+Source, revision and automatic/authored mode affect temporal continuity and participate in camera-history rollback.
+Runtime-world snapshots feed the shared player and Play Mode Game-view request builder. Scene view and camera preview
+use the same world during Play; Edit Scene/Game/camera preview share workspace-owned preview snapshots. Shadow controls
+are implemented, but desktop/rendered shadow acceptance and baked-lighting policy remain unfinished;
+this is not yet a complete user-facing day/night system.
+
+### Authoring daily-light shadows (development build)
+
+For a ready-to-edit cycle, choose **Apply Daylight Preset** in the Environment tab. It replaces the daily keys with
+eight art-directed keys spanning night, sunrise, noon and sunset, enables daily lighting, and retains your shadow
+settings. It also includes cool, dim nighttime ambient keys and brighter daytime ambient keys. Undo restores the
+previous profile. The preset is not a geographic solar model, and does not change sky, exposure or baked lighting.
+Its intensity values are artistic defaults, not lux.
+
+**Animate Ambient Lighting** enables per-key ambient RGB and intensity controls. Enabling starts every ambient key
+from the current project settings; customize them inside each Key. Disabling removes these optional keys and returns
+to project ambient settings; Undo restores them. All daily keys either carry ambient values or omit them together.
+Profiles using ambient animation write lighting record version 3. Profiles without it retain version 2; versions 1
+and 2 load without ambient animation. Older readers reject version 3, so use matching development player binaries
+and recook content rather than mixing versions. Focused render-packet tests and a Windows Editor preset/save,
+midnight-preview, Play/Stop and Undo/Redo check pass for this addition. A 77-asset QA cook preserved the authored
+version-3 profile and completed a 30-frame headless player run. This is not rendered standalone evidence;
+cross-backend comparisons and long-session qualification remain separate gates.
+
+In Edit Mode, the preview shows a 24-hour clock. **Midnight**, **Dawn**, **Noon** and **Dusk** jump to 00:00, 06:00,
+12:00 and 18:00 on the current preview day. These are fixed authoring landmarks, not calculated sunrise/sunset times.
+Use **Play Time Preview** to animate the cycle; speed and seeking remain transient until **Apply Time to Project**
+saves the time. Profile edits are separate saved Project Settings edits with Undo/Redo.
+
+Before configuring shadows, use **Use Daily Lighting** to select the automatic directional light. An empty profile
+starts with two keys: phase 0 has zero intensity and phase 0.5 has a warm daytime light. Re-enabling an existing profile
+preserves its keys and shadow settings. A profile loaded with one retained authored key gains a matching key half a
+day away rather than losing the custom key; this initially produces constant lighting until you edit the keys.
+
+Expand a **Key** to edit its day fraction, azimuth, elevation, linear RGB channels and intensity. Fractions are in
+`[0, 1)`: 0.25 is a quarter of the cycle, not an automatically computed astronomical sunrise. Keep fractions strictly
+between neighboring keys. Azimuth is in `[0, 360)`, elevation in `[-90, 90]`, linear color channels in `[0, 1]`, and
+intensity is nonnegative. The track interpolates across midnight and uses the shortest azimuth arc; it is art-directed,
+not a latitude/date-based solar ephemeris.
+
+**Add Lighting Key** inserts halfway through the largest cyclic interval and copies the preceding key's values;
+adjust that key afterward to shape the transition. It does not promise to preserve the previous interpolated curve.
+The enabled profile supports 2–128 keys; **Remove Key** is disabled at two. Key edits use the same settings Undo,
+autosave and failed-save retry workflow described below.
+
+1. Open **Edit > Project Settings > Environment** and enable **Use Daily Lighting**.
+2. Expand **Daily Light Shadows**. Choose **Hard** or **Soft**; **Disabled** retains the other shadow values without
+   using them. Existing version-1 profiles load disabled, so migration does not change their appearance.
+3. Adjust **Shadow Resolution Hint**, **Shadow Strength** and **Shadow Bias**. The resolution hint scales the
+   project-wide budget; it is not an independent texture-size override. Cascade count/distance/budget are lower in
+   the same **Environment** tab, under **Directional Shadows**.
+   Bias uses a fine-step numeric drag control; Ctrl-click to enter an exact value in the supported `[0, 1]` range.
+   **Reset Daily Shadows** disables daily shadows and restores their defaults without changing lighting keys or
+   project cascade settings. The reset participates in settings Undo/Redo and autosave.
+4. Scrub the transient preview time to inspect different directions. This does not save a new starting time; use
+   **Apply Time to Project** only when that is intended. Shadow-setting edits themselves use settings autosave and Undo.
+5. After Undo/Redo, check the saved/unsaved indicator and use **Save Settings** for pending changes. Disabling daily
+   lighting restores authored light selection while retaining the daily keys and shadow configuration.
+
+Play starts with a copy of the project's authored environment time and daily-light profile, not the transient
+Edit preview time. Use **Apply Time to Project** before starting Play if that preview time should become the starting
+time. The running world owns its clock and profile independently: settings edits during Play do not hot-reload that
+world's daily lighting. Stop and start Play again to use those edits. Edit preview advancement is suspended during
+Play; it does not accumulate a catch-up interval. This describes the implementation's ownership contract, not completed
+cross-view visual acceptance.
+
+For visual acceptance, use separate caster and receiver geometry with their Cast/Receive Shadows options enabled,
+test a daytime key with positive intensity, and compare Disabled/Hard/Soft. High bias can detach shadows from casters;
+strength zero intentionally removes visible shadowing. Baked indirect light does not track the daily cycle.
+
+Windows DevDist acceptance has verified switching from Disabled to Soft in Edit Scene: visible cast silhouettes
+appeared on the showcase platform, settings autosaved, and the version-2 file retained the original lighting keys.
+Reopening retained Soft shadows; strength 1 to 0 removed silhouettes and restoring 1 restored them, with saved-value
+readback. This is a limited visual check, not full acceptance. Hard/Disabled comparisons, intermediate strength,
+bias/resolution edits, moving
+preview-time shadows, Play/player views and backend parity remain unverified. Model, persistence and capture tests
+do not substitute for those rendered checks.
+
 Project rendering settings schema 5 stores Automatic/Forward+/Deferred-Hybrid path intent, None/FXAA/TAA/MSAA 2x/4x
 anti-aliasing intent, a static render scale, bounded automatic dynamic-resolution settings, and requested GI/Irradyn
 quality. Capability resolution returns requested and effective values plus specific path, anti-aliasing,
@@ -137,7 +328,9 @@ opaque surfaces use the hair participation path, transparent surfaces inject red
 are aggregated by renderer class so ribbons behave like low-density hair while volumetric particles inject
 low-frequency volume energy. The cache is hard-capped at 2,048 entries with deterministic least-recently-updated
 eviction, while a frame samples only its nearest 8, 12, or 16 cards. These paths intentionally approximate
-translucency, hair, fog, and VFX rather than pretending that every fragment is an opaque surface. Performance,
+translucency, hair, and VFX rather than pretending that every fragment is an opaque surface. The volume participation
+flag describes an approximate VFX radiance contribution; it does not implement atmospheric fog, volumetric cloud
+transport, or depth-integrated extinction. Performance,
 Balanced, and Quality bound rays, visibility steps, and card updates to target 1.5 ms, 2.5 ms, and 4.0 ms p95
 respectively at 1080p on the project baseline GPUs; `render-benchmark` remains the authority for measured hardware
 results.

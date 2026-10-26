@@ -2,6 +2,236 @@
 
 ## Unreleased
 
+- Opt MSVC-built Windows executable hosts into long-path handling through a shared application manifest,
+  covering nested asset-cache paths as well as the existing extended-length rename boundary.
+
+- Retry transient Windows output-file sharing violations after captured tools exit, with a bounded wait and
+  no partial-stream reads; staged Hub/Editor launch validation no longer fails on delayed redirection cleanup.
+
+- Add an explicit Bright Night star appearance action, preserving authored placement and visibility timing,
+  with twinkle disabled and ordinary settings Undo support. Existing saved appearances remain unchanged.
+
+- Add in-development star-field persistence to rendering schema 8 and cooked runtime manifest 9, with disabled
+  legacy defaults and strict record validation. Experimental star rendering and shared Environment/Project Settings
+  controls now include seeded color/size/density, solar-elevation fading and shared-clock twinkle; visual acceptance is pending.
+
+- Integrate atmosphere extinction analytically within each sampled segment, including a stable optically thin
+  limit, reducing sample-budget-dependent attenuation error. Density and sun lighting remain midpoint-sampled.
+
+- Add preview-time lighting key insertion using evaluated directional/ambient values, with duplicate rejection
+  and existing settings Undo/save behavior.
+- Add timeline key selection with a focused inspector and key dropdown; edit key times in hours with strict
+  neighbor bounds, and use responsive numeric controls plus collapsible lighting help.
+- Add a development 24-hour lighting intensity graph with authored-key markers, preview cursor, exact-key
+  snapping and Shift free scrubbing. Scrubbing pauses edit-mode preview without saving or changing authored keys.
+- Add a development Environment workspace under Window, sharing Project Settings' document, preview clock,
+  Undo history and save errors. Separate Lighting, Sky, Clouds and Bloom sections, wrapped numeric labels,
+  compact preview transport and focus/close gesture boundaries improve authoring; desktop acceptance remains open.
+- Integrate optional HDR bloom extraction and separable blur before tone mapping, with validated settings,
+  rendering schema 7 and cooked environment schema 8. Older content defaults to disabled bloom. Visual quality,
+  backend coverage and long-session qualification remain open.
+
+- Correct atmosphere surface-ray cancellation and tiny sun-radius precision; filter the sun disk edge and expose
+  its angular diameter in degrees with an Earth-like reset. Lens glare remains unsupported; HDR bloom is separate.
+- Expose world-space UI and HDR camera effects as a separate frame-graph preparation pass before tone mapping,
+  preserving their order and providing an explicit dependency for subsequent HDR post-processing.
+- Add explicit natural-lit versus legacy-unlit layered-cloud appearance and seed controls. Cloud record version 2
+  retains version-1 appearance until the user changes it; new layers use the natural-lit model. This remains a
+  layered approximation, not volumetric clouds; visual and performance qualification remain open.
+
+- Add an opt-in experimental spherical atmosphere sky with configurable Rayleigh/Mie scattering, absorption,
+  planet geometry and bounded ray-march budgets. The selected directional light supplies its sun direction.
+  Rendering settings schema 6 preserves older projects with atmosphere disabled. LUT acceleration, multiple
+  scattering, aerial perspective and atmosphere-driven environment reflections remain pending.
+
+- Add optional cyclic ambient color/intensity keys to daily lighting, version-3 persistence, immutable render
+  snapshots and per-key editor controls. Older profiles retain project ambient settings; the daylight preset now
+  includes a dim nighttime ambient track. This does not replace sky, reflection or baked-lighting contributions.
+
+- Add an editable eight-key daylight preset that retains shadow settings, plus a readable preview clock and
+  midnight/dawn/noon/dusk preview shortcuts. These are art-directed lighting controls, not atmosphere or clouds.
+- Reject externally changed Project Settings against their open/last-save baseline, and recheck recovery
+  destinations before each rollback mutation to preserve changes made after the group preflight.
+
+- Prepare all four Project Settings payloads before grouped publication, retain rollback/recovery journals, reject
+  recovery conflicts without overwriting external edits, and load Editor audio preferences after project recovery.
+  Keep settings staging bounded and preserve the separate material-migration recovery workflow.
+
+- Preserve an immediate Undo after applying a custom code editor instead of allowing the stale draft to reapply it.
+  Keep editor selection, executable input, and help text within narrow Project Settings panels.
+
+- Synchronize the Code Editor preference controls with Project Settings Undo/Redo and document changes without
+  overwriting uncommitted custom-path drafts on ordinary redraws.
+
+- Keep failed Project Settings save diagnostics visible while browsing Scripting; reading SDK preferences no longer
+  silently dismisses unrelated recovery guidance.
+
+- Avoid intermediate overflow and underflow in environment-clock advancement for extreme finite day-length and
+  playback-rate combinations, while retaining day-range rejection and ordinary playback behavior.
+
+- Preserve a retained single authored daily-light key when enabling automatic lighting, adding a matching half-day
+  companion instead of replacing custom values with defaults. Expand the day/night key-authoring guide.
+
+- Keep Project Settings error recovery guidance above the tabs and long diagnostic details in a bounded scrolling
+  area, so narrow panels retain access to Save and dismiss controls.
+
+- Block normal editor exit before scene/workspace teardown when pending Project Settings cannot be saved, preserving
+  edits for repair and retry instead of only logging a failure during shutdown.
+
+- Identify the failed Project Settings file and explain retry/recovery when saving fails. Clarify that settings
+  currently use individual atomic file writes, not a crash-safe transaction across the entire settings group.
+
+- Validate the retained rendering settings when package import chooses Keep Local, rather than rejecting usable
+  assets because of discarded incoming settings. Invalid retained settings still stop publication.
+
+- Clarify that optional packaged rendering settings do not import daily time or daily-lighting profiles; unsupported
+  settings remain explicitly listed as skipped in import review.
+
+- Stack asset-picker labels at the descriptive-field width threshold, preserving room for the reveal button in
+  narrow Project Settings and Inspector panels.
+
+- Keep Default Action Map, Render Scale, Dynamic Resolution and Global Illumination labels above full-width controls
+  in Project Settings so their names remain readable in narrow panels.
+
+- Move the shared render reset above scrolling settings so wrapped guidance does not push its button below narrow
+  panels. Put environment preview labels above full-width numeric controls to avoid right-edge label clipping.
+
+- Clarify the shared Rendering / Environment reset scope beside the action and document Project Settings navigation.
+  Daily time, lighting keys and daily-light shadows remain unchanged by that reset.
+
+- Correct daily-shadow guidance to point to Environment > Directional Shadows and explain that either daily lighting
+  or an authored directional light can supply shadows independently of the skybox.
+
+- Explain in daily-light authoring controls that edits during Play apply to the next session, not the running world.
+
+- Use a fine-step numeric drag for daily-light shadow bias, retaining the full supported range and exact typed input.
+  Explain zero shadow strength and excessive bias beside the controls.
+  Add a scoped daily-shadow reset that preserves lighting keys and project cascade settings and supports Undo/Redo.
+
+- Add validated shadow quality, resolution hint, strength and bias to evaluated environment directional submissions.
+  Render capture uses these values without inheriting authored light identity or cookies. Daily profiles preserve
+  them through key edits and version-2 persistence; version-1 profiles load with disabled shadows. Add Environment-tab
+  quality, resolution, strength and bias controls. Desktop and rendered acceptance are still pending.
+
+- Show phase values on collapsed daily-lighting keys with stable expansion identity. Reject crossing/duplicate phases
+  with an actionable neighboring-key diagnostic, and let users dismiss settings diagnostics without altering data.
+
+- Show saved/unsaved status and an explicit Save Settings action above Project Settings categories, including
+  pending Undo/Redo changes and retryable save failures.
+
+- Add daily-lighting ownership and keyframe controls to the Environment tab, retaining keys when disabled and
+  validating edits before document publication. Add/remove uses bounded daily intervals and settings history.
+  This first authoring UI still needs desktop acceptance; sky/clouds and automatic shadows are not included.
+
+- Give Project Settings a readable first-use window size while preserving saved layouts and subsequent resizing.
+
+- Connect Scene, camera preview and Edit Game lighting to one workspace preview snapshot; Play views use runtime
+  world identity. Profile edits and seeks invalidate history without restarting unchanged playback. Scene/Edit
+  scrub/reset has desktop acceptance; Play/player visual parity, profile authoring UI and automatic shadows remain pending.
+
+- Add an optional evaluated environment-light submission with validated source/revision and directional values.
+  Frame capture replaces only the directional slot and includes environment identity in camera-history continuity.
+  Runtime world snapshots feed shared player/Play Game-view requests. Defaults retain authored lighting.
+
+- Add private world-owned lighting profiles and combined time/profile restoration with owner-thread, closed-world
+  and simulation-tick guards. Editor Play and player restore both before scene startup; shared runtime rendering
+  receives evaluated world snapshots.
+
+- Prepare strict private schema-6 runtime environment decoding for time plus lighting profiles, with schema-4/5
+  authored-light compatibility. Cooking emits schema 6 with the project lighting profile; time-only consumers
+  reject schema 6 instead of silently discarding lighting.
+
+- Add a private validated daily-lighting profile evaluator and versioned payload, including midnight/azimuth wrap,
+  explicit authored ownership and bounded decoding.
+- Add a bounded atomic project-default lighting adapter and safe profile move/copy assignment. Editor document
+  load/save, Cancel and Undo/Redo include the profile; reusable profile assets remain pending.
+  Settings files are individually atomic, not a multi-file transaction.
+- Connect transient environment time preview to the editor workspace and Environment settings tab, with playback,
+  scrub, speed, reset and explicit undoable Apply Time. Authored changes resynchronize preview; Play Mode does not
+  advance the edit preview. Sky/cloud animation remains pending.
+- Divide Project Settings into Scripting, Input, Code Editor, Audio / Physics, Rendering, and Environment tabs.
+  Commit pending edits when switching categories so navigation preserves autosave and Undo history.
+  Wrap explanations and diagnostics within their category instead of clipping them at narrow panel widths.
+- Initialize Play Mode from authored environment time and carry the same validated record in schema-5 cooked
+  runtime manifests, subsequently extended to schema 6 with lighting. Schema-4 default-time compatibility is retained.
+- Include authored environment time in project-settings save/reload and Undo/Redo. Restore the clean indicator
+  when Cancel or Undo returns project settings to their saved values.
+- Give each runtime world a private environment clock advancing once per accepted fixed tick or manual step, with
+  pause coordination, checked overflow, owner-thread access and recursive-tick rejection.
+- Route Editor Pause and Step through the runtime world so additive sessions participate together; newly adopted
+  or activated sessions inherit world pause. World Step rejects empty or mixed-state session sets.
+- Reject unrepresentable frame-clock or fixed-step advancement atomically instead of publishing nonfinite clocks
+  or converting an out-of-range floating-point step count to an integer.
+- Wrap long UI tooltips using font-scaled width capped by the active viewport and theme padding.
+- Validate preserved reparent poses before changing hierarchy or local values, so rejected small-scale results do
+  not leave partially reparented entities or dirty saved scenes.
+- Add private runtime-world ownership of spatial frames, with root attachments retained across persistent-scene
+  retirement and live-handle invalidation on world closure. This does not yet migrate public Transform precision.
+- Register asynchronously loaded scene sessions before startup callbacks so Awake can resolve the owning runtime
+  world. Failed startup or validation removes the prepared session and preserves the previous active scene.
+  Process a bounded snapshot of pending loads so callbacks can enqueue additional scenes safely for a later pass.
+  Recursive load-processing calls from lifecycle callbacks are explicitly rejected without draining pending work.
+- Preserve serialized unit rotations within float rounding tolerance during scene restoration, preventing repeated
+  Undo/Redo from manufacturing unsaved changes. Invalid rotations still fail before mutating the transform.
+- Separate Inspector selection/locking, entity metadata, component headers, built-in cards, reflected fields, and
+  audio diagnostics behind a call-scoped private draw context. Single-entity and locked Inspectors now edit the
+  displayed repeated component instance instead of the first instance; selection-wide edits retain ordinal matching.
+  Added actual-panel regressions for narrow widths, undo callbacks, locking, reordering, and stale locked targets.
+- Split Shader Graph preview traversal/cache ownership from six typed node-evaluation families behind the existing
+  private evaluator. Fixed ten extended math nodes reading `Value` instead of their canonical `Input` pin; added
+  catalog-wide output, typed-value, lazy-branch, retry, deep-chain, and OpenPBR conversion regressions.
+- Kept Game preview controls accessible in narrow docks with a compact aspect selector, font/theme-aware checkbox
+  wrapping, and wrapped camera captions. Added an opt-in responsive checkbox overload without changing legacy layout.
+- Separated Game viewport drawing, Hub activity popovers, shared task formatting, and error-notice persistence into
+  focused implementation files; restored the enforced source-size gate without raising limits. Isolated thumbnail
+  test directories and removed a leading separator from component-only task details.
+- Expanded canonical shader compile manifests to accept 128 global defines plus a pass selector. Added bounded
+  internal import identities preserving include-root precedence and retained compiler/runtime-library snapshots.
+- Reuse fully validated graphics shader imports from a bounded project-local cache. Warm hits skip native stage and
+  reflection processes; source, roots, defines, passes, formats, manifest, limits, and runtime-library changes invalidate
+  reuse. Corrupt/unavailable storage falls back to compilation; failed or cancelled jobs publish no partial artifact.
+- Fixed the bundled host compiler rejecting multiple include roots and silently truncating defines after 64. A
+  fingerprinted build-tree adaptation preserves ordered roots, 128 global defines plus a pass selector, and the pinned
+  Vendor checkout. Integration-only updates reuse the existing dependency build objects.
+- Corrected Visual Studio readiness checks to enumerate named engine references instead of passing a simple name
+  to the full-identity lookup API; unresolved references still block automatic project-owned script opening.
+- List installed Visual Studio versions individually in Code Editor settings while preserving automatic newest-version
+  selection. Fixed custom executable paths not saving after editing; added an explicit validated Use Custom Editor action.
+- Added same-source .NET 8 design-time APIs and an isolated VS 2022 17.8+ companion workspace alongside the modern
+  primary solution, preserving .NET 10 runtime builds. Made the native-service generator portable across both IDE
+  generations and the runtime compiler. Handoff honors the selected executable and exact solution, validates fallback
+  versions, and excludes unrelated scripts from implicit None items in generated design-time projects.
+- Separated external-editor/Visual Studio handoff from native process execution without changing script readiness
+  or navigation behavior. Added regressions for large compiler output, bounded retention, and final diagnostics.
+- Added isolated DevDist Editor iteration without whole-program optimization. Windows stage-editor now defaults to
+  the fast profile, reuses the pinned SDK, and avoids SDK/archive/installer and all-player-configuration work.
+  Explicit Dist staging and full release validation remain available and unchanged.
+  Interrupted development-stage copies are blocked from launch until a successful retry completes the layout.
+- Kept graph Arrange controls bounded and replaced oversized bookmark combo boxes with labelled action popups.
+  VFX Edit Payload now reveals Runtime Modules through a one-frame tab-selection request. The existing UI tab API
+  remains available alongside an additive explicit-selection overload.
+- Added weighted Audio Mixer snapshot audition and authored-mix restoration without changing source or undo history.
+  Failed auditions restore the draft best-effort and retain the original error. Mixer rows retain stable values
+  across edits, and snapshot parameter removal stops traversal before shifted row indices can be reused.
+- Preflighted Audio Mixer preview resources before publication, added last-good rollback and retained saved-state
+  restoration when source files disappear, and preserved failed restoration sessions for retry. Snapshot effect
+  parameter blending now avoids intermediate overflow for finite opposite-sign endpoints.
+- Captured supported literal shader dependencies once per import for consistent traversal, hashes, and compiler
+  staging. Commented directives no longer create false dependencies; line continuations are recognized. Added
+  aggregate source bounds and stronger path confinement, with shader/graph importer version invalidation.
+- Preserved imported source/asset dependencies and derived display/bounds metadata across background asset scans.
+  Source-only edits keep last-good import data, while changed metadata/importer contracts still invalidate it.
+- Reconciled VFX system selection before compact/wide layout, so opening a graph no longer requires visiting Systems
+  before its canvas appears. Changing systems clears stale node, block, cable, comment, and context selection together.
+- Propagated live Shader Graph cancellation into running native stage/reflection processes through an internal shader
+  importer factory. Bounded output draining prevents continuous diagnostics from starving cancellation polling;
+  existing importer callers and timeout defaults remain unchanged.
+- Persisted graph bookmarks as local per-project/asset/system preferences with naming, update, rename, and removal.
+  Corrupt saved-state files are preserved with diagnostics, and write failures retain usable session views.
+- Added shared Inspector controls to add/remove curve and gradient keys, select interpolation, and edit cubic curve
+  tangents. Key insertion samples the existing value, respects key/time limits, and isolates neighboring field IDs.
+- Avoided intermediate overflow when interpolating finite extreme curve/color values or widely separated curve and
+  gradient times; cubic evaluation uses wider intermediate arithmetic without changing the stored asset format.
 - Reconciled the documentation and website with current Hub, Inspector-based materials, Shader Graph, UI Builder,
   gameplay scripting, and player-build workflows. Added installation/recovery, project maintenance, UI-from-scratch,
   and gameplay-testing guides; separated current tutorials from dated engineering records.

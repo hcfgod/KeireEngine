@@ -504,6 +504,9 @@ namespace Keire
         const auto ideAggregatorPath = m_Impl->ProjectRoot / "Keire.Managed.VisualStudio.Build.csproj";
         (void)Detail::WriteTextFileAtomicallyIfChanged(ideAggregatorPath,
                                                        GenerateManagedIdeAggregator(request, ideTargetFramework));
+        (void)Detail::GenerateManagedCompatibilityWorkspace(request, names, m_Impl->ProjectRoot, result.Solution,
+                                                            m_Impl->ManagedApi, m_Impl->ManagedEditorApi,
+                                                            m_Impl->ManagedGenerator);
         return result;
     }
 

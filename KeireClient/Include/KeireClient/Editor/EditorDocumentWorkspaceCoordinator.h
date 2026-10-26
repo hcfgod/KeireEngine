@@ -86,6 +86,8 @@ namespace KeireEditor
         void CancelMaterialCatalog() noexcept;
         void CloseUndoContexts() noexcept;
         void PersistRecovery();
+        // Normal exit must succeed here before irreversible workspace teardown begins.
+        void SaveProjectSettingsBeforeExit();
         void CloseProjectSettings() noexcept;
         void SetPendingTransition(EditorDocumentTransitionAction action, Keire::AssetId asset = {});
         void CancelPendingTransition();

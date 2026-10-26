@@ -86,6 +86,8 @@ continue with installed healthy software; uncached downloads and online authoriz
 
 In **Tasks and downloads**, use **Dismiss** on an ended task or **Clear finished** for completed entries. Closing the
 panel only hides it; it does not clear history or cancel active work. Keep failure details before dismissing them.
+Task cards can show remaining components before a download total is known. Byte counts and rates use binary units
+(KiB, MiB, GiB); a missing total is not the same as a completed transfer.
 
 From Editor Build Settings, **Open Build Support** requests the selected target for that Editor executable. Check the
 Editor path/version in Hub, save your project, and close that Editor before component maintenance. Do not install into

@@ -190,7 +190,11 @@ namespace KeireEditor
         if (DrawGraphArrangeMenu(ui, nodes, connections, nodeIdentities, connectionIdentities))
             return;
         ui.SameLine();
-        (void)DrawGraphBookmarkMenu(ui, m_GraphBookmarks, m_GraphCanvas);
+        if (m_GraphBookmarks.Open(m_BookmarkDirectory, document.Asset(), system->Id))
+        {
+            m_BookmarkMenu = {};
+        }
+        (void)DrawGraphBookmarkMenu(ui, m_GraphBookmarks, m_GraphCanvas, m_BookmarkMenu);
         ui.SameLine();
         if (m_GraphCanvas.ConnectionDragActive())
             ui.TextColored(theme.Warning, "Release over a compatible pin  |  Escape cancels");

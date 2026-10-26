@@ -2,7 +2,11 @@
 
 #include "Keire/Animation/Skinning.h"
 #include "Keire/Assets/RenderingAssets.h"
+#include "Keire/Rendering/Atmosphere.h"
+#include "Keire/Rendering/Cloud.h"
+#include "Keire/Rendering/EnvironmentLighting.h"
 #include "Keire/Rendering/Lighting.h"
+#include "Keire/Rendering/RenderSystem.h"
 #include "Keire/Scenes/Scene.h"
 #include "KeireInternal/Rendering/GpuVisibilityCandidateInternal.h"
 
@@ -12,6 +16,7 @@
 #include <cstdint>
 #include <functional>
 #include <map>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -116,7 +121,55 @@ namespace Keire::RenderBackend
     {
         Matrix4 Transform;
         std::uint64_t Frame = 0;
+        AssetId EnvironmentSource;
+        std::uint64_t EnvironmentRevision = 0;
+        bool EnvironmentDirectional = false;
     };
+
+    // Authoring edits invalidate camera history; ordinary evaluated solar motion does not.
+    // Keep these bounded settings off per-entity motion records.
+    struct CameraMotionHistoryEntry final
+    {
+        Matrix4 Transform;
+        std::uint64_t Frame = 0;
+        AssetId EnvironmentSource;
+        std::uint64_t EnvironmentRevision = 0;
+        bool EnvironmentDirectional = false;
+        AtmosphereSettings Atmosphere;
+        CloudSettings Clouds;
+        BloomSettings Bloom;
+        StarFieldSettings Stars;
+        std::optional<double> EnvironmentSecondsPerDay;
+
+        [[nodiscard]] bool HasContinuousEnvironment(const CameraMotionHistoryEntry& next) const noexcept
+        {
+            return EnvironmentSource == next.EnvironmentSource && EnvironmentRevision == next.EnvironmentRevision &&
+                   EnvironmentDirectional == next.EnvironmentDirectional && Atmosphere == next.Atmosphere &&
+                   Clouds == next.Clouds && Bloom == next.Bloom && Stars == next.Stars &&
+                   EnvironmentSecondsPerDay == next.EnvironmentSecondsPerDay;
+        }
+    };
+
+    [[nodiscard]] inline CameraMotionHistoryEntry
+    MakeCameraMotionHistory(const Matrix4& transform, const std::uint64_t frame,
+                            const RenderEnvironmentSettings& environment,
+                            const std::optional<EnvironmentLightingSnapshot>& snapshot) noexcept
+    {
+        CameraMotionHistoryEntry result{transform,
+                                        frame,
+                                        snapshot ? snapshot->Source : AssetId{},
+                                        snapshot ? snapshot->Revision : 0U,
+                                        snapshot && snapshot->Directional,
+                                        environment.Atmosphere,
+                                        environment.Clouds,
+                                        environment.Bloom,
+                                        environment.Stars};
+        if (snapshot && snapshot->Time)
+        {
+            result.EnvironmentSecondsPerDay = snapshot->Time->SecondsPerDay;
+        }
+        return result;
+    }
 
     struct SkinMotionHistoryEntry final
     {

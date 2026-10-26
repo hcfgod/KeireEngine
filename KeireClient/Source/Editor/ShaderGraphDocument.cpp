@@ -1,6 +1,7 @@
 #include "KeireClient/Editor/ShaderGraphDocument.h"
 
 #include "Keire/Rendering/MaterialEcosystem.h"
+#include "KeireInternal/Assets/ShaderCompilerJobs.h"
 
 #include <nlohmann/json.hpp>
 
@@ -234,7 +235,8 @@ namespace KeireEditor
 #else
             importerSpecification.Formats = {Keire::ShaderBinaryFormat::SpirV};
 #endif
-            const auto importer = Keire::CreateShaderAssetImporter(std::move(importerSpecification));
+            const auto importer = Keire::Detail::CreateCancellableShaderAssetImporter(
+                std::move(importerSpecification), jobContext ? jobContext->StopToken() : std::stop_token{});
             if (!importer.ContextualImport)
                 throw std::logic_error("Live Shader Graph compilation requires the contextual shader importer.");
 

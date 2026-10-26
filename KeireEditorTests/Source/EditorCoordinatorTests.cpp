@@ -262,10 +262,11 @@ TEST_CASE("document workspace facade rejects off-owner updates without running c
             reject([&] { coordinator.UpdateMaintenance({}, 0.016); });
             reject([&] { static_cast<void>(coordinator.Scene()); });
             reject([&] { static_cast<void>(coordinator.ShutdownComplete()); });
+            reject([&] { coordinator.SaveProjectSettingsBeforeExit(); });
             coordinator.Shutdown();
         });
     worker.join();
-    CHECK(rejections == 3);
+    CHECK(rejections == 4);
     CHECK_FALSE(callbackInvoked);
     CHECK(callback.Current());
     CHECK_FALSE(coordinator.ShutdownComplete());
@@ -277,7 +278,7 @@ TEST_CASE("document workspace facade rejects off-owner updates without running c
     CHECK_THROWS_AS(static_cast<void>(coordinator.Scene()), std::logic_error);
 }
 
-TEST_CASE("document workspace facade closes project settings after a save failure")
+TEST_CASE("normal settings exit preserves failed edits while forced teardown remains best effort")
 {
     auto documents = CreateTestDocuments();
     auto* projectSettings = documents.ProjectSettings.get();
@@ -295,6 +296,7 @@ TEST_CASE("document workspace facade closes project settings after a save failur
     projectSettings->Update(edited);
     REQUIRE(projectSettings->Dirty());
     std::vector<std::string> failures;
+    bool writable = true;
 
     KeireEditor::EditorDocumentWorkspaceCoordinator coordinator(
         std::move(documents),
@@ -307,18 +309,46 @@ TEST_CASE("document workspace facade closes project settings after a save failur
             .ReportSceneError = [](std::string) {},
             .CloseWorkspaceUndo = [] {},
             .CloseSupplementalDocuments = [] {},
-            .ProjectWritable = [] { return true; },
+            .ProjectWritable = [&] { return writable; },
             .ReportShutdownFailure = [&](const std::string_view operation, const std::exception_ptr&)
             { failures.emplace_back(operation); },
         });
 
-    coordinator.CloseProjectSettings();
-    CHECK_FALSE(projectSettings->Opened());
-    CHECK_FALSE(projectSettings->Dirty());
-    CHECK(failures == std::vector<std::string>{"save-project-settings"});
-    coordinator.CloseProjectSettings();
-    CHECK(failures.size() == 1);
-    std::filesystem::remove(invalidRoot);
+    CHECK_THROWS(coordinator.SaveProjectSettingsBeforeExit());
+    CHECK(projectSettings->Opened());
+    CHECK(projectSettings->Dirty());
+    CHECK(projectSettings->Settings() == edited);
+    CHECK(failures.empty());
+    writable = false;
+    CHECK_THROWS_WITH_AS(coordinator.SaveProjectSettingsBeforeExit(), doctest::Contains("read-only"),
+                         std::runtime_error);
+    CHECK(projectSettings->Dirty());
+    writable = true;
+
+    SUBCASE("repair permits normal exit without discarding settings")
+    {
+        REQUIRE(std::filesystem::remove(invalidRoot));
+        std::filesystem::create_directories(invalidRoot);
+        coordinator.SaveProjectSettingsBeforeExit();
+        CHECK(projectSettings->Opened());
+        CHECK_FALSE(projectSettings->Dirty());
+        CHECK(Keire::LoadRenderEnvironmentSettings(invalidRoot) == edited);
+        writable = false;
+        CHECK_NOTHROW(coordinator.SaveProjectSettingsBeforeExit());
+        CHECK(failures.empty());
+        coordinator.CloseProjectSettings();
+        std::filesystem::remove_all(invalidRoot);
+    }
+    SUBCASE("forced teardown still releases documents after reporting save failure")
+    {
+        coordinator.CloseProjectSettings();
+        CHECK_FALSE(projectSettings->Opened());
+        CHECK_FALSE(projectSettings->Dirty());
+        CHECK(failures == std::vector<std::string>{"save-project-settings"});
+        coordinator.CloseProjectSettings();
+        CHECK(failures.size() == 1);
+        std::filesystem::remove(invalidRoot);
+    }
 }
 
 TEST_CASE("package coordinator owns panel and export lifecycle idempotently")

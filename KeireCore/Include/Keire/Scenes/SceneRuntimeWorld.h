@@ -14,6 +14,12 @@
 
 namespace Keire
 {
+    namespace Detail
+    {
+        class SceneRuntimeSpatialAccess;
+        class SceneRuntimeEnvironmentAccess;
+    } // namespace Detail
+
     struct SceneHandleTag;
     using SceneHandle = StableHandle<SceneHandleTag>;
 
@@ -76,7 +82,13 @@ namespace Keire
         [[nodiscard]] bool SetActive(SceneHandle scene);
         [[nodiscard]] bool MakePersistent(const Entity& entity);
 
+        /// Processes a bounded load batch. Recursive calls from lifecycle callbacks throw std::logic_error.
         void Process(SceneValidator validator = nullptr);
+        /// Coordinates loaded and persistent sessions, including subsequently activated scenes.
+        void Pause(bool paused = true);
+        /// Advances each paused session once. Returns false for empty, mixed-state or faulted worlds.
+        /// Callback failures can fault a session; completed simulation steps are not rolled back.
+        [[nodiscard]] bool Step(float fixedDeltaSeconds);
         void FixedUpdate(float deltaSeconds);
         void Update(float deltaSeconds, float interpolationAlpha = 1.0F);
         void SetDeterministicSimulation(bool enabled);
@@ -105,6 +117,8 @@ namespace Keire
         void Close() noexcept;
 
       private:
+        friend class Detail::SceneRuntimeSpatialAccess;
+        friend class Detail::SceneRuntimeEnvironmentAccess;
         class Impl;
         std::unique_ptr<Impl> m_Impl;
     };

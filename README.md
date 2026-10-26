@@ -7,6 +7,53 @@
 
 Opening a C# script waits for its Visual Studio project and engine reference, then opens the project-owned document
 so engine types participate in completion. The Editor remains responsive while the IDE loads.
+Choose VS 2022 17.8+, VS 2026, or another supported external editor. VS 2022 uses an isolated .NET 8 design-time
+workspace and matching engine APIs; runtime gameplay still builds with .NET 10. See [IDE setup](Docs/Scripting/GettingStarted.md#ide-projects).
+Project Settings uses separate Scripting, Input, Code Editor, Audio / Physics, Rendering, and Environment tabs
+instead of one long page. Each category scrolls independently, keeping the tabs visible. Switching tabs commits
+pending settings edits; existing Undo/Redo remains available. Undo/Redo can leave unsaved settings: the status above
+the tabs shows this, and **Save Settings** writes them explicitly (or retries a failed save). Player builds prompt
+before using unsaved settings; normal editor exit saves them and stays open if that save fails. On first use, the window opens at a readable
+900 by 700 size; saved layouts and subsequent resizing are preserved.
+Settings saves prepare all four files before publication and retain a recovery journal for rollback and interrupted-save
+recovery. Pending edits remain on failure; external changes block recovery rather than being overwritten.
+See [Project Settings](Docs/ProjectSettings.md) for recovery and durability limits.
+
+Development builds also provide **Window > Environment**, a dockable Lighting/Sky/Clouds/Bloom workspace sharing
+Project Settings' document, Undo history and temporary preview clock. A 24-hour intensity graph provides key markers,
+a preview cursor and snapped time scrubbing without saving. Its desktop acceptance and advanced timeline
+work remain in progress; see the [workspace guide](Docs/ProjectSettings.md#environment-workspace-development).
+
+The Environment tab offers **Apply Daylight Preset** for an editable eight-key sunrise/noon/sunset lighting cycle,
+with retained shadow settings, optional animated ambient illumination and Undo. A readable preview clock and midnight/dawn/noon/dusk buttons make it easy
+to inspect the cycle without changing the saved starting time. Atmosphere and clouds are not implemented by this preset.
+The development Environment tab additionally offers an opt-in experimental planetary atmosphere sky that follows
+the selected directional light. See [atmosphere controls and limitations](Docs/Rendering.md#experimental-planetary-atmosphere).
+Noon/dusk Edit preview has been checked on Windows; full cross-view and player visual acceptance remains open.
+Optional layered clouds offer a seeded Natural lit mode and a Legacy unlit mode that preserves older projects.
+Their visual-quality acceptance is pending; this is not yet a production weather or volumetric-cloud system.
+
+In Edit Mode, the Environment tab also exposes transient time-preview playback, day/fraction scrubbing, speed and
+reset. **Apply Time to Project** explicitly saves the preview position through Undo/Redo for subsequent Play and
+cooked builds. Preview alone does not change the saved starting time. Configured daily-lighting profiles feed Scene,
+camera-preview and Game requests. The Environment tab's **Use Daily Lighting** toggle enables a two-key starting
+profile. Expand keys to edit day fraction, azimuth/elevation, linear RGB and intensity; add/remove keys as needed.
+Phases appear in collapsed key headers and must remain strictly increasing in [0, 1), with 2–128 keys when enabled.
+Rejected phase edits leave the prior profile intact and explain the required range/order. Disabling retains the keys and restores
+authored light selection. Edits use settings autosave and Undo/Redo. Windows checks cover adding a key, ownership-toggle
+retention, saving after Undo and rejecting duplicate phases; removal and broader interaction coverage remain pending.
+Expand **Daily Light Shadows** to choose Disabled, Hard or Soft shadows, a resolution hint, strength and bias.
+Project-wide cascade count, distance and resolution budgets are under **Environment > Directional Shadows**.
+Daily profiles persist their own quality, resolution hint, strength and bias; older profiles load with disabled shadows.
+Windows Edit Scene checks cover Disabled-to-Soft, strength endpoints, fine bias dragging, scoped shadow reset and Undo.
+A bounded Play/Stop check confirmed that running daily lighting stays isolated from project edits and Edit preview
+returns after Stop. Remaining controls, moving shadows and full Play/player image parity still need verification.
+Scene/Edit scrub/reset has Windows desktop acceptance; sky/cloud animation and Play/player visual parity remain in development. Default authored-light projects retain
+their existing light selection.
+
+Under **Edit > Project Settings > Code Editor**, choose an installed Visual Studio version individually, let
+**Visual Studio (latest installed)** track the newest version, or validate a **Custom Executable** path.
+The displayed choice and path follow Project Settings Undo/Redo.
 
 UI Document selection stays in the Inspector; use **Open Visual Tree in UI Builder** when you want to edit it.
 The Builder presents outlined input fields and a multiline style editor. Console compiler diagnostics support
@@ -18,6 +65,10 @@ placeholder. Right-click an existing folder and choose **Rename** to change its 
 
 During Play, Game retains keyboard/gamepad input even if the pointer crosses another panel. Press **Escape** to
 release gameplay input, then click inside Scene before navigating its camera. Click Game to resume gameplay input.
+
+Game's **Preview** selector chooses Free, 16:9, 16:10, or 4:3 framing. **Maximize On Play**, **FPS**, and **GPU Bounds**
+wrap onto additional toolbar rows instead of continuing beyond a compact dock's right edge. Fixed-aspect previews
+remain centered below the controls. GPU bounds describe that Game camera, not the Scene camera.
 
 The Play Mode Changes review shows wrapped **Before** and **After** values for each change, so long values remain
 readable before you choose which runtime edits to keep. Rotation changes show labeled quaternion components.
@@ -50,8 +101,14 @@ UI. See [UI Toolkit input handling](Docs/Scripting/UiAndEvents.md) for button cl
 
 UI and fullscreen Shader Graphs display a flat image preview with transparency, rather than a lit mesh.
 See [shader authoring previews](Docs/ShadersAndMaterials.md) for their current scope.
+Extended math nodes now evaluate their canonical **Input** pins in authoring previews, including inverse/hyperbolic
+trigonometry, degree/radian conversion, Negate, Exponential, Logarithm, and Scale And Bias. This fixes a preview-only
+missing-pin error; it does not add a compute or custom-pass consumer.
 Shader Graph focus selects the graph's undo history. Edit output values through the expanded **Input Defaults**.
 Scene Undo/Redo restores the clean indicator when the complete authored scene returns to its saved content.
+Restoring a snapshot preserves stored unit rotations within float rounding tolerance, avoiding false unsaved changes.
+Updated source builds preserve the displayed instance when editing repeated components, including a locked Inspector.
+Selection-wide component edits match the same type-instance ordinal; lock the Inspector to edit only its pinned entity.
 Right-click item actions return focus to their owning panel; hierarchy duplication can be undone immediately without
 an extra click to switch away from asset history.
 Reselecting an assigned asset or an already-empty asset slot leaves the scene unchanged; choosing a different asset
@@ -119,13 +176,38 @@ Native Save dialogs preserve accented and other UTF-8 filenames when exporting p
 Asset-browser operation messages appear above the asset list and can be scrolled when a long diagnostic does not fit.
 C# fields declared as `SceneAsset` offer only scene assets in the Inspector picker, with `None` for optional references.
 Curve and gradient Inspector headings display their readable names without internal widget ID suffixes.
+Graph bookmarks persist as local project preferences per graph/VFX system, with names, update, rename, and removal
+controls. VFX graphs select an available system before drawing compact or wide layouts, so newly opened effects do not
+require a detour through Systems to show their canvas.
+Saved views do not dirty graph sources or ship in player content; see [Graph Editing](Docs/Manual/GraphEditing.md#save-and-manage-views).
+Shared curve and gradient Inspectors support Add key, per-key removal, and interpolation selection. Cubic curve
+segments expose endpoint tangent slopes. New keys sample the existing value, and distinct field IDs keep neighboring
+curve/gradient controls independent. See [VFX lifetime modules](Docs/Vfx.md#size-over-lifetime) for editing details.
+Graphics shader imports retain supported literal includes once per import, so traversal, dependency hashes, and compiler
+staging use the same bytes. See [custom include requirements](Docs/ShadersAndMaterials.md#custom-include-files) for
+lookup order, bounds, and unsupported preprocessor patterns.
+Background Shader Graph cancellation stops owned native stage/reflection jobs; the original importer factory retains
+timeout-only behavior. See [cancellation limits](Docs/ShadersAndMaterials.md#cancelling-background-compilation).
+Canonical compile-unit identities now accept the graphics importer's full define set, including its optional pass
+selector. Complete validated graphics imports reuse a project-local cache keyed by the retained compiler/runtime
+bundle and exact inputs. Warm hits skip compiler/reflection processes; corrupt entries or storage failures trigger
+normal compilation. Committed entries are bounded to 64 slots of at most 8 MiB each; larger imports are not cached.
+
 Audio Inspector preview messages and import errors wrap; **Reimport Audio** appears below the playback controls.
+The Audio Mixer's Snapshots tab offers weighted **Audition Snapshot** and **Restore Authored Mix** controls. Audition
+uses the current draft without dirtying the mixer, changing undo history, or baking preview values on Save.
+See [Audio Production](Docs/AudioProduction.md#snapshot-audition-in-the-editor) for preview and transition limits.
+Preview resources are preflighted before publication, and closing the mixer can restore retained saved state when its
+source is unreadable. Failed restoration retains the session for retry; this is not a device-recovery guarantee.
+
 **Preview** becomes available when an imported clip is loaded; a missing or failed source cannot report successful
 playback of fallback silence. Correct the source file and reimport to recover without reopening the project.
 Import failure diagnostics survive restarts after publication of the updated source index. Selecting another asset
 stops its audio preview and clears the previous status message; Mixer setup guidance wraps in narrow Inspectors.
 Import settings show **Apply and Reimport** and **Revert Import Settings** on separate rows so both remain accessible
 in narrow Inspectors. Instructions and external-change warnings also wrap to the panel width.
+Background asset scans retain imported dependency and display metadata until the metadata/importer contract changes;
+idle monitoring and source edits no longer erase that information before reimport.
 Algorithmic reverb keeps its combined feedback below unity throughout the supported decay range, so sustained
 sources produce a decaying tail rather than runaway feedback. Mixer meters remain useful for checking ordinary
 gain buildup when combining dry signals, sends, and effects.
@@ -135,7 +217,7 @@ authored base mixer, including its reverb effects and sends.
 VFX edit previews and browser/Inspector thumbnails wait for initial asset imports when opening a project with a fresh
 cache, then start automatically.
 The status bar shows **Preparing GPU effects...** during background shader preparation; effects appear when ready.
-Windows Hub 0.4.8 hot patch and Editor 0.4.8 are active in immutable signed catalog sequence 27. The same signed
+Windows Hub 0.4.8 and the Editor 0.4.8 script-handoff hotfix are active in immutable signed catalog sequence 28. The same signed
 snapshot retains the independently validated Linux x86-64 0.4.2 packages and the previous Windows and Linux records;
 macOS downloads remain gated pending platform, signing, and notarization validation.
 
@@ -211,6 +293,7 @@ automatically after creation.
 Its task and notification centers retain useful history across restarts; finished tasks and read notifications can be
 dismissed individually, and the task center can clear all finished work at once. Dismissing a retryable editor removal
 hides its recovery record durably while preserving the exact journal identity needed by a later Retry or Remove action.
+Task cards can show remaining components before byte totals are available; transfer rates appear once progress is known.
 Marketplace Asset Import packages open a verified file-and-conflict review in the Editor before the user confirms any
 project writes; executable-code consent and keep-local conflict choices are applied during that preflight.
 The import review can optionally adopt packaged rendering settings and an imported input-action asset as the
@@ -393,6 +476,10 @@ Both platform launchers expose the same top-level workflow:
 | `test` | Build and run the native doctest suite. |
 | `run` | Build and run the Hub, or open the editor directly with explicit flags. |
 | `coverage` | Produce Clang source coverage and enforce the configured gate. |
+| `stage-editor` | Update the fast repository-local DevDist Editor; select `-Configuration Dist` for the shipping-optimized layout. |
+| `stage-hub` | Update the local Dist Hub without archive publication. |
+| `run-staged-editor` | Launch the completed DevDist Editor without building; accepts `-ProjectPath` and explicit Dist selection. |
+| `run-staged-hub` | Launch the completed Dist Hub without building. |
 | `package` | Validate and create runtime/SDK archives and checksums. |
 | `package-editor` | Create a ready-to-run native editor distribution and archive. |
 | `package-hub` | Create a standalone Hub distribution and archive. |
@@ -404,16 +491,23 @@ Both platform launchers expose the same top-level workflow:
 | `rename` | Transactionally rename the reusable engine template. |
 | `help` | Print the authoritative options and supported values. |
 
-On Windows, `Scripts\project.bat stage-editor` and `Scripts\project.bat stage-hub` provide a shorter local Dist
-iteration loop. They update the runnable layouts under `Build\Distributions` without running the release test matrix
-or creating and re-extracting archives; the corresponding `package-*` commands remain the release gates. Development
-staging defaults to Ninja so repeated runs retain compatible incremental outputs.
+On Windows, `Scripts\project.bat stage-editor` defaults to `DevDist`: distribution code paths and release dependencies,
+but speed optimization, symbols, and **no link-time optimization**. Its separate binaries, objects, and runnable layout
+cannot overwrite `Dist`. It builds the Editor and its runtime tools without the SDK packager, standalone Hub executable,
+installer, archive, or all player Build Support configurations. The pinned SDK is reused from the repository, not copied again.
+The first `DevDist` build must populate its own cache; subsequent edits reuse it. Do not clean or alternate toolchains
+between ordinary iterations. `stage-hub` still stages Dist. Both commands default to Ninja.
 The equivalent PowerShell commands are `./Scripts/project.ps1 stage-editor -Toolset msc` and
 `./Scripts/project.ps1 stage-hub -Toolset msc`. Open `Launch-KeireHub.cmd` inside its `Build\Distributions` folder to
 test the Hub. To open a project directly in the staged Editor, run `Launch-KeireEditor.cmd --project "C:\path\to\project"`
 from the Editor distribution folder. You can also launch directly through `Scripts\project.bat run-staged-hub` or
 `Scripts\project.bat run-staged-editor -ProjectPath "C:\path\to\project"` without building. Interactive menu options
 19 and 20 launch the staged Editor and Hub; options 7 and 8 update those stages after source changes.
+The fast Editor stage is repository-local, not portable or publishable. It writes `development-stage.json`, not a release
+package manifest. Use `stage-editor -Configuration Dist` and `run-staged-editor -Configuration Dist` for shipping
+optimization and packaged-player acceptance; `package-editor` remains the complete release gate. DevDist is not
+evidence of Dist performance or packaged Build Support correctness. Batch fixes, build once, run focused tests with
+`-Configuration DevDist`, then exercise the same staged binary through the UI.
 Player exports prefer the Editor's bundled Build Support when compatible, so a same-version module installed by an
 older development build cannot override it. Installed modules remain the fallback for other targets or configurations.
 Exports copy runtime files and their parent directories, not empty leftover template directories that could interfere
@@ -424,7 +518,7 @@ Use **Import package** to add a compatible `.keireplayersupport` package for tha
 Windows packaging captures and waits for the runtime smoke process, including cold shader warmup, before checking its
 exit code and cleaning up validation content. A failed, timed-out, or unavailable process result stops packaging.
 
-Supported build configurations are `Debug`, `Release`, `Profile`, `Dist`, `DebugASan`, `DebugUBSan`, `DebugTSan`, and `Coverage`.
+Supported build configurations are `Debug`, `Release`, `Profile`, `Dist`, `DevDist`, `DebugASan`, `DebugUBSan`, `DebugTSan`, and `Coverage`.
 `Release` and `Profile` explicitly enable speed optimization, including `/O2` for MSVC builds.
 Available generators and sanitizer support vary by host platform and toolchain; `doctor` and `help` report the valid
 local combination.
@@ -456,7 +550,8 @@ The key contracts are:
 - Immediate UI/runtime work is construction-thread-affine. Worker producers use bounded queues and cancellable jobs.
 - Ownership is represented through RAII, `std::unique_ptr`, and Kéire strong/weak references; owning raw pointers are
   not part of the public contract.
-- Import, registration, save, packaging, and activation workflows validate first and commit transactionally.
+- Validate before publication and use transactional commits where implemented. Project Settings groups rendering,
+  authoring, time and lighting publication with rollback and an interrupted-save recovery journal.
 
 Read [Architecture](Docs/Architecture.md) and [Runtime Lifecycle](Docs/RuntimeLifecycle.md) before changing ownership,
 threading, startup, frame order, or shutdown behavior.
@@ -506,7 +601,7 @@ Current authoring and runtime contracts include:
 | Property-backed Material source | 5 | New Materials select a shader and edit its properties in the Inspector. |
 | Legacy Material Graph source | 7 | Existing graph-owned sources retain compatibility decoding and graph editing; this is not the new-material creation workflow. |
 | VFX source | 5 | Schemas 1–4 migrate in memory; graph and compatibility payloads remain distinct execution sources. |
-| Cooked runtime manifest | 4 | Older builds require a recook; newer unsupported schemas fail before partial startup. |
+| Cooked runtime manifest | 9 | Schema 4 uses default time; schemas 4/5 use authored lighting. Schema 6 adds lighting profiles; schema 7 adds atmosphere/cloud records; schema 8 requires bloom; schema 9 requires the experimental star record (visual acceptance pending). Schemas 4–6 retain disabled sky additions; schemas 4–7 default bloom to disabled; schemas 4–8 default stars to disabled. Unsupported newer schemas fail before partial startup. |
 | Asset package archive | 1 | `KEIRASPK1` archives are deterministic, bounded, inventoried, hashed, and signature-verifiable. |
 | Project package lock | 1 | Exact versions, hashes, dependency edges, sources, and signature identities publish atomically. |
 
@@ -618,6 +713,9 @@ inspects Authenticode: a genuinely unsigned preview may use the disclosed catalo
 invalid or untrusted publisher signature fails closed. Production release claims still require the platform-native
 signing policy described in the release guide.
 
+See [Project Settings](Docs/ProjectSettings.md#asset-package-import) for optional rendering-settings import and
+Keep Local validation behavior.
+
 See [Asset Packages](Docs/AssetPackages.md), [Desktop Player Builds](Docs/PlayerBuilds.md),
 [Package Archives](Docs/PackageArchives.md), and
 [Testing and Release](Docs/TestingAndRelease.md) before producing or publishing an artifact.
@@ -670,6 +768,9 @@ service and its documentation generator likewise use `Source/`, never a lowercas
 Generated builds, packages, logs, restored tools, dependency caches, and website output are disposable and are not
 documentation authorities.
 
+Core's internal `Process.cpp` owns native process execution and capture; `ExternalEditor.cpp` owns source/solution
+targeting and Visual Studio readiness. Both remain private behind `KeireInternal/Process.h`.
+
 SDK consumers link `Keire::Core` through CMake. The package carries its private FreeType, HarfBuzz, FriBidi, and
 libunibreak archives and their license files; CMake supplies those text dependencies transitively. Direct compiler
 invocations must include the same archives, as exercised by the package launchers.
@@ -681,7 +782,7 @@ output and reject stale or build-mismatched reports.
 
 ## Documentation
 
-The [documentation library](Docs/README.md) contains 114 guides and progress records grouped around real tasks. Project authors
+The [documentation library](Docs/README.md) contains 116 guides and progress records grouped around real tasks. Project authors
 should begin with the [Kéire 0.4.8 User Manual](Docs/Manual/README.md):
 
 - [Projects and the Editor](Docs/Manual/ProjectsAndEditor.md),

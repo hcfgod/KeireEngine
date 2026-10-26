@@ -80,6 +80,13 @@ namespace Keire
         float SizePixels = 16.0F;
     };
 
+    struct UiCheckboxOptions
+    {
+        // Continue the preceding row only when the entire checkbox and visible label fit its content boundary.
+        // Otherwise use normal next-line layout. This does not shrink or hide the control.
+        bool ContinueRow = false;
+    };
+
     struct UiSpecification
     {
         UiMode Mode = UiMode::Disabled;
@@ -592,6 +599,8 @@ namespace Keire
         [[nodiscard]] UiMenuScope BeginMenu(std::string_view label, bool enabled = true);
         [[nodiscard]] UiTabBarScope BeginTabBar(std::string_view id);
         [[nodiscard]] UiTabItemScope BeginTabItem(std::string_view label, bool* open = nullptr);
+        // Request selection for this frame only; false preserves normal user-controlled tab selection.
+        [[nodiscard]] UiTabItemScope BeginTabItem(std::string_view label, bool* open, bool select);
         [[nodiscard]] UiTreeNodeScope BeginTreeNode(std::string_view label, bool selected = false);
         [[nodiscard]] UiDisabledScope BeginDisabled(bool disabled = true);
         [[nodiscard]] UiIdScope PushId(std::string_view id);
@@ -646,6 +655,7 @@ namespace Keire
         [[nodiscard]] bool OverlayIconButton(std::string_view id, UiIcon icon,
                                              UiOverlayIconButtonSpecification specification);
         [[nodiscard]] bool Checkbox(std::string_view label, bool& value);
+        [[nodiscard]] bool Checkbox(std::string_view label, bool& value, UiCheckboxOptions options);
         [[nodiscard]] bool DragInteger(std::string_view label, std::int64_t& value, double speed = 1.0,
                                        std::optional<std::int64_t> minimum = {},
                                        std::optional<std::int64_t> maximum = {});

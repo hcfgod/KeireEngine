@@ -5,7 +5,12 @@
 #include "Keire/Assets/RenderingAssets.h"
 #include "Keire/Math/Math.h"
 #include "Keire/Ref.h"
+#include "Keire/Rendering/Atmosphere.h"
+#include "Keire/Rendering/Bloom.h"
+#include "Keire/Rendering/Cloud.h"
+#include "Keire/Rendering/EnvironmentLighting.h"
 #include "Keire/Rendering/FrameGraphSnapshot.h"
+#include "Keire/Rendering/StarField.h"
 #include "Keire/Ui/RuntimeUi.h"
 #include "Keire/Vfx/VfxSystem.h"
 
@@ -371,7 +376,7 @@ namespace Keire
         std::array<AssetId, 3> FullscreenEffects{};
     };
 
-    inline constexpr std::uint32_t RenderEnvironmentSettingsSchemaVersion = 5;
+    inline constexpr std::uint32_t RenderEnvironmentSettingsSchemaVersion = 8;
 
     struct RenderEnvironmentSettings
     {
@@ -398,6 +403,10 @@ namespace Keire
         float DynamicResolutionTargetMilliseconds = 16.667F;
         GlobalIlluminationMode RequestedGlobalIllumination = GlobalIlluminationMode::Disabled;
         IrradynQuality RequestedIrradynQuality = IrradynQuality::Balanced;
+        AtmosphereSettings Atmosphere;
+        CloudSettings Clouds;
+        BloomSettings Bloom;
+        StarFieldSettings Stars;
 
         auto operator<=>(const RenderEnvironmentSettings&) const noexcept = default;
     };
@@ -482,6 +491,8 @@ namespace Keire
         std::size_t PrimaryContributionIndex = 0;
         /// False records a clear-only scene pass. Runtime UI submitted for the frame remains visible.
         bool DrawSceneContributions = true;
+        /// Optional evaluated lighting; omission preserves the existing authored-light path.
+        std::optional<EnvironmentLightingSnapshot> EvaluatedEnvironment;
     };
 
     struct RenderCapabilities

@@ -613,8 +613,12 @@ namespace KeireEditor
             auto request = m_ImportReview.Request();
             bool optionsChanged = false;
             if (plan.HasRenderingSettings)
+            {
                 optionsChanged |= ui.Checkbox("Apply packaged rendering settings (replaces current settings)",
                                               request.ApplyRenderingSettings);
+                ui.TextWrapped("This applies Rendering.keiresettings only. Daily time and daily-lighting profiles "
+                               "are not imported; unsupported settings are listed below.");
+            }
             for (const auto& asset : plan.Package.Manifest.Assets)
             {
                 if (asset.Type != Keire::InputActionAsset::StaticType() ||

@@ -2,6 +2,7 @@
 
 #include "KeireClient/Editor/AudioMixerDocument.h"
 #include "KeireClient/Editor/AudioMixerPanel.h"
+#include "KeireClient/Editor/AudioMixerPreviewSession.h"
 #include "KeireClient/Editor/EditorAssetFileService.h"
 
 #include <stdexcept>
@@ -100,27 +101,25 @@ void EditorWorkspaceLayer::RedoAudioMixerEdit() { (void)m_AudioMixerDocument->Re
 
 void EditorWorkspaceLayer::StopAudioMixerPreview() noexcept
 {
-    const auto asset = std::exchange(m_AudioMixerPreviewAsset, {});
-    m_AudioMixerPreviewDiagnostic.clear();
-    if (!asset || !m_AssetDatabase)
-        return;
     try
     {
-        const auto record = m_AssetDatabase->Find(asset);
-        if (!record)
-            return;
-        const auto& specification = m_AssetDatabase->Specification();
-        const auto source = specification.ProjectRoot / specification.SourceDirectory / record->RelativePath;
-        const auto mixer = Keire::AudioMixerAsset::Decode(ReadBytes(source));
-        const auto assets = Owner().Assets();
-        if (assets)
-            (void)assets->PublishDevelopmentAsset(asset, mixer);
-        if (const auto audio = Owner().Audio())
-            audio->SubmitMixer(asset, mixer->Definition(), ResolveImpulseResponses(assets, mixer->Definition()));
+        if (m_AudioMixerPreview)
+        {
+            m_AudioMixerPreview->Stop();
+        }
+        m_AudioMixerPreviewDiagnostic.clear();
     }
     catch (...)
     {
-        // Preview teardown is advisory and must remain noexcept during panel and application shutdown.
+        // Keep the session for retry; shutdown must not throw, including diagnostic allocation failures.
+        try
+        {
+            m_AudioMixerPreviewDiagnostic =
+                "Audio Mixer preview restoration failed. Reopen and close the mixer to retry.";
+        }
+        catch (...)
+        {
+        }
     }
 }
 
@@ -128,14 +127,47 @@ void EditorWorkspaceLayer::ReportAudioMixerError(std::string message) noexcept {
 
 void EditorWorkspaceLayer::PreviewAudioMixer(const Keire::AssetId asset, const Keire::AudioMixerDefinition& definition)
 {
-    Keire::ValidateAudioMixer(definition);
-    const auto mixer = Keire::CreateRef<Keire::AudioMixerAsset>(definition);
-    const auto assets = Owner().Assets();
-    if (!assets || !assets->PublishDevelopmentAsset(asset, mixer))
-        throw std::runtime_error("The transient Audio Mixer asset could not be published for live preview.");
-    if (const auto audio = Owner().Audio())
-        audio->SubmitMixer(asset, definition, ResolveImpulseResponses(assets, definition));
-    m_AudioMixerPreviewAsset = asset;
+    if (!m_AudioMixerPreview)
+    {
+        m_AudioMixerPreview =
+            std::make_unique<KeireEditor::AudioMixerPreviewSession>(KeireEditor::AudioMixerPreviewDependencies{
+                .ReadSource =
+                    [this](const Keire::AssetId sourceAsset)
+                {
+                    if (!m_AssetDatabase)
+                    {
+                        throw std::runtime_error("The Asset Database is unavailable.");
+                    }
+                    const auto record = m_AssetDatabase->Find(sourceAsset);
+                    if (!record || record->Type != Keire::AudioMixerAsset::StaticType() ||
+                        record->RelativePath.extension() != ".keiremixer")
+                    {
+                        throw std::runtime_error("The authored Audio Mixer source is unavailable.");
+                    }
+                    const auto& specification = m_AssetDatabase->Specification();
+                    const auto source =
+                        specification.ProjectRoot / specification.SourceDirectory / record->RelativePath;
+                    return Keire::AudioMixerAsset::Decode(ReadBytes(source));
+                },
+                .ResolveImpulseResponses = [this](const Keire::AudioMixerDefinition& candidate)
+                { return ResolveImpulseResponses(Owner().Assets(), candidate); },
+                .Publish =
+                    [this](const Keire::AssetId previewAsset, const Keire::Ref<Keire::AudioMixerAsset>& mixer)
+                {
+                    const auto assets = Owner().Assets();
+                    return assets && assets->PublishDevelopmentAsset(previewAsset, mixer);
+                },
+                .Submit =
+                    [this](const Keire::AssetId previewAsset, const Keire::AudioMixerDefinition& candidate,
+                           const Keire::AudioMixerImpulseResponses& responses)
+                {
+                    if (const auto audio = Owner().Audio())
+                    {
+                        audio->SubmitMixer(previewAsset, candidate, responses);
+                    }
+                }});
+    }
+    m_AudioMixerPreview->Preview(asset, definition);
     m_AudioMixerPreviewDiagnostic =
         "Live routing and fader preview is active; headless previews also process effects, sends, ducking, reverb, "
         "and meters. Unsaved edits remain transient.";
@@ -151,7 +183,15 @@ void EditorWorkspaceLayer::PersistAudioMixer(const Keire::AssetId asset, const s
         throw std::runtime_error("The edited Audio Mixer source is unavailable.");
     const auto source = m_AssetDatabase->Specification().ProjectRoot /
                         m_AssetDatabase->Specification().SourceDirectory / record->RelativePath;
+    const auto baseline =
+        m_AudioMixerPreview
+            ? m_AudioMixerPreview->PrepareSavedBaseline(asset, Keire::AudioMixerAsset::Decode(bytes)->Definition())
+            : KeireEditor::AudioMixerPreviewSession::Prepared{};
     WriteBytesAtomically(source, bytes);
+    if (m_AudioMixerPreview)
+    {
+        m_AudioMixerPreview->CommitSavedBaseline(asset, baseline);
+    }
 }
 
 void EditorWorkspaceLayer::OpenAudioMixer(const Keire::AssetId asset)

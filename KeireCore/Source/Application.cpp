@@ -4,6 +4,7 @@
 #include "Keire/Assets/BuiltinAssetRegistry.h"
 #include "Keire/Assets/RenderingAssets.h"
 #include "Keire/Audio/AudioAssets.h"
+#include "Keire/Project/ProjectAuthoringSettings.h"
 #include "Keire/Scenes/PrefabAsset.h"
 #include "Keire/Scripting/ManagedAssemblyAsset.h"
 
@@ -136,6 +137,25 @@ namespace Keire
                 if (m_Impl->Specification.Assets.Mode != AssetMode::Development)
                     throw std::invalid_argument("Editor projects require Development assets.");
                 m_Impl->ProjectService = Project::Open(m_Impl->Specification.Projects.Root, ProjectOpenMode::Exclusive);
+                if (m_Impl->Specification.LoadProjectAudioSettings)
+                {
+                    try
+                    {
+                        const auto authoring = LoadProjectAuthoringSettings(m_Impl->ProjectService->Root());
+                        auto& audio = m_Impl->Specification.Audio;
+                        audio.PlaybackDeviceId = authoring.Audio.PlaybackDeviceId;
+                        audio.MaximumVoices = authoring.Audio.MaximumVoices;
+                        audio.MaximumVirtualVoices = authoring.Audio.MaximumVirtualVoices;
+                        audio.MixSampleRate = authoring.Audio.MixSampleRate;
+                        audio.PeriodFrames = authoring.Audio.PeriodFrames;
+                        audio.OutputLayout = authoring.Audio.OutputLayout;
+                    }
+                    catch (const std::exception&)
+                    {
+                        // The editor workspace reports malformed authoring settings and offers repair.
+                        // Project recovery failures occur before this fallback and must abort opening.
+                    }
+                }
                 m_Impl->Specification.Assets.DevelopmentCatalog = m_Impl->ProjectService->AssetCatalog();
                 if (m_Impl->Specification.Input.BindingOverrideDirectory.empty())
                 {

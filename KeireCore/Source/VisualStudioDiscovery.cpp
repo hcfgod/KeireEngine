@@ -10,8 +10,23 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdlib>
+#include <fstream>
 #include <limits>
+#include <memory>
+#include <string>
 #include <system_error>
+#include <type_traits>
+
+#if defined(_WIN32)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <Windows.h>
+#include <winver.h>
+#endif
 
 namespace Keire::Detail
 {
@@ -44,6 +59,10 @@ namespace Keire::Detail
                 {
                     offset = value.size();
                     break;
+                }
+                if (end + 1U == value.size())
+                {
+                    return std::nullopt;
                 }
                 offset = end + 1;
             }
@@ -147,7 +166,183 @@ namespace Keire::Detail
         return major >= minimumMajor;
     }
 
-    std::filesystem::path ResolveCompatibleVisualStudioExecutable(const std::uint32_t minimumMajor) noexcept
+    std::uint32_t ReadVisualStudioSolutionMinimumMajor(const std::filesystem::path& solution) noexcept
+    {
+        constexpr auto fallback = ManagedWorkspaceMinimumVisualStudioMajor;
+        try
+        {
+            std::ifstream input(solution, std::ios::binary);
+            std::array<char, 4096> buffer{};
+            input.read(buffer.data(), static_cast<std::streamsize>(buffer.size()));
+            std::string_view header(buffer.data(), static_cast<std::size_t>(input.gcount()));
+            const bool boundedHeader = static_cast<std::size_t>(input.gcount()) == buffer.size();
+            if (header.starts_with("\xEF\xBB\xBF"))
+            {
+                header.remove_prefix(3U);
+            }
+            if (!header.starts_with("Microsoft Visual Studio Solution File, Format Version 12.00"))
+            {
+                return fallback;
+            }
+
+            std::optional<std::uint32_t> minimum;
+            bool reachedProjects = false;
+            constexpr std::string_view field = "MinimumVisualStudioVersion";
+            while (!header.empty())
+            {
+                const auto newline = header.find('\n');
+                if (newline == std::string_view::npos)
+                {
+                    break;
+                }
+                auto line = header.substr(0, newline);
+                header.remove_prefix(newline + 1U);
+                const auto first = line.find_first_not_of(" \t\r");
+                if (first == std::string_view::npos)
+                {
+                    continue;
+                }
+                line.remove_prefix(first);
+                if (line.starts_with("Project("))
+                {
+                    reachedProjects = true;
+                    break;
+                }
+                if (!line.starts_with(field))
+                {
+                    continue;
+                }
+                if (minimum)
+                {
+                    return fallback;
+                }
+                line.remove_prefix(field.size());
+                const auto assignment = line.find_first_not_of(" \t");
+                if (assignment == std::string_view::npos || line[assignment] != '=')
+                {
+                    return fallback;
+                }
+                line.remove_prefix(assignment + 1U);
+                const auto versionBegin = line.find_first_not_of(" \t");
+                if (versionBegin == std::string_view::npos)
+                {
+                    return fallback;
+                }
+                line.remove_prefix(versionBegin);
+                line = line.substr(0, line.find_last_not_of(" \t\r") + 1U);
+                const auto version = ParseVersion(line);
+                if (!version || (*version)[0] < ManagedWorkspaceCompatibilityVisualStudioMajor)
+                {
+                    return fallback;
+                }
+                minimum = (*version)[0];
+            }
+            return boundedHeader && !reachedProjects ? fallback : minimum.value_or(fallback);
+        }
+        catch (...)
+        {
+            return fallback;
+        }
+    }
+
+    std::filesystem::path SelectManagedVisualStudioSolution(const std::filesystem::path& primarySolution,
+                                                            const std::uint32_t visualStudioMajor)
+    {
+        if (visualStudioMajor != ManagedWorkspaceCompatibilityVisualStudioMajor || primarySolution.empty())
+        {
+            return primarySolution;
+        }
+        const auto directory = primarySolution.parent_path() / "Library/Ide/VisualStudio2022";
+        const auto solution = directory / primarySolution.filename();
+        const auto ready = directory / ".keire-workspace-ready";
+        if (!std::filesystem::is_regular_file(solution) || !std::filesystem::is_regular_file(ready))
+        {
+            return primarySolution;
+        }
+        try
+        {
+            if (ReadTextFile(ready, 16U) == "1\n" &&
+                ReadVisualStudioSolutionMinimumMajor(solution) == ManagedWorkspaceCompatibilityVisualStudioMajor)
+            {
+                return solution;
+            }
+        }
+        catch (...)
+        {
+            // An interrupted/corrupt companion cannot replace the primary workspace.
+        }
+        return primarySolution;
+    }
+
+    bool IsVisualStudioExecutableCompatible(const std::filesystem::path& executable,
+                                            const std::uint32_t minimumMajor) noexcept
+    {
+#if defined(_WIN32)
+        try
+        {
+            const auto release = [](HMODULE module)
+            {
+                if (module)
+                {
+                    FreeLibrary(module);
+                }
+            };
+            const std::unique_ptr<std::remove_pointer_t<HMODULE>, decltype(release)> module(
+                LoadLibraryExW(L"version.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32), release);
+            if (!module)
+            {
+                return false;
+            }
+            using VersionSizeFunction = DWORD(WINAPI*)(LPCWSTR, LPDWORD);
+            using VersionInfoFunction = BOOL(WINAPI*)(LPCWSTR, DWORD, DWORD, LPVOID);
+            using QueryValueFunction = BOOL(WINAPI*)(LPCVOID, LPCWSTR, LPVOID*, PUINT);
+            const auto sizeFunction =
+                reinterpret_cast<VersionSizeFunction>(GetProcAddress(module.get(), "GetFileVersionInfoSizeW"));
+            const auto infoFunction =
+                reinterpret_cast<VersionInfoFunction>(GetProcAddress(module.get(), "GetFileVersionInfoW"));
+            const auto queryFunction =
+                reinterpret_cast<QueryValueFunction>(GetProcAddress(module.get(), "VerQueryValueW"));
+            if (!sizeFunction || !infoFunction || !queryFunction)
+            {
+                return false;
+            }
+            DWORD unused = 0;
+            const auto size = sizeFunction(executable.c_str(), &unused);
+            constexpr DWORD maximumVersionBytes = 1024U * 1024U;
+            if (size == 0 || size > maximumVersionBytes)
+            {
+                return false;
+            }
+            std::vector<std::byte> data(size);
+            if (!infoFunction(executable.c_str(), 0, size, data.data()))
+            {
+                return false;
+            }
+            void* value = nullptr;
+            UINT valueBytes = 0;
+            if (!queryFunction(data.data(), L"\\", &value, &valueBytes) || !value ||
+                valueBytes < sizeof(VS_FIXEDFILEINFO))
+            {
+                return false;
+            }
+            const auto& version = *static_cast<const VS_FIXEDFILEINFO*>(value);
+            const auto major = static_cast<std::uint32_t>(HIWORD(version.dwFileVersionMS));
+            const auto minor = static_cast<std::uint32_t>(LOWORD(version.dwFileVersionMS));
+            return version.dwSignature == VS_FFI_SIGNATURE && major >= minimumMajor &&
+                   (major != ManagedWorkspaceCompatibilityVisualStudioMajor || minor >= 8U);
+        }
+        catch (...)
+        {
+            return false;
+        }
+#else
+        static_cast<void>(executable);
+        static_cast<void>(minimumMajor);
+        return false;
+#endif
+    }
+
+    std::vector<VisualStudioInstallation> DiscoverVisualStudioInstallations() noexcept
     {
 #if defined(_WIN32)
         try
@@ -163,6 +358,33 @@ namespace Keire::Detail
             auto installations = ParseVisualStudioInstallations(query.Output);
             std::erase_if(installations, [](const VisualStudioInstallation& installation)
                           { return !std::filesystem::is_regular_file(installation.Executable); });
+            std::ranges::sort(installations,
+                              [](const auto& first, const auto& second)
+                              {
+                                  if (first.Version != second.Version)
+                                  {
+                                      return first.Version > second.Version;
+                                  }
+                                  return first.Executable.generic_u8string() < second.Executable.generic_u8string();
+                              });
+            return installations;
+        }
+        catch (...)
+        {
+            return {};
+        }
+#else
+        return {};
+#endif
+    }
+
+    std::filesystem::path ResolveCompatibleVisualStudioExecutable(const std::uint32_t minimumMajor) noexcept
+    {
+        try
+        {
+            auto installations = DiscoverVisualStudioInstallations();
+            std::erase_if(installations, [minimumMajor](const auto& installation)
+                          { return !IsVisualStudioExecutableCompatible(installation.Executable, minimumMajor); });
             const auto selected = SelectCompatibleVisualStudioInstallation(installations, minimumMajor);
             if (!selected)
                 return {};
@@ -172,9 +394,5 @@ namespace Keire::Detail
         {
             return {};
         }
-#else
-        static_cast<void>(minimumMajor);
-        return {};
-#endif
     }
 } // namespace Keire::Detail

@@ -8,12 +8,12 @@ clipboard fragments, navigation, undo, and schema migration. Graph-specific node
 ## Scope And Ownership
 
 The stable node canvas owns presentation and input state. Each graph document owns the editable definition, validation,
-dirty state, and undo transaction; each panel translates canvas requests into document edits. Shared authoring metadata
-is stored with the source asset but remains editor-only:
+dirty state, and undo transaction; each panel translates canvas requests into document edits. Node annotations and
+comment regions are stored with the source asset but remain editor-only. View preferences are stored separately:
 
 - node annotations do not become shader code, material bindings, or VFX instructions;
 - comment regions do not change graph topology or execution order;
-- bookmarks are panel-session view state and are not part of the asset;
+- bookmarks persist as local project view preferences and are not part of the asset;
 - the compiler and runtime continue to consume only the graph's executable definition.
 
 This boundary lets graph editors, including the legacy material compatibility panel, share predictable editing behavior without coupling their compilers or
@@ -52,9 +52,26 @@ Node creation requested without an explicit canvas position starts near the visi
 the nearest clear axis when that rectangle is occupied. Repeated toolbar, blackboard, function, and compatibility-node
 insertion therefore preserves existing node bounds instead of stacking new nodes at one coordinate.
 
-Each open panel can retain up to nine named viewport bookmarks. A bookmark stores pan and zoom for the current panel
-session; choosing it restores the view without editing or dirtying the asset. Bookmark names are bounded to 64
-characters and invalid viewports are rejected.
+Each graph can retain up to 9 named viewport bookmarks. In **Bookmarks**, enter a name and choose **Save Current
+View**; leave Name empty to use the next free `Bookmark N` slot. Choosing a saved view restores its pan and zoom without
+editing or dirtying the asset. Selecting an existing name changes the save action to **Update Current View**, including
+when all nine slots are occupied. Edit Name and choose **Rename Selected**, or use **Remove Selected** to free a slot.
+Names require 1–64 UTF-8 bytes, cannot be blank or contain control characters, and cannot contain `##` widget markers.
+
+Views are saved atomically under the project's `Library/UserSettings/Workspace/GraphViews` directory, not in graph
+source or player content. Shader, compatibility Material, and VFX graphs use separate directories; each VFX system
+has its own view set. Views survive closing/reopening the graph and restarting the Editor. Copy that local preferences
+directory separately if you want the same bookmarks in another checkout; deleting Library also removes these views.
+
+A saved-state error leaves session navigation available and reports why persistence failed. Unreadable, oversized,
+duplicate, or unsupported-version view files are preserved instead of overwritten. Back up or move aside the named
+file, then reopen the graph to begin saving again. An ordinary write failure retains the current session's views;
+retry **Update Current View** after correcting the underlying writable-directory problem.
+
+To update a view, first choose its saved entry, then pan/zoom to the replacement view. Reopen **Bookmarks** and choose
+**Update Current View** while its name is unchanged. Choosing the saved entry again would restore its old position.
+To rename it, choose the entry, reopen **Bookmarks**, change Name, and choose **Rename Selected**. Choosing
+**Save Current View** after entering a different unused name creates another bookmark instead.
 
 ## Arrange Commands
 

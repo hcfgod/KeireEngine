@@ -71,6 +71,7 @@ export const docGroups = [
         "MaterialParityMatrix.md",
         "VfxBeyondParityRoadmap.md",
         "VisualAuthoringInitiatives.md",
+        "CloudWeatherImplementation.md",
     ]),
     group("C# scripting", "seti:c-sharp", [
         "Scripting/README.md",
@@ -112,6 +113,7 @@ export const docGroups = [
         "DiagnosticBundles.md",
         "MarketplaceLaunch.md",
         "ProductionReadinessReview.md",
+        "LargeWorldAndEnvironmentPlan.md",
         "Maintainability.md",
     ]),
     group("Material and shader progress records", "open-book", [
@@ -284,6 +286,19 @@ export const docAuthorities = {
     "DiagnosticBundles.md": ["KeireCore/Include/KeireInternal/Diagnostics/DiagnosticBundleInternal.h", "KeireTests/Source/Diagnostics/DiagnosticBundleTests.cpp"],
     "MarketplaceLaunch.md": ["Services/KeireDistributionService/DocumentationSite/Source/lib/platform-mysql.mjs", "Services/KeireDistributionService/DocumentationSite/Source/lib/platform-native-marketplace-http.mjs", "Services/KeireDistributionService/scripts/start-windows-host.ps1"],
     "ProductionReadinessReview.md": ["Config/PerformanceGates.json", "Docs/VfxParityManifest.json"],
+    "CloudWeatherImplementation.md": [
+        "KeireCore/Include/Keire/Rendering/Cloud.h",
+        "KeireCore/Shaders/CloudLayered.hlsl",
+        "KeireCore/Include/KeireInternal/Environment/WeatherEvaluation.h",
+    ],
+    "LargeWorldAndEnvironmentPlan.md": [
+        "KeireCore/Include/Keire/ECS/Components/TransformComponent.h",
+        "KeireCore/Include/Keire/Rendering/RenderSystem.h",
+        "KeireCore/Include/Keire/Streaming/StreamingSystem.h",
+        "KeireCore/Source/Physics/PhysicsSystem.cpp",
+        "KeireManaged/Handles.cs",
+        "Scripts/Dependencies/CMakeLists.txt",
+    ],
     "Maintainability.md": ["Config/SourceFileBudgets.json", "Scripts/Tests/check-source-budgets.py"],
     "Diagnostics/README.md": ["KeireCore/Include/Keire/Diagnostics/Diagnostic.h", "KeireCore/Source/Diagnostics"],
     "Diagnostics/KEIRE-AUDIO-0001.md": ["KeireCore/Include/Keire/Diagnostics/Diagnostic.h", "KeireCore/Source/Audio"],

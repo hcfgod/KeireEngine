@@ -23,6 +23,7 @@
 #include "KeireClient/Editor/UiBuilderPanel.h"
 #include "KeireClient/Editor/UiBuilderStyleSheetDocument.h"
 #include "KeireClient/Editor/VfxEffectDocument.h"
+#include "KeireClientInternal/Editor/EnvironmentPreviewClock.h"
 
 #include "KeireInternal/Diagnostics/DiagnosticBundleUiInternal.h"
 
@@ -71,6 +72,7 @@ void EditorWorkspaceLayer::OnDetach() noexcept
                 break;
             }
             case Phase::ProjectSettings:
+                m_EnvironmentPreview->Unbind();
                 m_DocumentCoordinator->CloseProjectSettings();
                 break;
             case Phase::Input:

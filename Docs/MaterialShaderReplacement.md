@@ -53,11 +53,18 @@ comprehensive interactive and platform acceptance is still a separate gate.
   is not generated visual evidence, and dependency pinning is not a complete shader compiler cache.
 - Migration: execute the reviewed UI conversion/restart scenarios against representative legacy projects. Native
   transaction and failure-path coverage already exists and passes; it does not replace interactive acceptance.
-- Shader authoring: target-specific VFX/custom-pass previews, persistent graph bookmarks, and remaining capability
-  rows in `MaterialParityMatrix.md`. Generic mesh previews and session-only bookmarks are not full completion.
-- Compilation and consumers: connect the currently unused `ShaderCompileWorkKey` to production compilation,
-  complete dependency snapshots, and cancellation of an in-progress native compiler. Verify real compiler invocation
-  counts for value edits; counting fixture importers establish only the import-dependency contract.
+- Shader authoring: target-specific VFX/custom-pass previews and remaining current capability rows in
+  `MaterialParityMatrix.md`. Local graph bookmarks now persist per asset/system and support names, updates, and
+  removal; this does not establish target-specific preview or broader interactive/platform acceptance.
+  - Compilation and consumers: validated local graphics-import caching now connects canonical work keys to production
+    compilation, with retained bundled runtimes and bounded, checksum-checked storage. Real native process counters
+    verify cold compilation and zero-start warm reuse on Windows. Finish full preprocessor/toolchain dependency
+    closure, the native platform matrix, and interactive cancellation/close acceptance. Live graph
+  native stages and reflection now receive the job stop token and stop owned processes; arbitrary source readers,
+  synchronous Save cancellation UI, and descendant-process-tree management are separate contracts. Supported
+    literal source/include files use single-read snapshots for traversal, digesting, staging, and cache identity.
+    Verify real compiler invocation counts for graph value edits and target-consumer workflows;
+    counting fixture importers establishes only the import-dependency contract.
 - Compute: complete authoring beyond the existing bounded graph subset and independent device API, shared renderer
   scheduling/hazards, and device-loss acceptance. Existing direct/indirect dispatch and readback tests are not absent
   implementations and should not be recreated.

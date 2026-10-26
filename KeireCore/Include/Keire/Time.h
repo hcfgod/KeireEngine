@@ -91,6 +91,7 @@ namespace Keire
         explicit Time(const TimeSpecification& specification = {});
 
         void Reset() noexcept;
+        // Invalid or unrepresentable advancement leaves all clocks and scheduled steps unchanged.
         void AdvanceFrame(TimeStep rawDeltaTime, bool suspendSimulation = false);
         [[nodiscard]] bool ConsumeFixedStep() noexcept;
         /// Discards scheduled steps without advancing the committed simulation clock.
@@ -117,6 +118,8 @@ namespace Keire
         [[nodiscard]] std::uint32_t PendingFixedSteps() const noexcept { return m_PendingFixedSteps; }
 
       private:
+        void AdvanceFrameChecked(TimeStep rawDeltaTime, bool suspendSimulation);
+
         TimeSpecification m_Specification;
         double m_TimeScale = 1.0;
         bool m_Paused = false;

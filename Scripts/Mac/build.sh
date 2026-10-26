@@ -81,7 +81,7 @@ runtime_staging_target="$TARGET"
 if [[ "$GENERATOR" == ninja && ( "$runtime_staging_target" == "$HUB_TARGET" || "$runtime_staging_target" == "$CLIENT_TARGET" ) ]]; then
     output_architecture="$(architecture_output_name "$ARCHITECTURE")"
     dependency_configuration=Debug
-    [[ "$CONFIGURATION" == Release || "$CONFIGURATION" == Profile || "$CONFIGURATION" == Dist ]] && dependency_configuration=Release
+    [[ "$CONFIGURATION" == Release || "$CONFIGURATION" == Profile || "$CONFIGURATION" == Dist || "$CONFIGURATION" == DevDist ]] && dependency_configuration=Release
     sodium_runtime="$ROOT/Build/Dependencies/macosx-$output_architecture-$TOOLSET/$dependency_configuration/install/lib/libsodium.dylib"
     target_directory="$ROOT/Build/Bin/$CONFIGURATION-macosx-$output_architecture/$runtime_staging_target"
     [[ -f "$sodium_runtime" ]] || {

@@ -535,6 +535,8 @@ namespace Keire::RenderBackend
             throw std::invalid_argument("Render swapchain clear color must contain finite values in 0..1.");
         SceneFrameGraph = BuildStaticSceneFrameGraph(RenderPath::ForwardPlus);
         DeferredSceneFrameGraph = BuildStaticSceneFrameGraph(RenderPath::DeferredHybrid);
+        BloomSceneFrameGraph = BuildStaticSceneFrameGraph(RenderPath::ForwardPlus, true);
+        DeferredBloomSceneFrameGraph = BuildStaticSceneFrameGraph(RenderPath::DeferredHybrid, true);
         if (Specification.MaximumFramesInFlight < 1 || Specification.MaximumFramesInFlight > 3)
             throw std::invalid_argument("MaximumFramesInFlight must be in the range 1..3.");
         if (Specification.DeviceLossRecoveryAttempts > 3)
@@ -1074,7 +1076,7 @@ namespace Keire::RenderBackend
     {
         SDL_GPUShaderCreateInfo information{};
         information.stage = vertex ? SDL_GPU_SHADERSTAGE_VERTEX : SDL_GPU_SHADERSTAGE_FRAGMENT;
-        information.num_samplers = vertex ? 0U : 3U;
+        information.num_samplers = vertex ? 0U : 4U;
         information.num_uniform_buffers = vertex ? 0U : 1U;
         const auto formats = SDL_GetGPUShaderFormats(Device);
         if (formats & SDL_GPU_SHADERFORMAT_DXIL)

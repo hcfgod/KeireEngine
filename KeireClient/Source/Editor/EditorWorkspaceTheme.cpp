@@ -388,6 +388,7 @@ void EditorWorkspaceLayer::DrawMainMenu(Keire::UiFrame& ui, Keire::UiWorkspace& 
             DrawPanelMenuItem(ui, m_UiBuilderPanel->Registration());
             DrawPanelMenuItem(ui, m_InputDebugger);
             DrawPanelMenuItem(ui, m_ProjectSettingsPanel->Registration());
+            DrawPanelMenuItem(ui, m_ProjectSettingsPanel->EnvironmentRegistration());
             DrawPanelMenuItem(ui, m_LightingPanel->Registration());
             DrawPanelMenuItem(ui, m_PrefabOverrides);
             DrawPanelMenuItem(ui, m_BuildSettings);
@@ -454,9 +455,10 @@ void EditorWorkspaceLayer::DrawMainToolbar(Keire::UiFrame& ui)
         ui.SameLine();
         if (auto disabled = ui.BeginDisabled(playState != Keire::ScenePlayState::Paused); disabled)
         {
-            if (ui.IconButton("ToolbarStep", Keire::UiIcon::Step, false, {28.0F, 24.0F}))
-                (void)m_SceneDocument->PlaySession()->Step(
-                    static_cast<float>(Owner().GetTime().FixedDeltaTime().Seconds()));
+            if (ui.IconButton("ToolbarStep", Keire::UiIcon::Step, false, {28.0F, 24.0F}) && m_PlayRuntimeWorld)
+            {
+                (void)m_PlayRuntimeWorld->Step(static_cast<float>(Owner().GetTime().FixedDeltaTime().Seconds()));
+            }
         }
 
         ui.SameLine();

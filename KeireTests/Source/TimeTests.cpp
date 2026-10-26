@@ -2,7 +2,36 @@
 
 #include <doctest/doctest.h>
 
+#include <limits>
 #include <stdexcept>
+
+TEST_CASE("Time rejects unrepresentable advancement without publishing partial clocks")
+{
+    Keire::TimeSpecification specification;
+    double delta = std::numeric_limits<double>::max();
+    SUBCASE("Elapsed real time overflow") {}
+    SUBCASE("Fixed step count overflow")
+    {
+        specification.FixedDeltaTime = Keire::TimeStep::FromSeconds(1e-30);
+        delta = 1.0;
+    }
+    Keire::Time time(specification);
+    time.SetPaused(true);
+    time.AdvanceFrame(Keire::TimeStep::FromSeconds(delta));
+    time.SetPaused(false);
+    const auto before = time;
+    CHECK_THROWS_AS(time.AdvanceFrame(Keire::TimeStep::FromSeconds(delta)), std::overflow_error);
+    CHECK(time.FrameCount() == before.FrameCount());
+    CHECK(time.RealtimeSinceStartup() == before.RealtimeSinceStartup());
+    CHECK(time.UnscaledTime() == before.UnscaledTime());
+    CHECK(time.TimeSinceStartup() == before.TimeSinceStartup());
+    CHECK(time.DeltaTime() == before.DeltaTime());
+    CHECK(time.SmoothDeltaTime() == before.SmoothDeltaTime());
+    CHECK(time.PendingFixedSteps() == before.PendingFixedSteps());
+    CHECK(time.DroppedSimulationTime() == before.DroppedSimulationTime());
+    CHECK(time.InterpolationAlpha() == before.InterpolationAlpha());
+    CHECK_NOTHROW(time.AdvanceFrame(Keire::TimeStep{}));
+}
 
 TEST_CASE("TimeStep exposes type-safe duration arithmetic")
 {

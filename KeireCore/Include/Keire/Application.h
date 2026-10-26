@@ -62,6 +62,9 @@ namespace Keire
         bool SuspendWhenMainWindowMinimized = true;
         bool UpdateLayersWhenMainWindowMinimized = false;
         bool ManageLogging = true;
+        /// Opt in to project audio settings after exclusive project opening and recovery.
+        /// Applies only to Editor projects; invalid authoring settings retain the supplied Audio specification.
+        bool LoadProjectAudioSettings = false;
     };
 
     class KEIRE_API Application

@@ -818,26 +818,28 @@ namespace Keire
                 throw std::invalid_argument("An entity cannot be parented to itself or one of its descendants.");
             if (record->Parent == parent)
                 return;
-            const auto previousWorld = WorldMatrix(id);
-            const auto previousParent = record->Parent;
+            Vector3 position;
+            Quaternion rotation;
+            Vector3 scale;
+            if (preserveWorldTransform)
+            {
+                const auto previousWorld = WorldMatrix(id);
+                const auto local =
+                    parent ? Math::Multiply(Math::Inverse(WorldMatrix(parent)), previousWorld) : previousWorld;
+                if (!Math::DecomposeTransform(local, position, rotation, scale) || !Math::IsFinite(position) ||
+                    !TransformComponent::IsValidLocalScale(scale))
+                {
+                    throw std::invalid_argument("Reparenting would produce an unsupported local transform.");
+                }
+                rotation = Math::Normalize(rotation);
+            }
+            // Validate the complete preserved pose before publishing any hierarchy or component mutation.
             record->Parent = parent;
             m_Impl->Hierarchy.Invalidate();
             m_Impl->LifecycleComponentsDirty = true;
             m_Impl->MarkWorldDirty(id);
             if (preserveWorldTransform)
             {
-                const auto local =
-                    parent ? Math::Multiply(Math::Inverse(WorldMatrix(parent)), previousWorld) : previousWorld;
-                Vector3 position;
-                Quaternion rotation;
-                Vector3 scale;
-                if (!Math::DecomposeTransform(local, position, rotation, scale))
-                {
-                    record->Parent = previousParent;
-                    m_Impl->Hierarchy.Invalidate();
-                    m_Impl->MarkWorldDirty(id);
-                    throw std::invalid_argument("Reparenting would produce a non-decomposable local transform.");
-                }
                 const auto transform = m_Impl->Transform(id);
                 transform->SetLocalPosition(position);
                 transform->SetLocalRotation(rotation);

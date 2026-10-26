@@ -209,13 +209,13 @@
       "id": "keire.sandbox",
       "version": "1.3.3",
       "displayName": "Kéire Sandbox",
-      "description": "The complete Kéire production Sandbox with twelve paired Shader Graph and Material Graph examples, a curated VFX gallery, reusable gameplay scripts, rendering, physics, UI, audio, meshes, and textures.",
+      "description": "The Kéire learning Sandbox with twelve paired Shader Graph and legacy Material Graph examples, a curated VFX gallery, reusable gameplay scripts, rendering, physics, UI, audio, meshes, and textures.",
       "category": "learning",
       "tags": [
         "Sample",
         "Learning",
         "Shader Graph",
-        "Material Graph",
+        "Materials",
         "VFX",
         "Scripting"
       ],
@@ -224,7 +224,7 @@
       "compatibleEditors": ">=0.4.7 <2.0.0",
       "projectSchema": 4,
       "platformTarget": "desktop",
-      "estimatedSizeBytes": 25135559,
+      "estimatedSizeBytes": 25136387,
       "payloadRoot": "Payloads/Sandbox",
       "payloadFiles": [
         {
@@ -814,8 +814,8 @@
         },
         {
           "path": "Assets/Scripts/FirstPersonCamera.cs",
-          "sizeBytes": 17304,
-          "sha256": "a78bd7bb38240946fe9d87d30ca4bdbfae74d42d99a7ea8cd7da4ded8dd9cf4a"
+          "sizeBytes": 17335,
+          "sha256": "eb3e94ef5bf2100d36a4b25c2946ed8a357493807ab08bc57da3f3d1ac0e5758"
         },
         {
           "path": "Assets/Scripts/FirstPersonCamera.cs.keiremeta",
@@ -824,8 +824,8 @@
         },
         {
           "path": "Assets/Scripts/FpsVfxShowcase.cs",
-          "sizeBytes": 4342,
-          "sha256": "688dcca75287b5af4c06871f97800ae266e5b2c480bd11349147746176234e22"
+          "sizeBytes": 4349,
+          "sha256": "011d7dd009df6e54a5caac1f3a71bca525505e8b45200adbe00a1a91e5a4cb00"
         },
         {
           "path": "Assets/Scripts/FpsVfxShowcase.cs.keiremeta",
@@ -854,8 +854,8 @@
         },
         {
           "path": "Assets/Scripts/ThirdPersonController.cs",
-          "sizeBytes": 3356,
-          "sha256": "548fd2d9a665f0f5443b068861c24fa2e064e099f37abf616fe41c495b49b041"
+          "sizeBytes": 3363,
+          "sha256": "6d8e32fc4cab06b9273e1e4a71e21f6223999bb8595081e6d040d3ee13b65e5d"
         },
         {
           "path": "Assets/Scripts/ThirdPersonController.cs.keiremeta",
@@ -864,8 +864,8 @@
         },
         {
           "path": "Assets/Scripts/UIController.cs",
-          "sizeBytes": 4044,
-          "sha256": "444373d6c41a8c9f9cac9d06e190b621235a4e4a3caf9a449e325b500d2cd25d"
+          "sizeBytes": 4065,
+          "sha256": "f67a9bb89125acbaed0f379b0537267f4fb89e143482a2abf2bded535e0ed5a6"
         },
         {
           "path": "Assets/Scripts/UIController.cs.keiremeta",
@@ -874,8 +874,8 @@
         },
         {
           "path": "Assets/Scripts/WeaponController.cs",
-          "sizeBytes": 8783,
-          "sha256": "293848f0b1143923ebcfa9ecbab4c9a5312416849d19074c57023ab08ab23f1a"
+          "sizeBytes": 8790,
+          "sha256": "e6d5000d4b3c51e71b3cda36b140c92e4631c54007298bd78d9ed9114b9cbe9f"
         },
         {
           "path": "Assets/Scripts/WeaponController.cs.keiremeta",
@@ -1139,8 +1139,8 @@
         },
         {
           "path": "README.md",
-          "sizeBytes": 2054,
-          "sha256": "e8303e29e019fec2f8baf76689459828c46683c809c20a5bc65c850bf4f1e902"
+          "sizeBytes": 2809,
+          "sha256": "3a4732d51f44e49c0a82353b82f16b7c79e1fc89ec745ef337d5e6e5eed28d17"
         }
       ],
       "defaultProjectConfiguration": {

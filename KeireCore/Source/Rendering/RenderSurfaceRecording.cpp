@@ -1,4 +1,5 @@
 #include "KeireInternal/Diagnostics/TelemetryInternal.h"
+#include "KeireInternal/Rendering/BloomUniforms.h"
 #include "KeireInternal/Rendering/DisplacementBoundsInternal.h"
 #include "KeireInternal/Rendering/ForwardPlusInternal.h"
 #include "KeireInternal/Rendering/InstanceBatchInternal.h"
@@ -106,7 +107,10 @@ namespace Keire::RenderBackend
                                 { return panel.Surface.Id == surface.Id && panel.Surface.Epoch == surface.Epoch; });
         if (deferred && std::max<std::size_t>(request->Packet.SpatialContributions.size(), 1U) > 255U)
             throw std::length_error("Deferred lighting exceeds the 8-bit additive-scene contribution limit.");
-        const auto& frameGraph = deferred ? DeferredSceneFrameGraph : SceneFrameGraph;
+        const bool bloomEnabled = request != requests.end() && request->Packet.Environment.Bloom.Enabled &&
+                                  request->Packet.Environment.Bloom.Intensity > 0.0;
+        const auto& frameGraph = bloomEnabled ? (deferred ? DeferredBloomSceneFrameGraph : BloomSceneFrameGraph)
+                                              : (deferred ? DeferredSceneFrameGraph : SceneFrameGraph);
         PreparedSceneDrawLists preparedDraws;
         PreparedGpuOcclusion preparedOcclusion;
         PreparedCpuVfx preparedCpuVfx;
@@ -742,24 +746,51 @@ namespace Keire::RenderBackend
                     }
                     return;
                 }
-                if (frameGraphPass == frameGraph.ToneMap)
+                if (frameGraphPass == frameGraph.HdrPreparation)
                 {
                     auto started = std::chrono::steady_clock::now();
                     RecordRuntimeUiWorldPanels(commands, surface);
                     Statistics.UiRecordingMilliseconds +=
                         std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - started).count();
                     started = std::chrono::steady_clock::now();
-                    const bool temporalHistoryContinuous =
-                        request != requests.end() && request->Packet.TemporalHistoryContinuous;
                     if (request != requests.end())
+                    {
                         RecordFullscreenEffect(
                             commands, surface, request->Packet.Camera.FullscreenEffects[0], true,
                             {request->Packet.MaterialTimeSeconds, request->Packet.MaterialDeltaSeconds});
-                    RecordToneMap(commands, surface, featureSelection.EffectiveAntiAliasing, temporalHistoryContinuous);
+                    }
+                    Statistics.ToneMapMilliseconds +=
+                        std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - started).count();
+                    return;
+                }
+                if (bloomEnabled &&
+                    (frameGraphPass == frameGraph.BloomExtraction || frameGraphPass == frameGraph.BloomHorizontalBlur ||
+                     frameGraphPass == frameGraph.BloomVerticalBlur))
+                {
+                    const auto bloomPass = frameGraphPass == frameGraph.BloomExtraction       ? BloomPass::Extract
+                                           : frameGraphPass == frameGraph.BloomHorizontalBlur ? BloomPass::Horizontal
+                                                                                              : BloomPass::Vertical;
+                    const auto started = std::chrono::steady_clock::now();
+                    RecordBloom(commands, surface, request->Packet.Environment.Bloom, bloomPass);
+                    Statistics.ToneMapMilliseconds +=
+                        std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - started).count();
+                    return;
+                }
+                if (frameGraphPass == frameGraph.ToneMap)
+                {
+                    const auto started = std::chrono::steady_clock::now();
+                    const bool temporalHistoryContinuous =
+                        request != requests.end() && request->Packet.TemporalHistoryContinuous;
+                    const auto bloomIntensity =
+                        bloomEnabled ? static_cast<float>(request->Packet.Environment.Bloom.Intensity) : 0.0F;
+                    RecordToneMap(commands, surface, featureSelection.EffectiveAntiAliasing, temporalHistoryContinuous,
+                                  bloomIntensity);
                     if (request != requests.end())
+                    {
                         RecordFullscreenEffect(
                             commands, surface, request->Packet.Camera.FullscreenEffects[1], false,
                             {request->Packet.MaterialTimeSeconds, request->Packet.MaterialDeltaSeconds});
+                    }
                     Statistics.ToneMapMilliseconds +=
                         std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - started).count();
                     return;

@@ -1,6 +1,12 @@
 #include "Keire/Scenes/SceneRuntimeWorld.h"
 
+#include "KeireInternal/Environment/EnvironmentLightingEvaluation.h"
+#include "KeireInternal/Environment/SceneRuntimeEnvironmentAccess.h"
+#include "KeireInternal/Spatial/FrameRegistry.h"
+#include "KeireInternal/Spatial/SceneRuntimeSpatialAccess.h"
+
 #include <algorithm>
+#include <cmath>
 #include <limits>
 #include <ranges>
 #include <set>
@@ -83,6 +89,7 @@ namespace Keire
             AssetId Asset;
             Ref<SceneRuntimeSession> Runtime;
             std::set<EntityId> PersistentRoots;
+            Detail::FrameAttachment SpatialAttachment;
             bool Loaded = true;
             bool Persistent = false;
         };
@@ -129,7 +136,12 @@ namespace Keire
                 throw std::invalid_argument("SceneRuntimeWorld requires a runtime session with a source scene.");
             const auto handle = AllocateHandle();
             const auto asset = runtimeScene ? runtimeScene->Asset() : editScene->Asset();
-            Entries.push_back({handle, asset, std::move(session)});
+            Entry entry;
+            entry.Handle = handle;
+            entry.Asset = asset;
+            entry.Runtime = std::move(session);
+            entry.SpatialAttachment = Spatial.Attach(Spatial.Find(Detail::SceneRuntimeSpatialAccess::RootFrame));
+            Entries.push_back(std::move(entry));
             if (!Active)
                 Active = handle;
             return handle;
@@ -140,6 +152,40 @@ namespace Keire
             if (Entries[index].Runtime)
                 Entries[index].Runtime->Stop();
             Entries.erase(Entries.begin() + static_cast<std::ptrdiff_t>(index));
+        }
+
+        [[nodiscard]] SceneHandle Activate(Ref<SceneRuntimeSession> session, const SceneValidator validator)
+        {
+            const auto previousActive = Active;
+            const auto handle = Add(session);
+            try
+            {
+                // Publish ownership before Play invokes callbacks on the newly cloned scene.
+                session->Play();
+                if (Paused)
+                {
+                    session->Pause();
+                }
+                if (session->State() == ScenePlayState::Faulted)
+                {
+                    throw std::runtime_error("Scene Play failed: " + session->Diagnostic().Message);
+                }
+                if (validator && !validator(session->RuntimeScene()))
+                {
+                    throw std::runtime_error("The loaded scene failed runtime validation.");
+                }
+            }
+            catch (...)
+            {
+                const auto found = Find(handle);
+                if (found != Entries.end())
+                {
+                    StopAndErase(static_cast<std::size_t>(std::distance(Entries.begin(), found)));
+                }
+                Active = previousActive;
+                throw;
+            }
+            return handle;
         }
 
         void Retire(const std::size_t index)
@@ -219,6 +265,11 @@ namespace Keire
         }
 
         SceneRuntimeWorldSpecification Specification;
+        Detail::EnvironmentClock Environment;
+        Detail::EnvironmentLightingProfile EnvironmentLighting;
+        const AssetId EnvironmentSource = AssetId::Generate();
+        Detail::FrameRegistry Spatial{Detail::SceneRuntimeSpatialAccess::DefaultLogicalWorld,
+                                      Detail::SceneRuntimeSpatialAccess::RootFrame};
         std::thread::id OwnerThread;
         std::vector<Entry> Entries;
         std::vector<Ref<SceneRuntimeLoadOperation>> Loads;
@@ -227,6 +278,9 @@ namespace Keire
         SceneHandle Active;
         std::uint32_t NextHandle = 0;
         bool Open = true;
+        bool Processing = false;
+        bool Paused = false;
+        bool Stepping = false;
     };
 
     SceneRuntimeWorld::SceneRuntimeWorld(SceneRuntimeWorldSpecification specification)
@@ -236,10 +290,90 @@ namespace Keire
 
     SceneRuntimeWorld::~SceneRuntimeWorld() { Close(); }
 
+    Detail::EnvironmentClockState Detail::SceneRuntimeEnvironmentAccess::State(const SceneRuntimeWorld& world)
+    {
+        world.m_Impl->RequireOwner("EnvironmentState");
+        return world.m_Impl->Environment.State();
+    }
+
+    std::uint64_t Detail::SceneRuntimeEnvironmentAccess::Revision(const SceneRuntimeWorld& world)
+    {
+        world.m_Impl->RequireOwner("EnvironmentRevision");
+        return world.m_Impl->Environment.DiscontinuityRevision();
+    }
+
+    void Detail::SceneRuntimeEnvironmentAccess::Restore(SceneRuntimeWorld& world, const EnvironmentClockState state)
+    {
+        world.m_Impl->RequireOwner("RestoreEnvironment");
+        if (world.m_Impl->Stepping)
+        {
+            throw std::logic_error("Environment restoration is not allowed during a world tick.");
+        }
+        world.m_Impl->Environment.Restore(state);
+    }
+
+    Detail::EnvironmentLightingProfile Detail::SceneRuntimeEnvironmentAccess::Lighting(const SceneRuntimeWorld& world)
+    {
+        world.m_Impl->RequireOwner("EnvironmentLighting");
+        return world.m_Impl->EnvironmentLighting;
+    }
+
+    EnvironmentLightingSnapshot Detail::SceneRuntimeEnvironmentAccess::CaptureLighting(const SceneRuntimeWorld& world)
+    {
+        world.m_Impl->RequireOwner("CaptureEnvironmentLighting");
+        return EvaluateEnvironmentLighting(world.m_Impl->EnvironmentLighting, world.m_Impl->Environment.State(),
+                                           world.m_Impl->EnvironmentSource,
+                                           world.m_Impl->Environment.DiscontinuityRevision());
+    }
+
+    void Detail::SceneRuntimeEnvironmentAccess::Restore(SceneRuntimeWorld& world, const EnvironmentClockState state,
+                                                        EnvironmentLightingProfile lighting)
+    {
+        world.m_Impl->RequireOwner("RestoreEnvironmentLighting");
+        if (world.m_Impl->Stepping)
+        {
+            throw std::logic_error("Environment restoration is not allowed during a world tick.");
+        }
+        auto clock = world.m_Impl->Environment;
+        clock.Restore(state);
+        world.m_Impl->EnvironmentLighting = std::move(lighting);
+        world.m_Impl->Environment = clock;
+    }
+
+    const Detail::FrameRegistry& Detail::SceneRuntimeSpatialAccess::Frames(const SceneRuntimeWorld& world)
+    {
+        world.m_Impl->RequireOwner("SpatialFrames");
+        return world.m_Impl->Spatial;
+    }
+
+    Detail::LiveFrame Detail::SceneRuntimeSpatialAccess::FrameForEntity(const SceneRuntimeWorld& world,
+                                                                        const Entity& entity)
+    {
+        world.m_Impl->RequireOwner("SpatialFrameForEntity");
+        if (!entity)
+        {
+            throw std::invalid_argument("Spatial frame resolution requires a live entity.");
+        }
+        for (const auto& entry : world.m_Impl->Entries)
+        {
+            const auto scene = entry.Runtime ? entry.Runtime->RuntimeScene() : Ref<Scene>{};
+            if (scene && scene->FindEntity(entity.Id()) == entity)
+            {
+                return world.m_Impl->Spatial.Find(RootFrame);
+            }
+        }
+        throw std::invalid_argument("The entity does not belong to this runtime spatial world.");
+    }
+
     SceneHandle SceneRuntimeWorld::Adopt(Ref<SceneRuntimeSession> session)
     {
         m_Impl->RequireOwner("Adopt");
-        return m_Impl->Add(std::move(session));
+        const auto handle = m_Impl->Add(session);
+        if (m_Impl->Paused)
+        {
+            session->Pause();
+        }
+        return handle;
     }
 
     Ref<SceneRuntimeLoadOperation> SceneRuntimeWorld::Load(const AssetId scene, const SceneLoadMode mode,
@@ -303,6 +437,18 @@ namespace Keire
     void SceneRuntimeWorld::Process(const SceneValidator validator)
     {
         m_Impl->RequireOwner("Process");
+        if (m_Impl->Processing)
+        {
+            throw std::logic_error("SceneRuntimeWorld::Process cannot run recursively from a lifecycle callback.");
+        }
+        struct ProcessingScope final
+        {
+            bool& Active;
+
+            ~ProcessingScope() { Active = false; }
+        };
+        m_Impl->Processing = true;
+        const ProcessingScope processingScope{m_Impl->Processing};
         for (const auto handle : std::exchange(m_Impl->PendingUnloads, {}))
         {
             const auto found = m_Impl->Find(handle);
@@ -319,7 +465,9 @@ namespace Keire
             }
         }
 
-        for (const auto& operation : m_Impl->Loads)
+        // Startup callbacks may enqueue loads. Keep this pass bounded and its operation references stable.
+        const auto processingLoads = m_Impl->Loads;
+        for (const auto& operation : processingLoads)
         {
             auto& state = *operation->m_Impl;
             if (operation->State() == SceneLoadState::Cancelled || operation->State() == SceneLoadState::Failed ||
@@ -348,12 +496,8 @@ namespace Keire
                 if (const auto presentation = session->Presentation())
                     presentation->SetDefaultMixer(m_Impl->Specification.DefaultMixer);
                 session->SetDeterministicSimulation(m_Impl->Specification.DeterministicSimulation);
-                session->Play();
-                if (session->State() == ScenePlayState::Faulted)
-                    throw std::runtime_error("Scene Play failed: " + session->Diagnostic().Message);
-                if (state.Load->Mode() == SceneLoadMode::Single && validator && !validator(session->RuntimeScene()))
-                    throw std::runtime_error("The loaded scene failed runtime validation.");
-                state.Handle = m_Impl->Add(std::move(session));
+                state.Handle = m_Impl->Activate(std::move(session),
+                                                state.Load->Mode() == SceneLoadMode::Single ? validator : nullptr);
                 if (state.Load->Mode() == SceneLoadMode::Single)
                 {
                     m_Impl->RetireLoadedExcept(state.Handle);
@@ -392,17 +536,92 @@ namespace Keire
                       });
     }
 
+    void SceneRuntimeWorld::Pause(const bool paused)
+    {
+        m_Impl->RequireOwner("Pause");
+        const auto sessions = Sessions();
+        for (const auto& session : sessions)
+        {
+            session->Pause(paused);
+        }
+        m_Impl->Paused = paused;
+    }
+
+    bool SceneRuntimeWorld::Step(const float fixedDeltaSeconds)
+    {
+        m_Impl->RequireOwner("Step");
+        if (m_Impl->Stepping)
+        {
+            throw std::logic_error("World stepping cannot be recursive.");
+        }
+        if (!std::isfinite(fixedDeltaSeconds) || fixedDeltaSeconds <= 0.0F)
+        {
+            throw std::invalid_argument("World step delta must be finite and positive.");
+        }
+        const auto sessions = Sessions();
+        if (sessions.empty() || std::ranges::any_of(sessions, [](const auto& session)
+                                                    { return session->State() != ScenePlayState::Paused; }))
+        {
+            return false;
+        }
+        struct StepScope
+        {
+            bool& Active;
+            ~StepScope() { Active = false; }
+        } scope{m_Impl->Stepping};
+        m_Impl->Stepping = true;
+        // Commit once before callbacks. A gameplay fault cannot roll back an already accepted world tick.
+        m_Impl->Environment.Advance(fixedDeltaSeconds);
+        bool succeeded = true;
+        for (const auto& session : sessions)
+        {
+            const bool stepped = session->Step(fixedDeltaSeconds);
+            succeeded = stepped && succeeded;
+        }
+        return succeeded;
+    }
+
     void SceneRuntimeWorld::FixedUpdate(const float deltaSeconds)
     {
         m_Impl->RequireOwner("FixedUpdate");
-        for (const auto& entry : m_Impl->Entries)
-            if (entry.Runtime)
-                entry.Runtime->FixedUpdate(deltaSeconds);
+        if (m_Impl->Stepping)
+        {
+            throw std::logic_error("World stepping cannot be recursive.");
+        }
+        if (!std::isfinite(deltaSeconds) || deltaSeconds < 0.0F)
+        {
+            throw std::invalid_argument("World fixed delta must be finite and nonnegative.");
+        }
+        if (m_Impl->Paused)
+        {
+            return;
+        }
+        const auto sessions = Sessions();
+        if (std::ranges::none_of(sessions,
+                                 [](const auto& session) { return session->State() == ScenePlayState::Playing; }))
+        {
+            return;
+        }
+        struct TickScope
+        {
+            bool& Active;
+            ~TickScope() { Active = false; }
+        } scope{m_Impl->Stepping};
+        m_Impl->Stepping = true;
+        m_Impl->Environment.Advance(deltaSeconds);
+        for (const auto& session : sessions)
+        {
+            session->FixedUpdate(deltaSeconds);
+        }
     }
 
     void SceneRuntimeWorld::Update(const float deltaSeconds, const float interpolationAlpha)
     {
         m_Impl->RequireOwner("Update");
+        if (m_Impl->Paused)
+        {
+            return;
+        }
         for (const auto& entry : m_Impl->Entries)
             if (entry.Runtime)
                 entry.Runtime->Update(deltaSeconds, interpolationAlpha);
@@ -577,6 +796,7 @@ namespace Keire
             if (entry->Runtime)
                 entry->Runtime->Stop();
         m_Impl->Entries.clear();
+        m_Impl->Spatial.Close();
         m_Impl->PendingUnloads.clear();
         m_Impl->PendingActive.reset();
         m_Impl->Active = {};

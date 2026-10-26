@@ -160,7 +160,7 @@ stay within the resolved material's target. Retained UI uses UI materials. VFX m
 on CPU and GPU Sprite/Ribbon outputs and the existing mesh consumer. Volumetric VFX retains built-in density shading.
 Custom Graphics has the existing mesh consumer; it does not expose arbitrary render-pass scheduling.
 
-The current Shader Graph generator version is 16 and the Shader Graph importer version is 28. These versions describe
+The current Shader Graph generator version is 16 and the Shader Graph importer version is 29. These versions describe
 generated binaries and cache invalidation, not the serialized graph schema or the engine release number.
 
 C++ uses `CameraComponent::SetFullscreenEffect(CameraEffectStage::AfterTonemapping, materialId)`.
@@ -354,6 +354,43 @@ present when final coverage uses MSAA.
 
 ## Renderer And Compiler Boundary
 
+### Custom Include Files
+
+Use literal `#include "file.hlsl"` or `#include <file.hlsl>` directives inside project files. Resolution checks the
+including file's folder first, then the manifest's declared `includeRoots` in order. Project-root-qualified includes
+under a declared root remain supported. Absolute paths, drive-relative paths, and paths escaping the project are
+rejected. Prefer simple relative paths that work on every supported platform.
+
+Each import retains the first successfully read contents of a source/include file and uses those same bytes for
+dependency traversal, SHA-256 identity, and compiler staging. A file edited later cannot silently replace the contents
+already captured by that import; subsequent imports read fresh contents. Comments do not create dependencies, and
+backslash-newline continuations are recognized. Snapshot capture is not a filesystem-wide atomic read.
+
+The graphics importer supports at most 16 include roots and 256 captured files; literal header names are bounded to
+1024 bytes. The aggregate source snapshot is bounded by
+`AssetImportContext::MaximumDependencyBytes` (64 MiB by default), including the entry source. Split oversized generated
+inputs rather than assuming every file receives a separate full budget. Macro-computed includes and cyclic include
+graphs are unsupported. Discovery is conservative, not a conditional preprocessor: literal includes inside inactive
+`#if` branches must still resolve, and include guards do not enable cyclic dependency graphs.
+
+Snapshot capture supplies the retained inputs to the persistent import cache described below. Process cancellation
+is a separate execution contract.
+The code-shader importer version is 11. Updating importer versions invalidates previously derived outputs; the next
+import may therefore take longer while those shaders are rebuilt. Cooked shader schemas are unchanged by this update.
+
+### Cancelling Background Compilation
+
+Superseding a background Shader Graph generation or closing its document requests cancellation of its native stage
+and reflection jobs. Those jobs stop their owned compiler processes rather than waiting for the normal per-process
+timeout. A cancelled generation cannot publish partially compiled variants or replace the last-good preview.
+
+Editor tooling supplies the job token through an internal factory. The public `CreateShaderAssetImporter` API and
+`ShaderImporterSpecification` layout remain unchanged; ordinary importer callers retain timeout-only behavior.
+A synchronous Save has no new Cancel button, and cancellation does not forcibly interrupt arbitrary
+source-reader callbacks or establish whole-process-tree termination. This is not the persistent compile-cache gate.
+
+### Compilation And Binding Contracts
+
 Generated and raw shaders share the fixed Kéire graphics ABI. Position, normal, UV0, and color occupy vertex locations
 0 through 3. Object/view/projection and normal data use vertex `b0/space1`; scene lighting uses fragment `b0/space3`;
 material numerics use fragment `b1/space3`; material textures use declaration-ordered `tN/sN/space2` pairs. Optional
@@ -374,6 +411,33 @@ SHA-256 of a domain-separated deterministic CBOR encoding. Policy (`LocalOnly`, 
 and interactive/background priority do not enter the key, so scheduling cannot change artifact identity. Remote-service
 deployment and authentication are separate from the local shader-authoring workflow; this guide does not prescribe
 historical provider credentials or claim that a remote compiler service is enabled.
+
+The compile-unit helper accepts up to 129 unique defines, covering the graphics importer's 128 global defines plus
+one optional pass selector. Ordered include roots and the source's project-relative path are not fields in the public
+schema-2 manifest. An internal import identity therefore wraps the unit keys with those inputs and the authored shader
+manifest digest; it must not sort include-root precedence away. Internal toolchain snapshots fingerprint the supplied
+flat compiler/runtime-library bundle and stage the retained bytes, so changing only a runtime DLL changes its identity.
+The graphics importer uses these identities to reuse complete, previously validated imports in
+`Library/ShaderCompileCache/v1`. A hit checks the stored key, payload checksum, decoded shader contract, exact requested
+pass/format inventory, dependency digests, and output limits before returning it without native stage or reflection
+processes. A miss executes the retained compiler/runtime bytes against the retained source snapshot. Compiler source
+and include arguments are stable scratch-relative paths, not UUID-bearing absolute paths.
+
+The bundled host compiler accepts the source directory followed by up to 16 authored include roots in order, and
+forwards all 128 global defines plus the optional pass selector. Bootstrap generates narrowly adapted build-tree
+copies of the pinned CLI/library sources; it does not edit the Vendor checkout. The adaptation is fingerprinted and
+fails configuration if its expected upstream source fragments change. Updating only this integration reuses the
+existing DXC/SPIRV dependency objects instead of discarding the entire host-tool build cache.
+
+The cache has 64 collision-checked slots, each at most 8 MiB including its header: at most 512 MiB of committed entries.
+Collisions replace an older slot and cause a normal miss, never cross-key reuse. Larger valid imports still compile
+but are not stored. Atomic writes prevent partial entries from becoming hits; simultaneous misses may compile twice.
+Temporary atomic-write files can briefly consume additional space, so the committed-entry bound is not a whole-disk
+quota. Storage errors, corrupt/truncated/oversized entries, unavailable bundled runtimes, loader overrides, and unknown
+compiler names do not prevent ordinary compilation. Sources containing `__DATE__`, `__TIME__`, or `__TIMESTAMP__`
+conservatively bypass reuse, including spliced spellings and token-pasting inputs that could synthesize them.
+This is a local graphics-import cache, not remote compilation, a compute-shader cache,
+or proof of packaged/native platform acceptance on every operating system.
 
 ```powershell
 ./Scripts/project.ps1 bootstrap -Generator ninja -Toolset msc

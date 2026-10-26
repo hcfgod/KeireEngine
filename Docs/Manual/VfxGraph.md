@@ -20,6 +20,13 @@ asset.
 Expected result: a valid emitting graph produces particles in preview and through its scene emitter. An effect asset
 alone is not a persistent scene placement. Keep capacity modest for the first test and check the dropped count.
 
+The graph selects its first available system automatically, including in a narrow panel where **Canvas**, **Systems**,
+and **Inspector** are tabs. Use **Systems** to switch between systems in compatible legacy assets. A valid selection
+stays selected after other edits; if that system is removed or source reload replaces it, the graph selects the first
+remaining system. With no systems the canvas has nothing to draw; inspect the execution badge and graph diagnostics
+before treating an empty canvas as a renderer failure. Selection and viewport navigation do not dirty the effect or
+add undo entries.
+
 Required Spawn, Initialize, Update, and Output flow depends on the effect. Context anchors are protected. Blocks execute
 in their authored order inside a Context; Operators provide typed values through cables. Starting search from a pin
 filters the catalog to compatible choices.
@@ -49,6 +56,33 @@ edit; Kéire keeps the editable draft, positions, selection, and undo history.
 Subgraphs validate purpose, typed boundaries, dependencies, recursion, and bounded expansion before lowering. They do
 not imply the remainder of another engine's node catalog. Do not infer a VFX selection-extraction command from the
 separate Shader Graph function-extraction feature.
+
+## Shape Size And Color Over A Particle's Lifetime
+
+When a Size over Lifetime or Color over Lifetime module exposes a curve or gradient, edit the keys directly in its
+Inspector. Time `0` is birth and `1` is the end of the particle's lifetime; it is not the effect's duration in seconds.
+Select its Block in the graph, then choose **Edit Payload: Size over Lifetime** or **Edit Payload: Color over Lifetime**
+in the graph Inspector. This selects the referenced payload and reveals **Runtime Modules** automatically. The tab
+switch is a one-time navigation request, so you can return to Graph without it switching you back.
+
+For a simple grow-then-shrink curve:
+
+1. Select the size curve and use **Add key** until it has keys at `0`, `0.5`, and `1`. Missing endpoints are added first;
+   subsequent additions split the widest interval. Adjust **Time** if the source already has a different key layout.
+2. Set their **Value** fields to `0`, `1`, and `0`. Leave **Interpolation** as Linear for a predictable triangular shape.
+3. For eased motion, choose Cubic on the first two keys, then adjust the endpoint **In Tangent** and **Out Tangent**
+   slopes. Zero tangents ease into/out of a segment. Interpolation belongs to the segment after that key.
+4. Preview, undo and redo one edit, save, and reopen the effect. Verify both the key values and the particle silhouette.
+
+For a fade, use the color gradient's endpoint keys: keep the starting alpha at `1` and set the ending alpha to `0`.
+Choose Linear **Interpolation** for a gradual fade; Constant holds each key's color until the next key. **Add key**
+samples the existing gradient, so add a middle key when you need a separate color or alpha change.
+
+**Remove key** affects only its row. An empty size curve evaluates to zero, making particles invisible; an empty
+gradient evaluates to opaque white. Add a key to begin again. New curve keys use Linear interpolation and zero
+tangents, so review the shape after inserting into a cubic segment. The controls enforce strictly ordered times and
+the 4,096-key asset limit. CPU evaluation and the GPU's 64-sample lookup have different precision; see the
+[lifetime-module reference](../Vfx.md#size-over-lifetime) before relying on sharp transitions.
 
 ## Use An Authored Particle Material
 

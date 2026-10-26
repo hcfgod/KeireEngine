@@ -268,6 +268,8 @@ namespace Keire::RenderBackend
         ShadowPipeline = nullptr;
         SceneDepthPipeline = nullptr;
         ToneMapPipeline = nullptr;
+        BloomPipeline = nullptr;
+        CloudVolumePipeline = nullptr;
         DeferredGBufferPipeline = nullptr;
         DepthVelocityPipeline = nullptr;
         DeferredLightingPipeline = nullptr;

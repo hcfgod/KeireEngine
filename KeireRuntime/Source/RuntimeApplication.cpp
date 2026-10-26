@@ -3,6 +3,8 @@
 
 #include "KeireInternal/Assets/AssetInternal.h"
 #include "KeireInternal/Build/PlayerPackage.h"
+#include "KeireInternal/Environment/EnvironmentRuntimeManifest.h"
+#include "KeireInternal/Environment/SceneRuntimeEnvironmentAccess.h"
 #include "KeireInternal/FileSystem.h"
 #include "KeireInternal/RenderInternal.h"
 #include "KeireInternal/Rendering/DynamicResolutionInternal.h"
@@ -52,6 +54,7 @@ namespace
         Keire::AssetId DefaultMixer;
         Keire::AudioProjectSettings AudioSettings;
         Keire::RenderEnvironmentSettings Rendering;
+        Keire::Detail::EnvironmentRuntimeManifest::State Environment;
         std::array<std::uint32_t, Keire::PhysicsCollisionLayerCount> PhysicsCollisionMatrix;
         std::vector<std::filesystem::path> ManagedAssemblyRoots;
         std::vector<Keire::RequiredSourceModule> RequiredModules;
@@ -70,14 +73,8 @@ namespace
         stream >> source;
         if (!stream || !source.is_object())
             throw Keire::CommandLineError("Cooked content has no valid runtime-manifest.json.");
-        const auto schema = source.value("schemaVersion", 0U);
-        if (schema < 4)
-            throw Keire::CommandLineError(
-                "Cooked runtime manifest schema is obsolete; recook the project with this Kéire version.");
-        if (schema > 4)
-            throw Keire::CommandLineError(
-                "Cooked runtime manifest requires a newer Kéire runtime (supported schema: 4).");
         RuntimeManifest result;
+        result.Environment = Keire::Detail::EnvironmentRuntimeManifest::DecodeState(source);
         result.ContentRoot = std::filesystem::absolute(content).lexically_normal();
         const auto& modules = source.at("sourceModules");
         if (!modules.is_array())
@@ -107,6 +104,10 @@ namespace
         result.Rendering.EnvironmentDiffuseIntensity = rendering.value("environmentDiffuseIntensity", 1.0F);
         result.Rendering.EnvironmentSpecularIntensity = rendering.value("environmentSpecularIntensity", 1.0F);
         result.Rendering.SkyVisible = rendering.value("skyVisible", true);
+        result.Rendering.Atmosphere = result.Environment.Atmosphere;
+        result.Rendering.Clouds = result.Environment.Clouds;
+        result.Rendering.Bloom = result.Environment.Bloom;
+        result.Rendering.Stars = result.Environment.Stars;
         result.Rendering.DirectionalShadowDistance = rendering.value("directionalShadowDistance", 100.0F);
         result.Rendering.DirectionalShadowCascadeCount = rendering.value("directionalShadowCascadeCount", 4U);
         result.Rendering.DirectionalShadowResolution = rendering.value("directionalShadowResolution", 2048U);
@@ -281,12 +282,13 @@ namespace
       public:
         RuntimeLayer(const Keire::AssetId startupScene, const Keire::AssetId defaultInput,
                      const Keire::AssetId defaultInputMap, const Keire::AssetId defaultMixer,
-                     const Keire::RenderEnvironmentSettings rendering, RuntimeCommandLine commandLine,
+                     const Keire::RenderEnvironmentSettings rendering,
+                     Keire::Detail::EnvironmentRuntimeManifest::State environment, RuntimeCommandLine commandLine,
                      Keire::ReplayFingerprints fingerprints, std::shared_ptr<RuntimeReplayState> replayState)
             : Layer("Runtime"), ManagedWorldRuntimeServices(false, rendering), m_StartupScene(startupScene),
               m_DefaultInput(defaultInput), m_DefaultInputMap(defaultInputMap), m_DefaultMixer(defaultMixer),
-              m_CommandLine(std::move(commandLine)), m_ReplayFingerprints(std::move(fingerprints)),
-              m_ReplayState(std::move(replayState)),
+              m_Environment(std::move(environment)), m_CommandLine(std::move(commandLine)),
+              m_ReplayFingerprints(std::move(fingerprints)), m_ReplayState(std::move(replayState)),
               m_AdditiveValidation(m_CommandLine.AdditiveValidationOutput, m_CommandLine.ValidationScenes
 #if defined(KEIRE_ENABLE_TEST_HOOKS)
                                    ,
@@ -303,6 +305,12 @@ namespace
             BindManagedApplication(Owner());
             BindManagedWorld(Owner(), m_Runtime, m_Scene, m_Presentation, m_ReplayState->Session,
                              m_ReplayState->Started, m_DefaultMixer);
+            const auto world = RuntimeWorld();
+            if (!world)
+            {
+                throw std::runtime_error("Runtime world initialization failed.");
+            }
+            Keire::Detail::SceneRuntimeEnvironmentAccess::Restore(*world, m_Environment.Time, m_Environment.Lighting);
             m_Load = Owner().Scenes()->Load(m_StartupScene);
             Keire::RenderSurfaceSpecification surface;
             surface.Name = "Runtime";
@@ -1062,6 +1070,7 @@ namespace
         Keire::AssetId m_DefaultInput;
         Keire::AssetId m_DefaultInputMap;
         Keire::AssetId m_DefaultMixer;
+        Keire::Detail::EnvironmentRuntimeManifest::State m_Environment;
         RuntimeCommandLine m_CommandLine;
         Keire::ReplayFingerprints m_ReplayFingerprints;
         std::shared_ptr<RuntimeReplayState> m_ReplayState;
@@ -1372,7 +1381,7 @@ namespace
             }
             (void)PushLayer(std::make_unique<RuntimeLayer>(
                 m_Manifest.StartupScene, m_Manifest.DefaultInput, m_Manifest.DefaultInputMap, m_Manifest.DefaultMixer,
-                m_Manifest.Rendering, m_CommandLine, m_ReplayFingerprints, m_ReplayState));
+                m_Manifest.Rendering, m_Manifest.Environment, m_CommandLine, m_ReplayFingerprints, m_ReplayState));
         }
 
       private:

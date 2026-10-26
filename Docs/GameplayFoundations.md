@@ -100,8 +100,16 @@ base/variant prefab sources, and its deterministic cook/runtime route validates 
 
 ## Cooked runtime manifests
 
-Runtime manifests use schema 4 and include build identity, the ordered enabled build-scene IDs and matching startup
+Runtime manifests use schema 9 and include build identity, the ordered enabled build-scene IDs and matching startup
 scene, required source modules, managed assembly roots, default input and mixer identities, subsystem flags, the
-32-layer physics configuration, rendering environment values, and streaming settings. Duplicate, empty, oversized, or
-startup-mismatched scene lists fail before assets mount. Older content fails with a direct recook diagnostic; manifests
+32-layer physics configuration, rendering environment values, authored environment time and lighting profile, and streaming settings.
+Schema-4 content remains readable with default time; schema 5 retains its validated time record. Both default to
+authored lighting. Schemas 6–8 require validated time and lighting records, restored together before scene startup.
+Schemas 7–8 additionally require validated atmosphere/cloud rendering records; schemas 4–6 use disabled defaults for them.
+Schema 8 requires the versioned bloom record; older schemas default bloom to disabled and reject embedded bloom data.
+The world evaluates the profile into the shared player/Play render request's optional directional-light snapshot.
+Earlier atmosphere/cloud headless cooking/startup and capture tests passed. The new schema-8 cook/player integration
+still needs rebuilt end-to-end validation; player/Play visual parity and automatic shadows remain unverified.
+Duplicate, empty, oversized, or startup-mismatched scene lists fail before assets mount. Content older than schema 4
+fails with a recook diagnostic; manifests
 from a newer schema fail without partially starting runtime services.

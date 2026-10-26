@@ -9,8 +9,10 @@
 
 #include <doctest/doctest.h>
 
+#include <array>
 #include <cstddef>
 #include <filesystem>
+#include <limits>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -60,6 +62,88 @@ namespace
         }
     };
 } // namespace
+
+TEST_CASE("Transform restoration preserves unit rotations and rejects invalid state atomically")
+{
+    const auto registration = Keire::CreateTransformComponentRegistration();
+    Keire::TransformComponent transform;
+    for (int angle = -180; angle <= 180; angle += 15)
+    {
+        transform.SetLocalEulerAngles({static_cast<float>(angle), 37.0F, -71.0F});
+        const auto rotation = transform.LocalRotation();
+        auto values = registration.Serialize(transform);
+        for (int cycle = 0; cycle < 32; ++cycle)
+        {
+            registration.Deserialize(transform, values, 1);
+            CHECK(transform.LocalRotation() == rotation);
+            values = registration.Serialize(transform);
+        }
+        const Keire::Quaternion opposite{-rotation.X, -rotation.Y, -rotation.Z, -rotation.W};
+        values["rotation"] = opposite;
+        registration.Deserialize(transform, values, 1);
+        CHECK(transform.LocalRotation() == opposite);
+    }
+    auto values = registration.Serialize(transform);
+    values["rotation"] = Keire::Quaternion{0.0F, 0.0F, 0.0F, 2.0F};
+    registration.Deserialize(transform, values, 1);
+    CHECK(transform.LocalRotation() == Keire::Quaternion{});
+    const auto before = registration.Serialize(transform);
+    for (const auto invalid : std::array{Keire::Quaternion{0.0F, 0.0F, 0.0F, 0.0F},
+                                         Keire::Quaternion{std::numeric_limits<float>::infinity(), 0.0F, 0.0F, 1.0F},
+                                         Keire::Quaternion{0.0F, std::numeric_limits<float>::quiet_NaN(), 0.0F, 1.0F}})
+    {
+        values["position"] = Keire::Vector3{12.0F, 13.0F, 14.0F};
+        values["rotation"] = invalid;
+        CHECK_THROWS_AS(registration.Deserialize(transform, values, 1), std::invalid_argument);
+        CHECK(registration.Serialize(transform) == before);
+    }
+}
+
+TEST_CASE("Scene history round trips normalized rotations without manufacturing unsaved edits")
+{
+    PersistenceFixture fixture;
+    const auto scene = fixture.Document.EditingScene();
+    const auto entity = scene->Entities().front();
+    const auto transform = entity.GetComponent<Keire::TransformComponent>();
+    REQUIRE(transform);
+    // This rounded authored light orientation alternates between adjacent unit float quaternions if normalized again.
+    transform->SetLocalRotation({0.880651F, 0.113152F, -0.376104F, 0.264946F});
+    const auto light = fixture.Document.AddComponent(entity.Id(), Keire::DirectionalLightComponent::StaticType());
+    REQUIRE(light);
+    fixture.Document.Save();
+    const auto saved = scene->Snapshot();
+    const auto savedBytes = Keire::SceneAsset::Encode(saved);
+    const auto savedRotation = transform->LocalRotation();
+    const auto registry = scene->Components();
+    const auto restore = [&](const Keire::SceneDefinition& definition)
+    {
+        auto replacement = Keire::CreateRef<Keire::Scene>(fixture.Asset, definition, registry);
+        replacement->MarkDirty();
+        fixture.Document.ReplaceEditingScene(std::move(replacement), true);
+        fixture.Document.RefreshDirtyState();
+    };
+    for (int cycle = 0; cycle < 32; ++cycle)
+    {
+        INFO("History round trip: " << cycle);
+        const auto before = fixture.Document.EditingScene()->Snapshot();
+        const std::array selected{entity.Id().Value()};
+        fixture.Document.SetComponentsEnabled(selected, light->Type(), false);
+        const auto after = fixture.Document.EditingScene()->Snapshot();
+        fixture.Document.RefreshDirtyState();
+        CHECK(fixture.Document.Dirty());
+        restore(before);
+        const auto current = fixture.Document.EditingScene();
+        CHECK_FALSE(fixture.Document.Dirty());
+        CHECK(Keire::SceneAsset::Encode(current->Snapshot()) == savedBytes);
+        CHECK(current->FindEntity(entity.Id()).GetComponent<Keire::TransformComponent>()->LocalRotation() ==
+              savedRotation);
+        CHECK(current->FindEntity(entity.Id()).GetComponent(light->Type())->Enabled());
+        restore(after);
+        CHECK(fixture.Document.Dirty());
+        CHECK_FALSE(fixture.Document.EditingScene()->FindEntity(entity.Id()).GetComponent(light->Type())->Enabled());
+        restore(before);
+    }
+}
 
 TEST_CASE("Scene persistence rejects changed source and preserves dirty state and recovery")
 {

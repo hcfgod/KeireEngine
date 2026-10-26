@@ -130,6 +130,8 @@ namespace
             if (invalidRendering)
                 Write(payload / "ProjectSettings/Rendering.keiresettings", "{\"schemaVersion\":999}");
             Write(payload / "ProjectSettings/Project.keireproject", "do not replace project identity");
+            Write(payload / "ProjectSettings/EnvironmentTime.keiresettings", "unsupported packaged daily time");
+            Write(payload / "ProjectSettings/EnvironmentLighting.keiresettings", "unsupported packaged daily lighting");
             const auto bytes = Keire::InputActionAsset::Encode(Keire::InputActionAsset::GameplayDefinition());
             {
                 std::ofstream stream(payload / "Assets/Controls.keireinput", std::ios::binary);
@@ -191,14 +193,23 @@ TEST_CASE("asset package settings are explicit validated project-owned choices")
     const auto descriptor = fixture.Project->Root() / "ProjectSettings/Project.keireproject";
     const auto original = Keire::Project::Open(fixture.Project->Root())->Descriptor();
     const auto rendering = fixture.Project->Root() / "ProjectSettings/Rendering.keiresettings";
+    const auto dailyTime = fixture.Project->Root() / "ProjectSettings/EnvironmentTime.keiresettings";
+    const auto dailyLighting = fixture.Project->Root() / "ProjectSettings/EnvironmentLighting.keiresettings";
+    ProjectAssetImportFixture::Write(dailyTime, "destination daily time");
+    ProjectAssetImportFixture::Write(dailyLighting, "destination daily lighting");
     ProjectAssetImportFixture::Write(rendering, "original rendering settings");
     auto plan = importer.Preflight(request);
     REQUIRE(plan.Valid());
     CHECK(plan.HasRenderingSettings);
-    CHECK(plan.UnsupportedSettings == std::vector<std::filesystem::path>{"ProjectSettings/Project.keireproject"});
+    CHECK(plan.UnsupportedSettings ==
+          std::vector<std::filesystem::path>{"ProjectSettings/EnvironmentLighting.keiresettings",
+                                             "ProjectSettings/EnvironmentTime.keiresettings",
+                                             "ProjectSettings/Project.keireproject"});
     CHECK(plan.Entries.size() == 2);
     static_cast<void>(importer.Import(request));
     CHECK(KeireTests::ReadFile(rendering) == "original rendering settings");
+    CHECK(KeireTests::ReadFile(dailyTime) == "destination daily time");
+    CHECK(KeireTests::ReadFile(dailyLighting) == "destination daily lighting");
     CHECK(Keire::Project::Open(fixture.Project->Root())->Descriptor().DefaultInput == original.DefaultInput);
     CHECK_FALSE(std::filesystem::exists(fixture.Project->Root() / "Assets/ProjectSettings"));
 
@@ -221,6 +232,8 @@ TEST_CASE("asset package settings are explicit validated project-owned choices")
     fixture.Project->Save(fixture.Project->Descriptor());
     CHECK(Keire::Project::Open(fixture.Project->Root())->Descriptor().DefaultInput == fixture.PrimaryId);
     CHECK_NOTHROW(Keire::LoadRenderEnvironmentSettings(fixture.Project->Root()));
+    CHECK(KeireTests::ReadFile(dailyTime) == "destination daily time");
+    CHECK(KeireTests::ReadFile(dailyLighting) == "destination daily lighting");
     CHECK(result.Receipt.Entries.size() == 2);
     CHECK(std::ranges::none_of(result.Receipt.Entries, &Keire::ProjectAssetImportReceiptEntry::Owned));
     static_cast<void>(importer.Remove(result.Receipt.PackageId));
@@ -243,6 +256,46 @@ TEST_CASE("invalid optional package settings fail before publication")
         CHECK_THROWS(importer.Import(request));
         CHECK(KeireTests::ReadFile(descriptor) == before);
         CHECK_FALSE(std::filesystem::exists(fixture.Project->Root() / "Assets/Controls.keireinput"));
+    }
+}
+
+TEST_CASE("kept local rendering settings determine import validation")
+{
+    for (const bool invalidLocal : {false, true})
+    {
+        ProjectAssetImportFixture fixture;
+        auto request = fixture.SettingsPackage(!invalidLocal);
+        request.ApplyRenderingSettings = true;
+        const std::filesystem::path renderingPath = "ProjectSettings/Rendering.keiresettings";
+        request.Decisions.push_back({renderingPath, Keire::ProjectAssetImportResolution::KeepLocal});
+        Keire::RenderEnvironmentSettings localSettings;
+        localSettings.Exposure = 2.0F;
+        Keire::SaveRenderEnvironmentSettings(fixture.Project->Root(), localSettings);
+        if (invalidLocal)
+        {
+            ProjectAssetImportFixture::Write(fixture.Project->Root() / renderingPath, "{\"schemaVersion\":999}");
+        }
+        const auto before = KeireTests::ReadFile(fixture.Project->Root() / renderingPath);
+        auto importer = fixture.Importer();
+        const auto plan = importer.Preflight(request);
+        REQUIRE(plan.Valid());
+        const auto entry =
+            std::ranges::find(plan.Entries, renderingPath, &Keire::ProjectAssetImportPlanEntry::ProjectPath);
+        REQUIRE(entry != plan.Entries.end());
+        CHECK(entry->Disposition == Keire::ProjectAssetImportDisposition::KeepLocal);
+        if (invalidLocal)
+        {
+            CHECK_THROWS(importer.Import(request));
+            CHECK_FALSE(std::filesystem::exists(fixture.Project->Root() / "Assets/Controls.keireinput"));
+            CHECK_FALSE(importer.Receipt("com.keire.tests.settings-import").has_value());
+        }
+        else
+        {
+            const auto result = importer.Import(request);
+            CHECK(std::ranges::find(result.Retained, renderingPath) != result.Retained.end());
+            CHECK(std::filesystem::exists(fixture.Project->Root() / "Assets/Controls.keireinput"));
+        }
+        CHECK(KeireTests::ReadFile(fixture.Project->Root() / renderingPath) == before);
     }
 }
 

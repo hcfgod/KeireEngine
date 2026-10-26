@@ -161,7 +161,7 @@ Commands: bootstrap, generate, build, test, run, clean, coverage, package,
 
 Common options:
   --generator <ninja|gmake|xcode4|compilecommands>
-  --configuration <Debug|Release|Profile|Dist|DebugASan|DebugUBSan|DebugTSan|Coverage>
+  --configuration <Debug|Release|Profile|Dist|DevDist|DebugASan|DebugUBSan|DebugTSan|Coverage>
   --architecture <x86_64|ARM64> --toolset <default|gcc|clang>
   --compiler-cache <auto|off|sccache> (Ninja builds; auto uses sccache when installed)
   --allow-dirty (package commands only; emits a local development artifact and is rejected in CI)
