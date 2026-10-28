@@ -73,7 +73,13 @@ namespace Keire::Detail
             connect(constant(ShaderGraphValueType::Scalar, 1.0F), strength, "A");
             connect(gradient, strength, "B");
             connect(parameter("Strength", 0.6F), strength, "T");
-            result = binary(ShaderGraphNodeKind::Multiply, ShaderGraphValueType::Color, sample(uv), strength);
+            // A vignette attenuates radiance, not coverage. Changing scene alpha makes an
+            // embedded viewport blend with its UI background and creates radial bands.
+            const auto rgbStrength = binary(ShaderGraphNodeKind::Multiply, ShaderGraphValueType::Color, strength,
+                                            constant(ShaderGraphValueType::Color, Color{1, 1, 1, 0}));
+            const auto colorStrength = binary(ShaderGraphNodeKind::Add, ShaderGraphValueType::Color, rgbStrength,
+                                              constant(ShaderGraphValueType::Color, Color{0, 0, 0, 1}));
+            result = binary(ShaderGraphNodeKind::Multiply, ShaderGraphValueType::Color, sample(uv), colorStrength);
         }
         else
         {

@@ -11,3 +11,23 @@ float VolumeSegmentWeight(float opticalDepth)
     }
     return (1.0F - exp(-opticalDepth)) / opticalDepth;
 }
+
+struct VolumeIntegratedMedium
+{
+    float Transmittance;
+    float Radiance;
+};
+
+// Coefficients are finite, nonnegative and summed over all media occupying this segment.
+// Source is lit radiance per metre, not albedo. This also supports emissive vacuum.
+VolumeIntegratedMedium IntegrateVolumeMedium(float extinction, float source, float distance)
+{
+    const float opticalDepth = extinction * distance;
+    VolumeIntegratedMedium result;
+    result.Transmittance = exp(-opticalDepth);
+    // Divide by extinction in the thick branch to avoid overflowing source * distance.
+    result.Radiance = opticalDepth < 0.1F
+        ? source * distance * VolumeSegmentWeight(opticalDepth)
+        : (source / extinction) * (1.0F - result.Transmittance);
+    return result;
+}

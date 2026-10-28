@@ -47,15 +47,24 @@ namespace Keire::Detail
         {
             return AtmosphereRayInterval{0.0, 0.0, true};
         }
+        const double directionLength = std::sqrt(directionLengthSquared);
+        projection /= directionLength;
+        double closestDistanceSquared = 0.0;
+        for (std::size_t axis = 0; axis < 3; ++axis)
+        {
+            const double closest = std::fma(-projection, direction[axis] / directionLength, origin[axis]);
+            closestDistanceSquared = std::fma(closest, closest, closestDistanceSquared);
+        }
         // (r - R)(r + R) retains near-surface height better than r*r - R*R.
         const auto roots = [&](const double radius) -> std::optional<std::array<double, 2>>
         {
             const double constant = (originRadius - radius) * (originRadius + radius);
-            const double discriminant = std::fma(projection, projection, -constant);
-            // Radius reconstruction and the dot product can put an exact tangent a few ulps below zero.
-            // Scale to the operands, not a world-space epsilon, so genuine nearby misses stay misses.
+            // Closest approach avoids subtracting two astronomical squared distances.
+            // The tolerance must scale with the planet, not the observer's distance;
+            // otherwise distant rays that genuinely miss become false tangent hits.
+            const double discriminant = std::fma(radius, radius, -closestDistanceSquared);
             const double roundoff =
-                8.0 * std::numeric_limits<double>::epsilon() * std::max(projection * projection, std::abs(constant));
+                8.0 * std::numeric_limits<double>::epsilon() * std::max(radius * radius, closestDistanceSquared);
             if (discriminant < -roundoff)
             {
                 return std::nullopt;

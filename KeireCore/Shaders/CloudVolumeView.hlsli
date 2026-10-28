@@ -3,7 +3,7 @@
 #include "CloudVolume.hlsli"
 #include "VolumeSurfaceComposition.hlsli"
 
-// Shared background/surface constants. Keep the host's 448-byte layout in this order.
+// Shared background/surface constants. Keep the host's 1520-byte layout in this order.
 struct CloudVolumeView
 {
     float4x4 InverseProjection;
@@ -23,6 +23,7 @@ struct CloudVolumeView
     AtmosphereMedium Atmosphere;
     float4 HeightProfile;
     float4 WeatherControls;
+    FogViewDensity Fog;
 };
 
 struct CloudVolumeViewTransport
@@ -47,7 +48,7 @@ CloudVolumeParameters MakeCloudVolumeParameters(CloudVolumeView view)
     parameters.Thickness = view.Geometry.y;
     parameters.PatternSize = view.Geometry.z;
     parameters.Coverage = view.Density.x;
-    parameters.Extinction = view.Density.y;
+    parameters.Extinction = view.Quality.x != 0U ? view.Density.y : 0.0F;
     parameters.DetailAmount = view.Density.z;
     // Zero in the formerly reserved lane preserves coupled detail for older uniform producers.
     parameters.ErosionAmount = VolumeCloudErosionAmount(view.RegionalControls.w, view.Density.z);
@@ -86,7 +87,8 @@ CloudVolumeViewRay MakeCloudVolumeViewRay(float2 uv, float depth, CloudVolumeVie
     ray.Origin = orthographic ? mul((float3x3)view.InverseView, nearView) : 0.0F;
     ray.Direction = normalize(mul((float3x3)view.InverseView,
         orthographic ? middleView - nearView : middleView));
-    ray.MaximumDistance = view.Geometry.w;
+    ray.MaximumDistance = max(view.Quality.x != 0U ? view.Geometry.w : 0.0F,
+        view.Fog.Controls.x != 0U ? view.Fog.HeightDensity.w : 0.0F);
     ray.SurfaceDistance = 0.0F;
     if (depth < 1.0F)
     {
@@ -106,11 +108,11 @@ float4 EvaluateCloudVolumeTrace(CloudVolumeViewRay ray, CloudVolumeView view, bo
     parameters.RaySamplePhase = samplePhase;
     cloudDistance = 0.0F;
     float4 volume = 0.0F;
-    if (view.Quality.x != 0U)
+    if (view.Quality.x != 0U || view.Fog.Controls.x != 0U)
     {
         volume = IntegrateCloudVolumeWithDepth(ray.Origin, ray.Direction, 0.0F, ray.MaximumDistance,
             view.SunDirection.xyz, view.SunRadiance.xyz, view.AmbientRadiance.xyz, parameters,
-            view.Atmosphere, includeRadiance, cloudDistance);
+            view.Atmosphere, includeRadiance, view.Fog, cloudDistance);
     }
     return volume;
 }
@@ -143,7 +145,7 @@ CloudVolumeViewTransport ComposeCloudVolumeTrace(float4 volume, float cloudDista
 // Output matches the engine's pre-exposed HDR target; opacity must not be exposed.
 CloudVolumeViewTransport EvaluateCloudVolumeView(float2 uv, float depth, CloudVolumeView view, bool includeRadiance)
 {
-    if (view.Quality.x == 0U && view.Atmosphere.Controls.x <= 0.5F)
+    if (view.Quality.x == 0U && view.Atmosphere.Controls.x <= 0.5F && view.Fog.Controls.x == 0U)
     {
         CloudVolumeViewTransport empty = (CloudVolumeViewTransport)0;
         empty.Transmission = 1.0F;

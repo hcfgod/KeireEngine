@@ -537,6 +537,7 @@ namespace Keire::RenderBackend
         std::vector<SceneLightProbeVolume> LightProbeVolumes;
         std::vector<SceneSpatialContribution> SpatialContributions;
         bool DrawGrid = false;
+        SceneGridSettings Grid;
         std::vector<VfxRenderSnapshot> VfxSnapshots;
         float MaterialTimeSeconds = 0.0F;
         float MaterialDeltaSeconds = 0.0F;
@@ -1046,7 +1047,7 @@ namespace Keire::RenderBackend
                                                                          CloudVolumePass pass);
         [[nodiscard]] const GpuTextureResources& EnsureCloudNoiseTexture();
         void RecordCloudVolume(SDL_GPUCommandBuffer* commands, RenderSurfaceState& surface,
-                               const SceneRenderPacket& packet);
+                               const SceneRenderPacket& packet, const ShadowFrameData& shadows);
         SDL_GPUShader* CreateCloudVolumeShader(bool vertex) const;
         void RecordBloom(SDL_GPUCommandBuffer* commands, const RenderSurfaceState& surface,
                          const BloomSettings& settings, BloomPass bloomPass);

@@ -5,7 +5,7 @@ retains its original version and scope; this historical review is not a certific
 
 Review date: 2026-08-25
 
-Documentation reconciliation, October 26, 2026: the maintained inventory contains 116 guides and progress records,
+Documentation reconciliation, October 28, 2026: the maintained inventory contains 117 guides and progress records,
 including 22 user-manual guides. Current material authoring uses shader selection and properties in the Inspector;
 use [Materials](Manual/MaterialGraph.md) for the workflow. This documentation audit does not rerun the historical
 production scenarios or promote their scores into a current product certification.

@@ -382,7 +382,7 @@ namespace Keire::RenderBackend
         CloudVolumeViewUniforms Volume;
     };
 
-    static_assert(sizeof(AssetEnvironmentVolumeUniforms) == 1392U);
+    static_assert(sizeof(AssetEnvironmentVolumeUniforms) == 2464U);
     static_assert(offsetof(AssetEnvironmentVolumeUniforms, Volume) == 944U);
 
     static_assert(sizeof(AssetObjectUniforms) == sizeof(float) * 64);
@@ -409,9 +409,10 @@ namespace Keire::RenderBackend
         CloudLightingUniforms CloudLighting;
         StarFieldUniforms Stars;
         SkyColorUniforms SkyColors;
+        Vector4 GroundReflectance;
     };
 
-    static_assert(sizeof(SkyUniforms) == sizeof(float) * 132);
+    static_assert(sizeof(SkyUniforms) == sizeof(float) * 136);
     static_assert(offsetof(SkyUniforms, SkyColors) == 496);
 
     struct GridUniforms final
@@ -420,7 +421,8 @@ namespace Keire::RenderBackend
         Matrix4 InverseView;
         Matrix4 ViewProjection;
         Vector4 Parameters;
+        Vector4 Appearance;
     };
 
-    static_assert(sizeof(GridUniforms) == sizeof(float) * 52);
+    static_assert(sizeof(GridUniforms) == sizeof(float) * 56);
 } // namespace Keire::RenderBackend

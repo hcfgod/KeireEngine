@@ -11,6 +11,10 @@ namespace Keire::Detail
     {
         const auto bounded = [](const double value, const double minimum, const double maximum)
         { return std::isfinite(value) && value >= minimum && value <= maximum; };
+        if (!bounded(settings.GroundIntensity, 0.0, 100.0))
+        {
+            throw std::invalid_argument("Atmosphere ground intensity must be finite and within 0..100.");
+        }
         for (const double coordinate : settings.PlanetCenter)
         {
             if (!bounded(coordinate, -1.0e15, 1.0e15))
@@ -29,7 +33,8 @@ namespace Keire::Detail
         {
             if (!bounded(settings.RayleighScattering[channel], 0.0, 0.01) ||
                 !bounded(settings.AbsorptionExtinction[channel], 0.0, 0.01) ||
-                !bounded(settings.SolarIrradiance[channel], 0.0, 100'000.0))
+                !bounded(settings.SolarIrradiance[channel], 0.0, 100'000.0) ||
+                !bounded(settings.GroundReflectance[channel], 0.0, 1.0))
             {
                 throw std::invalid_argument("Atmosphere spectral coefficients or solar irradiance are invalid.");
             }

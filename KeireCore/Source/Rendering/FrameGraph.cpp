@@ -520,8 +520,10 @@ namespace Keire::RenderBackend
         // Opaque indirect lighting belongs behind translucent surfaces and participating media.
         const auto cloudVolumeComplete =
             result.Graph.AddResource({"Cloud volume complete", FrameGraphResourceKind::Buffer, true});
-        result.CloudVolume = result.Graph.AddPass(
-            {"Cloud volume", {result.HdrScene, result.SampledDepth, opaqueLightingComplete}, {cloudVolumeComplete}});
+        result.CloudVolume =
+            result.Graph.AddPass({"Cloud volume",
+                                  {result.HdrScene, result.SampledDepth, opaqueLightingComplete, shadows},
+                                  {cloudVolumeComplete}});
         result.Transparency =
             result.Graph.AddPass({"Transparency",
                                   {result.HdrScene, result.SampledDepth, cloudVolumeComplete,

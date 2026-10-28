@@ -2,6 +2,37 @@
 
 ## Unreleased
 
+- Add development fog exclusion regions with soft edges, strength, enable controls and strongest-overlap behavior.
+  Volume ABI 9 and Shader Graph importer 50 carry the new uniforms; legacy fog records load without exclusions.
+  Native editor/player and performance acceptance remain pending.
+
+- Add per-box fog enable controls, preserving authored values and migrating older boxes as enabled.
+  Disabled boxes are excluded from CPU density evaluation and GPU volume packing.
+
+- Preserve cloud-only sampling when fog is enabled with zero global density and no visible local volumes, avoiding an unnecessary fog quality budget and changes to cloud opacity.
+
+- Integrate local fog box soft edges over ray segments, including oblique crossings, instead of treating thin
+  volumes as solid fog at low sample counts. Native rendering and performance acceptance remain pending.
+
+- Integrate exponential height-fog density across each ray segment to avoid sample-count-dependent opacity
+  on steep upward/downward rays and crossings of the fog base; native visual acceptance remains pending.
+
+- Prioritize the saved scene's dependency migration before unrelated startup imports when a published catalog exists.
+  Failed dependency imports block the scene handoff; projects without a usable catalog retain the full-import fallback.
+
+- Defer temporary shader-source writes until a validated compiler-cache miss; cached imports retain source and ABI validation.
+
+- Add a lit procedural ground boundary with editable linear RGB color, independent intensity, and legacy atmosphere-record migration.
+  This affects the reference planet rather than scene geometry; native visual and performance acceptance remain pending.
+
+- Wire development height/local fog into the shared cloud volume view and depth capture, preserving legacy material uniform prefixes with volume ABI 8. Shader Graph importer 49 rebuilds affected material outputs. Shared Environment/Project Settings controls and cooked runtime propagation are implemented; native acceptance remains pending.
+
+- Add development fog settings persistence in rendering schema 9, with disabled migration defaults and validated local volumes. Rendering integration and authoring controls remain in development.
+
+- Preserve scene alpha in newly created fullscreen Vignette presets. Edge darkening now affects RGB only,
+  avoiding radial transparency bands when the viewport is composited into the editor. Existing authored graphs
+  remain unchanged; their attenuation multiplier should use alpha 1.
+
 - Reduce cloud weather sampling and zero-sun lighting work; reuse night caches and skip optically empty cache builds.
   Preserve dark gradients with half-float intermediates and final display dithering. Focused CPU, ASan lifecycle,
   and D3D12/Vulkan shader checks pass; native appearance and frame-time acceptance remain pending.

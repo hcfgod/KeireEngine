@@ -49,7 +49,7 @@ TEST_CASE("built-in surface shaders preserve asset UVs and consume baked lightma
     CHECK(forwardShader.find("Texture2D<float4> EnvironmentTexture : register(t4, space2)") != std::string::npos);
     CHECK(forwardShader.find("CameraPositionExposure.w") != std::string::npos);
     CHECK(forwardShader.find("return float4(saturate(") == std::string::npos);
-    CHECK(sizeof(Keire::RenderBackend::BuiltInSpatialLightingUniforms) == sizeof(float) * 28U + 448U);
+    CHECK(sizeof(Keire::RenderBackend::BuiltInSpatialLightingUniforms) == sizeof(float) * 28U + 1520U);
     CHECK(offsetof(Keire::RenderBackend::BuiltInSpatialLightingUniforms, CloudVolume) == sizeof(float) * 28U);
     CHECK(offsetof(Keire::RenderBackend::BuiltInSpatialLightingUniforms, CameraPositionExposure) ==
           sizeof(float) * 12U);
@@ -69,7 +69,7 @@ TEST_CASE("built-in surface shaders preserve asset UVs and consume baked lightma
 
 TEST_CASE("Editor grid shader reconstructs an infinite plane and writes scene depth")
 {
-    CHECK(sizeof(Keire::RenderBackend::GridUniforms) == sizeof(float) * 52);
+    CHECK(sizeof(Keire::RenderBackend::GridUniforms) == sizeof(float) * 56);
 
     std::ifstream stream("KeireCore/Shaders/BuiltinGrid.hlsl", std::ios::binary);
     REQUIRE(stream.good());

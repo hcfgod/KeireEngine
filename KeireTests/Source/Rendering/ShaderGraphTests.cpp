@@ -191,7 +191,7 @@ TEST_CASE("Shader Graph compatibility versions are explicit and future sources f
     CHECK(manifest.at("instanceAddressingAbiVersion") == 2U);
     CHECK(manifest.at("occlusionSupport") == 3U);
     CHECK(manifest.at("spatialLightingAbiVersion") == 3U);
-    CHECK(manifest.at("volumeLightingAbiVersion") == 7U);
+    CHECK(manifest.at("volumeLightingAbiVersion") == 9U);
     CHECK(manifest.at("maximumWorldPositionDisplacementRadius").get<float>() == doctest::Approx(0.0F));
     CHECK(variant.Hlsl.find("Generator version 26, source schema 6") != std::string::npos);
     CHECK(variant.Hlsl.find("#define KEIRE_CLOUD_NOISE_TEXTURE t") != std::string::npos);

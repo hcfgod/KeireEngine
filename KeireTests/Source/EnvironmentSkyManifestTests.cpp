@@ -26,7 +26,8 @@ TEST_CASE("Runtime manifests preserve HDR sky curves and disabled authoring acro
                                        {{"atmosphere", EncodeAtmosphere({})},
                                         {"clouds", EncodeCloudSettings({})},
                                         {"bloom", EncodeBloomSettings({})},
-                                        {"stars", EncodeStarField({})}}}};
+                                        {"stars", EncodeStarField({})},
+                                        {"fog", EncodeFogDensity({})}}}};
         const auto decoded = EnvironmentRuntimeManifest::DecodeState(nlohmann::json::parse(manifest.dump()));
         CHECK(decoded.Lighting == profile);
         CHECK(decoded.Time == clock);
@@ -247,4 +248,58 @@ TEST_CASE("Runtime sky manifest rejects incompatible nested record versions with
     auto incompatible = SkyManifest();
     incompatible["rendering"]["clouds"]["version"] = 999;
     CHECK_THROWS_AS((void)EnvironmentRuntimeManifest::DecodeState(incompatible), std::invalid_argument);
+}
+
+TEST_CASE("Runtime atmosphere preserves ground reflectance and migrates legacy ground records")
+{
+    using namespace Keire::Detail;
+    auto manifest = SkyManifest();
+    Keire::AtmosphereSettings atmosphere;
+    atmosphere.Enabled = true;
+    atmosphere.GroundReflectance = {0.02, 0.3, 0.7};
+    atmosphere.GroundIntensity = 3.5;
+    manifest["rendering"]["atmosphere"] = EncodeAtmosphere(atmosphere);
+    CHECK(EnvironmentRuntimeManifest::DecodeState(manifest).Atmosphere == atmosphere);
+    auto& record = manifest["rendering"]["atmosphere"];
+    record.erase("schemaVersion");
+    record.erase("groundReflectance");
+    record.erase("groundIntensity");
+    atmosphere.GroundReflectance = Keire::AtmosphereSettings{}.GroundReflectance;
+    atmosphere.GroundIntensity = 1.0;
+    CHECK(EnvironmentRuntimeManifest::DecodeState(manifest).Atmosphere == atmosphere);
+    record["groundReflectance"] = {1, 1, 1};
+    CHECK_THROWS_AS((void)EnvironmentRuntimeManifest::DecodeState(manifest), std::invalid_argument);
+}
+
+TEST_CASE("Runtime fog preserves authored volumes and rejects missing malformed or downgraded records")
+{
+    using namespace Keire::Detail;
+    auto manifest = SkyManifest();
+    CHECK(EnvironmentRuntimeManifest::DecodeState(manifest).Fog == Keire::FogSettings{});
+    manifest["schemaVersion"] = EnvironmentRuntimeManifest::FogSchema;
+    manifest["rendering"]["bloom"] = EncodeBloomSettings({});
+    manifest["rendering"]["stars"] = EncodeStarField({});
+    CHECK_THROWS_AS((void)EnvironmentRuntimeManifest::DecodeState(manifest), std::invalid_argument);
+    Keire::FogSettings fog;
+    fog.Enabled = true;
+    fog.LocalVolumes.emplace_back();
+    fog.LocalVolumes.front().Center = {1.0e12 + 0.125, 25.0, -30.0};
+    fog.LocalVolumes.front().Enabled = false;
+    fog.LocalVolumes.emplace_back();
+    fog.Anisotropy = -0.4;
+    fog.ExclusionRegions.emplace_back();
+    fog.ExclusionRegions.front().Center = {1.0e12 + 0.125, 7.0, 8.0};
+    fog.ExclusionRegions.front().Strength = 0.6;
+    manifest["rendering"]["fog"] = EncodeFogDensity(fog);
+    CHECK(EnvironmentRuntimeManifest::DecodeState(nlohmann::json::parse(manifest.dump())).Fog == fog);
+    for (const unsigned schema : {4U, 5U, 6U, 7U, 8U, 9U})
+    {
+        auto downgraded = manifest;
+        downgraded["schemaVersion"] = schema;
+        CHECK_THROWS_AS((void)EnvironmentRuntimeManifest::DecodeState(downgraded), std::invalid_argument);
+    }
+    manifest["rendering"]["fog"]["localVolumes"][0]["halfExtent"] = {0, 1, 1};
+    CHECK_THROWS_AS((void)EnvironmentRuntimeManifest::DecodeState(manifest), std::invalid_argument);
+    manifest["schemaVersion"] = EnvironmentRuntimeManifest::FogSchema + 1;
+    CHECK_THROWS_AS((void)EnvironmentRuntimeManifest::DecodeState(manifest), std::invalid_argument);
 }

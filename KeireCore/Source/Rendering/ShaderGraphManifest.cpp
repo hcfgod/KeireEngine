@@ -214,7 +214,7 @@ namespace Keire::Detail
              maximumWorldPositionDisplacementRadius ? Json(*maximumWorldPositionDisplacementRadius) : Json(nullptr)},
             {"usesImageBasedLighting", lit},
             {"spatialLightingAbiVersion", lit ? 3 : 0},
-            {"volumeLightingAbiVersion", screenSpace ? 0 : 7},
+            {"volumeLightingAbiVersion", screenSpace ? 0 : 9},
             {"usesVertexMaterialParameters", usesVertexMaterialParameters},
             {"stages", {{"vertex", "VSMain"}, {"fragment", "PSMain"}}},
             {"defines", std::move(defines)},

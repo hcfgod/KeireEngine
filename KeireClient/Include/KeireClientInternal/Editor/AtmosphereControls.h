@@ -123,6 +123,16 @@ namespace KeireEditor::Detail
                 "Coefficients are inverse metres, not colors. Extinction includes scattering "
                 "and cannot be lower than Mie scattering. Positive anisotropy favors forward scattering.");
         }
+        if (auto ground = ui.BeginSection("Ground / Void Appearance"); ground)
+        {
+            changed |=
+                DrawAtmosphereScalar(ui, "Ground / Void Intensity", settings.GroundIntensity, 0.01, 0.0, 100.0, commit);
+            changed |= DrawAtmosphereSpectrum(ui, "Ground / Void Color (linear RGB)", settings.GroundReflectance, 0.01,
+                                              1.0, commit);
+            ui.TextColoredWrapped(theme.MutedText,
+                                  "Colors the reference planet below the horizon. This does not create terrain or "
+                                  "change scene materials. Sunlight and environment ambient light illuminate it.");
+        }
         if (auto sunlight = ui.BeginSection("Sun and Quality Budget"); sunlight)
         {
             changed |= DrawAtmosphereSpectrum(ui, "Top-of-atmosphere Solar Irradiance", settings.SolarIrradiance, 0.1,

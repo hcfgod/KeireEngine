@@ -640,7 +640,8 @@ namespace Keire::RenderBackend
             const GridUniforms grid{Math::Inverse(camera.Projection),
                                     Math::Inverse(camera.View),
                                     Math::Multiply(camera.Projection, camera.View),
-                                    {1.0F, 10.0F, 0.45F, 0.7F}};
+                                    {1.0F, 10.0F, 0.45F, 0.7F},
+                                    {packet.Grid.Opacity, packet.Grid.FadeDistance, 0.0F, 0.0F}};
             SDL_PushGPUFragmentUniformData(commands, 0, &grid, sizeof(grid));
             SDL_BindGPUGraphicsPipeline(pass, pipelines.Grid);
             SDL_DrawGPUPrimitives(pass, 3, 1, 0, 0);

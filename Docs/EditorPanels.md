@@ -127,6 +127,12 @@ drawer. Mesh and Material metadata carries its expected asset type so those fiel
 fields select from the open scene. An edit is validated against a fresh component first, records undo only after that
 validation succeeds, and restores the original property bag if applying the validated change unexpectedly fails.
 
+The fullscreen **Vignette** preset darkens RGB without changing scene alpha. Existing graphs created from the older
+preset are not rewritten automatically. If a vignette creates screen-centered transparency bands, preserve the
+sampled Scene Color alpha: multiply the scalar attenuation by Color `(1, 1, 1, 0)`, add Color `(0, 0, 0, 1)`, then
+multiply Scene Color by that RGBA multiplier. Keep the existing Radius, Softness, and Strength parameters.
+This preserves coverage instead of forcing transparent scene pixels opaque.
+
 Camera components expose **Fullscreen Effects** with **Before Tonemapping**, **After Tonemapping**, and **After UI**
 material slots. Assign a material created from a Fullscreen Effect Shader Graph, not the graph asset itself. Each slot
 can be cleared independently and participates in scene save/load and Inspector undo. The Scene/Game/camera-preview
@@ -138,3 +144,18 @@ images show the effect; the graph's flat thumbnail does not have Scene Color inp
 `UiImage` is an opaque reference-counted image owned by the UI service. Call `UiFrame::CreateImage` on the UI owner
 thread with RGBA8 pixels; the private rendered backend uploads and releases the texture safely. Retained images become
 inert after UI shutdown. Clients never receive a GPU texture, native handle, or ImGui identifier.
+
+### Fog authoring (development)
+
+The **Environment → Fog** tab groups height/visibility, scattering/quality and local fog boxes. The same controls
+are available under **Project Settings → Environment** and use the shared project-settings save/undo flow.
+Enable Fog to preview the authored medium; Reset Fog restores disabled defaults. Global Density is extinction
+per metre, remains constant below Base Height, and decays exponentially above it. Set it to zero to use only
+local boxes. Each box has a centre, half extents, density and soft-edge fraction; up to 16 boxes add together.
+Removing a box and adding one are individual committed edits. Numeric positions use the local scene frame.
+
+Ray Samples trades GPU cost for density detail; local-volume boundaries also split the ray automatically.
+Maximum Distance clips fog without changing opaque geometry. These controls are in development: terrain shadowing,
+exclusion volumes, native motion quality and performance acceptance are not complete. The new tab is awaiting
+native testing in the batched DevDist build. Cooked manifest schema 10 carries the same authored fog record;
+use matching development player binaries. Older manifests load with fog disabled.

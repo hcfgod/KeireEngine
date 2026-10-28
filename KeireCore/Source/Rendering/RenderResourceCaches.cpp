@@ -696,6 +696,13 @@ namespace Keire::RenderBackend
         LastCapturedDirectionalLightEntity.store(packet.Lighting.Entity.Value().Low(), std::memory_order_relaxed);
 #endif
         packet.DrawGrid = request.DrawGrid;
+        packet.Grid = request.Grid;
+        packet.Grid.Opacity = std::isfinite(request.Grid.Opacity) ? std::clamp(request.Grid.Opacity, 0.0F, 1.0F)
+                                                                  : SceneGridSettings{}.Opacity;
+        packet.Grid.FadeDistance = std::isfinite(request.Grid.FadeDistance)
+                                       ? std::clamp(request.Grid.FadeDistance, 10.0F, 2000.0F)
+                                       : SceneGridSettings{}.FadeDistance;
+        packet.DrawGrid = packet.DrawGrid && packet.Grid.Opacity > 0.0F;
         packet.MaterialTimeSeconds = request.MaterialTimeSeconds;
         packet.MaterialDeltaSeconds = request.MaterialDeltaSeconds;
         packet.AcceptedFrameId = acceptedFrameId;

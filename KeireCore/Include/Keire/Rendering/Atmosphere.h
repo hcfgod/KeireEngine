@@ -29,6 +29,12 @@ namespace Keire
         std::uint32_t ViewSamples = 24;
         std::uint32_t LightSamples = 8;
 
+        /// Linear diffuse reflectance of the atmosphere's reference ground, not authored scene geometry.
+        std::array<double, 3> GroundReflectance{0.18, 0.18, 0.18};
+
+        /// Artistic multiplier for reference-ground lighting; zero retains only atmospheric scattering.
+        double GroundIntensity = 1.0;
+
         auto operator<=>(const AtmosphereSettings&) const noexcept = default;
     };
 } // namespace Keire

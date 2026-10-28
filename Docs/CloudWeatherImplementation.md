@@ -1978,3 +1978,39 @@ transport. D3D12 and Vulkan each passed 384,000 probe samples; DXIL, SPIR-V and 
 The first Vulkan run exposed that exact attenuation equality across specialized shader paths was too strict; the
 comparison uses the existing attenuation check's 1e-6 absolute tolerance. Native staging and performance measurement
 of this additional optimization remain pending. No frame-time improvement is claimed from the invariant test.
+
+### October 28 user correction: viewport rings versus clear sky
+
+The user confirms the dark gaps between clouds are expected clear sky. Earlier descriptions of those gaps as dark
+cloud silhouettes or defective patches must not be used as a reason to fill gaps, raise cloud illumination or change
+coverage. A controlled sky-track toggle changed those gaps to the authored sky color, consistent with this correction.
+
+The reported rings occur across daylight, dusk and night and are described as viewport-space artifacts. They remain
+unresolved. Investigate the shared rendering/presentation path with identical camera and output dimensions across
+times of day. The final-display gradient probe alone does not validate cloud reconstruction, temporal history or UI
+composition. Its undithered reference has 0.4697 display-code annulus bias versus 0.07893 for the saved D3D12/Vulkan
+outputs (threshold 0.15), demonstrating sensitivity to simple quantization bands without proving the reported rings fixed.
+
+## October 28: viewport rings isolated to vignette coverage
+
+Native midnight Game-view comparisons changed camera yaw and height, then disabled and restored the assigned
+`CloudHdrVignette` fullscreen material. The broad screen-centered bands disappeared without that material and
+returned when it was restored. The preset multiplied scene RGBA by its radial attenuation, unintentionally changing
+coverage before the editor composited the viewport over its background.
+
+The preset now multiplies RGB by the attenuation while preserving sampled scene alpha. Focused production-importer
+coverage passed 3 tests / 78 assertions, including DXIL, SPIR-V and MSL compilation. The QA graph was explicitly
+updated with the equivalent RGB-only multiplier; existing user graphs are not automatically rewritten. Midnight
+checks at the baseline camera and an upward pitch, followed by noon checks at baseline and a sideways position,
+showed no broad screen-centered rings. Camera transforms were restored after each check. This does not establish
+that every possible sky gradient or display configuration is free of banding.
+
+The DevDist build passed in 50.96 seconds; the running QA editor received the graph through hot reload, while staging
+the new preset binary remains pending. At noon with both Scene and Game views visible, instantaneous status values
+were approximately 18–19 ms. Those readings are not a controlled benchmark and do not meet the requested 10 ms
+ceiling. Cloud gaps, density and sky settings were not changed to mask the artifact. Fog and large-world acceptance
+remain open.
+
+October 28 user acceptance: the user reports the viewport rings are not visible in the currently open updated
+build. Preserve this as visual evidence for that build, rather than a claim that every view or display is covered.
+Repeat the night/day Game-view angle checks after the next fog integration build.

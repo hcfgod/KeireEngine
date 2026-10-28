@@ -28,14 +28,22 @@ def main() -> None:
     parser.add_argument("--probe", type=Path, default=ROOT / f"Build/Validation/cloud-appearance-gpu{suffix}")
     parser.add_argument("--backend", choices=("direct3d12", "vulkan"), action="append", required=True)
     parser.add_argument("--output", type=Path, default=ROOT / "Build/Validation/AtmosphereMedium")
-    parser.add_argument("--suite", choices=("atmosphere", "cloud-density", "cloud-ambient"), default="atmosphere")
+    parser.add_argument("--suite", choices=("atmosphere", "atmosphere-approach", "atmosphere-ground", "cloud-density", "cloud-ambient", "grid", "volume-overlap", "fog-density", "fog-transport", "fog-view", "fog-exclusion"), default="atmosphere")
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=True)
 
     shader = {
         "atmosphere": "AtmosphereMediumProbe.hlsl",
+        "atmosphere-ground": "AtmosphereGroundProbe.hlsl",
+        "atmosphere-approach": "AtmosphereApproachProbe.hlsl",
         "cloud-density": "CloudAppearanceProbe.hlsl",
         "cloud-ambient": "CloudAmbientProbe.hlsl",
+        "grid": "GridAppearanceProbe.hlsl",
+        "volume-overlap": "VolumeOverlapProbe.hlsl",
+        "fog-density": "FogDensityProbe.hlsl",
+        "fog-transport": "FogTransportProbe.hlsl",
+        "fog-view": "FogViewProbe.hlsl",
+        "fog-exclusion": "FogExclusionProbe.hlsl",
     }[args.suite]
     for shader_format in ("DXIL", "SPIRV", "MSL"):
         subprocess.run([
@@ -47,7 +55,7 @@ def main() -> None:
 
     for backend in dict.fromkeys(args.backend):
         shader_format = "DXIL" if backend == "direct3d12" else "SPIRV"
-        densities = (0, 1, 30) if args.suite != "atmosphere" else (None,)
+        densities = (0, 1, 30) if args.suite in ("cloud-density", "cloud-ambient") else (None,)
         for density in densities:
             case = args.suite if density is None else f"density-{density}"
             parameters = [] if density is None else [

@@ -1,6 +1,7 @@
 #include "KeireInternal/Rendering/CloudTemporalRendering.h"
 #include "KeireInternal/Rendering/CloudTemporalReprojection.h"
 #include "KeireInternal/Rendering/RenderBackendInternal.h"
+#include "KeireInternal/Rendering/VolumeShadowUniforms.h"
 
 #include <array>
 #include <stdexcept>
@@ -34,7 +35,7 @@ namespace Keire::RenderBackend
     void RecordCloudTemporal(RenderSharedState& state, SDL_GPUCommandBuffer* commands, RenderSurfaceState& surface,
                              const SceneRenderPacket& packet, const CloudVolumeViewUniforms& uniforms,
                              const CloudLightCacheLookupUniforms& cacheUniforms, const GpuTextureResources& noise,
-                             SDL_GPUSampler* sampler)
+                             SDL_GPUSampler* sampler, const VolumeShadowUniforms& shadows)
     {
         auto& resources = surface.Resources.CloudHistory;
         auto& workset = surface.ActiveWorkset();
@@ -55,8 +56,11 @@ namespace Keire::RenderBackend
         rotationView.Elements[13] = 0.0F;
         rotationView.Elements[14] = 0.0F;
         current.RotationViewProjection = Math::Multiply(packet.Camera.Projection, rotationView);
+        // Moving casters change volume lighting without changing environment uniforms. Until shadow
+        // content revisions participate in history validation, do not reuse shadowed fog radiance.
+        const bool shadowedFog = FogReceivesTerrainSunlight(uniforms.Fog, uniforms.SunRadiance, shadows);
         const auto reprojection =
-            resources.PublishedView
+            resources.PublishedView && !shadowedFog
                 ? MakeCloudTemporalReprojection(current, *resources.PublishedView, packet.TemporalHistoryContinuous)
                 : std::nullopt;
         const auto& previous = reprojection ? *resources.PublishedView : current;
@@ -65,14 +69,18 @@ namespace Keire::RenderBackend
                                                          reprojection ? 1U : 0U, 0U, 0U};
 
         auto* pass = BeginCloudPair(commands, writer.Current);
-        const std::array traceBindings{SDL_GPUTextureSamplerBinding{workset.SampledDepth, sampler},
-                                       SDL_GPUTextureSamplerBinding{noise.Texture, noise.Sampler}};
+        const std::array traceBindings{
+            SDL_GPUTextureSamplerBinding{workset.SampledDepth, sampler},
+            SDL_GPUTextureSamplerBinding{noise.Texture, noise.Sampler},
+            SDL_GPUTextureSamplerBinding{
+                workset.DirectionalShadow ? workset.DirectionalShadow : state.EmptyShadowTexture, state.ShadowSampler}};
         SDL_BindGPUGraphicsPipeline(pass, tracePipeline);
         SDL_BindGPUFragmentSamplers(pass, 0, traceBindings.data(), static_cast<std::uint32_t>(traceBindings.size()));
         SDL_BindGPUFragmentStorageBuffers(pass, 0, &workset.CloudLightCache.Transmission, 1);
         SDL_PushGPUFragmentUniformData(commands, 0, &uniforms, sizeof(uniforms));
         SDL_PushGPUFragmentUniformData(commands, 1, &cacheUniforms, sizeof(cacheUniforms));
         SDL_PushGPUFragmentUniformData(commands, 2, traceControls.data(), sizeof(traceControls));
+        SDL_PushGPUFragmentUniformData(commands, 3, &shadows, sizeof(shadows));
         SDL_DrawGPUPrimitives(pass, 3, 1, 0, 0);
         SDL_EndGPURenderPass(pass);
 

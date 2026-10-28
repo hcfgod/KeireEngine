@@ -117,7 +117,8 @@ namespace Keire::RenderBackend
         bool sampledDepthRecorded = false;
         bool gpuDepthCollisionRequired = false;
         const bool cloudVolumeRequired = request != requests.end() && (request->Packet.CloudVolume.Quality[0] != 0U ||
-                                                                       request->Packet.Environment.Atmosphere.Enabled);
+                                                                       request->Packet.Environment.Atmosphere.Enabled ||
+                                                                       request->Packet.Environment.Fog.Enabled);
         if (request != requests.end())
         {
             auto started = std::chrono::steady_clock::now();
@@ -674,7 +675,7 @@ namespace Keire::RenderBackend
                 {
                     if (cloudVolumeRequired)
                     {
-                        RecordCloudVolume(commands, surface, request->Packet);
+                        RecordCloudVolume(commands, surface, request->Packet, shadows);
                     }
                     return;
                 }

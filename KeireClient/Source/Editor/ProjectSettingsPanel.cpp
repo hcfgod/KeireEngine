@@ -11,6 +11,7 @@
 #include "KeireClientInternal/Editor/EnvironmentPreviewControls.h"
 #include "KeireClientInternal/Editor/EnvironmentSkyControls.h"
 #include "KeireClientInternal/Editor/ExternalEditorSettings.h"
+#include "KeireClientInternal/Editor/FogControls.h"
 #include "KeireClientInternal/Editor/StarFieldControls.h"
 #include "KeireClientInternal/Editor/VolumetricCloudControls.h"
 #include "KeireInternal/FileSystem.h"
@@ -863,6 +864,7 @@ namespace KeireEditor
                 changed |= Detail::DrawStarFieldControls(ui, theme, settings.Stars, commit);
                 changed |= Detail::DrawCloudControls(ui, theme, settings.Clouds, commit);
                 changed |= Detail::DrawVolumetricCloudControls(ui, theme, settings.Clouds.Volume, commit);
+                changed |= Detail::DrawFogControls(ui, theme, settings.Fog, commit);
                 changed |= Detail::DrawBloomControls(ui, theme, settings.Bloom, commit);
                 Keire::UiColor ambient{settings.AmbientColor.Red, settings.AmbientColor.Green,
                                        settings.AmbientColor.Blue, settings.AmbientColor.Alpha};

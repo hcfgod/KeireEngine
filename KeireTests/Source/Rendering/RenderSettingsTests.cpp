@@ -152,6 +152,7 @@ TEST_CASE("rendering schema six persists atmosphere while legacy schemas keep it
         legacy["schemaVersion"] = schema;
         legacy.erase("atmosphere");
         legacy.erase("stars");
+        legacy.erase("fog");
         WriteSettings(directory.Path, legacy);
         const auto migrated = Keire::LoadRenderEnvironmentSettings(directory.Path);
         CHECK(migrated.SchemaVersion == Keire::RenderEnvironmentSettingsSchemaVersion);

@@ -906,6 +906,14 @@ void EditorWorkspaceLayer::UpdateAssetOperations()
         }
         try
         {
+            if (completion->Context.StartupSceneRefresh &&
+                (completion->Result.Import.Statuses.empty() ||
+                 std::ranges::any_of(completion->Result.Import.Statuses, [](const Keire::AssetImportStatus& status)
+                                     { return status.State == Keire::AssetImportState::Failed; })))
+            {
+                throw std::runtime_error("Startup scene dependencies could not be refreshed. Fix the reported asset "
+                                         "errors and retry refresh.");
+            }
             (void)Keire::Detail::AssetDatabaseWorkerAccess::ReloadSourceIndex(*m_AssetDatabase,
                                                                               completion->SourceIndexPath);
             if (completion->Kind == Keire::Detail::AssetWorkerOperationKind::ExternalImport)
@@ -1197,6 +1205,12 @@ void EditorWorkspaceLayer::UpdateAssetOperations()
             if (completion->Context.Generation > 0)
                 m_MaterialDocument->MarkCatalogRefreshApplied(completion->Context.Generation);
             OpenPendingStartupScene();
+            if (completion->Context.StartupSceneRefresh)
+            {
+                m_AssetOperations->QueueImport(KeireEditor::AssetOperationPriority::AutomaticRefresh,
+                                               {.Reason = "remaining-startup-refresh"});
+                m_AssetStatus = "Startup scene assets ready. Remaining assets are refreshing in the background.";
+            }
             if (completion->Kind == Keire::Detail::AssetWorkerOperationKind::ImportAll)
                 QueueDefaultLitWarmup();
         }

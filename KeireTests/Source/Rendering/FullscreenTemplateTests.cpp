@@ -4,11 +4,41 @@
 
 #include <doctest/doctest.h>
 
+#include <algorithm>
 #include <filesystem>
 #include <span>
 #include <stdexcept>
 #include <string>
 #include <vector>
+
+TEST_CASE("fullscreen vignette attenuates RGB without attenuating scene coverage")
+{
+    const auto graph = Keire::CreateShaderGraphTemplate(Keire::ShaderGraphTemplate::FullscreenVignette);
+    const auto inputSource = [&](const Keire::ShaderGraphNode& node,
+                                 const std::string_view name) -> const Keire::ShaderGraphNode&
+    {
+        const auto pin = std::ranges::find(node.Pins, name, &Keire::ShaderGraphPin::Name);
+        REQUIRE(pin != node.Pins.end());
+        const auto connection =
+            std::ranges::find_if(graph.Connections, [&](const auto& candidate)
+                                 { return candidate.Input.Node == node.Id && candidate.Input.Pin == pin->Id; });
+        REQUIRE(connection != graph.Connections.end());
+        const auto source = std::ranges::find(graph.Nodes, connection->Output.Node, &Keire::ShaderGraphNode::Id);
+        REQUIRE(source != graph.Nodes.end());
+        return *source;
+    };
+
+    const auto& product = inputSource(graph.Nodes.front(), "Color");
+    REQUIRE(product.Kind == Keire::ShaderGraphNodeKind::Multiply);
+    CHECK(inputSource(product, "A").Kind == Keire::ShaderGraphNodeKind::SceneColor);
+    const auto& strength = inputSource(product, "B");
+    REQUIRE(strength.Kind == Keire::ShaderGraphNodeKind::Add);
+    CHECK(std::get<Keire::Color>(inputSource(strength, "B").Value) == Keire::Color{0, 0, 0, 1});
+    const auto& rgb = inputSource(strength, "A");
+    REQUIRE(rgb.Kind == Keire::ShaderGraphNodeKind::Multiply);
+    CHECK(std::get<Keire::Color>(inputSource(rgb, "B").Value) == Keire::Color{1, 1, 1, 0});
+    CHECK(inputSource(rgb, "A").Kind == Keire::ShaderGraphNodeKind::Lerp);
+}
 
 TEST_CASE("fullscreen effect presets compile their authored scene sampling through the production importer")
 {

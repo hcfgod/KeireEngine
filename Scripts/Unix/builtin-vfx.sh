@@ -14,6 +14,8 @@ includes=("$ROOT/KeireCore/Shaders/CloudVolumeView.hlsli"
           "$ROOT/KeireCore/Shaders/CloudVolumeLighting.hlsli"
           "$ROOT/KeireCore/Shaders/CloudVolumeDensity.hlsli"
           "$ROOT/KeireCore/Shaders/CloudWeather.hlsli"
+          "$ROOT/KeireCore/Shaders/FogDensity.hlsli" "$ROOT/KeireCore/Shaders/FogExclusion.hlsli"
+          "$ROOT/KeireCore/Shaders/FogRayIntervals.hlsli"
           "$ROOT/KeireCore/Shaders/VolumeSurfaceComposition.hlsli"
           "$ROOT/KeireCore/Shaders/VolumeTransport.hlsli")
 generated_directory="$ROOT/Build/Generated/Keire"

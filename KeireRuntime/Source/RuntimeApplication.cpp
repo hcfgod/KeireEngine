@@ -108,6 +108,7 @@ namespace
         result.Rendering.Clouds = result.Environment.Clouds;
         result.Rendering.Bloom = result.Environment.Bloom;
         result.Rendering.Stars = result.Environment.Stars;
+        result.Rendering.Fog = result.Environment.Fog;
         result.Rendering.DirectionalShadowDistance = rendering.value("directionalShadowDistance", 100.0F);
         result.Rendering.DirectionalShadowCascadeCount = rendering.value("directionalShadowCascadeCount", 4U);
         result.Rendering.DirectionalShadowResolution = rendering.value("directionalShadowResolution", 2048U);

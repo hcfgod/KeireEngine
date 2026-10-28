@@ -272,6 +272,8 @@ void KeireEditor::SceneViewportPanel::Draw(Keire::UiFrame& ui)
         m_Gizmos->SetOcclusionDebugView(renderSurface->OcclusionDebugView());
         m_Gizmos->SetOcclusionDebugMip(renderSurface->OcclusionDebugMip());
         Keire::SceneRenderRequest renderRequest{renderScene, m_RenderView, !playActive, environment};
+        renderRequest.DrawGrid = !playActive && m_Gizmos->Settings().ShowGrid;
+        renderRequest.Grid = m_Gizmos->Settings().Grid;
         renderRequest.EvaluatedEnvironment = m_Controller.SceneViewportEnvironmentLighting();
         const auto& materialTime = m_Controller.SceneViewportTime();
         renderRequest.MaterialTimeSeconds = static_cast<float>(materialTime.TimeSinceStartup().Seconds());

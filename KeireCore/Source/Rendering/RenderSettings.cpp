@@ -3,6 +3,7 @@
 #include "KeireInternal/Environment/AtmosphereRecord.h"
 #include "KeireInternal/Environment/BloomRecord.h"
 #include "KeireInternal/Environment/CloudRecord.h"
+#include "KeireInternal/Environment/FogDensityRecord.h"
 #include "KeireInternal/Environment/StarFieldRecord.h"
 #include "KeireInternal/FileSystem.h"
 #include "KeireInternal/ProjectSettingsSerialization.h"
@@ -201,6 +202,7 @@ namespace Keire
             Detail::ValidateCloudSettings(settings.Clouds);
             Detail::ValidateBloomSettings(settings.Bloom);
             Detail::ValidateStarField(settings.Stars);
+            Detail::ValidateFogDensity(settings.Fog);
             if (settings.SchemaVersion != RenderEnvironmentSettingsSchemaVersion)
                 throw std::invalid_argument("Rendering project settings use an unsupported schema version.");
             if (!ValidColor(settings.AmbientColor))
@@ -323,6 +325,14 @@ namespace Keire
         {
             throw std::invalid_argument("Star settings require rendering schema 8.");
         }
+        if (sourceSchemaVersion >= 9U)
+        {
+            result.Fog = Detail::DecodeFogDensity(document.at("fog"));
+        }
+        else if (document.contains("fog"))
+        {
+            throw std::invalid_argument("Fog settings require rendering schema 9.");
+        }
         Validate(result);
         return result;
     }
@@ -354,6 +364,7 @@ namespace Keire
         document["clouds"] = Detail::EncodeCloudSettings(settings.Clouds);
         document["bloom"] = Detail::EncodeBloomSettings(settings.Bloom);
         document["stars"] = Detail::EncodeStarField(settings.Stars);
+        document["fog"] = Detail::EncodeFogDensity(settings.Fog);
         document["gpuOcclusion"] = GpuOcclusionModeName(settings.GpuOcclusion);
         document["renderPath"] = RenderPathName(settings.RequestedRenderPath);
         document["antiAliasing"] = AntiAliasingModeName(settings.RequestedAntiAliasing);

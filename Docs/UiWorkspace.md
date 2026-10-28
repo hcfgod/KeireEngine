@@ -265,3 +265,19 @@ UI font atlases include three filtered smaller levels with glyph padding, reduci
 scaled down. This applies to the embedded fallback font and imported font faces. Extremely small text still loses
 readability because the display has too few pixels: validate menus at their smallest supported viewport, use a
 comfortable physical text size, and provide text scaling. Do not use a tiny Game view as the final legibility target.
+
+## Pending grid authoring validation
+
+The next source batch adds Show grid, Grid opacity, Grid fade distance (metres), and Reset grid to the Scene toolbar
+settings popup. Preferences are stored in local SceneTools state version 5; older versions use a visible grid with
+0.5 opacity and a 200 m fade distance. Grid lines and axes fade together over the outer half of that distance.
+These controls affect the editor overlay, not scene lighting or packaged content. Zero opacity skips the grid draw.
+The updated shader compiles as DXIL, SPIR-V and MSL. The October 28 combined DevDist build and staging passed.
+In the maximized editor, Show grid removed both lines and axes, and Reset grid restored visibility and defaults.
+Persistence/migration coverage has been extended; linked persistence tests, slider appearance checks and restart
+acceptance remain pending.
+
+Grid fade validation: the shared shader visibility function is exercised by
+`Scripts/Tests/GridAppearanceProbe.hlsl` through `test-atmosphere-medium-gpu.py --suite grid`.
+D3D12 and Vulkan each passed 384,000 opacity/range samples; DXIL, SPIR-V and MSL compilation passed.
+These numerical checks cover opacity clamping and near/midpoint/far fading, not native viewport appearance.

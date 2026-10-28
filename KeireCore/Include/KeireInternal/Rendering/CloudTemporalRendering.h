@@ -13,6 +13,7 @@ namespace Keire::RenderBackend
     struct SceneRenderPacket;
     struct CloudLightCacheLookupUniforms;
     struct GpuTextureResources;
+    struct VolumeShadowUniforms;
 
     [[nodiscard]] SDL_GPUGraphicsPipeline* EnsureCloudTemporalPipeline(RenderSharedState& state,
                                                                        CloudTemporalPass pass);
@@ -20,5 +21,5 @@ namespace Keire::RenderBackend
     void RecordCloudTemporal(RenderSharedState& state, SDL_GPUCommandBuffer* commands, RenderSurfaceState& surface,
                              const SceneRenderPacket& packet, const CloudVolumeViewUniforms& uniforms,
                              const CloudLightCacheLookupUniforms& cacheUniforms, const GpuTextureResources& noise,
-                             SDL_GPUSampler* sampler);
+                             SDL_GPUSampler* sampler, const VolumeShadowUniforms& shadows);
 } // namespace Keire::RenderBackend

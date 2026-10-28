@@ -39,6 +39,10 @@ TEST_CASE("volume shader contract accepts only supported mesh lighting layouts")
     definition.VolumeLightingAbiVersion = 7U;
     CHECK_NOTHROW(Keire::Detail::ValidateShaderDefinition(definition, false, true));
     definition.VolumeLightingAbiVersion = 8U;
+    CHECK_NOTHROW(Keire::Detail::ValidateShaderDefinition(definition, false, true));
+    definition.VolumeLightingAbiVersion = 9U;
+    CHECK_NOTHROW(Keire::Detail::ValidateShaderDefinition(definition, false, true));
+    definition.VolumeLightingAbiVersion = 10U;
     CHECK_THROWS_AS(Keire::Detail::ValidateShaderDefinition(definition, false, true), std::invalid_argument);
     definition.VolumeLightingAbiVersion = 1U;
     definition.VertexLayoutVersion = Keire::UiShaderVertexLayoutVersion;
@@ -89,7 +93,11 @@ TEST_CASE("canonical volume shader metadata round trips and fails closed on olde
     CHECK(decode().VolumeLightingAbiVersion == 6U);
     document["volumeLightingAbiVersion"] = 7U;
     CHECK(decode().VolumeLightingAbiVersion == 7U);
-    for (const auto invalidVersion : {-1LL, 8LL, 4294967296LL, 4294967297LL})
+    document["volumeLightingAbiVersion"] = 8U;
+    CHECK(decode().VolumeLightingAbiVersion == 8U);
+    document["volumeLightingAbiVersion"] = 9U;
+    CHECK(decode().VolumeLightingAbiVersion == 9U);
+    for (const auto invalidVersion : {-1LL, 10LL, 4294967296LL, 4294967297LL})
     {
         document["volumeLightingAbiVersion"] = invalidVersion;
         CHECK_THROWS_AS(decode(), std::invalid_argument);

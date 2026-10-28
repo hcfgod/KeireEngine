@@ -1550,7 +1550,12 @@ snapshots enter the project-assets undo context; the workspace and asset-operati
 Continuous numeric/color edits update a development-only in-memory asset revision for immediate rendering and share a
 property-scoped undo command until the UI edit boundary. The final serialized source is written once and its catalog
 refresh runs in the background. Startup mounts a current development catalog directly; stale non-startup sources are
-refreshed after the editor becomes usable.
+refreshed after the editor becomes usable. When a published catalog exists but importer migration or a changed
+startup scene requires refresh, startup first imports that scene and its transitive dependency closure. Traversal
+continues through current catalog entries to find outdated dependency importers. A successful targeted completion
+opens the deferred scene and queues the remaining project refresh; failed dependency statuses prevent that handoff.
+Missing catalogs and unavailable startup sources retain the full-import fallback. Validated shader compiler-cache
+hits avoid temporary source staging while retaining snapshot, dependency and ABI validation.
 
 `ShaderGraphDocument` is a separate authoring document layered on the shared stable node-graph canvas rather than a
 second graph interaction implementation. It owns graph validation, undo/redo, compile options, generated diagnostics,
@@ -2740,3 +2745,18 @@ frames invalidate pending writes. Resource release also invalidates the record b
 publication cannot revive retired contents. Reuse requires exact submitted-key equality. This avoids dependence
 on frame serials that can be reused after failure and avoids pointers into movable workset storage. Native motion,
 wind and device-recovery acceptance remain required in addition to the isolated ASan lifecycle tests.
+
+### Fog volume ABI development integration
+
+Volume-lighting ABI 8 appends the bounded height/local fog block after ABI 7's 448-byte prefix, producing a
+1008-byte view record. ABI 9 appends 16 exclusion records, producing a 1520-byte view record; Shader Graph
+importer 50 rebuilds generated materials against this layout. Older shader
+assets retain their declared prefix sizes; shader validation rejects unsupported ABI versions. The shared volume
+view receives the fog settings from the scene render packet and clips transport to the caller's surface depth.
+Fog-only requests participate in sampled-depth capture. Temporal history rejects fog changes and incompatible
+cloud/fog motion instead of reusing a single incorrect motion mapping. Shared Environment/Project Settings controls
+and cooked fog record propagation are implemented. Local box enable flags retain authored settings but exclude
+disabled volumes from density evaluation and GPU packing; legacy records without the flag remain enabled.
+Exclusion regions use camera-relative coordinates, strongest-overlap retention and explicit ray boundary splits.
+Native quality/performance acceptance, terrain-shadow coupling and planetary layer geometry
+remain unfinished.

@@ -569,6 +569,17 @@ namespace KeireEditor
 
         if (auto popup = ui.BeginPopup("SceneSnapSettings"); popup)
         {
+            ui.Text("EDITOR GRID");
+            (void)ui.Checkbox("Show grid", m_Settings.ShowGrid);
+            (void)ui.SliderFloat("Grid opacity", m_Settings.Grid.Opacity, 0.0F, 1.0F);
+            (void)ui.SliderFloat("Grid fade distance (m)", m_Settings.Grid.FadeDistance, 10.0F, 2000.0F);
+            ui.Text("Grid and axes fade over the outer half of this distance. Scene lighting is unchanged.");
+            if (ui.Button("Reset grid"))
+            {
+                m_Settings.ShowGrid = true;
+                m_Settings.Grid = {};
+            }
+            ui.Separator();
             ui.Text("SNAPPING");
             ui.Separator();
             (void)ui.DragVector3("Position", m_Settings.PositionSnap, 0.05F);
@@ -1374,7 +1385,7 @@ namespace KeireEditor
         std::ifstream input(projectRoot / "Library/Editor/SceneTools.state");
         std::uint32_t version = 0;
         std::uint32_t tool = 0;
-        if (!(input >> version) || (version != 1 && version != 2 && version != 3 && version != 4) ||
+        if (!(input >> version) || version < 1 || version > 5 ||
             !(input >> tool >> m_Settings.PositionSnap.X >> m_Settings.PositionSnap.Y >> m_Settings.PositionSnap.Z >>
               m_Settings.RotationSnapDegrees >> m_Settings.ScaleSnap >> m_Settings.Snapping >> m_Settings.LocalSpace >>
               m_Settings.ShowIcons >> m_Settings.ShowCameraFrustums >> m_Settings.ShowLightDirections) ||
@@ -1387,6 +1398,8 @@ namespace KeireEditor
         m_Settings.EditColliders = false;
         m_Settings.ShowPhysicsGizmos = true;
         m_Settings.ShowOcclusionMetadata = false;
+        m_Settings.ShowGrid = true;
+        m_Settings.Grid = {};
         if (version >= 2 && !(input >> m_Settings.EditColliders))
         {
             m_Settings = {};
@@ -1405,7 +1418,16 @@ namespace KeireEditor
             m_Tool = SceneTool::Translate;
             return;
         }
-        if (!Keire::Math::IsFinite(m_Settings.PositionSnap) || m_Settings.PositionSnap.X <= 0.0F ||
+        if (version >= 5 && !(input >> m_Settings.ShowGrid >> m_Settings.Grid.Opacity >> m_Settings.Grid.FadeDistance))
+        {
+            m_Settings = {};
+            m_Tool = SceneTool::Translate;
+            return;
+        }
+        if (!std::isfinite(m_Settings.Grid.Opacity) || m_Settings.Grid.Opacity < 0.0F ||
+            m_Settings.Grid.Opacity > 1.0F || !std::isfinite(m_Settings.Grid.FadeDistance) ||
+            m_Settings.Grid.FadeDistance < 10.0F || m_Settings.Grid.FadeDistance > 2000.0F ||
+            !Keire::Math::IsFinite(m_Settings.PositionSnap) || m_Settings.PositionSnap.X <= 0.0F ||
             m_Settings.PositionSnap.Y <= 0.0F || m_Settings.PositionSnap.Z <= 0.0F ||
             !std::isfinite(m_Settings.RotationSnapDegrees) || m_Settings.RotationSnapDegrees <= 0.0F ||
             !std::isfinite(m_Settings.ScaleSnap) || m_Settings.ScaleSnap <= 0.0F)
@@ -1423,7 +1445,7 @@ namespace KeireEditor
         {
             std::filesystem::create_directories(projectRoot / "Library/Editor");
             std::ostringstream output;
-            output << "4\n"
+            output << "5\n"
                    << static_cast<std::uint32_t>(m_Tool) << '\n'
                    << m_Settings.PositionSnap.X << ' ' << m_Settings.PositionSnap.Y << ' ' << m_Settings.PositionSnap.Z
                    << '\n'
@@ -1431,7 +1453,9 @@ namespace KeireEditor
                    << m_Settings.Snapping << ' ' << m_Settings.LocalSpace << ' ' << m_Settings.ShowIcons << ' '
                    << m_Settings.ShowCameraFrustums << ' ' << m_Settings.ShowLightDirections << ' '
                    << m_Settings.EditColliders << ' ' << m_Settings.ShowPhysicsGizmos << ' '
-                   << m_Settings.ShowOcclusionMetadata << '\n';
+                   << m_Settings.ShowOcclusionMetadata << '\n'
+                   << m_Settings.ShowGrid << ' ' << m_Settings.Grid.Opacity << ' ' << m_Settings.Grid.FadeDistance
+                   << '\n';
             Keire::Detail::WriteTextFileAtomically(projectRoot / "Library/Editor/SceneTools.state", output.str());
         }
         catch (...)

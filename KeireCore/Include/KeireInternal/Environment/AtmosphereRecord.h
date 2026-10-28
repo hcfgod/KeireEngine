@@ -9,7 +9,10 @@ namespace Keire::Detail
     [[nodiscard]] inline nlohmann::json EncodeAtmosphere(const AtmosphereSettings& settings)
     {
         ValidateAtmosphere(settings);
-        return {{"enabled", settings.Enabled},
+        return {{"schemaVersion", 3},
+                {"groundIntensity", settings.GroundIntensity},
+                {"groundReflectance", settings.GroundReflectance},
+                {"enabled", settings.Enabled},
                 {"planetCenter", settings.PlanetCenter},
                 {"planetRadius", settings.PlanetRadius},
                 {"height", settings.Height},
@@ -32,7 +35,14 @@ namespace Keire::Detail
     {
         try
         {
-            if (!record.is_object() || record.size() != 17 || !record.at("enabled").is_boolean())
+            const bool legacy = record.is_object() && record.size() == 17 && !record.contains("schemaVersion") &&
+                                !record.contains("groundReflectance");
+            const bool reflectanceOnly =
+                record.is_object() && record.size() == 19 && record.contains("schemaVersion") &&
+                record.at("schemaVersion").is_number_integer() && record.at("schemaVersion") == 2;
+            const bool current = record.is_object() && record.size() == 20 && record.contains("schemaVersion") &&
+                                 record.at("schemaVersion").is_number_integer() && record.at("schemaVersion") == 3;
+            if ((!legacy && !reflectanceOnly && !current) || !record.at("enabled").is_boolean())
             {
                 throw std::invalid_argument("Malformed atmosphere settings.");
             }
@@ -72,6 +82,14 @@ namespace Keire::Detail
                 return value.get<std::uint32_t>();
             };
             AtmosphereSettings result;
+            if (!legacy)
+            {
+                result.GroundReflectance = spectrum("groundReflectance");
+            }
+            if (current)
+            {
+                result.GroundIntensity = scalar("groundIntensity");
+            }
             result.Enabled = record.at("enabled").get<bool>();
             result.PlanetCenter = spectrum("planetCenter");
             result.PlanetRadius = scalar("planetRadius");

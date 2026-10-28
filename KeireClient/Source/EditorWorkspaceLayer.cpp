@@ -934,7 +934,8 @@ void EditorWorkspaceLayer::OnAttach()
             RefreshAssetBrowserRecords();
             const auto catalog = project->AssetCatalog();
             std::error_code catalogError;
-            bool requiresSynchronousImport = !std::filesystem::is_regular_file(catalog, catalogError) || catalogError;
+            const bool hasPublishedCatalog = std::filesystem::is_regular_file(catalog, catalogError) && !catalogError;
+            bool requiresSynchronousImport = !hasPublishedCatalog;
             if (!requiresSynchronousImport)
             {
                 requiresSynchronousImport =
@@ -959,7 +960,18 @@ void EditorWorkspaceLayer::OnAttach()
             if (requiresSynchronousImport)
             {
                 m_SceneTransitions->DeferStartupScene(startupCandidate);
-                ImportAssets(KeireEditor::AssetOperationPriority::AutomaticRefresh);
+                if (hasPublishedCatalog && startupCandidate && m_AssetDatabase->Find(startupCandidate))
+                {
+                    // Refresh the scene's dependency closure before unrelated importer migrations.
+                    m_AssetOperations->QueueAssetImport(
+                        startupCandidate, KeireEditor::AssetOperationPriority::ExplicitAction,
+                        {.Reason = "startup-scene-refresh", .StartupSceneRefresh = true});
+                    m_AssetStatus = "Preparing the startup scene and its dependencies.";
+                }
+                else
+                {
+                    ImportAssets(KeireEditor::AssetOperationPriority::AutomaticRefresh);
+                }
             }
             else
             {

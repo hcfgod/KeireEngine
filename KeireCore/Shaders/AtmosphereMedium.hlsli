@@ -21,8 +21,12 @@ bool AtmosphereSphereInterval(float3 origin, float3 direction, float radius, out
     const float originRadius = length(origin);
     // Factoring the radial difference preserves surface roots; subtracting two squared radii loses metres.
     const float constant = (originRadius - radius) * (originRadius + radius);
-    const float discriminant = mad(along, along, -constant);
-    const float roundoff = 4.0F * 1.192092896e-7F * max(along * along, abs(constant));
+    // Work at closest approach rather than subtracting astronomical squared distances.
+    // A distance-scaled tolerance would turn genuine limb misses into false planet hits.
+    const float3 closest = mad(-along, direction, origin);
+    const float closestSquared = dot(closest, closest);
+    const float discriminant = mad(radius, radius, -closestSquared);
+    const float roundoff = 4.0F * 1.192092896e-7F * max(radius * radius, closestSquared);
     interval = 0.0F;
     if (discriminant < -roundoff)
     {
@@ -30,7 +34,11 @@ bool AtmosphereSphereInterval(float3 origin, float3 direction, float radius, out
     }
     const float root = sqrt(max(discriminant, 0.0F));
     const float stableRoot = -along - (along >= 0.0F ? root : -root);
-    const float otherRoot = stableRoot != 0.0F ? constant / stableRoot : 0.0F;
+    // Far from the sphere both roots are large: the factored constant adds avoidable rounding.
+    // Keep the product form near the surface, where direct subtraction loses the small root.
+    const float otherRoot = originRadius > 2.0F * radius
+        ? -along + (along >= 0.0F ? root : -root)
+        : (stableRoot != 0.0F ? constant / stableRoot : 0.0F);
     interval = float2(min(stableRoot, otherRoot), max(stableRoot, otherRoot));
     return interval.y >= 0.0F;
 }

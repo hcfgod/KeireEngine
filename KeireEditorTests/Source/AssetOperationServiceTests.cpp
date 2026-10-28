@@ -81,8 +81,9 @@ TEST_CASE("Asset worker startup failures become completions and leave the queue 
     for (std::uint64_t generation = 1; generation <= 2; ++generation)
     {
         const bool warmup = true;
-        operations.QueueAssetImport(asset, KeireEditor::AssetOperationPriority::MaterialRefresh,
-                                    {.ReloadAsset = asset, .Generation = generation, .DefaultLitWarmup = warmup});
+        operations.QueueAssetImport(
+            asset, KeireEditor::AssetOperationPriority::MaterialRefresh,
+            {.ReloadAsset = asset, .Generation = generation, .DefaultLitWarmup = warmup, .StartupSceneRefresh = true});
         CHECK(operations.PendingDefaultLitWarmup() == warmup);
         CHECK_NOTHROW(operations.Update());
         CHECK_FALSE(operations.Busy());
@@ -94,6 +95,7 @@ TEST_CASE("Asset worker startup failures become completions and leave the queue 
         CHECK(completion->Context.ReloadAsset == asset);
         CHECK(completion->Context.Generation == generation);
         CHECK(completion->Context.DefaultLitWarmup == warmup);
+        CHECK(completion->Context.StartupSceneRefresh);
         CHECK_FALSE(completion->OperationId.empty());
         CHECK_FALSE(operations.TakeCompletion());
     }

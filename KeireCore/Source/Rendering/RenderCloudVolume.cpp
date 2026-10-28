@@ -4,6 +4,7 @@
 #include "KeireInternal/Rendering/AtmosphereUniforms.h"
 #include "KeireInternal/Rendering/CloudLightingUniforms.h"
 #include "KeireInternal/Rendering/CloudTemporalRendering.h"
+#include "KeireInternal/Rendering/VolumeShadowUniforms.h"
 
 #include <array>
 #include <memory>
@@ -14,8 +15,9 @@ namespace Keire::RenderBackend
     CloudVolumeViewUniforms MakeCloudVolumeViewUniforms(const SceneRenderPacket& packet, const std::uint32_t width,
                                                         const std::uint32_t height)
     {
-        if ((packet.CloudVolume.Quality[0] == 0U && !packet.Environment.Atmosphere.Enabled) || width == 0U ||
-            height == 0U)
+        if ((packet.CloudVolume.Quality[0] == 0U && !packet.Environment.Atmosphere.Enabled &&
+             !packet.Environment.Fog.Enabled) ||
+            width == 0U || height == 0U)
         {
             return {};
         }
@@ -51,13 +53,15 @@ namespace Keire::RenderBackend
                 {packet.Environment.Clouds.Volume.IndependentWeather ? 1.0F : 0.0F,
                  static_cast<float>(packet.Environment.Clouds.Volume.CloudType),
                  static_cast<float>(packet.Environment.Clouds.Volume.TypeVariation),
-                 static_cast<float>(packet.Environment.Clouds.Volume.BaseHeightVariationMeters)}};
+                 static_cast<float>(packet.Environment.Clouds.Volume.BaseHeightVariationMeters)},
+                MakeFogViewUniforms(packet.Environment.Fog, {observer.X, observer.Y, observer.Z})};
     }
 
     void RenderSharedState::RecordCloudVolume(SDL_GPUCommandBuffer* commands, RenderSurfaceState& surface,
-                                              const SceneRenderPacket& packet)
+                                              const SceneRenderPacket& packet, const ShadowFrameData& shadows)
     {
-        if (packet.CloudVolume.Quality[0] == 0U && !packet.Environment.Atmosphere.Enabled)
+        if (packet.CloudVolume.Quality[0] == 0U && !packet.Environment.Atmosphere.Enabled &&
+            !packet.Environment.Fog.Enabled)
         {
             return;
         }
@@ -67,6 +71,8 @@ namespace Keire::RenderBackend
             throw std::logic_error("Cloud volume recording requires current sampled depth and an HDR target.");
         }
         auto uniforms = MakeCloudVolumeViewUniforms(packet, surface.Width, surface.Height);
+        const auto shadowUniforms =
+            MakeVolumeShadowUniforms(shadows.Directional, packet.Camera.View, uniforms.InverseView);
         const SamplerDescription samplerDescription{TextureFilter::Nearest,    TextureFilter::Nearest,
                                                     TextureFilter::Nearest,    TextureAddressMode::Clamp,
                                                     TextureAddressMode::Clamp, TextureAddressMode::Clamp};
@@ -90,7 +96,8 @@ namespace Keire::RenderBackend
             workset.MultisampleHdrColor ? ToSdlSampleCount(surface.ActualSamples) : SDL_GPU_SAMPLECOUNT_1;
         if (!workset.MultisampleHdrColor && packet.CloudVolume.Quality[0] != 0U)
         {
-            RecordCloudTemporal(*this, commands, surface, packet, uniforms, cacheUniforms, noise, sampler);
+            RecordCloudTemporal(*this, commands, surface, packet, uniforms, cacheUniforms, noise, sampler,
+                                shadowUniforms);
             return;
         }
         const bool composite = !workset.MultisampleHdrColor;
@@ -124,12 +131,16 @@ namespace Keire::RenderBackend
         {
             throw std::runtime_error("SDL_BeginGPURenderPass(cloud volume) failed: " + LastSdlError());
         }
-        const std::array bindings{SDL_GPUTextureSamplerBinding{workset.SampledDepth, sampler},
-                                  SDL_GPUTextureSamplerBinding{noise.Texture, noise.Sampler},
-                                  SDL_GPUTextureSamplerBinding{background, sampler}};
+        const std::array bindings{
+            SDL_GPUTextureSamplerBinding{workset.SampledDepth, sampler},
+            SDL_GPUTextureSamplerBinding{noise.Texture, noise.Sampler},
+            SDL_GPUTextureSamplerBinding{background, sampler},
+            SDL_GPUTextureSamplerBinding{workset.DirectionalShadow ? workset.DirectionalShadow : EmptyShadowTexture,
+                                         ShadowSampler}};
         SDL_BindGPUFragmentSamplers(pass, 0, bindings.data(), static_cast<std::uint32_t>(bindings.size()));
         SDL_BindGPUFragmentStorageBuffers(pass, 0, &workset.CloudLightCache.Transmission, 1);
         SDL_PushGPUFragmentUniformData(commands, 1, &cacheUniforms, sizeof(cacheUniforms));
+        SDL_PushGPUFragmentUniformData(commands, 2, &shadowUniforms, sizeof(shadowUniforms));
         if (attenuationPipeline)
         {
             SDL_BindGPUGraphicsPipeline(pass, attenuationPipeline);
@@ -150,8 +161,8 @@ namespace Keire::RenderBackend
     {
         SDL_GPUShaderCreateInfo information{};
         information.stage = vertex ? SDL_GPU_SHADERSTAGE_VERTEX : SDL_GPU_SHADERSTAGE_FRAGMENT;
-        information.num_samplers = vertex ? 0U : 3U;
-        information.num_uniform_buffers = vertex ? 0U : 2U;
+        information.num_samplers = vertex ? 0U : 4U;
+        information.num_uniform_buffers = vertex ? 0U : 3U;
         information.num_storage_buffers = vertex ? 0U : 1U;
         const auto formats = SDL_GetGPUShaderFormats(Device);
         if (formats & SDL_GPU_SHADERFORMAT_DXIL)

@@ -184,6 +184,8 @@ namespace Keire
         /// Version 5 appends finite RGB atmosphere transport, for a 416-byte view block.
         /// Version 6 appends normalized cloud height profiles, for a 432-byte view block.
         /// Version 7 appends independent weather controls, for a 448-byte view block.
+        /// Version 8 appends height/local fog controls, for a 1008-byte view block.
+        /// Version 9 appends fog exclusion regions, for a 1520-byte view block.
         std::uint32_t VolumeLightingAbiVersion = 0;
         bool UsesVertexMaterialParameters = false;
         /// Additional graph-authored combined texture/sampler slots and fragment read-only buffers.

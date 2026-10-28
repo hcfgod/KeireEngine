@@ -1,3 +1,5 @@
+#include "GridAppearance.hlsli"
+
 struct VertexOutput
 {
     float2 UV : TEXCOORD0;
@@ -16,6 +18,7 @@ cbuffer GridConstants : register(b0, space3)
     float4x4 InverseView;
     float4x4 ViewProjection;
     float4 GridParameters;
+    float4 GridAppearance;
 };
 
 VertexOutput VSMain(const uint vertexId : SV_VertexID)
@@ -53,7 +56,8 @@ FragmentOutput PSMain(const VertexOutput input)
     const float majorLine = GridLine(worldPosition.xz, max(GridParameters.y, GridParameters.x));
     const float axisDerivative = max(max(fwidth(worldPosition.x), fwidth(worldPosition.z)), 1.0e-6F);
     const float axisLine = 1.0F - saturate(min(abs(worldPosition.x), abs(worldPosition.z)) / axisDerivative);
-    const float opacity = max(max(minorLine * GridParameters.z, majorLine * GridParameters.w), axisLine * 0.9F);
+    const float opacity = max(max(minorLine * GridParameters.z, majorLine * GridParameters.w), axisLine * 0.9F) *
+        GridVisibility(GridAppearance.x, GridAppearance.y, rayDistance);
     if (opacity <= 0.001F)
         discard;
 

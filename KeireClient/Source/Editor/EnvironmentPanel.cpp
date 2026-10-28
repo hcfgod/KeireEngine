@@ -8,6 +8,7 @@
 #include "KeireClientInternal/Editor/EnvironmentPreviewControls.h"
 #include "KeireClientInternal/Editor/EnvironmentSkyControls.h"
 #include "KeireClientInternal/Editor/EnvironmentTimelineControls.h"
+#include "KeireClientInternal/Editor/FogControls.h"
 #include "KeireClientInternal/Editor/StarFieldControls.h"
 #include "KeireClientInternal/Editor/VolumetricCloudControls.h"
 
@@ -131,6 +132,14 @@ namespace KeireEditor
                 {
                     changed |= Detail::DrawCloudControls(ui, theme, settings.Clouds, commit);
                     changed |= Detail::DrawVolumetricCloudControls(ui, theme, settings.Clouds.Volume, commit);
+                }
+            }
+            if (auto tab = ui.BeginTabItem("Fog"); tab)
+            {
+                activeCategory = 4;
+                if (auto content = ui.BeginChild("EnvironmentFogContent", {0.0F, 0.0F}); content)
+                {
+                    changed |= Detail::DrawFogControls(ui, theme, settings.Fog, commit);
                 }
             }
             if (auto tab = ui.BeginTabItem("Bloom"); tab)

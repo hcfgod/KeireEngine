@@ -114,6 +114,7 @@ export const docGroups = [
         "MarketplaceLaunch.md",
         "ProductionReadinessReview.md",
         "LargeWorldAndEnvironmentPlan.md",
+        "TechnicalReviewFollowUp20261028.md",
         "Maintainability.md",
     ]),
     group("Material and shader progress records", "open-book", [
@@ -299,6 +300,7 @@ export const docAuthorities = {
         "KeireManaged/Handles.cs",
         "Scripts/Dependencies/CMakeLists.txt",
     ],
+    "TechnicalReviewFollowUp20261028.md": ["Docs/LargeWorldAndEnvironmentPlan.md"],
     "Maintainability.md": ["Config/SourceFileBudgets.json", "Scripts/Tests/check-source-budgets.py"],
     "Diagnostics/README.md": ["KeireCore/Include/Keire/Diagnostics/Diagnostic.h", "KeireCore/Source/Diagnostics"],
     "Diagnostics/KEIRE-AUDIO-0001.md": ["KeireCore/Include/Keire/Diagnostics/Diagnostic.h", "KeireCore/Source/Audio"],

@@ -39,6 +39,36 @@ namespace KeireEditor::Detail
         return Keire::Detail::EnvironmentLightingProfile(directional.Ownership(), std::move(keys), shadows, sky);
     }
 
+    // A visibility preset, not a simulated moon: preserve the authored sun and independent sky tracks.
+    [[nodiscard]] inline Keire::Detail::EnvironmentLightingProfile
+    NightFillPreset(const Keire::Detail::EnvironmentLightingProfile& profile,
+                    const Keire::EnvironmentAmbientLight fallbackAmbient)
+    {
+        auto keys = profile.Keyframes();
+        for (auto& key : keys)
+        {
+            key.Ambient = key.Ambient.value_or(fallbackAmbient);
+            if (key.ElevationDegrees >= 0.0)
+            {
+                continue;
+            }
+            const float nightWeight = static_cast<float>(std::clamp(-key.ElevationDegrees / 12.0, 0.0, 1.0));
+            // Use a stable baseline so repeated preset application cannot accumulate twilight fill.
+            const auto original = fallbackAmbient;
+            constexpr Keire::EnvironmentAmbientLight nightFill{{0.16F, 0.22F, 0.36F}, 0.18F};
+            auto ambient = original;
+            for (std::size_t channel = 0; channel < ambient.LinearColor.size(); ++channel)
+            {
+                ambient.LinearColor[channel] =
+                    std::lerp(original.LinearColor[channel], nightFill.LinearColor[channel], nightWeight);
+            }
+            ambient.Intensity = std::lerp(original.Intensity, nightFill.Intensity, nightWeight);
+            key.Ambient = ambient;
+        }
+        return Keire::Detail::EnvironmentLightingProfile(profile.Ownership(), std::move(keys), profile.Shadows(),
+                                                         profile.Sky());
+    }
+
     [[nodiscard]] inline std::string EnvironmentClockLabel(const double fraction)
     {
         if (!std::isfinite(fraction) || fraction < 0.0 || fraction >= 1.0)

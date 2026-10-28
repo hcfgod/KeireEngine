@@ -66,6 +66,14 @@ TEST_CASE("HDR preparation is an explicit dependency before tone mapping in both
         CHECK(position(scene.Transparency) < position(scene.HdrPreparation));
         CHECK(position(scene.ResolveDepth) < position(scene.CloudVolume));
         CHECK(position(scene.Sky) < position(scene.CloudVolume));
+        CHECK(position(scene.DirectionalShadows) < position(scene.CloudVolume));
+        const auto& shadowPass = scene.Graph.Passes()[scene.DirectionalShadows.Value];
+        const auto& volumePass = scene.Graph.Passes()[scene.CloudVolume.Value];
+        for (const auto shadowResource : shadowPass.Writes)
+        {
+            CHECK(std::ranges::find(volumePass.Reads, shadowResource) != volumePass.Reads.end());
+            CHECK(scene.Compiled.Lifetimes[shadowResource.Value].LastPass >= position(scene.CloudVolume));
+        }
         CHECK(position(scene.CloudVolume) < position(scene.Transparency));
         if (path == Keire::RenderPath::DeferredHybrid)
         {

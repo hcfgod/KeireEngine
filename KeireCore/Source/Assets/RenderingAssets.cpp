@@ -732,7 +732,8 @@ namespace Keire
                 manifest.at("volumeLightingAbiVersion") != 1U && manifest.at("volumeLightingAbiVersion") != 2U &&
                 manifest.at("volumeLightingAbiVersion") != 3U && manifest.at("volumeLightingAbiVersion") != 4U &&
                 manifest.at("volumeLightingAbiVersion") != 5U && manifest.at("volumeLightingAbiVersion") != 6U &&
-                manifest.at("volumeLightingAbiVersion") != 7U)
+                manifest.at("volumeLightingAbiVersion") != 7U && manifest.at("volumeLightingAbiVersion") != 8U &&
+                manifest.at("volumeLightingAbiVersion") != 9U)
             {
                 throw std::invalid_argument("Shader volume-lighting ABI version is unsupported.");
             }
@@ -1198,18 +1199,12 @@ namespace Keire
             const auto passLanes = ParseShaderPasses(manifest);
             const auto snapshot = Detail::CaptureShaderSourceSnapshot(context, definition.Source, includeRoots);
 
-            TemporaryShaderDirectory temporary;
-            const auto stagedRoot = temporary.Path() / "Source";
             bool hasInstanceAddressingAbiV2Binding = false;
             for (const auto& file : snapshot)
             {
                 definition.Dependencies.push_back(file.Dependency);
-                const auto destination = stagedRoot / file.Dependency.RelativePath;
-                std::filesystem::create_directories(destination.parent_path());
-                const auto& dependencyBytes = file.Bytes;
                 if (definition.InstanceAddressingAbiVersion == 2U)
-                    hasInstanceAddressingAbiV2Binding |= ContainsInstanceAddressingAbiV2Binding(Text(dependencyBytes));
-                Detail::WriteFileAtomically(destination, dependencyBytes);
+                    hasInstanceAddressingAbiV2Binding |= ContainsInstanceAddressingAbiV2Binding(Text(file.Bytes));
             }
             if (definition.InstanceAddressingAbiVersion == 2U && !hasInstanceAddressingAbiV2Binding)
             {
@@ -1241,6 +1236,11 @@ namespace Keire
                 {
                     statistics->CacheMisses.fetch_add(1U, std::memory_order_relaxed);
                 }
+            }
+            TemporaryShaderDirectory temporary;
+            const auto stagedRoot = temporary.Path() / "Source";
+            if (cache)
+            {
                 try
                 {
                     compiler = cache->StageCompiler(temporary.Path() / "Compiler");
@@ -1249,6 +1249,14 @@ namespace Keire
                 {
                     cache.reset();
                 }
+            }
+            // Cache hits use the validated in-memory snapshot without materializing compiler inputs.
+            // Stage the same immutable bytes only when compilation is actually required.
+            for (const auto& file : snapshot)
+            {
+                const auto destination = stagedRoot / file.Dependency.RelativePath;
+                std::filesystem::create_directories(destination.parent_path());
+                Detail::WriteFileAtomically(destination, file.Bytes);
             }
             const auto source = stagedRoot / definition.Source;
             std::vector<std::filesystem::path> stagedIncludeRoots;

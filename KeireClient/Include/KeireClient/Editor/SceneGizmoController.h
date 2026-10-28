@@ -103,6 +103,8 @@ namespace KeireEditor
         Keire::GpuOcclusionDebugView OcclusionDebugView = Keire::GpuOcclusionDebugView::None;
         std::uint32_t OcclusionDebugMip = 0;
         bool ShowOcclusionMetadata = false;
+        bool ShowGrid = true;
+        Keire::SceneGridSettings Grid;
     };
 
     struct SceneGizmoResult

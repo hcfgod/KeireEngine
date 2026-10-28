@@ -155,3 +155,92 @@ TEST_CASE("targeted publication includes newly referenced dependency sources and
         CHECK(metadataText.find(generated.ToString()) == std::string::npos);
     }
 }
+
+TEST_CASE("targeted publication migrates cataloged dependencies through unchanged owners")
+{
+    TemporaryAssetProject project;
+    Keire::AssetId leaf;
+    Keire::AssetId middle;
+    Keire::AssetImporterRegistration container;
+    container.Name = "Test.MigrationContainer";
+    container.Type = Keire::TextAsset::StaticType();
+    container.Extensions = {".container"};
+    container.ContextualImport = [&](const Keire::AssetImportContext&, const std::span<const std::byte> bytes)
+    {
+        const std::string source(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+        Keire::AssetImportOutput output;
+        output.Bytes.assign(bytes.begin(), bytes.end());
+        output.AssetDependencies = {source == "root" ? middle : leaf};
+        return output;
+    };
+    Keire::AssetImporterRegistration shader;
+    shader.Name = "Test.MigrationLeaf";
+    shader.Version = 1;
+    shader.Type = Keire::TextAsset::StaticType();
+    shader.Extensions = {".leaf"};
+    std::size_t leafImports = 0;
+    bool failMigration = false;
+    shader.Import = [&](const std::span<const std::byte> bytes)
+    {
+        ++leafImports;
+        if (failMigration)
+        {
+            throw std::runtime_error("migration failed");
+        }
+        return std::vector<std::byte>(bytes.begin(), bytes.end());
+    };
+    auto database = Keire::CreateRef<Keire::AssetDatabase>(
+        Keire::AssetDatabaseSpecification{.ProjectRoot = project.Root, .Importers = {container, shader}});
+    const std::string payload = "leaf";
+    leaf = database->CreateAsset("used.leaf", shader, std::as_bytes(std::span(payload)));
+    const auto unrelated = database->CreateAsset("unrelated.leaf", shader, std::as_bytes(std::span(payload)));
+    const std::string middlePayload = "middle";
+    middle = database->CreateAsset("middle.container", container, std::as_bytes(std::span(middlePayload)));
+    const std::string rootPayload = "root";
+    const auto root = database->CreateAsset("root.container", container, std::as_bytes(std::span(rootPayload)));
+    (void)database->ImportAll();
+    shader.Version = 2;
+    database = Keire::CreateRef<Keire::AssetDatabase>(
+        Keire::AssetDatabaseSpecification{.ProjectRoot = project.Root, .Importers = {container, shader}});
+    const auto before = leafImports;
+    const std::array targets{root};
+    SUBCASE("failed migration retains the previous published catalog")
+    {
+        const auto catalogPath = project.Root / "Library/AssetCache/Runtime/catalog.json";
+        const auto previousCatalog = ReadAll(catalogPath);
+        failMigration = true;
+        CHECK_THROWS((void)database->ImportAssets(targets, Keire::AssetImportPolicy::FailFast));
+        CHECK(ReadAll(catalogPath) == previousCatalog);
+        REQUIRE(database->Find(leaf));
+        CHECK(database->Find(leaf)->ImporterVersion == 1);
+    }
+    SUBCASE("successful migration leaves unrelated stale assets deferred")
+    {
+        (void)database->ImportAssets(targets, Keire::AssetImportPolicy::FailFast);
+        REQUIRE(database->Find(leaf));
+        REQUIRE(database->Find(unrelated));
+        CHECK(database->Find(leaf)->ImporterVersion == 2);
+        CHECK(database->Find(unrelated)->ImporterVersion == 1);
+        CHECK(leafImports == before + 1);
+    }
+    SUBCASE("worker keep-last-good policy reports dependency migration failure")
+    {
+        failMigration = true;
+        const auto result = database->ImportAssets(targets, Keire::AssetImportPolicy::KeepLastGood);
+        const auto failed = std::ranges::find(result.Statuses, leaf, &Keire::AssetImportStatus::Id);
+        REQUIRE(failed != result.Statuses.end());
+        CHECK(failed->State == Keire::AssetImportState::Failed);
+        REQUIRE(database->Find(leaf));
+        CHECK(database->Find(leaf)->ImporterVersion == 1);
+        REQUIRE(database->Find(unrelated));
+        CHECK(database->Find(unrelated)->ImporterVersion == 1);
+        CHECK_NOTHROW(Keire::AssetCooker::Validate(result.CatalogPath));
+
+        failMigration = false;
+        const auto retry = database->ImportAssets(targets, Keire::AssetImportPolicy::KeepLastGood);
+        CHECK(std::ranges::none_of(retry.Statuses, [](const Keire::AssetImportStatus& status)
+                                   { return status.State == Keire::AssetImportState::Failed; }));
+        REQUIRE(database->Find(leaf));
+        CHECK(database->Find(leaf)->ImporterVersion == 2);
+    }
+}

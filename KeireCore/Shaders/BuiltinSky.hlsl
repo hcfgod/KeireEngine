@@ -1,5 +1,5 @@
 #include "CloudLayered.hlsl"
-#include "AtmosphereMedium.hlsli"
+#include "AtmosphereGround.hlsli"
 #include "SkyColorGradient.hlsli"
 
 struct VertexOutput
@@ -37,6 +37,7 @@ cbuffer SkyConstants : register(b0, space3)
     uint4 StarIdentity;
     float4 SkyHorizonWeight;
     float4 SkyZenithExponent;
+    float4 GroundReflectance;
 };
 
 Texture2D EnvironmentTexture : register(t0, space2);
@@ -188,6 +189,13 @@ float3 AtmosphereRadiance(float3 direction, out float3 backgroundTransmission, o
         observer, direction, planetRadius + AtmosphereSunHeight.w, atmosphereInterval);
     float2 groundInterval;
     const bool groundHit = AtmosphereGroundIntersection(observer, direction, groundInterval);
+    if (groundHit)
+    {
+        // Ambient radiance is the same authored environment used by scene/cloud lighting.
+        // Convert uniform hemispherical radiance to irradiance; a sky-irradiance LUT is separate work.
+        return AtmosphereGroundRadiance(observer, direction, groundInterval.x, CurrentAtmosphereMedium(),
+            GroundReflectance.xyz * GroundReflectance.w, CloudAmbientLight.xyz * pi);
+    }
     const float maximumDistance = intersectsAtmosphere ? max(atmosphereInterval.y, 0.0F) : 0.0F;
     const AtmosphereTransport transport = IntegrateAtmosphereMedium(
         observer, direction, maximumDistance, CurrentAtmosphereMedium());

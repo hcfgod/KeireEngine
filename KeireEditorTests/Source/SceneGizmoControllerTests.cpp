@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <fstream>
 #include <memory>
+#include <string_view>
 
 TEST_CASE("Selecting UI documents never opens UI Builder implicitly")
 {
@@ -55,7 +56,7 @@ TEST_CASE("Selecting UI documents never opens UI Builder implicitly")
     CHECK(checked);
 }
 
-TEST_CASE("scene physics and occlusion gizmo settings migrate version one state and round trip version four")
+TEST_CASE("scene gizmo settings migrate version one state and round trip version five")
 {
     const auto root =
         std::filesystem::temp_directory_path() / ("Keire-SceneTools-" + Keire::AssetId::Generate().ToString());
@@ -82,6 +83,9 @@ TEST_CASE("scene physics and occlusion gizmo settings migrate version one state 
     CHECK(migrated.Settings().OcclusionDebugView == Keire::GpuOcclusionDebugView::None);
     CHECK(migrated.Settings().OcclusionDebugMip == 0U);
     CHECK_FALSE(migrated.Settings().ShowOcclusionMetadata);
+    CHECK(migrated.Settings().ShowGrid);
+    CHECK(migrated.Settings().Grid.Opacity == 0.5F);
+    CHECK(migrated.Settings().Grid.FadeDistance == 200.0F);
 
     migrated.SetColliderEditing(true);
     migrated.SetOcclusionDebugView(Keire::GpuOcclusionDebugView::HierarchicalDepth);
@@ -100,7 +104,7 @@ TEST_CASE("scene physics and occlusion gizmo settings migrate version one state 
         std::ifstream input(state);
         std::uint32_t version = 0;
         input >> version;
-        CHECK(version == 4);
+        CHECK(version == 5);
     }
 
     std::error_code cleanupError;
@@ -233,4 +237,34 @@ TEST_CASE("world UI Document corner handles resize transform scale without chang
     const auto negative = KeireEditor::EffectiveSceneUiWorldPanelSize(basePhysicalSize, {-2.0F, 3.0F, -4.0F});
     CHECK(negative.X == doctest::Approx(3.84F));
     CHECK(negative.Y == doctest::Approx(3.24F));
+}
+
+TEST_CASE("scene grid settings persist and reject invalid or truncated appearance values")
+{
+    const auto root =
+        std::filesystem::temp_directory_path() / ("Keire-GridTools-" + Keire::AssetId::Generate().ToString());
+    const auto state = root / "Library/Editor/SceneTools.state";
+    std::filesystem::create_directories(state.parent_path());
+    for (const auto values : {"0 0.25 450", "1 -0.5 450", "1 0.25 -1", "1 0.25"})
+    {
+        {
+            std::ofstream output(state);
+            output << "5\n1\n0.5 0.5 0.5\n15 0.1\n0 1 1 1 1 0 1 0\n" << values << '\n';
+        }
+        KeireEditor::SceneGizmoController controller;
+        controller.Load(root);
+        const bool valid = std::string_view(values) == "0 0.25 450";
+        CHECK(controller.Settings().ShowGrid == !valid);
+        CHECK(controller.Settings().Grid.Opacity == (valid ? 0.25F : 0.5F));
+        CHECK(controller.Settings().Grid.FadeDistance == (valid ? 450.0F : 200.0F));
+        controller.Save(root);
+        KeireEditor::SceneGizmoController restored;
+        restored.Load(root);
+        CHECK(restored.Settings().ShowGrid == controller.Settings().ShowGrid);
+        CHECK(restored.Settings().Grid.Opacity == controller.Settings().Grid.Opacity);
+        CHECK(restored.Settings().Grid.FadeDistance == controller.Settings().Grid.FadeDistance);
+    }
+    std::error_code cleanupError;
+    std::filesystem::remove_all(root, cleanupError);
+    CHECK_FALSE(cleanupError);
 }

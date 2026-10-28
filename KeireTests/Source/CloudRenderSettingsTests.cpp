@@ -70,6 +70,7 @@ TEST_CASE("Bloom settings round trip and older rendering settings migrate with b
     document["schemaVersion"] = 6;
     document.erase("bloom");
     document.erase("stars");
+    document.erase("fog");
     directory.Write(document);
     CHECK_FALSE(Keire::LoadRenderEnvironmentSettings(directory.Root).Bloom.Enabled);
     document["schemaVersion"] = 7;
@@ -94,6 +95,7 @@ TEST_CASE("Star settings round trip and require an explicit rendering schema")
     directory.Write(document);
     CHECK_THROWS((void)Keire::LoadRenderEnvironmentSettings(directory.Root));
     document.erase("stars");
+    document.erase("fog");
     directory.Write(document);
     CHECK(Keire::LoadRenderEnvironmentSettings(directory.Root).Stars == Keire::StarFieldSettings{});
     document["schemaVersion"] = 8;
@@ -127,6 +129,7 @@ TEST_CASE("Legacy rendering schema five without clouds migrates to disabled clou
     legacy.erase("clouds");
     legacy.erase("atmosphere");
     legacy.erase("stars");
+    legacy.erase("fog");
     directory.Write(legacy);
     const auto migrated = Keire::LoadRenderEnvironmentSettings(directory.Root);
     CHECK(migrated.SchemaVersion == Keire::RenderEnvironmentSettingsSchemaVersion);
@@ -206,4 +209,62 @@ TEST_CASE("Cloud version one project settings preserve legacy appearance when mi
     CHECK(saved.at("clouds").at("layers").at(0).at("appearance") == "legacy-unlit");
     CHECK(saved.at("clouds").at("layers").at(1).at("appearance") == "legacy-unlit");
     CHECK(Keire::LoadRenderEnvironmentSettings(directory.Root) == migrated);
+}
+
+TEST_CASE("Fog settings persist precise positions and migrate older rendering schemas disabled")
+{
+    CloudSettingsDirectory directory;
+    Keire::RenderEnvironmentSettings settings;
+    settings.Fog.Enabled = true;
+    settings.Fog.LocalVolumes.emplace_back();
+    settings.Fog.LocalVolumes.front().Center = {1.0e12 + 0.125, -30.0, 42.0};
+    settings.Fog.LocalVolumes.front().Enabled = false;
+    settings.Fog.LocalVolumes.emplace_back();
+    settings.Fog.Anisotropy = -0.25;
+    settings.Fog.ViewSteps = 96;
+    settings.Fog.ExclusionRegions.emplace_back();
+    settings.Fog.ExclusionRegions.front().Center = {1.0e12 + 0.125, 5.0, 6.0};
+    settings.Fog.ExclusionRegions.front().Strength = 0.4;
+    Keire::SaveRenderEnvironmentSettings(directory.Root, settings);
+    CHECK(Keire::LoadRenderEnvironmentSettings(directory.Root) == settings);
+    const auto saved = nlohmann::json::parse(directory.ReadBytes());
+    for (std::uint32_t schema = 1; schema < 9; ++schema)
+    {
+        auto legacy = saved;
+        legacy["schemaVersion"] = schema;
+        legacy.erase("fog");
+        if (schema < 8)
+        {
+            legacy.erase("stars");
+        }
+        directory.Write(legacy);
+        const auto migrated = Keire::LoadRenderEnvironmentSettings(directory.Root);
+        CHECK(migrated.Fog == Keire::FogSettings{});
+        CHECK(migrated.SchemaVersion == Keire::RenderEnvironmentSettingsSchemaVersion);
+    }
+    auto downgraded = saved;
+    downgraded["schemaVersion"] = 8;
+    directory.Write(downgraded);
+    CHECK_THROWS_AS((void)Keire::LoadRenderEnvironmentSettings(directory.Root), std::invalid_argument);
+    auto missing = saved;
+    missing.erase("fog");
+    directory.Write(missing);
+    CHECK_THROWS((void)Keire::LoadRenderEnvironmentSettings(directory.Root));
+}
+
+TEST_CASE("Invalid fog settings never overwrite an existing rendering document")
+{
+    CloudSettingsDirectory directory;
+    Keire::RenderEnvironmentSettings settings;
+    Keire::SaveRenderEnvironmentSettings(directory.Root, settings);
+    const auto original = directory.ReadBytes();
+    settings.Fog.LocalVolumes.emplace_back();
+    settings.Fog.LocalVolumes.front().HalfExtent[0] = 0.0;
+    CHECK_THROWS_AS(Keire::SaveRenderEnvironmentSettings(directory.Root, settings), std::invalid_argument);
+    CHECK(directory.ReadBytes() == original);
+    auto malformed = nlohmann::json::parse(original);
+    malformed["fog"]["viewSteps"] = 2.5;
+    directory.Write(malformed);
+    CHECK_THROWS_AS((void)Keire::LoadRenderEnvironmentSettings(directory.Root), std::invalid_argument);
+    CHECK(nlohmann::json::parse(directory.ReadBytes()) == malformed);
 }

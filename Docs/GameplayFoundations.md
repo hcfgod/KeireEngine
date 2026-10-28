@@ -100,7 +100,7 @@ base/variant prefab sources, and its deterministic cook/runtime route validates 
 
 ## Cooked runtime manifests
 
-Runtime manifests use schema 9 and include build identity, the ordered enabled build-scene IDs and matching startup
+Runtime manifests use schema 10 and include build identity, the ordered enabled build-scene IDs and matching startup
 scene, required source modules, managed assembly roots, default input and mixer identities, subsystem flags, the
 32-layer physics configuration, rendering environment values, authored environment time and lighting profile, and streaming settings.
 Schema-4 content remains readable with default time; schema 5 retains its validated time record. Both default to

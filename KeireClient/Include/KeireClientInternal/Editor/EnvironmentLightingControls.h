@@ -126,6 +126,17 @@ namespace KeireEditor::Detail
             ui.TextColoredWrapped(theme.MutedText, "Authored scene lights are used. Existing daily keys are retained.");
             return false;
         }
+        if (ui.Button("Apply Night Fill Preset"))
+        {
+            const auto rendering = document.Settings();
+            document.UpdateEnvironmentLighting(NightFillPreset(
+                profile, {{rendering.AmbientColor.Red, rendering.AmbientColor.Green, rendering.AmbientColor.Blue},
+                          rendering.AmbientIntensity}));
+            return true;
+        }
+        ui.TextColoredWrapped(theme.MutedText,
+                              "Night Fill adds cool ambient detail to below-horizon daily keys. Daylight, sky tracks "
+                              "and shadows are retained. This is artistic fill, not a moon light; Undo restores it.");
         bool commit = DrawEnvironmentShadowControls(ui, theme, document);
         bool ambient = !profile.Keyframes().empty() && profile.Keyframes().front().Ambient.has_value();
         if (ui.Checkbox("Animate Ambient Lighting", ambient))

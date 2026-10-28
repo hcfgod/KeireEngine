@@ -436,19 +436,36 @@ namespace Keire
                     m_Impl->StoreCachedImport(record, imported);
                 if (!assets.empty())
                 {
-                    // Import missing dependencies too, so their source metadata and generated identities are published.
+                    // Catalog presence does not establish importer compatibility. Follow current owners too,
+                    // because an unchanged material may reference a shader requiring migration.
                     const auto includeDependencies = [&](const std::span<const AssetId> dependencies)
                     {
-                        for (const auto dependency : dependencies)
+                        std::vector<AssetId> pending(dependencies.begin(), dependencies.end());
+                        std::unordered_set<AssetId> visited;
+                        for (std::size_t dependencyIndex = 0; dependencyIndex < pending.size(); ++dependencyIndex)
                         {
-                            if (availableAssets.contains(dependency))
+                            const auto dependency = pending[dependencyIndex];
+                            if (!visited.insert(dependency).second)
+                            {
                                 continue;
+                            }
                             const auto* owner = findSourceOwner(dependency);
                             if (!owner)
+                            {
                                 continue;
+                            }
                             const auto& source = *owner;
-                            if (!selected.insert(source.Id).second)
+                            const auto* importer = m_Impl->FindImporter(source);
+                            const bool requiresMigration = importer && importer->Version > source.ImporterVersion;
+                            if (availableAssets.contains(dependency) && !requiresMigration)
+                            {
+                                pending.insert(pending.end(), source.Dependencies.begin(), source.Dependencies.end());
                                 continue;
+                            }
+                            if (!selected.insert(source.Id).second)
+                            {
+                                continue;
+                            }
                             records.push_back(source);
                             sourceAssets.push_back(source.Id);
                             replacedAssets.push_back(source.Id);

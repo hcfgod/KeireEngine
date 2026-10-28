@@ -33,6 +33,13 @@ for platform in Linux Mac; do
   assert_true grep -F -q 'generated_content_release_lock "$build_lock"' "$ROOT/Scripts/$platform/build.sh"
 done
 
+for generator in builtin-shaders builtin-vfx; do
+  for dependency in FogDensity.hlsli FogExclusion.hlsli FogRayIntervals.hlsli; do
+    assert_true grep -F -q "$dependency" "$ROOT/Scripts/Unix/$generator.sh"
+  done
+done
+assert_true grep -F -q 'AtmosphereGround.hlsli' "$ROOT/Scripts/Unix/builtin-shaders.sh"
+assert_true grep -F -q 'FogTerrainShadow.hlsli' "$ROOT/Scripts/Unix/builtin-shaders.sh"
 fixture="$(mktemp -d)"
 lock_held=0
 waiter=""

@@ -51,7 +51,7 @@ structural and API drift; they do not establish that every prose claim or UI wor
 
 ## Complete Guide Library
 
-All 116 published guides and progress records are listed below. User workflows, technical references, and dated
+All 117 published guides and progress records are listed below. User workflows, technical references, and dated
 engineering records have different purposes; use the manual for a current authoring task.
 
 ### Start Here

@@ -35,10 +35,10 @@ it does not undo unrelated scene changes. Changes restored through history remai
 ## Environment Workspace (Development)
 
 Open **Window > Environment** for a dockable environment-authoring view. Its **Lighting**, **Sky**, **Clouds**,
-and **Bloom** tabs edit the same project settings as Project Settings; opening both does not create a second
+**Fog**, and **Bloom** tabs edit the same project settings as Project Settings; opening both does not create a second
 environment or preview clock. This workspace is under development and still requires desktop acceptance testing.
 Framed settings headings expand or collapse with a single click on their label or unused row space. This applies
-to lighting keys, time-preview options, atmosphere, stars, clouds and bloom; expansion does not create an Undo entry.
+to lighting keys, time-preview options, atmosphere, stars, clouds, fog and bloom; expansion does not create an Undo entry.
 Each section has its own scrolling content area below the preview controls and tabs, keeping navigation available
 while browsing long lighting-key or atmosphere settings. Very short windows still need enough height for transport.
 
@@ -83,6 +83,17 @@ shared by both views and pending edits are retained for recovery.
 Atmosphere, layered clouds and the separate local volumetric-cloud path remain experimental. Cloud interiors,
 weather simulation, planetary navigation and production timeline acceptance are unfinished. Technical skybox asset selection,
 IBL defaults and render-path options remain in Project Settings.
+
+**Ground / Void Color (linear RGB)** in the atmosphere's **Ground / Void Appearance** section controls the
+procedural reference planet below the horizon. Each channel accepts 0–1; the neutral default is 0.18.
+Sunlight and the evaluated environment ambient light illuminate this boundary. It does not create terrain,
+collisions, or materials for your scene. Set reflectance to zero for an absorbing boundary; space rays that miss
+the planet still show the space background. Existing atmosphere records receive the neutral default when loaded.
+**Ground / Void Intensity** multiplies reference-ground lighting (0–100; default 1), retaining the day/night
+response. Zero removes ground illumination but retains atmospheric scattering along the view ray. Older records
+retain intensity 1. Both controls require the procedural atmosphere to be enabled.
+The boundary currently uses authored ambient illumination, not a computed sky-irradiance lookup or cloud shadows.
+Native appearance and performance acceptance are still pending for this development feature.
 
 ### Shaping Volumetric Clouds
 
@@ -169,6 +180,40 @@ to the authored height profile. There is no separate history-quality control in 
 shared settings workflow above. Defaults aim for a natural appearance, but current visual quality, customization,
 motion, transparent overlap and backend performance still need acceptance testing; this is not a finished weather system.
 
+### Authoring Height and Local Fog (Development)
+
+Open **Window > Environment > Fog** and enable **Enable Fog**. Fog affects the air between the camera and
+visible surfaces; it does not create terrain. Height fog and local boxes add density together.
+
+1. Expand **Height and Visibility**. Start with a low **Density (per m)** and increase it while watching nearby
+   geometry. **Base Height (m)** is the level below which density stays constant; **Height Falloff (per m)**
+   controls how quickly it fades above that level. A falloff of zero gives constant density.
+2. Set **Maximum Distance (m)** to the range the effect needs. This clips fog along the viewing ray, so an
+   unnecessarily short distance can make distant haze disappear. It is not a terrain draw-distance setting.
+3. Expand **Scattering and Quality**. The three scattering channels control how much light the fog scatters;
+   they are not an emissive color. **Directional Scattering** changes the angular response to sunlight.
+   Compare **Ray Samples** at the same camera position and viewport size when assessing quality and cost.
+4. For a localized patch, expand **Local Volumes** and choose **Add Fog Box**. Expand its numbered section,
+   then set its center and half dimensions in metres. A half width of 10 produces a box 20 metres wide.
+   **Box Density (per m)** controls its contribution; **Edge Softness** blends its edges. Set global
+   **Density (per m)** to zero if you want only local boxes. Up to 16 boxes are supported.
+   Clear **Enable Box** to compare the scene without that patch while retaining its values. Disabled boxes
+   still count toward the authored limit, but do not contribute density or occupy GPU volume slots.
+5. Keep the Environment panel focused to use Undo/Redo for these settings. After restoring values through
+   history, choose **Save Environment** and confirm **All settings saved**. **Reset Fog** restores defaults,
+   including disabling fog and clearing its local boxes; Undo can restore the previous configuration.
+
+Development exclusion controls are under **Exclusion Regions**. Choose **Add Exclusion Region**, then set its
+center and half dimensions. **Strength** controls fog removal: zero leaves fog unchanged and one clears the core.
+**Edge Softness** blends the boundary. Overlapping regions use the strongest removal, so duplicate regions do not
+increase the effect. **Enable Region** retains the authored values while toggling its contribution. Regions affect
+height and local fog, not clouds. Up to 16 regions are supported independently of the local fog box limit.
+Native exclusion authoring and performance acceptance are still pending.
+
+Fog remains in development. Terrain-shadow coupling, standalone visual acceptance and final
+performance tuning are unfinished. The current height profile follows world Y; it is not yet a radial planetary
+fog model. Do not assume the same authored height settings remain appropriate throughout surface-to-orbit travel.
+
 ## Player Build Settings
 
 The **Build Settings** panel owns `Player.keiresettings`, `BuildProfiles.keiresettings`, and
@@ -218,7 +263,7 @@ remain valid in settings and appear as `Layer N` in the Inspector so every slot 
 
 ## Rendering Environment
 
-`Rendering.keiresettings` is a bounded document (current schema 8) containing:
+`Rendering.keiresettings` is a bounded document (current schema 9) containing:
 
 - ambient light color in linear RGBA;
 - ambient intensity in the supported `0..16` engine range;
@@ -228,6 +273,8 @@ remain valid in settings and appear as `Layer N` in the Inspector so every slot 
 - directional-shadow distance, cascade count, resolution, and split lambda;
 - requested render path, anti-aliasing, GPU occlusion, global illumination, and Irradyn quality;
 - render scale, dynamic-resolution mode, minimum/maximum scale, and target frame time.
+
+Schema 9 also stores disabled-by-default height fog and up to 16 local fog boxes. The development Fog tab controls this record and the shared volume renderer consumes it; native visual and performance acceptance is pending. Schemas 1–8 migrate with fog disabled; invalid fog records are rejected before saving.
 
 Requested rendering modes are project preferences, not a guarantee that every backend supports them. The Rendering
 tab reports requested and effective settings separately so a fallback is visible.
@@ -243,7 +290,7 @@ Within rendering schema 6 and later, cloud record version 2 adds appearance and 
 Legacy unlit rather than changing their look automatically. Choose Natural lit in a layer's Appearance control to
 upgrade explicitly; Undo restores the previous choice. New layers and Reset Layer use Natural lit with seed 1.
 The sky controls and separate local volumetric-cloud controls remain experimental, with no complete weather system. Their authored
-values are included in cooked runtime manifest schema 9; use matching development player binaries when recooking.
+values are included in cooked runtime manifest schema 10; use matching development player binaries when recooking.
 
 Rendering schema 7 introduced a versioned bloom record (enabled, intensity, threshold, soft knee, and radius).
 Older rendering files migrate with bloom disabled. Runtime manifest schema 8 requires this record; older manifests
@@ -324,3 +371,17 @@ SDK tools can call `LoadRenderEnvironmentSettings(projectRoot)` and
 `SaveRenderEnvironmentSettings(projectRoot, settings)`. The supported value type contains no JSON object, backend
 handle, synchronization primitive, or editor ownership. `SceneRenderRequest::Environment` transfers a validated copy
 into one render submission.
+
+### Pending night-fill authoring preset
+
+The next source batch adds **Apply Night Fill Preset** to daily-light authoring. It applies a cool ambient fill to
+below-horizon keys and keeps directional values, daylight ambient keys, shadows, and independent sky tracks intact.
+When ambient animation was disabled, daytime keys retain the project's current ambient settings. Existing document
+Undo and save behavior apply. The darker Daylight preset remains available and is not changed automatically.
+This is explicitly an artistic visibility preset, not simulated moonlight, a moon disc, or moon-phase support.
+Eight focused sky/preset tests passed with 121 assertions, including repeat application at twilight.
+The October 28 DevDist build and staging passed. In the maximized QA editor, the preset changed night detail and
+Undo restored the previous lighting; saving after Undo persisted that restored baseline. The dark gaps observed
+between clouds are expected clear regions exposing the sky, not a cloud defect. The user confirmed this distinction.
+The separate viewport-ring report applies at all times of day and remains unresolved. This preset does not address
+those rings or establish moonlight support.

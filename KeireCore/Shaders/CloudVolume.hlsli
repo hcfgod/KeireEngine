@@ -5,6 +5,11 @@
 #include "CloudVolumeLighting.hlsli"
 #include "CloudVolumeDensity.hlsli"
 #include "CloudWeather.hlsli"
+#include "FogRayIntervals.hlsli"
+
+#ifndef KEIRE_FOG_TERRAIN_VISIBILITY
+#define KEIRE_FOG_TERRAIN_VISIBILITY(position) 1.0F
+#endif
 
 #ifndef KEIRE_CLOUD_NOISE_SPACE
 #define KEIRE_CLOUD_NOISE_SPACE space2
@@ -239,25 +244,31 @@ float4 VolumeCloudCachedTransmission(float3 position, float3 sunDirection,
 }
 #endif
 
-// Call only with a finite, nonnegative interval already intersected against the cloud volume and scene geometry.
+// Call with a finite, nonnegative interval clipped to scene geometry; cloud and fog bounds are intersected here.
 // Directions are normalized. Returns premultiplied cloud-correction radiance and opacity, before exposure or bloom.
 // The atmosphere is already present in a sky background. For a surface, add (1-opacity)*clearAir.Radiance
 // and multiply the surface radiance by (1-opacity)*clearAir.Transmission at that surface's distance.
 float4 IntegrateCloudVolumeWithDepth(float3 origin, float3 direction, float entryDistance, float exitDistance,
                                          float3 sunDirection, float3 sunRadiance, float3 ambientRadiance,
                                          CloudVolumeParameters parameters, AtmosphereMedium medium,
-                                         bool includeRadiance, out float meanCloudDistance)
+                                         bool includeRadiance, FogViewDensity fog, out float meanCloudDistance)
 {
     // Zero denotes a ray without measurable cloud opacity. Distances are metres along the normalized view ray.
     meanCloudDistance = 0.0F;
-    if (exitDistance <= entryDistance || parameters.Thickness <= 0.0F || parameters.PatternSize <= 0.0F ||
-        parameters.Extinction <= 0.0F || parameters.Coverage <= 0.0F)
+    // Empty fog must preserve cloud-only sample placement and quality, not merely produce zero extinction.
+    const bool fogEnabled = fog.Controls.x != 0U && (fog.HeightDensity.z > 0.0F || fog.Controls.z > 0U);
+    const bool cloudEnabled = parameters.Thickness > 0.0F && parameters.PatternSize > 0.0F &&
+        parameters.Extinction > 0.0F && parameters.Coverage > 0.0F;
+    [branch]
+    if (exitDistance <= entryDistance || (!cloudEnabled && !fogEnabled))
     {
         return 0.0F;
     }
 
-    const bool atmosphereEnabled = medium.Controls.x > 0.5F;
     const float3 airOrigin = medium.ObserverRadius.xyz + origin * 0.001F;
+    // Local fog remains valid below the synthetic atmosphere surface (for example in a basement).
+    const bool atmosphereEnabled = medium.Controls.x > 0.5F &&
+        !(fogEnabled && length(airOrigin) < medium.ObserverRadius.w);
     if (atmosphereEnabled)
     {
         if (length(airOrigin) < medium.ObserverRadius.w)
@@ -273,31 +284,69 @@ float4 IntegrateCloudVolumeWithDepth(float3 origin, float3 direction, float entr
     const float heightVariation = VolumeCloudBaseHeightVariation(parameters);
     const CloudVolumeInterval slab = IntersectCloudVolumeSlab(
         origin.y, direction.y, parameters.BaseHeight - heightVariation,
-        parameters.Thickness + 2.0F * heightVariation, exitDistance);
-    entryDistance = max(entryDistance, slab.Entry);
-    exitDistance = min(exitDistance, slab.Exit);
+        parameters.Thickness + 2.0F * heightVariation,
+        fogEnabled ? min(exitDistance, parameters.MaximumDistance) : exitDistance);
+    if (!fogEnabled)
+    {
+        entryDistance = max(entryDistance, slab.Entry);
+        exitDistance = min(exitDistance, slab.Exit);
+    }
+    else
+    {
+        // Fog starts at the camera, including rays which never enter a cloud slab.
+        const float cloudExit = cloudEnabled ? slab.Exit : 0.0F;
+        exitDistance = min(exitDistance, max(cloudExit, fog.HeightDensity.w));
+    }
+    [branch]
     if (exitDistance <= entryDistance)
     {
         return 0.0F;
     }
 
-    const uint steps = clamp(parameters.ViewSteps, 1U, 128U);
+    const uint steps = clamp(max(cloudEnabled ? parameters.ViewSteps : 1U,
+        fogEnabled ? fog.Controls.y : 1U), 1U, 128U);
     const uint shadowSteps = clamp(parameters.ShadowSteps, 1U, 16U);
     const float stepLength = (exitDistance - entryDistance) / float(steps);
     const float samplePhase = clamp(parameters.RaySamplePhase, 0.0F, 1.0F);
-    const bool shiftedSamples = samplePhase > 0.0F;
-    const uint intervalCount = steps + (shiftedSamples ? 1U : 0U);
+    const bool shiftedSamples = !fogEnabled && samplePhase > 0.0F;
+    // Each of 16 boxes adds at most two edges; cloud slab and fog cutoff add three more.
+    const uint exclusionCount = fogEnabled ? min(fog.Controls.w, 16U) : 0U;
+    const uint intervalCount = steps + (shiftedSamples ? 1U : 0U) +
+        (fogEnabled ? 35U + exclusionCount * 4U : 0U);
+    CloudVolumeInterval exclusionIntervals[32];
+    for (uint index = 0U; index < exclusionCount; ++index)
+    {
+        FogLocalDensity box;
+        box.CenterExtinction = fog.Exclusions[index].CenterStrength;
+        box.HalfExtentEdge = fog.Exclusions[index].HalfExtentEdge;
+        exclusionIntervals[index * 2U] = IntersectFogBox(origin, direction, box,
+            min(exitDistance, fog.HeightDensity.w));
+        box.HalfExtentEdge.xyz *= max(1.0F - box.HalfExtentEdge.w, 1.0e-6F);
+        exclusionIntervals[index * 2U + 1U] = IntersectFogBox(origin, direction, box,
+            min(exitDistance, fog.HeightDensity.w));
+    }
+    CloudVolumeInterval fogIntervals[16];
+    const uint localCount = fogEnabled ? min(fog.Controls.z, 16U) : 0U;
+    for (uint localIndex = 0U; localIndex < localCount; ++localIndex)
+    {
+        fogIntervals[localIndex] = IntersectFogBox(origin, direction, fog.Local[localIndex],
+            min(exitDistance, fog.HeightDensity.w));
+    }
+    float cursor = entryDistance;
+    uint gridIndex = 1U;
     const float scatteringCosine = dot(direction, sunDirection);
     const bool sunlightEnabled = any(sunRadiance > 0.0F);
     // Both blend passes must march identical density samples even when the compiler removes lighting work.
     precise float transmission = 1.0F;
     float depthWeight = 0.0F;
     float weightedDistance = 0.0F;
-    float3 radiance = 0.0F;
+    // Keep accumulation ordered; relaxed vector reassociation also fails SPIR-V validation in fog-only variants.
+    precise float3 radiance = 0.0F;
     AtmosphereTransport airPrefix;
     airPrefix.Radiance = 0.0F;
     airPrefix.Transmission = 1.0F;
-    float previousSampleDistance = entryDistance + 0.5F * stepLength * (shiftedSamples ? samplePhase : 1.0F);
+    float previousSampleDistance = fogEnabled ? 0.0F :
+        entryDistance + 0.5F * stepLength * (shiftedSamples ? samplePhase : 1.0F);
     float3 previousAirPosition = airOrigin + direction * (previousSampleDistance * 0.001F);
     if (atmosphereEnabled && includeRadiance)
     {
@@ -326,9 +375,41 @@ float4 IntegrateCloudVolumeWithDepth(float3 origin, float3 direction, float entr
             }
             sampleDistance = 0.5F * (interval.Entry + interval.Exit);
         }
+        if (fogEnabled)
+        {
+            if (cursor >= exitDistance)
+            {
+                break;
+            }
+            float boundary = min(exitDistance, entryDistance + float(gridIndex) * stepLength);
+            boundary = NextVolumeIntervalBoundary(cursor, boundary, slab);
+            if (fog.HeightDensity.w > cursor)
+            {
+                boundary = min(boundary, fog.HeightDensity.w);
+            }
+            for (uint localIndex = 0U; localIndex < localCount; ++localIndex)
+            {
+                boundary = NextVolumeIntervalBoundary(cursor, boundary, fogIntervals[localIndex]);
+            }
+            for (uint index = 0U; index < exclusionCount * 2U; ++index)
+            {
+                boundary = NextVolumeIntervalBoundary(cursor, boundary, exclusionIntervals[index]);
+            }
+            intervalLength = boundary - cursor;
+            sampleDistance = 0.5F * (cursor + boundary);
+            cursor = boundary;
+            if (boundary >= entryDistance + float(gridIndex) * stepLength)
+            {
+                ++gridIndex;
+            }
+            if (intervalLength <= 0.0F)
+            {
+                continue;
+            }
+        }
         precise float3 position = origin + direction * sampleDistance;
         const float3 airPosition = medium.ObserverRadius.xyz + position * 0.001F;
-        if (atmosphereEnabled && includeRadiance && step > 0U)
+        if (atmosphereEnabled && includeRadiance && (step > 0U || fogEnabled))
         {
             // Advance once through each interval, including intervals without clouds. Reintegrating from the
             // camera at every occupied sample is quadratic work and changes the foreground-air quadrature.
@@ -336,13 +417,17 @@ float4 IntegrateCloudVolumeWithDepth(float3 origin, float3 direction, float entr
             segmentMedium.Controls.y = 1.0F;
             const AtmosphereTransport segment = IntegrateAtmosphereMedium(
                 previousAirPosition, direction,
-                (shiftedSamples ? sampleDistance - previousSampleDistance : stepLength) * 0.001F, segmentMedium);
+                ((shiftedSamples || fogEnabled) ? sampleDistance - previousSampleDistance : stepLength) * 0.001F, segmentMedium);
             airPrefix.Radiance += airPrefix.Transmission * segment.Radiance;
             airPrefix.Transmission *= segment.Transmission;
         }
         previousAirPosition = airPosition;
         previousSampleDistance = sampleDistance;
-        precise float extinction = VolumeCloudDensity(position, direction, intervalLength, parameters) * parameters.Extinction;
+        const float cloudExtinction = cloudEnabled && sampleDistance >= slab.Entry && sampleDistance <= slab.Exit ?
+            VolumeCloudDensity(position, direction, intervalLength, parameters) * parameters.Extinction : 0.0F;
+        const float fogExtinction = fogEnabled && sampleDistance < fog.HeightDensity.w ?
+            SampleFogSegmentDensity(position, direction * intervalLength, fog) : 0.0F;
+        precise float extinction = cloudExtinction + fogExtinction;
         if (extinction <= 0.0F)
         {
             continue;
@@ -351,7 +436,8 @@ float4 IntegrateCloudVolumeWithDepth(float3 origin, float3 direction, float entr
         // The RGB multiplication pass needs cloud optical depth, but no shadow march or radiance evaluation.
         // Bounding optical depth also avoids Inf * zero in segment integration.
         precise float opticalDepth = min(extinction * intervalLength, 80.0F);
-        const float eventWeight = transmission * opticalDepth * VolumeSegmentWeight(opticalDepth);
+        const VolumeIntegratedMedium cloudSegment = IntegrateVolumeMedium(opticalDepth, opticalDepth, 1.0F);
+        const float eventWeight = transmission * cloudSegment.Radiance;
         const float eventFraction = VolumeCloudMeanEventFraction(extinction * intervalLength);
         const float eventDistance = clamp(sampleDistance + (eventFraction - 0.5F) * intervalLength,
             entryDistance, exitDistance);
@@ -359,38 +445,52 @@ float4 IntegrateCloudVolumeWithDepth(float3 origin, float3 direction, float entr
         depthWeight += eventWeight;
         if (!includeRadiance)
         {
-            transmission *= exp(-opticalDepth);
+            transmission *= cloudSegment.Transmittance;
             continue;
         }
 
+        float3 solarTransmission = 1.0F;
+        if (atmosphereEnabled && sunlightEnabled)
+        {
+            solarTransmission = AtmosphereMediumSunTransmission(airPosition, medium);
+        }
+        float3 cloudSource = 0.0F;
+        if (cloudExtinction > 0.0F)
+        {
 #ifdef KEIRE_CLOUD_LIGHT_CACHE
-        const float4 cachedTransmission = sunlightEnabled || parameters.AmbientOcclusionStrength > 0.0F ?
-            VolumeCloudCachedTransmission(position, sunDirection, parameters, shadowSteps, sunlightEnabled) : 1.0F.xxxx;
-        const float ambientTransmission = cachedTransmission.a;
-        const float contribution = saturate(parameters.MultipleScatteringContribution);
-        const float incident = sunlightEnabled ? dot(cachedTransmission.rgb, float3(
-            VolumeCloudPhase(scatteringCosine, parameters.Anisotropy),
-            contribution * VolumeCloudPhase(scatteringCosine, parameters.Anisotropy * 0.5F),
-            contribution * contribution * VolumeCloudPhase(scatteringCosine, parameters.Anisotropy * 0.25F))) : 0.0F;
+            const float4 cachedTransmission = sunlightEnabled || parameters.AmbientOcclusionStrength > 0.0F ?
+                VolumeCloudCachedTransmission(position, sunDirection, parameters, shadowSteps, sunlightEnabled) : 1.0F.xxxx;
+            const float ambientTransmission = cachedTransmission.a;
+            const float contribution = saturate(parameters.MultipleScatteringContribution);
+            const float incident = sunlightEnabled ? dot(cachedTransmission.rgb, float3(
+                VolumeCloudPhase(scatteringCosine, parameters.Anisotropy),
+                contribution * VolumeCloudPhase(scatteringCosine, parameters.Anisotropy * 0.5F),
+                contribution * contribution * VolumeCloudPhase(scatteringCosine, parameters.Anisotropy * 0.25F))) : 0.0F;
 #else
-        const float ambientTransmission = VolumeCloudAmbientTransmission(position, parameters);
-        const float lightOpticalDepth = sunlightEnabled ? VolumeCloudLightOpticalDepth(
-            position, sunDirection, parameters, shadowSteps) : 0.0F;
+            const float ambientTransmission = parameters.AmbientOcclusionStrength > 0.0F ?
+                VolumeCloudAmbientTransmission(position, parameters) : 1.0F;
+            const float lightOpticalDepth = sunlightEnabled ? VolumeCloudLightOpticalDepth(
+                position, sunDirection, parameters, shadowSteps) : 0.0F;
 
-        const float incident = sunlightEnabled ?
-            VolumeCloudIncidentLight(scatteringCosine, parameters.Anisotropy, lightOpticalDepth,
-                parameters.MultipleScatteringContribution, parameters.MultipleScatteringOcclusion) : 0.0F;
+            const float incident = sunlightEnabled ?
+                VolumeCloudIncidentLight(scatteringCosine, parameters.Anisotropy, lightOpticalDepth,
+                    parameters.MultipleScatteringContribution, parameters.MultipleScatteringOcclusion) : 0.0F;
 #endif
-        const float3 solarTransmission = atmosphereEnabled && sunlightEnabled ?
-            AtmosphereMediumSunTransmission(airPosition, medium) : 1.0F;
-        const float ambientWeight = lerp(1.0F, ambientTransmission, saturate(parameters.AmbientOcclusionStrength));
-        const float3 illumination = ambientRadiance * ambientWeight + sunRadiance * incident * solarTransmission;
+            const float ambientWeight = lerp(1.0F, ambientTransmission, saturate(parameters.AmbientOcclusionStrength));
+            cloudSource = (ambientRadiance * ambientWeight + sunRadiance * incident * solarTransmission) *
+                saturate(parameters.ScatteringAlbedo) * cloudExtinction;
+        }
+        const float fogPhase = VolumeCloudPhase(scatteringCosine, fog.Scattering.w);
+        const float fogVisibility = fogExtinction > 0.0F && sunlightEnabled ?
+            KEIRE_FOG_TERRAIN_VISIBILITY(position) : 1.0F;
+        const float3 fogSource = (ambientRadiance + sunRadiance * fogPhase * solarTransmission * fogVisibility) *
+            saturate(fog.Scattering.xyz) * fogExtinction;
+        const float3 illumination = (cloudSource + fogSource) / extinction;
         // Replacing background sky at this opacity event must preserve the air in front of the cloud.
         // The caller adds the remaining clear-air integral for an opaque/transparent surface background.
-        radiance += transmission * (airPrefix.Radiance + airPrefix.Transmission * illumination *
-            saturate(parameters.ScatteringAlbedo)) *
-            (opticalDepth * VolumeSegmentWeight(opticalDepth));
-        transmission *= exp(-opticalDepth);
+        radiance += transmission * (airPrefix.Radiance + airPrefix.Transmission * illumination) *
+            cloudSegment.Radiance;
+        transmission *= cloudSegment.Transmittance;
     }
     if (depthWeight > 0.0F && transmission < 1.0F)
     {
@@ -399,6 +499,15 @@ float4 IntegrateCloudVolumeWithDepth(float3 origin, float3 direction, float entr
     return float4(radiance, 1.0F - transmission);
 }
 
+// Preserve the existing cloud-only call contract and its sampling cost.
+float4 IntegrateCloudVolumeWithDepth(float3 origin, float3 direction, float entryDistance, float exitDistance,
+    float3 sunDirection, float3 sunRadiance, float3 ambientRadiance,
+    CloudVolumeParameters parameters, AtmosphereMedium medium, bool includeRadiance, out float meanCloudDistance)
+{
+    const FogViewDensity disabledFog = (FogViewDensity)0;
+    return IntegrateCloudVolumeWithDepth(origin, direction, entryDistance, exitDistance,
+        sunDirection, sunRadiance, ambientRadiance, parameters, medium, includeRadiance, disabledFog, meanCloudDistance);
+}
 // Compatibility path for consumers that do not reconstruct cloud history. Unused depth work is eliminated.
 float4 IntegrateCloudVolumeWithAtmosphere(float3 origin, float3 direction, float entryDistance, float exitDistance,
                                          float3 sunDirection, float3 sunRadiance, float3 ambientRadiance,

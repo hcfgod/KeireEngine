@@ -9,6 +9,7 @@
 #include "Keire/Rendering/Bloom.h"
 #include "Keire/Rendering/Cloud.h"
 #include "Keire/Rendering/EnvironmentLighting.h"
+#include "Keire/Rendering/Fog.h"
 #include "Keire/Rendering/FrameGraphSnapshot.h"
 #include "Keire/Rendering/StarField.h"
 #include "Keire/Ui/RuntimeUi.h"
@@ -376,7 +377,7 @@ namespace Keire
         std::array<AssetId, 3> FullscreenEffects{};
     };
 
-    inline constexpr std::uint32_t RenderEnvironmentSettingsSchemaVersion = 8;
+    inline constexpr std::uint32_t RenderEnvironmentSettingsSchemaVersion = 9;
 
     struct RenderEnvironmentSettings
     {
@@ -407,6 +408,7 @@ namespace Keire
         CloudSettings Clouds;
         BloomSettings Bloom;
         StarFieldSettings Stars;
+        FogSettings Fog;
 
         auto operator<=>(const RenderEnvironmentSettings&) const noexcept = default;
     };
@@ -472,6 +474,13 @@ namespace Keire
         VfxRenderSnapshot Vfx;
     };
 
+    struct SceneGridSettings
+    {
+        float Opacity = 0.5F;
+        /// Distance from the viewing camera in metres; the grid fades over the outer half.
+        float FadeDistance = 200.0F;
+    };
+
     struct SceneRenderRequest
     {
         static constexpr std::size_t MaximumContributions = 64U;
@@ -493,6 +502,7 @@ namespace Keire
         bool DrawSceneContributions = true;
         /// Optional evaluated lighting; omission preserves the existing authored-light path.
         std::optional<EnvironmentLightingSnapshot> EvaluatedEnvironment;
+        SceneGridSettings Grid;
     };
 
     struct RenderCapabilities

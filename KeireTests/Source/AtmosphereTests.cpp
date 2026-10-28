@@ -19,22 +19,51 @@ TEST_CASE("atmosphere defaults are opt in and preserve all serialized parameters
     settings.SolarIrradiance = {12.0, 13.0, 14.0};
     settings.ViewSamples = 64;
     settings.LightSamples = 32;
+    settings.GroundIntensity = 2.5;
+    settings.GroundReflectance = {0.3, 0.2, 0.1};
     const auto encoded = Keire::Detail::EncodeAtmosphere(settings);
-    CHECK(encoded.size() == 17);
+    CHECK(encoded.size() == 20);
     CHECK(Keire::Detail::DecodeAtmosphere(nlohmann::json::parse(encoded.dump())) == settings);
+}
+
+TEST_CASE("atmosphere ground migration preserves old records and rejects malformed reflectance")
+{
+    auto legacy = Keire::Detail::EncodeAtmosphere({});
+    legacy.erase("schemaVersion");
+    legacy.erase("groundReflectance");
+    legacy.erase("groundIntensity");
+    CHECK(Keire::Detail::DecodeAtmosphere(legacy).GroundReflectance == Keire::AtmosphereSettings{}.GroundReflectance);
+    for (const double invalid : {-0.01, 1.01, std::numeric_limits<double>::infinity()})
+    {
+        auto record = Keire::Detail::EncodeAtmosphere({});
+        record["groundReflectance"][1] = invalid;
+        CHECK_THROWS_AS((void)Keire::Detail::DecodeAtmosphere(record), std::invalid_argument);
+    }
+    for (const auto version : {nlohmann::json(1), nlohmann::json(4), nlohmann::json(3.0), nlohmann::json(true)})
+    {
+        auto record = Keire::Detail::EncodeAtmosphere({});
+        record["schemaVersion"] = version;
+        CHECK_THROWS_AS((void)Keire::Detail::DecodeAtmosphere(record), std::invalid_argument);
+    }
 }
 
 TEST_CASE("atmosphere validation rejects nonfinite scalar and spectral inputs even when disabled")
 {
-    constexpr std::array scalarMembers{
-        &Keire::AtmosphereSettings::PlanetRadius,        &Keire::AtmosphereSettings::Height,
-        &Keire::AtmosphereSettings::RayleighScaleHeight, &Keire::AtmosphereSettings::MieScaleHeight,
-        &Keire::AtmosphereSettings::MieScattering,       &Keire::AtmosphereSettings::MieExtinction,
-        &Keire::AtmosphereSettings::MieAnisotropy,       &Keire::AtmosphereSettings::AbsorptionPeakAltitude,
-        &Keire::AtmosphereSettings::AbsorptionHalfWidth, &Keire::AtmosphereSettings::SunAngularRadius};
+    constexpr std::array scalarMembers{&Keire::AtmosphereSettings::GroundIntensity,
+                                       &Keire::AtmosphereSettings::PlanetRadius,
+                                       &Keire::AtmosphereSettings::Height,
+                                       &Keire::AtmosphereSettings::RayleighScaleHeight,
+                                       &Keire::AtmosphereSettings::MieScaleHeight,
+                                       &Keire::AtmosphereSettings::MieScattering,
+                                       &Keire::AtmosphereSettings::MieExtinction,
+                                       &Keire::AtmosphereSettings::MieAnisotropy,
+                                       &Keire::AtmosphereSettings::AbsorptionPeakAltitude,
+                                       &Keire::AtmosphereSettings::AbsorptionHalfWidth,
+                                       &Keire::AtmosphereSettings::SunAngularRadius};
     constexpr std::array vectorMembers{
         &Keire::AtmosphereSettings::PlanetCenter, &Keire::AtmosphereSettings::RayleighScattering,
-        &Keire::AtmosphereSettings::AbsorptionExtinction, &Keire::AtmosphereSettings::SolarIrradiance};
+        &Keire::AtmosphereSettings::AbsorptionExtinction, &Keire::AtmosphereSettings::SolarIrradiance,
+        &Keire::AtmosphereSettings::GroundReflectance};
     for (const double invalid : {std::numeric_limits<double>::quiet_NaN(), std::numeric_limits<double>::infinity(),
                                  -std::numeric_limits<double>::infinity()})
     {
@@ -178,4 +207,24 @@ TEST_CASE("atmosphere ray geometry rejects invalid and unnormalized inputs")
     CHECK_THROWS_AS(
         (void)IntersectAtmosphere({0.0, std::numeric_limits<double>::infinity(), 0.0}, {0.0, 1.0, 0.0}, 10.0, 12.0),
         std::invalid_argument);
+}
+
+TEST_CASE("ground intensity migrates and rejects invalid brightness")
+{
+    auto previous = Keire::Detail::EncodeAtmosphere({});
+    previous["schemaVersion"] = 2;
+    previous.erase("groundIntensity");
+    CHECK(Keire::Detail::DecodeAtmosphere(previous).GroundIntensity == 1.0);
+    for (const double value : {-0.01, 100.01})
+    {
+        auto invalid = Keire::Detail::EncodeAtmosphere({});
+        invalid["groundIntensity"] = value;
+        CHECK_THROWS_AS((void)Keire::Detail::DecodeAtmosphere(invalid), std::invalid_argument);
+    }
+    for (const double value : {0.0, 100.0})
+    {
+        Keire::AtmosphereSettings settings;
+        settings.GroundIntensity = value;
+        CHECK(Keire::Detail::DecodeAtmosphere(Keire::Detail::EncodeAtmosphere(settings)) == settings);
+    }
 }

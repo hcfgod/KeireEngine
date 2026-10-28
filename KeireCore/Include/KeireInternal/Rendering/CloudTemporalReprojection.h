@@ -59,8 +59,9 @@ namespace Keire::RenderBackend
             view.Volume.Geometry[1] != old.Volume.Geometry[1] || patternSize != old.Volume.Geometry[2] ||
             view.Volume.Geometry[3] != old.Volume.Geometry[3] || view.ShapeControls != old.ShapeControls ||
             view.RegionalControls != old.RegionalControls || view.HeightProfile != old.HeightProfile ||
-            view.WeatherControls != old.WeatherControls || view.CameraControls.X != old.CameraControls.X ||
-            view.CameraControls.Z != old.CameraControls.Z || view.CameraControls.W != old.CameraControls.W ||
+            view.WeatherControls != old.WeatherControls || view.Fog != old.Fog ||
+            view.CameraControls.X != old.CameraControls.X || view.CameraControls.Z != old.CameraControls.Z ||
+            view.CameraControls.W != old.CameraControls.W ||
             !CloudTemporalDetail::SimilarRadiance(view.SunRadiance, old.SunRadiance) ||
             !CloudTemporalDetail::SimilarRadiance(view.AmbientRadiance, old.AmbientRadiance))
         {
@@ -112,6 +113,15 @@ namespace Keire::RenderBackend
         {
             // Vertical noise advection does not move the authored height envelope rigidly. Reset until
             // a deformation-aware mapping is available; also reject anchor changes and large camera cuts.
+            return std::nullopt;
+        }
+        if (view.Fog.Controls[0] != 0U &&
+            (std::abs(result.CloudPositionOffset.X - result.ScenePositionOffset.X) > 0.01F ||
+             std::abs(result.CloudPositionOffset.Y - result.ScenePositionOffset.Y) > 0.01F ||
+             std::abs(result.CloudPositionOffset.Z - result.ScenePositionOffset.Z) > 0.01F))
+        {
+            // Stationary fog and advecting cloud density cannot share a single motion mapping.
+            // Reject this history until separate-medium reconstruction is available.
             return std::nullopt;
         }
         // Eight-sample exponential accumulation. Per-pixel depth and neighborhood checks further limit reuse.

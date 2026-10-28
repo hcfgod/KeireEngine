@@ -591,6 +591,7 @@ namespace
               {"clouds", Keire::Detail::EncodeCloudSettings(rendering.Clouds)},
               {"bloom", Keire::Detail::EncodeBloomSettings(rendering.Bloom)},
               {"stars", Keire::Detail::EncodeStarField(rendering.Stars)},
+              {"fog", Keire::Detail::EncodeFogDensity(rendering.Fog)},
               {"directionalShadowDistance", rendering.DirectionalShadowDistance},
               {"directionalShadowCascadeCount", rendering.DirectionalShadowCascadeCount},
               {"directionalShadowResolution", rendering.DirectionalShadowResolution},

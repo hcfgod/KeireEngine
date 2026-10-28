@@ -95,6 +95,7 @@ namespace KeireEditor
         Keire::AssetId ParentSource;
         std::string Reason;
         bool DefaultLitWarmup = false;
+        bool StartupSceneRefresh = false;
 
         [[nodiscard]] bool CanAdoptSceneCopy(Keire::AssetId currentAsset,
                                              const Keire::SceneDefinition& currentDefinition) const;

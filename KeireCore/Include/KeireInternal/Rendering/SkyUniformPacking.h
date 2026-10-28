@@ -31,6 +31,10 @@ namespace Keire::RenderBackend
                 MakeCloudLightingUniforms(environment.AmbientColor, environment.AmbientIntensity,
                                           lighting.ColorAndIntensity, lighting.Enabled, atmosphere.SunHeight),
                 MakeStarFieldUniforms(environment.Stars, starPhase),
-                skyColors};
+                skyColors,
+                {static_cast<float>(environment.Atmosphere.GroundReflectance[0]),
+                 static_cast<float>(environment.Atmosphere.GroundReflectance[1]),
+                 static_cast<float>(environment.Atmosphere.GroundReflectance[2]),
+                 static_cast<float>(environment.Atmosphere.GroundIntensity)}};
     }
 } // namespace Keire::RenderBackend

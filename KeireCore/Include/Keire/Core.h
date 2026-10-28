@@ -71,6 +71,7 @@
 #include "Keire/Rendering/Compute.h"
 #include "Keire/Rendering/ComputeCompilation.h"
 #include "Keire/Rendering/EnvironmentLighting.h"
+#include "Keire/Rendering/Fog.h"
 #include "Keire/Rendering/FrameGraphSnapshot.h"
 #include "Keire/Rendering/Lighting.h"
 #include "Keire/Rendering/LightingBaker.h"

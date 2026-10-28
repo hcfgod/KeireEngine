@@ -636,9 +636,15 @@ compilation and CPU geometry/codec checks do not prove cloud appearance, perform
 - Include local fog volumes, storm audio/ambience, visibility transitions, and documented gameplay event/query APIs.
 
 Environment authoring acceptance must include genuine volumetric clouds and fog, not only layered substitutes.
-Implementation checkpoint: an internal CPU volume-transport reference now defines homogeneous segment
+Initial implementation checkpoint (superseded by the October 28 fog integration evidence below): an internal CPU volume-transport reference defines homogeneous segment
 transmittance and integrated source weighting, including vacuum, thin and opaque limits and front-to-back
-composition. It is not yet connected to a GPU fog pass or authoring settings.
+composition. At that checkpoint it was not connected to a GPU fog pass or authoring settings. Height/local fog is
+now connected to the shared volume renderer and Environment controls; shadow coupling and exclusion remain unfinished.
+The reference also integrates overlapping homogeneous media by summing extinction and per-channel lit source
+coefficients before integration. Focused tests cover layer-order independence, segment-subdivision invariance,
+emissive vacuum, invalid coefficients and overflow (6 cases / 166 assertions across volume transport). This is the
+reference used by the shared cloud/fog interval path. This CPU reference alone does not validate the renderer. The integration model
+follows the shared-medium direction of [Frostbite's unified volumetric rendering](https://advances.realtimerendering.com/s2015/).
 Atmosphere now consumes a shared `VolumeTransport.hlsli` segment-weight kernel;
 numeric tests compile that same scalar shader source on the CPU rather than maintaining a copied formula.
 Windows and Unix shader generation both fingerprint the include. This does not substitute for GPU fog validation.
@@ -653,7 +659,8 @@ light absorption and shadow controls. Fog needs global height/density falloff pl
 scattering controls. Provide named quality presets and advanced bounded sample, resolution, temporal/history and
 distance budgets, with visible capability/fallback explanations. Verify edit-mode, Play and cooked-player parity,
 quality changes, camera cuts, origin shifts, night lighting, cloud interiors, transparent surfaces and GPU cost.
-These are pending renderer and authoring requirements; current layered-cloud controls do not fulfill them.
+Treat these as acceptance requirements: volumetric cloud and height/local fog controls now exist, while the
+remaining shadow, exclusion, planetary geometry and player/performance gates still need evidence.
 A weather preset alone does not establish physical water, fluid dynamics, or a full climate simulator.
 
 ### Authoring And Diagnostics
@@ -999,6 +1006,10 @@ These are implementation requirements for subsequent batches, not claims that th
 
 ## Migration And Release Rules
 
+The [October 28 technical review follow-up](TechnicalReviewFollowUp20261028.md) is deferred until the current
+environment work, fog, and this plan's large-world implementation and travel validation are complete.
+Do not start that separate review audit between these milestones.
+
 - Version scene, prefab, environment, checkpoint/replay, cooked, interop, and package contracts as necessary.
   Old float content widens through an explicit migration path, preserving stable IDs and a recoverable original.
 - Coordinate all canonical native and managed APIs, generated service bindings, source generators, reflection,
@@ -1010,3 +1021,330 @@ These are implementation requirements for subsequent batches, not claims that th
   edits merely because this plan exists. Those remain separately authorized operations.
 - Documentation and the website describe implemented and validated subsets truthfully throughout delivery.
   Do not label the complete plan production-ready until all required workflows and evidence gates are closed.
+
+### Shared fog/cloud segment shader checkpoint
+
+`VolumeTransport.hlsli` now integrates finite nonnegative extinction and lit source coefficients, including emissive
+vacuum. `CloudVolume.hlsli` consumes the shared segment result for opacity, representative-depth weighting,
+radiance and transmission. This prepares a common integration boundary; it does not add fog density or rendering.
+The scalar shader source is compiled directly into focused CPU tests and compared with the independent double
+reference: 7 cases / 214 assertions pass. The new `volume-overlap` GPU probe passed 384,000 samples on each of D3D12
+and Vulkan, with DXIL/SPIR-V/MSL compilation. Cloud density and ambient probes also passed on both backends at
+zero, normal and high density. Full DevDist shader rebuild and native regression remain separate gates.
+
+### Fog renderer integration sites verified
+
+The existing cloud transport path is the integration point for fog, rather than a second post-tone-map overlay:
+
+- `CloudVolumeView.hlsli::EvaluateCloudVolumeView` receives opaque depth or each transparent fragment's depth.
+  Its early-out currently covers cloud/atmosphere only and must include fog.
+- `EvaluateCloudVolumeTrace` and `IntegrateCloudVolumeWithDepth` currently intersect the cloud slab. Fog must
+  integrate the union of relevant intervals; merely adding fog density inside that slab would omit ground fog.
+- `RenderCloudVolume.cpp` skips when clouds and atmosphere are disabled and selects cloud temporal reconstruction
+  when clouds are enabled. Both selection and history validity must account for fog, including fog-only views.
+- `CloudVolumeViewUniforms` is ABI 7 (448 bytes), with legacy prefix sizes in `CloudVolumeUniformByteSize`.
+  Append fog uniforms with an explicit ABI revision and update generated shader/import invalidation together.
+- `Rendering.keiresettings` is schema 8. Fog needs a versioned record, disabled migration defaults, strict bounded
+  validation, and editor/runtime propagation. Do not expose an operational enable control before rendering exists.
+
+These are verified implementation constraints, not completed features. The shared scalar segment shader build is
+still in progress; changing renderer source during that build is deferred to keep its result reproducible.
+
+### Fog density model and record checkpoint
+
+Internal `FogDensity.h` and `FogDensityRecord.h` now define bounded global height falloff and up to 16 local box
+volumes, smooth edge blending, additive extinction, albedo, anisotropy, maximum ray distance and sample budget.
+Density below the reference height is capped, and coordinates use an explicitly selected local metre frame.
+The JSON codec rejects malformed fields and invalid budgets before returning settings. These internal records are
+not yet wired to `Rendering.keiresettings`, scene submission, GPU uniforms or authoring UI. Existing project files
+remain schema 8; do not describe fog enablement or migration as shipped functionality yet.
+
+### Fog GPU density and camera-relative preparation
+
+`FogViewUniforms.h` prepares a 560-byte bounded record, subtracting camera position in double precision before
+narrowing visible local bounds. Volumes outside the maximum trace domain are culled before upload. A focused test
+preserves a 0.125 m offset at a 1e12 m origin. `FogDensity.hlsli` samples the global height layer and up to 16 smoothly
+blended local boxes. The `fog-density` GPU probe passed 384,000 samples each on D3D12 and Vulkan; shader generation
+also passed for MSL. CPU density/codec/preparation tests passed 5 cases / 39 assertions. This validates the density
+kernel and packing, not a rendered fog pass: scene submission, interval integration, light/shadow coupling,
+transparency, history, serialization migration and UI remain to be connected.
+
+### Fog settings integration checkpoint (October 28)
+
+Rendering schema 9 now persists the public `FogSettings` record. Schemas 1–8 migrate with fog disabled;
+mislabelled older documents containing fog are rejected. Saving validates all fog fields before replacing the
+settings document. Double-precision local volume positions survive serialization, including a 0.125 m offset
+at a 1e12 m origin. This supersedes the earlier schema-8/internal-record-only checkpoint above.
+
+The focused optimized harness compiled the current `RenderSettings.cpp` and passed 30 cases / 1,704 assertions
+across rendering settings, cloud settings and fog density/preparation. Documentation validation passed all 117
+guides and 14 schema contracts. This is not renderer acceptance: scene submission, overlapping ray intervals,
+lighting/shadows, history, runtime manifest propagation and authoring controls are still pending. Keep fog UI
+unavailable until the render path works; batch the renderer changes before the next DevDist build and UI session.
+
+### Shared fog/cloud transport checkpoint (October 28)
+
+The shared cloud march now has a fog-aware overload. It covers the union of the cloud slab and fog distance,
+clips local boxes against the ray, and splits intervals at volume boundaries so a half-metre box cannot vanish
+between kilometre-spaced samples. Cloud and fog extinction/source coefficients combine before segment
+integration. Fog-only samples skip cloud lighting; zero-strength cloud ambient occlusion skips its extra density
+samples. The cloud-only overload remains available to existing consumers.
+
+The `fog-transport` GPU probe checks homogeneous extinction/albedo, surface-depth and maximum-distance clipping,
+radiance/attenuation agreement, thin overlapping local boxes, disabled fog and cloud/fog overlap. It passes
+384,000 cases each on D3D12 and Vulkan; DXIL, SPIR-V and MSL compile. Existing cloud-density and cloud-ambient
+suites pass at zero/normal/high density on both backends. Ordered (`precise`) radiance accumulation is necessary
+for the pinned shader compiler's fog-only SPIR-V path; relaxed accumulation produced invalid vector selects.
+
+This is kernel evidence, not live fog acceptance. The renderer still calls the cloud-only overload. Next: append
+fog uniforms with explicit shader ABI compatibility, propagate camera-relative data, handle fog-only dispatch and
+history invalidation, and complete light/shadow coupling and cooked runtime data. Height-fog quadrature at steep
+falloff, local soft-edge quality, indoor exclusion and native performance still need acceptance. Authoring controls
+remain unavailable until those paths are connected. No new DevDist build or editor restart at this checkpoint.
+
+### Lower-horizon appearance finding (October 28)
+
+The user's daylight screenshot shows a black lower hemisphere outside the finite showcase floor.
+`BuiltinSky.hlsl::AtmosphereRadiance` uses the atmosphere's synthetic planet intersection to occlude the sky,
+and returns only integrated air radiance along ground-hit rays. There is no reflected ground-surface term;
+near-surface downward rays therefore approach black. This is an implementation limitation, not evidence that
+scene lighting or the floor mesh is broken. Add an explicit configurable lower-horizon/ground appearance with
+daylight/night response and a sensible default. Preserve real terrain depth, planetary occlusion, and space views;
+do not fill the lower hemisphere with unrelated clouds or remove the planet intersection as a cosmetic patch.
+Validate near-ground cameras, below-sea-level geometry, orbit and planet-to-space transitions. This joins the
+active environment/large-world work, before the deferred technical review.
+
+### Fog renderer wiring checkpoint (October 28)
+
+Volume ABI 8 appends 560 bytes of fog uniforms after the unchanged 448-byte ABI-7 prefix (1008 bytes total).
+Legacy material uploads retain their original byte counts. Shader validation/metadata support ABI 8 and the graph
+importer revision is incremented to rebuild generated materials. Fog-only requests now require sampled scene
+depth and invoke the volume pass. Shared view tracing clips fog against each surface's own depth and covers sky
+rays to the fog distance. CPU view preparation uses the current local render-camera frame; this does not yet prove
+end-to-end double-precision world-camera propagation.
+
+History invalidates on fog-uniform changes and when cloud advection differs from stationary fog motion. This is
+conservative correctness, not final temporal performance: fog-only dispatch remains full-resolution and mixed
+fog/cloud reconstruction needs native motion acceptance and profiling. All five built-in volume/trace/resolve/
+composite/cache shaders compile for DXIL, SPIR-V and MSL. The fog-view GPU probe passes 384,000 samples per backend
+on D3D12/Vulkan. Layout/history/density focused checks pass 11 cases / 85 assertions. C++ consumer compilation,
+cooked runtime propagation, UI, native appearance and performance remain separate gates.
+
+### Fog UI and cooked propagation checkpoint (October 28)
+
+Runtime manifest schema 10 now carries fog from AssetTool into RuntimeApplication through the shared validated
+manifest decoder. Older manifests default to disabled fog; older schemas containing fog and current schemas
+missing fog are rejected. Runtime-manifest tests pass 10 cases / 101 assertions, including high-magnitude local
+positions and malformed local extents. The Environment panel has a dedicated Fog tab with grouped height,
+scattering/quality and local-box controls; Project Settings shares the same controls and document transactions.
+These supersede earlier notes saying the controls or cooked propagation are absent. Native undo/save/reload,
+viewport appearance, performance and standalone acceptance remain pending. The combined DevDist build is running.
+
+Lower-horizon implementation direction: add authored ground reflectance and a lit ground boundary term,
+composed with air radiance/transmittance to the planet intersection. Keep scene geometry visibility separate;
+retain a black space background where rays miss the planet/atmosphere. The reference model distinguishes
+sky radiance, point-to-camera aerial perspective and sun/sky surface irradiance, with an explicit ground-albedo
+parameter: [Bruneton atmosphere API](https://ebruneton.github.io/precomputed_atmospheric_scattering/atmosphere/model.h.html).
+Kéire currently has only the occluding boundary and atmospheric path contribution. This is a planned renderer
+change, not a completed fix. Preserve energy/units, test daylight/night/terminator/orbit, and avoid per-pixel
+nested sky integration that would undo the recent frame-time gains. Batch settings, codec, uniforms, UI and
+focused numerical/GPU tests together after the current fog build finishes.
+
+### Ground-boundary preparation and fog build completion (October 28)
+
+The complete DevDist editor, AssetTool and runtime build passed, and the cached development stage completed in
+22.1 seconds. Native fog appearance, authoring transactions and performance still require verification.
+`AtmosphereGround.hlsli` now implements a Lambertian ground boundary composed with air transmission to the
+intersection, rather than the sky path's zero transmission at opaque ground. Its focused GPU probe passes
+384,000 samples each on Direct3D 12 and Vulkan; DXIL, SPIR-V and MSL compilation pass. Coverage includes
+reflectance variation, surface-to-orbit distances, daylight, unilluminated night and absorbing air composition.
+This helper is not yet connected to BuiltinSky: authored reflectance, persistence, uniforms, controls, diffuse
+sky irradiance and native visual acceptance remain pending. The black lower-horizon issue is not fixed in the
+staged editor yet. Do not treat these numerical checks as visual or performance acceptance.
+
+### Reference-ground integration checkpoint (October 28)
+
+The sky renderer now composes reflected reference-ground radiance at the planet intersection, preserving
+atmospheric transmission to that boundary. Ground Reflectance is a linear RGB control (0–1, default 0.18)
+in the shared atmosphere UI. It affects the procedural reference sphere only; it creates neither terrain nor
+collisions and does not replace authored materials. Direct sunlight uses atmospheric attenuation and the local
+surface normal. Diffuse illumination currently uses the authored environment ambient radiance; a spatial
+sky-irradiance LUT and cloud shadows on this boundary are not implemented.
+
+The nested atmosphere record is now version 2; legacy unversioned 17-field records migrate to the neutral ground
+default, while malformed/new unsupported records are rejected. The shared atmosphere/cloud uniform ABI is
+unchanged; sky-only uniforms append one float4 (544 bytes total). Eight atmosphere tests / 179 assertions pass,
+and the integrated sky compiles for DXIL, SPIR-V and MSL. GPU ground-transport checks from the preceding checkpoint
+pass. Native visuals, terminator/orbit appearance and performance remain unverified until the next DevDist build.
+
+### Native acceptance sequence for ground and fog
+
+Run the rebuilt, staged DevDist editor maximized with the backed-up CloudIsolation20261026 QA project.
+Record viewport sizes, time, camera and render backend for comparisons; do not compare unlike viewport workloads.
+
+1. With fog disabled, compare Scene and Game views at noon, dusk and midnight. Look below and across the horizon,
+   then upward: reference ground should receive light without painting over meshes, stars or empty-space rays.
+2. Change Ground Reflectance, verify both settings surfaces agree, then Undo/Redo and save/reload. Restore the
+   neutral baseline. Check existing project migration without overwriting the saved baseline backup.
+3. Enable fog, vary density and maximum distance, and verify nearby surfaces remain clearer than distant ones.
+   Set global density to zero and add a local box; cross its edges and verify smooth transitions. Test Undo/Redo
+   and save/reload, then restore the original settings. Check add/remove behavior and the 16-box limit.
+4. Compare daytime/nighttime camera motion and time preview with fog off/on, keeping panel dimensions fixed.
+   Record frame-time distribution after warm-up, not a single FPS reading. Check cloud/fog overlap for halos,
+   stale history, boundary stepping and dark-gradient rings.
+5. Keep numerical probes and native results separate. Terrain fog shadows/exclusions, ground cloud shadows,
+   sky-irradiance LUTs, standalone acceptance and large-world travel remain open unless separately demonstrated.
+
+### Startup performance priority (user request, October 28)
+
+After the current ground/fog UI checks, investigate the long startup before continuing the performance pass.
+The user expects near-instant startup. Separate warm unchanged-project startup, first import and importer-version
+migration; do not use an empty editor's frame time as evidence of startup performance. The current native run
+waits for a 93-asset automatic refresh before restoring the scene, including unrelated MaterialLab shader graphs.
+Observed live worker progress advanced 6, 15, 26, 38 and 48 of 93 while the editor remained responsive.
+
+Measure time to window, time to usable restored scene, shader compiler invocations, cache hits and background
+completion. Audit whether scene dependencies can be prioritized and unrelated imports deferred, whether unchanged
+shader outputs are invalidated unnecessarily, and whether safe compiler/cache reuse reduces migration work.
+Preserve importer correctness, stale-output rejection and runtime parity. Validate both warm restart and forced
+migration with the same project, then document measured improvements and remaining costs. Target near-instant
+warm startup; a first-time compile must remain visible and cancellable rather than freezing or hiding progress.
+
+Startup source audit: `EditorWorkspaceLayer.cpp` currently defers the startup scene when any source record has
+an older importer version, then queues `ImportAll`. `AssetPipeline.cpp::ImportAssetsUnlocked` skips discovered
+dependencies already present in the catalog, so replacing that request with only the scene ID would not guarantee
+compatible upgraded shader dependencies. A scene-priority implementation must explicitly validate the transitive
+scene dependency closure (including subasset owners and newly discovered references), preserve transactional
+catalog publication, and defer unrelated refresh work. Test a stale shader already present in the catalog, missing
+catalog fallback, changed scene references, cancellation/failure, and a warm unchanged restart before acceptance.
+
+Existing regression fixtures to extend: `KeireTests/Source/Assets/AssetTests.cpp` covers background detection of
+offline source changes, including unchanged timestamps; `AssetTargetedPublicationTests.cpp` covers newly referenced
+missing dependencies and failed dependency publication. Neither establishes importer-version migration of dependencies
+already in the catalog. Keep those guarantees and add that case before enabling scene-priority migration.
+
+Measured migration baseline (October 28 QA operation `25dac2b2-fd42-4861-922f-49e256028ed9`):
+93 assets, 20 imported and 73 cache hits; total import 199.265 seconds. Worker phase timings report 0.463 seconds
+scanning and 197.070 seconds importing. The 20 slow preparation entries total 195.921 seconds. Largest entries:
+shared VFX 18.525 seconds, WorldAlignedStone 17.643, BrushedAlloy 16.598, AutomotiveClearCoat 15.948,
+shared Lit 14.752. Prioritize shader preparation/cache reuse and scene dependency scheduling over source scanning.
+This is an importer-migration measurement, not warm startup latency. The subsequent default-lit warmup operation
+`57d5df09-3437-4fee-bb62-740a7c75b745` reports 2.222 seconds setup and 0.281 seconds operation; it runs in the
+background and must not be reported as time to usable scene.
+
+Ground appearance native checks on the rebuilt DevDist: intensity 1 to 0.2 visibly dims the reference ground;
+red 0.18 to 0.98 produces a matching red boundary in Scene and Game views without recoloring scene meshes.
+Two Undo gestures restore color and brightness separately. Save Environment clears the unsaved notice, and
+Rendering.keiresettings confirms intensity 1 and RGB 0.18 afterward. Custom-value reload and fog interaction
+acceptance remain outstanding. The editor is left open, maximized, with desktop control released.
+
+Startup batch implemented: current catalog dependency traversal now discovers outdated transitive importers; editor queues the startup scene first, then remaining imports after successful completion. KeepLastGood failed statuses block the handoff. Shader cache hits no longer stage temporary sources. Focused validation passed: shader cache 9 cases / 303 assertions, dependency migration and rollback 2 cases / 43 assertions, worker startup failure/context propagation 1 case / 52 assertions. DevDist build and staging passed (20.2 seconds staging). Native warm restart restored the rendered scene; no precise startup duration or forced-migration comparison has been established yet. Those measurements and missing-catalog/cancellation native acceptance remain open.
+
+### Confirmed execution order and travel acceptance (October 28)
+
+Finish the startup measurement and recovery checks, then finish fog before moving to large-world travel. User explicitly reaffirmed this order. Ground-to-space and space-to-ground acceptance must exercise continuous travel in the Editor and player, coordinate precision and origin/reference-frame transitions, streamed content continuity, atmosphere/cloud/fog transitions, and measured frame times. A high-altitude camera screenshot alone does not establish seamless travel.
+
+Additional startup regression: KeepLastGood dependency migration failure is reported in statuses, retains importer version 1 and a valid catalog, and succeeds on retry without migrating the unrelated source. Focused suite now passes 2 cases / 53 assertions. Updated native warmup operation 02560e83-5773-4cf5-beb0-5f4171cad56f reports one cache hit, zero imports, 1.747 seconds worker setup and 0.158 seconds operation. This remains background-worker timing, not time to usable scene.
+
+Native scene-priority migration acceptance: backed up one ShaderGraph metadata file and the source index, then changed its importer version from 49 to 48 consistently in both (including metadata digest). Launch at 2026-10-28T16:54:01.6986756Z queued startup-scene-refresh fd216e3d-4578-4b07-9e07-47ee0b8db6d2. The targeted closure imported the scene and stale shader only: two statuses, one import, one cache hit, setup 342.781 ms and operation 487.952 ms. Then remaining-startup-refresh db43c1a7-ffbc-4803-b9c0-098850d7e801 processed 93 cache hits in 5156.1 ms plus 1817.66 ms setup. Native capture shows the restored scene rendering; disk metadata is back at version 49. This validates queue order and migration recovery, not a like-for-like speedup against the 199-second cold migration baseline. Full time-to-usable-frame instrumentation remains a performance follow-up; proceed with fog acceptance next.
+
+Fog native authoring checkpoint: on maximized QA editor, Enable Fog visibly attenuates geometry and sky; Ctrl+Z removes it and Ctrl+Y restores it. Add Fog Box changes count 0/16 to 1/16 and visibly adds local haze to the showcase. Undo removes the box and restores the previous appearance; another Undo restores fog disabled. Save Environment clears the unsaved status. Baseline left disabled with zero boxes at 09:00. These checks do not establish performance budgets or shadow/exclusion/standalone acceptance. Tool activation restored the maximized window and shifted the initial click to Profiler; manually maximized before tests, without changing editor code.
+
+Fog height integration finding: a new GPU regression exposed sample-count-dependent opacity for exponential height fog on vertical rays (old D3D12 probe failed). The shared march now uses the analytic mean height density over each interval, splits the constant-density contribution analytically when crossing the base, and uses a small-span series for horizontal-ray stability. Local boxes keep their existing midpoint sampling and interval clipping. Initial updated probe passes 384,000 cases each on D3D12/Vulkan; additional base-crossing and nearly-horizontal cases are included in the final rerun. This is a numerical quality fix, not a measured speedup. Native DevDist rendering and combined lighting quality remain pending; batch further fog work before rebuilding.
+Final expanded height-fog probe also passes 384,000 samples per backend, including base crossing and nearly horizontal rays; DXIL, SPIR-V and MSL compile successfully.
+
+Confirmed local soft-edge defect: the shared march clips at outer box boundaries but samples each resulting interval only at its midpoint. A thin box with 20-percent soft edges at one nominal step is treated as full core density. Added an analytic central-axis regression: two half-metre boxes at extinction 0.2 each should have optical depth 0.18, not 0.2. D3D12 probe fails all 384,000 cases (Build/Validation/fog-soft-edge-before.log). This regression is intentionally failing until local-volume integration is corrected. Retain bounded cost and test oblique rays, overlapping boxes, zero softness and full softness before native acceptance; do not mask this by raising default quality.
+
+Local soft-edge integration corrected: each box's normalized distance is the maximum of six affine face distances along the ray. The shader clips each face's dominance interval and integrates its clamped cubic soft ramp, with fast rejection for outside segments and a solid-core fast path. Expanded GPU transport tests pass 384,000 cases per backend on D3D12/Vulkan: thin overlapping boxes, oblique rays against 128-sample reference, reversed rays and split-segment invariance, plus height-fog regressions. DXIL/SPIR-V/MSL compile. Boundary cost is bounded but greater than midpoint sampling; measure native frame times before acceptance. The next DevDist batch includes both height and local fog fixes.
+
+Fog coordinate packing regression passes at the supported local-frame limit: all 16 volumes retain 0.125-metre camera-relative offsets near plus/minus 1e15 metres, and disabling fog clears the uniform record. Focused density/record suite passes 6 cases / 73 assertions. This verifies packing, not planetary motion or seamless travel.
+
+Height/local fog integration batch built successfully (18 native actions) and staged in 19.1 seconds. Updated editor launches with the saved QA baseline. First startup after new shader binaries took time before exposing its window; this is not proof of near-instant startup. Sustained fog performance and visual acceptance are still pending.
+
+Native stationary fog comparison (October 28): same maximized editor, camera and viewport, 09:00, clouds enabled, no local boxes, 10-second application-interval captures after two-second warmup. Fog disabled: 887 intervals, mean 11.28 ms, P95 12.64 ms, P99 13.36 ms, maximum 14.59 ms. Fog enabled: 749 intervals, mean 13.35 ms, P95 14.60 ms, P99 15.41 ms, maximum 15.83 ms. Approximately 2.07 ms incremental application-frame cost in this scene; not isolated GPU timing or a movement/player benchmark. CSV evidence: Build/Validation/fog-disabled-sustained.csv and fog-enabled-sustained.csv. Native toggle visibly changes haze and restores baseline; saved fog disabled afterward. Local-volume boundary performance, shadow/exclusion support and planetary height behavior remain open before travel acceptance.
+
+Empty-fog regression: enabled zero-density fog with no visible local boxes changed cloud opacity by overriding cloud sampling phase and raising the march to the fog step count. New GPU case fails on the old D3D12 path. The combined march now retains the cloud-only path when the fog uniform has no density contributors. Updated transport suite passes D3D12 and Vulkan, including the phase/quality regression. Native rebuild is deferred into the next fog batch; no measured speedup claimed. Planetary audit confirms both CloudVolume slab clipping/density and FogDensity height integration are world-Y based. Ground-space-return completion requires radial layer geometry, numerically stable altitude relative to the same planet/reference frame, and ray interval handling across shell entry/exit, followed by continuous travel validation; camera altitude alone is insufficient.
+
+Local fog authoring batch: added per-box Enabled state and Enable Box checkbox through shared Environment/Project Settings controls. Disabled records retain values and authored-limit accounting but are skipped by CPU density and GPU packing. The shared settings/runtime record decoder migrates legacy four-field boxes to enabled, emits explicit boolean state and rejects malformed flags. Focused tests pass 7 cases / 83 assertions, including disabled validation and legacy migration. Documentation validation passes 117 guides, 10 navigation groups, 29 Mermaid diagrams and schema/link contracts. DevDist build is running; native toggle Undo/Redo, reload and player acceptance remain pending. This is not exclusion-volume support: exclusion volumes must remove ambient/global fog in an authored region.
+
+Per-box runtime persistence acceptance expanded: rendering settings file roundtrip and cooked EnvironmentRuntimeManifest roundtrip now include both disabled and enabled boxes with precise positions. Combined focused suites pass 20 cases / 233 assertions. Test harness was corrected to link one doctest implementation after an initial duplicate-main linker failure; engine sources did not need a workaround. Native UI acceptance still awaits DevDist build completion.
+
+### Fog completion gates before travel acceptance
+
+The per-box enable toggle is an authoring comparison tool, not an exclusion region. Finish the following paths
+without conflating their evidence:
+
+| Gate | Implementation requirement | Acceptance evidence |
+| --- | --- | --- |
+| Local-box authoring | Shared controls, individual enable state, history, settings and cooked runtime propagation | Native enable/disable, Undo/Redo, save/reopen; mixed enabled/disabled boxes in player |
+| Exclusion regions | Bounded authored regions suppress height and additive local fog with a defined overlap rule and soft edges; preserve clouds | CPU/GPU agreement at thin boundaries, overlapping exclusions, disabled regions, camera-inside cases and transparent surfaces |
+| Terrain shadows | Volume sunlight samples actual directional shadow visibility; ambient remains independent; use camera-relative positions and valid cascade bounds | Wall/roof occlusion, cascade transitions, off-screen occluders, origin changes and cost measurements in editor/player |
+| Planetary layers | Fog altitude and cloud shell intersections use the selected planet/reference frame, not world Y; account for shell entry/exit on ascent and return | Surface, horizon, cloud interior, orbit and opposite-side approach without terrestrial fog in vacuum |
+| Performance | Measure height-only, one box and maximum boxes, soft boundaries and moving camera with fixed viewport | Sustained frame captures and renderer timings; compare against the 10 ms target, record misses honestly |
+| Continuous travel | Keep input, streaming, precision and local physics coherent through surface/orbit/reference-frame transitions | Complete ground-space-ground route in editor and standalone player with no loading screen, bounded memory and no visible jumps |
+
+Code audit: material shading already has directional shadow matrices and texture sampling in ShaderGraphHlsl.cpp;
+the shared cloud/fog view pass does not bind that visibility. Do not fake terrain occlusion by darkening fog or
+sampling only the final surface's shadow. Bind a shared visibility implementation at the volume sample positions,
+with explicit fallback outside valid shadow coverage. The world-Y cloud slab in CloudVolume.hlsli and height
+profile in FogDensity.hlsli are both planetary blockers, rather than a fog-only parameter adjustment.
+
+Fog projection acceptance expanded: FogViewProbe now checks off-axis perspective with a valid perspective inverse matrix, parallel orthographic rays away from screen center, and exposure scaling of radiance without changing transmission. Corrected fixture passes 384,000 samples each on Direct3D 12 and Vulkan; DXIL/SPIR-V/MSL compile. The first expanded run used the old affine center-ray fixture incorrectly as a perspective projection; that fixture error was corrected without changing renderer behavior. This does not establish native visual or planetary geometry acceptance.
+
+Fog authoring DevDist build completed successfully (254 native actions), including client, runtime and asset tool outputs. Native staging/toggle/history/reload acceptance is pending: the running QA camera changed during compilation, so desktop control was released and the user was asked whether the editor can be restarted.
+
+Exclusion implementation started while QA restart answer is pending: internal FogExclusion.h defines an axis-aligned region and CPU retention reference. Strongest weighted exclusion wins, making overlap order-independent and duplicate-invariant; strength and cubic soft edges multiply fog density only, never clouds. Disabled regions retain validation. Focused reference tests cover core, edges, partial strength, overlap/reordering/duplication, distant centers and invalid inputs. This is not yet connected to FogSettings, persistence, GPU uniforms/integration or authoring UI. Next wire those paths and test interval boundaries so thin exclusions cannot disappear between coarse samples. Do not advertise exclusion support until that integration and native/player acceptance pass.
+
+Exclusion settings/CPU integration checkpoint: FogExclusionRegion is now an authored type with a separate maximum of 16 regions. FogSettings carries ExclusionRegions; the shared record encoder/decoder preserves bounds, softness, strength and enabled state, and legacy nine-field fog records migrate with no exclusions. CPU extinction applies the strongest exclusion after summing global and local fog. Focused suite passes 4 cases / 26 assertions (including persistence, disabled state, legacy migration, malformed strength and count limit). GPU packing, segment integration, shader ABI migration, controls and native/player acceptance remain unimplemented for exclusions; do not expose or claim the feature until those paths are complete. The previously built DevDist predates this settings addition.
+
+GPU exclusion point kernel implemented in FogExclusion.hlsli and validated by FogExclusionProbe through the existing offscreen harness. The GPU test sweeps positions and strength, checks empty regions, duplicate invariance, order independence and hard boundaries. Both D3D12 and Vulkan pass 384,000 samples; DXIL/SPIR-V/MSL compile. This validates only point retention. The kernel is not yet called by the live volume renderer. Required next integration: append exclusion records to the volume uniform ABI with legacy prefix compatibility, origin-relative host packing, include exclusion boundaries in ray intervals, integrate retention against fog density over segments (not midpoint-only), regenerate material shaders, and add controls. Keep cloud extinction independent of exclusion retention.
+
+Exclusion ray/UI integration implemented, pending broader validation: the fog march splits outer/core exclusion box intervals, then uses bounded eight-point Gauss-Legendre weighting against the exact unexcluded density average on affected segments. Unaffected segments retain the existing analytic path. GPU transport tests pass 384,000 cases each on D3D12/Vulkan, including a half-metre hard/soft exclusion at a single nominal 100-metre step, duplicate regions and partial strength. Shared controls now expose bounded add/remove, enable, center, extents, strength and softness. Remaining gates include oblique/overlapping varied-density accuracy, explicit cloud-preservation tests, ABI/codec/layout tests, runtime persistence with exclusions, build, native UI/history/reload, performance and player acceptance. These changes are not staged into the running editor.
+
+Exclusion compatibility validation: volume layout/metadata suites pass 4 cases / 59 assertions, including ABI 9 and legacy prefixes. GPU transport now explicitly verifies a full fog exclusion preserves cloud opacity and cloud radiance; 384,000 cases pass per D3D12/Vulkan backend. Initial comparison incorrectly used the opacity-only cloud reference for RGB; corrected to the radiance-enabled reference before passing. Oblique, varying-density and native/player validation remain open.
+
+Low-quality exclusion regression fixed: the 1–32 step angled-ray sweep initially failed on D3D12 (0.009375 failed fraction) against a 512-sample reference at a 0.0002 opacity tolerance. Four subdivisions of the eight-node integration resolve changing dominant box faces and strongest overlapping regions; both backends now pass without loosening tolerance. Added constant-core fast paths: fully clearing cores return zero immediately; a core stronger than every intersecting region scales the analytic unexcluded integral directly. Final fast-path transport probe also passes 384,000 cases per backend. Performance is not established by these numerical tests. Full DevDist build started; no live editor replacement yet.
+
+Shader cache integration checks: Windows generated-content cache harness passes with FogExclusion.hlsli required in both shader and VFX dependency lists. Unix harness updated equivalently, but a Git Bash run cannot complete its atomic symlink-lock publication fixture: traced ln -s of the synthetic keire-owner target returns failure. Dependency assertions execute before that fixture. This is not a native Linux/macOS validation pass; rerun there before claiming cross-platform cache acceptance.
+
+Terrain-shadow integration map (source audit, not implemented): RenderSurfaceRecording.cpp records ShadowFrameData before the volume pass, but RecordCloudVolume currently receives only the scene packet. Its direct/MSAA pass binds depth, cloud noise and background; RecordCloudTemporal trace similarly has no directional shadow binding. Thread the existing shadow frame through both paths, bind directional cascade resources with matching shader metadata, and evaluate visibility at fog integration sample positions in CloudVolume.hlsli. Preserve ambient illumination and extinction when sunlight is occluded. Surface ShaderGraphHlsl.cpp already provides cascade selection and PCF behavior to reuse consistently. Acceptance must cover fog-only, cloud-plus-fog temporal rendering, MSAA, outside-cascade fallback and moving shadow casters; avoid introducing stale shadow visibility into the cloud light cache. No terrain-shadow behavior is validated by the current exclusion GPU tests.
+
+Exclusion capacity regression: GPU probe now exercises the sixteenth slot with all earlier slots inactive, plus defensive count clamping beyond uniform capacity. Direct3D 12 and Vulkan each pass 384,000 samples (Build/Validation/fog-exclusion-capacity.log). This extends point-kernel coverage; it does not measure maximum-region frame cost or replace native authoring acceptance.
+
+Fog temporal-history regression: every one of the 16 exclusion records is checked for strength and softness changes, plus removal through the active count. All invalidate combined cloud/fog accumulation; unchanged data retains history. Focused CloudTemporalReprojectionTests pass 6 cases / 63 assertions (Build/Validation/fog-temporal.log). This is CPU history-policy coverage, not native visual acceptance. Frame-graph audit also found the volume pass lacks an explicit shadow-resource read; add that dependency alongside the forthcoming sampler integration, not just a texture binding.
+
+Exclusion DevDist build completed successfully (366 native actions; editor, runtime, asset worker and tool linked). Build log: Build/Validation/fog-exclusion-devdist.log. Running QA editor still predates this build; staging/restart and native acceptance remain pending the existing question about whether that window is in use. Do not treat compilation or GPU probes as visual/performance acceptance.
+
+Terrain-shadow prerequisite implemented: CloudVolume now explicitly reads the directional-shadow frame-graph resource. Focused HDR graph tests pass 2 cases / 127 assertions, checking shadow-before-volume ordering, the declared read and resource lifetime in both Forward+ and Deferred Hybrid. Evidence: Build/Validation/fog-shadow-graph.log. This change is newer than the completed exclusion DevDist build. It establishes dependency/lifetime only; no GPU shadow sampler or fog lighting change is connected yet. Next update direct/MSAA and temporal trace resource layouts together (their storage-buffer registers currently immediately follow sampler registers), then validate shadow visibility at volume samples and history behavior with moving casters.
+
+Volume shadow packing started: new VolumeShadowUniforms.h defines a 304-byte record using existing cascade parameters/matrices plus view-depth direction. It folds camera translation into cascade matrices with double intermediates so fog samples remain camera-relative. Focused test passes 1 case / 22 assertions for all four cascades at a 100-million-metre camera translation and preserves source data. This helper is not yet called by rendering and does not establish arbitrary rotation/projection, GPU ABI, origin-rebase or planetary precision acceptance. Connect and extend coverage before claiming terrain-shadow support.
+
+Fog terrain-shadow implementation checkpoint: direct/MSAA and temporal trace paths now receive ShadowFrameData, pack camera-relative cascade matrices and bind directional shadow texture plus a 304-byte uniform. New FogTerrainShadow.hlsli selects cascades and applies hard/weighted 3x3 visibility with lit fallback outside coverage. CloudVolume applies visibility only to direct fog sunlight; ambient and extinction stay independent. Both builtin fragment shaders compile to DXIL, SPIR-V and MSL (Build/Validation/fog-shadow-shaders.log). No native C++ build or rendered GPU shadow acceptance yet. Shadowed fog conservatively rejects temporal accumulation because caster-content revision tracking is not connected; performance and noise need measurement and a better history policy before production acceptance. Transparent material/VFX fog paths still use unshadowed fallback and must be integrated for parity. Add real depth-array GPU occlusion tests, full native build and editor/player wall/roof/cascade/moving-caster checks. New include tracked in both builtin shader cache dependency lists.
+
+Fog-only particle correction: ComposeGraphVolumeSurface previously returned early for opaque draws when clouds and atmosphere were off, even with fog enabled. The early return now also requires disabled fog. Shader Graph importer advanced to 51 to invalidate cached generated materials; docs match and website documentation validator passes 117 guides / 10 groups / 29 diagrams. Shadow-batch DevDist build started (session 65139; Build/Validation/fog-shadow-devdist.log). Source compilation and native acceptance remain pending. This correction is separate from the still-unfinished transparent material/VFX terrain-shadow parity.
+
+Shadow packing coverage expanded: 2 cases / 42 assertions now compare all clip-coordinate rows for all four nontrivial matrices and rotated view-depth extraction. Windows generated-content cache harness passes with FogTerrainShadow.hlsli required in builtin shader dependencies; Unix source assertion updated, but native Unix execution remains unverified (earlier Git Bash symlink fixture failure still applies). Shadow build session 65139 remains live during generated-content preparation.
+
+Terrain-shadow batch DevDist build completed successfully (52 native actions; editor/runtime/worker/tool linked). Evidence: Build/Validation/fog-shadow-devdist.log, session 65139 exit 0. This proves native integration compiles, not rendered shadow correctness. No stage/restart performed; current QA window remains old build pending the existing use/restart question. Remaining before fog acceptance: actual shadow-depth GPU test, transparent/VFX parity, history cost/noise improvement, native wall/roof/cascade/moving-caster and maximum-region performance tests, standalone parity. Planetary layer geometry and continuous travel remain subsequent work.
+
+Shadow history refinement after successful build: FogReceivesTerrainSunlight now limits conservative history rejection to enabled nonempty fog with positive solar radiance, active cascades and positive shadow strength. Empty/night/zero-strength cases can retain normal history. Shader also exits before sampling for zero strength. Focused packing/policy suite passes 3 cases / 49 assertions; updated temporal fragment compiles DXIL/SPIR-V/MSL (fog-shadow-zero-strength.log). No frame-time improvement measured. These edits postdate the last successful DevDist build and must be included in the next batch. Actual shadowed fog still lacks caster-revision-based history reuse.
+
+Cascade-depth convention defect found during surface/volume audit: generated surface shaders use viewPosition.z directly, but the new volume packing helper negated the view Z row. Corrected the helper to positive view-space Z and added comparison against the surface matrix expression. Initial translation test had encoded the wrong convention and was corrected; it was not proof of cascade correctness. This fix postdates the shadow DevDist build, which must not be used for final acceptance. Pending native rebuild and GPU cascade/occluder tests remain required.
+
+Actual shadow-map probe preparation: Scripts/Tests/FogTerrainShadowProbe.hlsl uses the production fog shadow sampler with four depth-array layers (intended clear depths 0.15/0.35/0.55/0.75). Cases straddle each layer depth and exercise outside-UV/near/far fallback, writing actual and expected visibility separately. Vertex and fragment compile to DXIL, SPIR-V and MSL (Build/Validation/fog-shadow-probe-compile.log). This is not yet a GPU execution pass: add the host depth-array creation/clear, uniforms, hard/soft modes and readback comparison before recording acceptance.
+
+Actual depth-texture shadow GPU acceptance: FogTerrainShadowGpuProbe.cpp creates four D32 array layers, clears each to distinct depths, binds production packed uniforms and compares rendered visibility against reference values. Direct3D 12 and Vulkan each pass 65,536 pixels in hard mode and 65,536 in soft mode, zero failures (fog-shadow-gpu-d3d12.log / fog-shadow-gpu-vulkan.log). Covers cascade layer selection, lit/occluded samples, strength 0.75 and outside-UV/depth fallback. Does not cover spatially varying PCF edges, moving casters, transparent parity or native composition. User answered the pending restart question: restart when ready is authorized. Updated DevDist build session 89262 includes positive view-depth fix and history optimization; log fog-shadow-cascade-devdist.log. After success, close QA, stage and reopen maximized for native fog validation.
+
+Native updated-editor checkpoint: PID18936 opened maximized at 3440x1392 with CloudHdrShowcase, paused09:00. Fog tab displays local/exclusion sections; exclusion count0/16 and Add control visible. EnableFog immediately added visible scattering, Ctrl+Z restored the clear view with unsaved-history notice, Ctrl+Y restored fog and saved-state indication. Fog remains enabled for subsequent region tests. No exclusion added yet. Single status-bar samples near10ms are not sustained performance evidence. Desktop helper released, editor left open. Region create/toggle/edit/history/reload, terrain occlusion and player tests remain pending.
+
+Fog shadow boundary validation: the production GPU probe now samples half a texel inside both horizontal map boundaries and two corners. Independent expected soft visibility uses the outside-map weights 1/4 and 7/16; hard mode remains fully occluded. Updated fragment compiled to DXIL/SPIR-V/MSL. D3D12 and Vulkan each passed 65,536 pixels in hard and soft mode, zero failures (fog-shadow-edge-d3d12.log and fog-shadow-edge-vulkan.log). This verifies map-border filtering, not a spatially varying interior occluder or moving-caster history. Native exclusion add/disable/undo/save also passed; one enabled default region remains in the QA project. Transparent material/VFX shadow parity and planetary travel remain incomplete.
+
+### Planetary travel work started (October 28)
+User approved moving on from fog to planetary travel integration; remaining fog parity/performance gates stay open. Current source confirms TransformComponent still stores/returns float Vector3 positions. SectorPosition, FrameSnapshot and FrameRegistry are internal foundations, not an integrated editor flight feature. New PlanetaryTravelTests exercises Earth radius, ascent through 100 km atmosphere to 10,000 km altitude and return, planetary rotation, orbital velocity, distant positive/negative sector origins, sub-metre surface offsets, motion round trips and atmosphere entry/exit. Focused test passes 1 case / 128 assertions (Build/Validation/planetary-travel.log). This is a numerical baseline only, not continuous gameplay, streaming, physics or editor/player acceptance. Next required integration is authoritative high-precision scene positions and frame ownership, with persistence/managed/renderer boundaries migrated together; do not present a float camera fly-through as completion.
+
+Distant-approach CPU reference defect reproduced and corrected: IntersectAtmosphere subtracted astronomical squared distances; approach rays at 1e12/1e15 metres produced entry errors and false limb hits (planetary-approach-before.log, six failed assertions). Closest-approach geometry and planet-scaled tangent tolerance pass 143 planetary assertions; existing atmosphere suite also passes. This helper is a CPU reference used by tests, not the live sky shader; GPU distant-observer parity remains required. No editor travel claim.
+
+Live shader approach correction: AtmosphereMedium.hlsli now uses closest-approach discriminants and planet-scaled tolerance. Distant roots use direct addition/subtraction while near-surface roots retain the stable factored form. New AtmosphereApproachProbe initially failed 96.8% of samples; first correction left 0.2083% root-rounding failures; final correction passes without relaxing tolerance. Approach, existing atmosphere, and ground suites each pass 384,000 samples on D3D12 and Vulkan; probe shaders and BuiltinSky fragment compile DXIL/SPIR-V/MSL. Cases span axial approaches up to roughly 10 million km and limb misses; arbitrary grazing directions and camera-relative far-observer transport remain unqualified. Source shader changed, native editor rebuild/staging pending. No claim of completed travel integration.
+
+### Requested pause checkpoint
+User requested finishing this pass, committing/pushing all source work, final UI testing, then pausing. DevDist build passed 19 actions (planetary-approach-devdist.log); stage-editor passed in 20.5 seconds. Docs validation passed 117 guides/10 groups/29 diagrams; all changed C++ formatting and diff checks passed. Windows generated-content cache harness reports passed (wrapper initially misread a residual native exit code). Updated editor PID9812 opened the saved scene and rendered fog/materials; it subsequently disappeared during window-size testing, and capture reported no screenshot targets found. Process absence verified; cause not established. Final UI smoke is incomplete, not passed. Latest Client.log also reports startup scene dependencies could not be refreshed despite worker completion; investigate on resume before acceptance. Desktop helper released. Remaining work includes this startup/UI failure, full precision transform/persistence/managed integration, planetary cloud/fog geometry, streaming/physics, continuous editor/player ground-space-return and pending fog parity/performance. Generated vc140.pdb excluded from commit and left local.

@@ -5,6 +5,7 @@
 #include "KeireInternal/Environment/CloudRecord.h"
 #include "KeireInternal/Environment/EnvironmentClockRecord.h"
 #include "KeireInternal/Environment/EnvironmentLightingRecord.h"
+#include "KeireInternal/Environment/FogDensityRecord.h"
 #include "KeireInternal/Environment/StarFieldRecord.h"
 
 namespace Keire::Detail
@@ -12,7 +13,8 @@ namespace Keire::Detail
     class EnvironmentRuntimeManifest final
     {
       public:
-        static constexpr unsigned CurrentSchema = 9;
+        static constexpr unsigned CurrentSchema = 10;
+        static constexpr unsigned FogSchema = 10;
         static constexpr unsigned StarSchema = 9;
         static constexpr unsigned BloomSchema = 8;
         static constexpr unsigned LightingSchema = 6;
@@ -26,6 +28,7 @@ namespace Keire::Detail
             CloudSettings Clouds;
             BloomSettings Bloom;
             StarFieldSettings Stars;
+            FogSettings Fog;
         };
 
         [[nodiscard]] static EnvironmentClockState Decode(const nlohmann::json& manifest)
@@ -69,6 +72,11 @@ namespace Keire::Detail
                 rendering->contains("stars"))
             {
                 throw std::invalid_argument("Runtime star settings require manifest schema 9.");
+            }
+            if (schema < FogSchema && rendering != manifest.end() && rendering->is_object() &&
+                rendering->contains("fog"))
+            {
+                throw std::invalid_argument("Runtime fog settings require manifest schema 10.");
             }
             if (schema == 4)
             {
@@ -118,6 +126,14 @@ namespace Keire::Detail
                     throw std::invalid_argument("Runtime manifest schema 9 requires star settings.");
                 }
                 result.Stars = DecodeStarField(rendering->at("stars"));
+            }
+            if (schema >= FogSchema)
+            {
+                if (!rendering->contains("fog"))
+                {
+                    throw std::invalid_argument("Runtime manifest schema 10 requires fog settings.");
+                }
+                result.Fog = DecodeFogDensity(rendering->at("fog"));
             }
             return result;
         }

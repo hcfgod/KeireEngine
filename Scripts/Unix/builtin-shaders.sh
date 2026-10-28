@@ -20,8 +20,12 @@ source_files=("$ROOT/KeireCore/Shaders/BuiltinUnlit.hlsl" "$ROOT/KeireCore/Shade
 prefixes=(BuiltinUnlit BuiltinSky BuiltinCloudVolume BuiltinCloudTrace BuiltinCloudResolve BuiltinCloudComposite BuiltinGrid BuiltinDepthVelocity BuiltinShadow BuiltinToneMap BuiltinBloom BuiltinRuntimeUi \
   BuiltinDeferredGBuffer BuiltinDeferredLighting BuiltinIrradyn BuiltinCloudLightCache)
 include_files=("$ROOT/KeireCore/Shaders/BuiltinLighting.hlsli" "$ROOT/KeireCore/Shaders/CloudLayered.hlsl"
+               "$ROOT/KeireCore/Shaders/GridAppearance.hlsli"
                "$ROOT/KeireCore/Shaders/AtmosphereMedium.hlsli"
+               "$ROOT/KeireCore/Shaders/AtmosphereGround.hlsli"
                "$ROOT/KeireCore/Shaders/CloudVolume.hlsli" "$ROOT/KeireCore/Shaders/CloudVolumeGeometry.hlsli"
+               "$ROOT/KeireCore/Shaders/FogDensity.hlsli" "$ROOT/KeireCore/Shaders/FogExclusion.hlsli" "$ROOT/KeireCore/Shaders/FogRayIntervals.hlsli"
+               "$ROOT/KeireCore/Shaders/FogTerrainShadow.hlsli"
                "$ROOT/KeireCore/Shaders/CloudVolumeLighting.hlsli"
                "$ROOT/KeireCore/Shaders/CloudLightCacheSampling.hlsli"
                "$ROOT/KeireCore/Shaders/CloudTemporalRejection.hlsli"
@@ -97,7 +101,7 @@ fi
 {
   printf '#pragma once\n\nnamespace Keire::Detail\n{\n'
   printf '    inline constexpr char CloudVolumeShaderSource[] = "\\n"\n'
-  for source_name in VolumeTransport AtmosphereMedium CloudVolumeGeometry CloudVolumeLighting CloudVolumeDensity CloudWeather CloudVolume VolumeSurfaceComposition CloudVolumeView; do
+  for source_name in VolumeTransport AtmosphereMedium CloudVolumeGeometry FogDensity FogExclusion FogRayIntervals CloudVolumeLighting CloudVolumeDensity CloudWeather CloudVolume VolumeSurfaceComposition CloudVolumeView; do
     source_path="$ROOT/KeireCore/Shaders/$source_name.hlsli"
     if grep -Fq ')KEIRE_CLOUD"' "$source_path"; then
       printf 'Cloud source contains the reserved raw string delimiter.\n' >&2

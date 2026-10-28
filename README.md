@@ -5,6 +5,10 @@
 
 **Build worlds. Keep control.**
 
+Editor startup reuses the development catalog when available. If assets need an importer upgrade, it prepares the
+saved scene's dependencies first and refreshes unrelated assets in the background. Initial imports still require
+asset preparation; startup timing validation is in progress.
+
 Opening a C# script waits for its Visual Studio project and engine reference, then opens the project-owned document
 so engine types participate in completion. The Editor remains responsive while the IDE loads.
 Choose VS 2022 17.8+, VS 2026, or another supported external editor. VS 2022 uses an isolated .NET 8 design-time
@@ -19,7 +23,7 @@ Settings saves prepare all four files before publication and retain a recovery j
 recovery. Pending edits remain on failure; external changes block recovery rather than being overwritten.
 See [Project Settings](Docs/ProjectSettings.md) for recovery and durability limits.
 
-Development builds also provide **Window > Environment**, a dockable Lighting/Sky/Clouds/Bloom workspace sharing
+Development builds also provide **Window > Environment**, a dockable Lighting/Sky/Clouds/Fog/Bloom workspace sharing
 Project Settings' document, Undo history and temporary preview clock. A 24-hour intensity graph provides key markers,
 a preview cursor and snapped time scrubbing without saving. Its desktop acceptance and advanced timeline
 work remain in progress; see the [workspace guide](Docs/ProjectSettings.md#environment-workspace-development).
@@ -48,6 +52,9 @@ with retained shadow settings, optional animated ambient illumination and Undo. 
 to inspect the cycle without changing the saved starting time. Atmosphere and clouds are not implemented by this preset.
 The development Environment tab additionally offers an opt-in experimental planetary atmosphere sky that follows
 the selected directional light. See [atmosphere controls and limitations](Docs/Rendering.md#experimental-planetary-atmosphere).
+Its **Ground / Void Appearance** section controls the reference planet’s color and brightness below the horizon;
+these controls preserve day/night illumination and do not change terrain or scene materials. See
+[Project Settings](Docs/ProjectSettings.md) for ranges and current development limitations.
 Noon/dusk Edit preview has been checked on Windows; full cross-view and player visual acceptance remains open.
 Optional layered clouds offer a seeded Natural lit mode and a Legacy unlit mode that preserves older projects.
 Their visual-quality acceptance is pending; this is not yet a production weather or volumetric-cloud system.
@@ -119,6 +126,8 @@ Persistent game menus retain keyboard/gamepad focus across packaged scene change
 UI. See [UI Toolkit input handling](Docs/Scripting/UiAndEvents.md) for button click and submit events.
 
 UI and fullscreen Shader Graphs display a flat image preview with transparency, rather than a lit mesh.
+The fullscreen Vignette preset preserves scene alpha while darkening RGB. For existing vignette graphs,
+see the [camera effect guidance](Docs/EditorPanels.md) before changing their authored output.
 See [shader authoring previews](Docs/ShadersAndMaterials.md) for their current scope.
 Extended math nodes now evaluate their canonical **Input** pins in authoring previews, including inverse/hyperbolic
 trigonometry, degree/radian conversion, Negate, Exponential, Logarithm, and Scale And Bias. This fixes a preview-only
@@ -620,7 +629,7 @@ Current authoring and runtime contracts include:
 | Property-backed Material source | 5 | New Materials select a shader and edit its properties in the Inspector. |
 | Legacy Material Graph source | 7 | Existing graph-owned sources retain compatibility decoding and graph editing; this is not the new-material creation workflow. |
 | VFX source | 5 | Schemas 1–4 migrate in memory; graph and compatibility payloads remain distinct execution sources. |
-| Cooked runtime manifest | 9 | Schema 4 uses default time; schemas 4/5 use authored lighting. Schema 6 adds lighting profiles; schema 7 adds atmosphere/cloud records; schema 8 requires bloom; schema 9 requires the experimental star record (visual acceptance pending). Schemas 4–6 retain disabled sky additions; schemas 4–7 default bloom to disabled; schemas 4–8 default stars to disabled. Unsupported newer schemas fail before partial startup. |
+| Cooked runtime manifest | 10 | Schema 4 uses default time; schemas 4/5 use authored lighting. Schema 6 adds lighting profiles; schema 7 adds atmosphere/cloud records; schema 8 requires bloom; schema 9 requires the experimental star record (visual acceptance pending). Schema 10 adds the development fog record; schemas 4–9 default fog to disabled. Schemas 4–6 retain disabled sky additions; schemas 4–7 default bloom to disabled; schemas 4–8 default stars to disabled. Unsupported newer schemas fail before partial startup. |
 | Asset package archive | 1 | `KEIRASPK1` archives are deterministic, bounded, inventoried, hashed, and signature-verifiable. |
 | Project package lock | 1 | Exact versions, hashes, dependency edges, sources, and signature identities publish atomically. |
 
@@ -801,7 +810,7 @@ output and reject stale or build-mismatched reports.
 
 ## Documentation
 
-The [documentation library](Docs/README.md) contains 116 guides and progress records grouped around real tasks. Project authors
+The [documentation library](Docs/README.md) contains 117 guides and progress records grouped around real tasks. Project authors
 should begin with the [Kéire 0.4.8 User Manual](Docs/Manual/README.md):
 
 - [Projects and the Editor](Docs/Manual/ProjectsAndEditor.md),

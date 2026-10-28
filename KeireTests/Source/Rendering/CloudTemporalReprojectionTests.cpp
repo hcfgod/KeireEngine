@@ -2,6 +2,7 @@
 
 #include <doctest/doctest.h>
 
+#include <cstddef>
 #include <limits>
 
 namespace
@@ -103,5 +104,47 @@ TEST_CASE("Cloud reprojection rejects cloud edits, light jumps, cuts and invalid
     CHECK_FALSE(MakeCloudTemporalReprojection(current, previous, true));
     current = View(11);
     current.Volume.Volume.PatternOrigin[0] = std::numeric_limits<float>::quiet_NaN();
+    CHECK_FALSE(MakeCloudTemporalReprojection(current, previous, true));
+}
+
+TEST_CASE("Fog exclusion edits invalidate accumulated cloud and fog history")
+{
+    auto previous = View(10);
+    previous.Volume.Fog.Controls = {1U, 64U, 0U, 16U};
+    auto current = previous;
+    current.FrameId = 11;
+    REQUIRE(MakeCloudTemporalReprojection(current, previous, true));
+
+    for (std::size_t index = 0; index < previous.Volume.Fog.Exclusions.size(); ++index)
+    {
+        current.Volume.Fog = previous.Volume.Fog;
+        current.Volume.Fog.Exclusions[index].CenterExtinction[3] = 0.5F;
+        CHECK_FALSE(MakeCloudTemporalReprojection(current, previous, true));
+
+        current.Volume.Fog = previous.Volume.Fog;
+        current.Volume.Fog.Exclusions[index].HalfExtentEdge[3] = 0.25F;
+        CHECK_FALSE(MakeCloudTemporalReprojection(current, previous, true));
+    }
+
+    current.Volume.Fog = previous.Volume.Fog;
+    current.Volume.Fog.Controls[3] = 0U;
+    CHECK_FALSE(MakeCloudTemporalReprojection(current, previous, true));
+}
+
+TEST_CASE("Combined cloud fog history rejects fog edits and mismatched medium motion")
+{
+    auto previous = View(10);
+    previous.Volume.Fog.Controls = {1U, 64U, 0U, 0U};
+    previous.Volume.Fog.HeightDensity = {0.0F, 0.01F, 0.002F, 1000.0F};
+    auto current = previous;
+    current.FrameId = 11;
+    REQUIRE(MakeCloudTemporalReprojection(current, previous, true));
+    current.Volume.Fog.HeightDensity[2] = 0.003F;
+    CHECK_FALSE(MakeCloudTemporalReprojection(current, previous, true));
+    current.Volume.Fog = previous.Volume.Fog;
+    current.Volume.Volume.PatternOrigin[0] = 0.001F;
+    CHECK_FALSE(MakeCloudTemporalReprojection(current, previous, true));
+    current.Volume.Volume.PatternOrigin[0] = 0.0F;
+    current.Volume.Fog.Controls[0] = 0U;
     CHECK_FALSE(MakeCloudTemporalReprojection(current, previous, true));
 }
