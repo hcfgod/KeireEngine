@@ -1,3 +1,17 @@
+#define KEIRE_CLOUD_NOISE_TEXTURE t1
+#define KEIRE_CLOUD_NOISE_SAMPLER s1
+#include "CloudVolumeView.hlsli"
+
+// Built-in particle pipelines use straight-alpha blending for every fallback renderer.
+float4 ComposeVfxCloudVolume(float4 surface, float4 position, CloudVolumeView view)
+{
+    const CloudVolumeViewTransport volume = EvaluateCloudVolumeView(
+        position.xy * view.CameraControls.zw, position.z, view, true);
+    return float4(VolumeStraightSurfaceSource(surface.r, volume.Radiance.r, volume.Transmission.r),
+                  VolumeStraightSurfaceSource(surface.g, volume.Radiance.g, volume.Transmission.g),
+                  VolumeStraightSurfaceSource(surface.b, volume.Radiance.b, volume.Transmission.b), surface.a);
+}
+
 struct GpuParticle
 {
     float4 PositionAge;
@@ -3122,6 +3136,7 @@ cbuffer VfxMaterial : register(b0, space3)
     float4 DirectionalDirection;
     float4 MaterialTint;
     float4 SurfaceParameters;
+    CloudVolumeView VfxCloudVolume;
 };
 
 Texture2D<float4> RenderTexture : register(t0, space2);
@@ -3220,7 +3235,7 @@ float4 PSMain(VfxVertexOutput input) : SV_Target0
         else if (SurfaceParameters.y < 0.5F)
             surface.a = 1.0F;
     }
-    return surface;
+    return ComposeVfxCloudVolume(surface, input.Position, VfxCloudVolume);
 }
 
 struct VfxMeshVertexInput
@@ -3271,7 +3286,8 @@ float4 PSMesh(VfxMeshVertexOutput input) : SV_Target0
                               : 0.0F;
     const float3 lighting = AmbientColor.rgb + DirectionalColor.rgb * DirectionalColor.a * diffuse;
     const float4 tint = input.Tint * MaterialTint;
-    return float4(tint.rgb * max(lighting, 0.0001F.xxx), tint.a);
+    return ComposeVfxCloudVolume(float4(tint.rgb * max(lighting, 0.0001F.xxx), tint.a),
+                                input.Position, VfxCloudVolume);
 }
 
 struct VfxCpuVertexInput
@@ -3290,6 +3306,7 @@ cbuffer VfxCpuMaterial : register(b0, space3)
 {
     float4 CpuTint;
     float4 CpuSurfaceParameters;
+    CloudVolumeView CpuCloudVolume;
 };
 
 Texture2D<float4> CpuRenderTexture : register(t0, space2);
@@ -3340,5 +3357,5 @@ float4 PSCpu(VfxCpuVertexOutput input) : SV_Target0
         else if (CpuSurfaceParameters.z < 0.5F)
             surface.a = 1.0F;
     }
-    return surface;
+    return ComposeVfxCloudVolume(surface, input.Position, CpuCloudVolume);
 }

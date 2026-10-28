@@ -192,7 +192,7 @@ namespace Keire::Detail
             }
         }
         const Json manifest{
-            {"schemaVersion", 3},
+            {"schemaVersion", 4},
             {"materialGraphSourceSchemaVersion", definition.SchemaVersion},
             {"materialGraphGeneratedShaderVersion", ShaderGraphGeneratedShaderVersion},
             {"programTarget", ShaderGraphTargetName(definition.Target.Target)},
@@ -214,6 +214,7 @@ namespace Keire::Detail
              maximumWorldPositionDisplacementRadius ? Json(*maximumWorldPositionDisplacementRadius) : Json(nullptr)},
             {"usesImageBasedLighting", lit},
             {"spatialLightingAbiVersion", lit ? 3 : 0},
+            {"volumeLightingAbiVersion", screenSpace ? 0 : 7},
             {"usesVertexMaterialParameters", usesVertexMaterialParameters},
             {"stages", {{"vertex", "VSMain"}, {"fragment", "PSMain"}}},
             {"defines", std::move(defines)},

@@ -133,7 +133,7 @@ namespace Keire::RenderBackend
             information.entrypoint = entrypoint;
             information.format = format;
             information.stage = vertex ? SDL_GPU_SHADERSTAGE_VERTEX : SDL_GPU_SHADERSTAGE_FRAGMENT;
-            information.num_samplers = vertex ? 0U : 1U;
+            information.num_samplers = vertex ? 0U : 2U;
             information.num_uniform_buffers = 1U;
             auto* result = SDL_CreateGPUShader(Device, &information);
             if (!result)
@@ -232,7 +232,7 @@ namespace Keire::RenderBackend
             information.entrypoint = vertex ? (ribbon ? "VSRibbon" : "VSMain") : "PSMain";
             information.format = format;
             information.stage = vertex ? SDL_GPU_SHADERSTAGE_VERTEX : SDL_GPU_SHADERSTAGE_FRAGMENT;
-            information.num_samplers = vertex ? 0U : 1U;
+            information.num_samplers = vertex ? 0U : 2U;
             information.num_storage_buffers = vertex ? 2U : 0U;
             information.num_uniform_buffers = 1U;
             auto* result = SDL_CreateGPUShader(Device, &information);
@@ -320,6 +320,7 @@ namespace Keire::RenderBackend
             information.format = format;
             information.stage = vertex ? SDL_GPU_SHADERSTAGE_VERTEX : SDL_GPU_SHADERSTAGE_FRAGMENT;
             information.num_storage_buffers = vertex ? 2U : 0U;
+            information.num_samplers = vertex ? 0U : 2U;
             information.num_uniform_buffers = 1U;
             auto* result = SDL_CreateGPUShader(Device, &information);
             if (!result)

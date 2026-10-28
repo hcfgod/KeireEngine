@@ -11,14 +11,15 @@ namespace Keire::RenderBackend
 {
     [[nodiscard]] inline VolumetricCloudUniforms
     CaptureCloudVolume(const RenderCamera& camera, const VolumetricCloudSettings& settings,
-                       const std::optional<EnvironmentLightingSnapshot>& environment)
+                       const std::optional<EnvironmentLightingSnapshot>& environment, const bool atCloudBase = false)
     {
         if (!settings.Enabled)
         {
             return {};
         }
         const auto observer = Math::TransformPoint(Math::Inverse(camera.View), {});
-        const std::array<double, 3> observerFromAnchor{observer.X, observer.Y, observer.Z};
+        const std::array<double, 3> observerFromAnchor{observer.X, atCloudBase ? settings.BaseHeightMeters : observer.Y,
+                                                       observer.Z};
         if (!CloudObserverWithinLocalDomain(observerFromAnchor))
         {
             return {};

@@ -160,8 +160,8 @@ void EditorWorkspaceLayer::DrawGame(Keire::UiFrame& ui)
         {
             SetGameViewportInputActive(false);
             KeireEditor::CancelRuntimeUiPointer(m_PlayRuntimeWorld, m_GameRuntimeUiPointer);
-            DrawEmptyState(ui, "GAME", "No active primary camera.",
-                           "Add an enabled Camera component and mark it Primary.");
+            DrawEmptyState(ui, "GAME", "No active camera.",
+                           "Add or enable a Camera on an active entity. Use Primary to choose between cameras.");
             return;
         }
 

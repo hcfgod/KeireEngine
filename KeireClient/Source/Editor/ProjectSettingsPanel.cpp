@@ -9,6 +9,7 @@
 #include "KeireClientInternal/Editor/CloudControls.h"
 #include "KeireClientInternal/Editor/EnvironmentLightingControls.h"
 #include "KeireClientInternal/Editor/EnvironmentPreviewControls.h"
+#include "KeireClientInternal/Editor/EnvironmentSkyControls.h"
 #include "KeireClientInternal/Editor/ExternalEditorSettings.h"
 #include "KeireClientInternal/Editor/StarFieldControls.h"
 #include "KeireClientInternal/Editor/VolumetricCloudControls.h"
@@ -851,6 +852,8 @@ namespace KeireEditor
                     }
                     commit |= Detail::DrawEnvironmentLightingControls(ui, theme, m_Document,
                                                                       m_Controller.ProjectEnvironmentPreview());
+                    commit |= Detail::DrawSkyColorControls(ui, theme, m_Document,
+                                                           m_Controller.ProjectEnvironmentPreview(), m_SkySelectedKeys);
                 }
                 catch (const std::exception& error)
                 {

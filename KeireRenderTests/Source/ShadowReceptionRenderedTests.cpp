@@ -14,6 +14,7 @@
 #include <cstdint>
 #include <memory>
 #include <span>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -101,19 +102,20 @@ namespace
             {
                 m_Frames->push_back(
                     Keire::RenderSystemInternalAccess::ReadbackRGBA8(*Owner().Renderer(), *m_View->Surface()));
-                if (++m_Case == 14U)
+                if (++m_Case == 16U)
                 {
                     Owner().RequestExit();
                     return;
                 }
             }
             // Baseline, shadowed, reception disabled, reception restored; repeat for each light type.
-            m_Sun->SetEnabled(m_Case / 4U == 0U);
+            m_Sun->SetEnabled(m_Case / 4U == 0U || m_Case >= 14U);
             m_Point->SetEnabled(m_Case / 4U == 1U);
-            m_Spot->SetEnabled(m_Case >= 8U);
+            m_Spot->SetEnabled(m_Case >= 8U && m_Case < 14U);
             m_Spot->SetCookie(m_Case == 13U ? m_Cookie : Keire::AssetId{});
             m_Caster->SetCastShadows(m_Case < 12U && m_Case % 4U != 0U);
-            m_Receiver->SetReceiveShadows(m_Case % 4U != 2U);
+            m_Receiver->SetCastShadows(m_Case >= 14U);
+            m_Receiver->SetReceiveShadows(m_Case == 14U || (m_Case < 14U && m_Case % 4U != 2U));
             Keire::RenderEnvironmentSettings environment;
             environment.RequestedRenderPath = m_Path;
             environment.RequestedAntiAliasing = Keire::RenderAntiAliasingMode::None;
@@ -143,9 +145,44 @@ namespace
     };
 } // namespace
 
+TEST_CASE("dark authored floor retains direct lighting with unassigned texture slots")
+{
+    KeireRenderTests::Detail::RenderAssetFixture assets(false, false, false, false, false,
+                                                        Keire::SkinningMethod::LinearBlend, true);
+    const std::string materialText = "{\"schemaVersion\":2,\"shader\":\"" + assets.Shader.ToString() +
+                                     "\",\"properties\":{\"Tint\":[0.025,0.045,0.085,1],\"MetallicFactor\":0.18,"
+                                     "\"RoughnessFactor\":0.72,\"EmissiveFactor\":[0,0.008,0.02,1]}}";
+    const auto material =
+        assets.Database->CreateAsset("DarkFloor.keiremateriallegacy", Keire::CreateMaterialAssetImporter(),
+                                     std::as_bytes(std::span(materialText.data(), materialText.size())));
+    assets.Catalog = assets.Database->ImportAll(Keire::AssetImportPolicy::KeepLastGood).CatalogPath;
+    for (const auto path : {Keire::RenderPath::ForwardPlus, Keire::RenderPath::DeferredHybrid})
+    {
+        CAPTURE(static_cast<int>(path));
+        auto frames = std::make_shared<Frames>();
+        auto specification = RenderTestSpecification();
+        specification.Assets.Mode = Keire::AssetMode::Development;
+        specification.Assets.DevelopmentCatalog = assets.Catalog;
+        {
+            Keire::Application application(specification);
+            (void)application.PushLayer(
+                std::make_unique<ShadowReceptionLayer>(material, Keire::AssetId{}, path, frames));
+            CHECK(application.Run() == 0);
+        }
+        REQUIRE(frames->size() == 16U);
+        const auto lit = MeasureCenter((*frames)[15U]);
+        CAPTURE(lit.Red);
+        CAPTURE(lit.Green);
+        CAPTURE(lit.Blue);
+        CHECK(lit.Luminance() > 0.03F);
+        CHECK(MaximumDarkening((*frames)[15U], (*frames)[14U]) < MinimumShadowDelta);
+    }
+}
+
 TEST_CASE("shadow reception toggles preserve lighting for default and graph materials in both paths")
 {
-    KeireRenderTests::Detail::RenderAssetFixture assets(true);
+    KeireRenderTests::Detail::RenderAssetFixture assets(true, false, false, false, false,
+                                                        Keire::SkinningMethod::LinearBlend, true);
     Keire::TextureImportSettings cookieSettings;
     cookieSettings.Mips = Keire::TextureMipPolicy::None;
     Keire::TextureMipLevel cookieMip;
@@ -168,7 +205,7 @@ TEST_CASE("shadow reception toggles preserve lighting for default and graph mate
     const auto cookie = assets.Database->CreateAsset("Cookie.texture", cookieImporter,
                                                      Keire::Texture2DAsset::Encode(cookieSettings, {&cookieMip, 1U}));
     assets.Catalog = assets.Database->ImportAll(Keire::AssetImportPolicy::KeepLastGood).CatalogPath;
-    for (const auto material : std::array{Keire::AssetId{}, assets.ShaderGraphMaterial})
+    for (const auto material : std::array{Keire::AssetId{}, assets.Material, assets.ShaderGraphMaterial})
     {
         std::vector<std::shared_ptr<Frames>> pathFrames;
         for (const auto path : {Keire::RenderPath::ForwardPlus, Keire::RenderPath::DeferredHybrid})
@@ -184,7 +221,10 @@ TEST_CASE("shadow reception toggles preserve lighting for default and graph mate
                 (void)application.PushLayer(std::make_unique<ShadowReceptionLayer>(material, cookie, path, frames));
                 CHECK(application.Run() == 0);
             }
-            REQUIRE(frames->size() == 14U);
+            REQUIRE(frames->size() == 16U);
+            // An isolated receiver must not lose its direct light merely by entering the shadow map.
+            CHECK(MaximumDarkening((*frames)[0U], (*frames)[14U]) < MinimumShadowDelta);
+            CHECK(MaximumDarkening((*frames)[0U], (*frames)[15U]) < 0.01F);
             for (std::size_t light = 0; light < 3U; ++light)
             {
                 CAPTURE(light);
@@ -194,11 +234,11 @@ TEST_CASE("shadow reception toggles preserve lighting for default and graph mate
                 CHECK(MaximumDarkening((*frames)[offset + 2U], (*frames)[offset]) < 0.01F);
                 CHECK(MaximumDarkening((*frames)[offset + 2U], (*frames)[offset + 3U]) > MinimumShadowDelta);
             }
-            if (material)
+            if (material == assets.ShaderGraphMaterial)
                 CHECK(MaximumDarkening((*frames)[12U], (*frames)[13U]) > MinimumShadowDelta);
             pathFrames.push_back(frames);
         }
-        if (material)
+        if (material == assets.ShaderGraphMaterial)
         {
             const auto& forward = (*pathFrames[0])[13U];
             const auto& deferred = (*pathFrames[1])[13U];

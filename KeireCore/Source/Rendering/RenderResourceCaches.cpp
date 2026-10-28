@@ -655,10 +655,14 @@ namespace Keire::RenderBackend
                                                   previousCamera->second.Transform, temporalJitterNdc)
                                             : viewProjection;
         packet.Environment = request.Environment;
+        packet.SkyColors = CaptureSkyColors(request.EvaluatedEnvironment);
         Detail::ApplyEnvironment(packet.Environment, packet.CloudAdvectionPhase, packet.StarTwinklePhase,
                                  request.EvaluatedEnvironment);
         packet.CloudVolume =
             CaptureCloudVolume(packet.Camera, packet.Environment.Clouds.Volume, request.EvaluatedEnvironment);
+        packet.CloudBasePatternPhase =
+            CaptureCloudVolume(packet.Camera, packet.Environment.Clouds.Volume, request.EvaluatedEnvironment, true)
+                .PatternOrigin[1];
         packet.GlobalMaterialProperties = std::move(request.GlobalMaterialProperties);
         if (request.DrawSceneContributions)
         {
@@ -1163,104 +1167,88 @@ namespace Keire::RenderBackend
                                                      MaterialSurfaceState surface, const bool explicitSurface)
     {
         if (!id || !Assets)
+        {
             return nullptr;
+        }
         auto [iterator, inserted] = ShaderCache.try_emplace(id);
         auto& entry = iterator->second;
         if (inserted)
+        {
             entry.Handle = Assets->Load<ShaderAsset>(id, AssetPriority::High);
+        }
         const auto revision = entry.Handle.Revision();
-        if (revision != 0 && revision > entry.LastAttemptedRevision)
+        auto shader = entry.Handle.TryGetLoaded();
+        if (!shader || revision == 0)
+        {
+            return entry.LastGood ? &entry : nullptr;
+        }
+        if (revision != entry.LastAttemptedRevision)
         {
             entry.LastAttemptedRevision = revision;
-            if (const auto shader = entry.Handle.TryGetLoaded())
+            entry.AttemptedPipelines.clear();
+        }
+        if (!explicitSurface && shader->Definition().Blend)
+        {
+            surface.AlphaMode = MaterialAlphaMode::Blend;
+        }
+        if (!AssetPipelineWork.Job)
+        {
+            std::vector<GpuShaderEntry::Pipeline> missing;
+            for (const auto role : RuntimePassRoles(shader->Definition()))
             {
-                try
+                const auto roleSamples = PipelineSamplesForRole(samples, role);
+                const auto matches = [&](const GpuShaderEntry::Pipeline& candidate)
                 {
-                    if (!explicitSurface && shader->Definition().Blend)
-                        surface.AlphaMode = MaterialAlphaMode::Blend;
-                    std::vector<GpuShaderEntry::Pipeline> replacements;
-                    const auto roles = RuntimePassRoles(shader->Definition());
-                    if (roles.empty())
-                        throw std::runtime_error("Shader asset has no executable runtime material pass role.");
-                    replacements.reserve(roles.size());
-                    try
+                    return candidate.Samples == roleSamples && candidate.AlphaMode == surface.AlphaMode &&
+                           candidate.DoubleSided == surface.DoubleSided && candidate.PassRole == role;
+                };
+                if ((entry.LoadedRevision != revision || !std::ranges::any_of(entry.Pipelines, matches)) &&
+                    !std::ranges::any_of(entry.AttemptedPipelines, matches))
+                {
+                    missing.push_back({roleSamples, surface.AlphaMode, surface.DoubleSided, role, nullptr});
+                }
+            }
+            if (!missing.empty())
+            {
+                if (entry.LoadedRevision != revision)
+                {
+                    // Rebuild all resident variants together before retiring the previous revision.
+                    for (const auto& resident : entry.Pipelines)
                     {
-                        for (const auto role : roles)
+                        for (const auto role : RuntimePassRoles(shader->Definition()))
                         {
-                            const auto roleSamples = PipelineSamplesForRole(samples, role);
-                            replacements.push_back({roleSamples, surface.AlphaMode, surface.DoubleSided, role,
-                                                    CreateAssetPipeline(shader->Definition(), roleSamples, surface,
-                                                                        RuntimeMaterialPassName(role))});
+                            auto candidate = resident;
+                            candidate.Samples = PipelineSamplesForRole(resident.Samples, role);
+                            candidate.PassRole = role;
+                            candidate.Handle = nullptr;
+                            const auto matches = [&](const GpuShaderEntry::Pipeline& existing)
+                            {
+                                return existing.Samples == candidate.Samples &&
+                                       existing.AlphaMode == candidate.AlphaMode &&
+                                       existing.DoubleSided == candidate.DoubleSided && existing.PassRole == role;
+                            };
+                            if (!std::ranges::any_of(missing, matches))
+                            {
+                                missing.push_back(candidate);
+                            }
                         }
                     }
-                    catch (...)
-                    {
-                        for (const auto& replacement : replacements)
-                            SDL_ReleaseGPUGraphicsPipeline(Device, replacement.Handle);
-                        throw;
-                    }
-                    for (const auto& pipeline : entry.Pipelines)
-                        Retire(pipeline.Handle);
-                    entry.Pipelines = std::move(replacements);
-                    entry.LastGood = shader;
-                    entry.LoadedRevision = revision;
+                }
+                // Failed variants are retried only after a new asset revision, not every rendered frame.
+                entry.AttemptedPipelines.insert(entry.AttemptedPipelines.end(), missing.begin(), missing.end());
+                try
+                {
+                    StartAssetPipelinePreparation(id, shader, revision, std::move(missing));
                 }
                 catch (const std::exception& error)
                 {
-                    ThrowIfDeviceLost("shader GPU rebuild", error.what());
-                    KEIRE_CORE_ERROR("Shader GPU rebuild failed for id={} revision={}: {}", id.ToString(), revision,
+                    KEIRE_CORE_ERROR("Could not schedule material pipelines for id={}: {}", id.ToString(),
                                      error.what());
                 }
             }
         }
-        if (!entry.LastGood)
-            return nullptr;
-        if (!explicitSurface && entry.LastGood->Definition().Blend)
-            surface.AlphaMode = MaterialAlphaMode::Blend;
-        const auto roles = RuntimePassRoles(entry.LastGood->Definition());
-        std::vector<RuntimeMaterialPassRole> missingRoles;
-        for (const auto role : roles)
-        {
-            const auto roleSamples = PipelineSamplesForRole(samples, role);
-            const auto pipeline = std::ranges::find_if(entry.Pipelines,
-                                                       [&](const GpuShaderEntry::Pipeline& candidate)
-                                                       {
-                                                           return candidate.Samples == roleSamples &&
-                                                                  candidate.AlphaMode == surface.AlphaMode &&
-                                                                  candidate.DoubleSided == surface.DoubleSided &&
-                                                                  candidate.PassRole == role;
-                                                       });
-            if (pipeline == entry.Pipelines.end())
-                missingRoles.push_back(role);
-        }
-        if (!missingRoles.empty())
-        {
-            std::vector<GpuShaderEntry::Pipeline> replacements;
-            try
-            {
-                replacements.reserve(missingRoles.size());
-                for (const auto role : missingRoles)
-                {
-                    const auto roleSamples = PipelineSamplesForRole(samples, role);
-                    replacements.push_back({roleSamples, surface.AlphaMode, surface.DoubleSided, role,
-                                            CreateAssetPipeline(entry.LastGood->Definition(), roleSamples, surface,
-                                                                RuntimeMaterialPassName(role))});
-                }
-                entry.Pipelines.insert(entry.Pipelines.end(), std::make_move_iterator(replacements.begin()),
-                                       std::make_move_iterator(replacements.end()));
-            }
-            catch (const std::exception& error)
-            {
-                for (const auto& replacement : replacements)
-                    SDL_ReleaseGPUGraphicsPipeline(Device, replacement.Handle);
-                ThrowIfDeviceLost("shader pipeline creation", error.what());
-                KEIRE_CORE_ERROR("Shader pipeline creation failed for id={}: {}", id.ToString(), error.what());
-                return nullptr;
-            }
-        }
-        return &entry;
+        return entry.LastGood ? &entry : nullptr;
     }
-
     const ResolvedAssetMaterial* RenderSharedState::ResolveAssetMaterial(const AssetId id,
                                                                          const SDL_GPUSampleCount samples)
     {
@@ -1317,6 +1305,7 @@ namespace Keire::RenderBackend
         }
         stamp = HashDependencyStamp(stamp, shader->LastAttemptedRevision);
         stamp = HashDependencyStamp(stamp, shader->LoadedRevision);
+        stamp = HashDependencyStamp(stamp, shader->Pipelines.size());
         auto surface = material->Definition().Surface;
         if (material->Definition().SchemaVersion < 2 && shader->LastGood->Definition().Blend)
             surface.AlphaMode = MaterialAlphaMode::Blend;
@@ -1420,6 +1409,7 @@ namespace Keire::RenderBackend
             result.UsesSpatialLighting = definition.SpatialLightingAbiVersion >= 2U;
             result.UsesVertexMaterialParameters = definition.UsesVertexMaterialParameters;
             result.SpatialLightingAbiVersion = definition.SpatialLightingAbiVersion;
+            result.VolumeLightingAbiVersion = definition.VolumeLightingAbiVersion;
             result.InstanceAddressingAbiVersion = definition.InstanceAddressingAbiVersion;
             for (const auto& property : shader->LastGood->Definition().Properties)
             {

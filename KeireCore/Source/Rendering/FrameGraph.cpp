@@ -500,12 +500,7 @@ namespace Keire::RenderBackend
         result.ResolveDepth =
             result.Graph.AddPass({"Sampled scene depth", {uploads, result.HdrScene}, {result.SampledDepth}});
         result.Sky = result.Graph.AddPass({"Sky", {result.HdrScene}, {skyComplete}});
-        result.Transparency =
-            result.Graph.AddPass({"Transparency",
-                                  {result.HdrScene, result.SampledDepth, skyComplete, result.ForwardPlusLightTiles,
-                                   result.SpatialSelectionRecords, vfxPrepared},
-                                  {transparencyComplete}});
-        auto toneMapDependency = transparencyComplete;
+        auto opaqueLightingComplete = skyComplete;
         if (path == RenderPath::DeferredHybrid)
         {
             const auto irradynComplete =
@@ -513,20 +508,30 @@ namespace Keire::RenderBackend
             result.IrradynTrace = result.Graph.AddPass(
                 {"Irradyn trace and temporal accumulation",
                  {result.HdrScene, result.SceneDepth, result.GBufferBaseColorMetallic, result.GBufferNormalRoughness,
-                  result.GBufferMaterial, result.GBufferVelocity, transparencyComplete},
+                  result.GBufferMaterial, result.GBufferVelocity, skyComplete},
                  {result.IrradynRadiance}});
             result.IrradynComposite =
                 result.Graph.AddPass({"Irradyn bilateral composite",
                                       {result.IrradynRadiance, result.SceneDepth, result.GBufferBaseColorMetallic,
                                        result.GBufferNormalRoughness, result.GBufferMaterial},
                                       {result.HdrScene, irradynComplete}});
-            toneMapDependency = irradynComplete;
+            opaqueLightingComplete = irradynComplete;
         }
+        // Opaque indirect lighting belongs behind translucent surfaces and participating media.
+        const auto cloudVolumeComplete =
+            result.Graph.AddResource({"Cloud volume complete", FrameGraphResourceKind::Buffer, true});
+        result.CloudVolume = result.Graph.AddPass(
+            {"Cloud volume", {result.HdrScene, result.SampledDepth, opaqueLightingComplete}, {cloudVolumeComplete}});
+        result.Transparency =
+            result.Graph.AddPass({"Transparency",
+                                  {result.HdrScene, result.SampledDepth, cloudVolumeComplete,
+                                   result.ForwardPlusLightTiles, result.SpatialSelectionRecords, vfxPrepared},
+                                  {transparencyComplete}});
         const auto hdrPrepared =
             result.Graph.AddResource({"HDR preparation complete", FrameGraphResourceKind::Buffer, true});
         // World-space UI and HDR camera effects must finish before any HDR post-processing samples the scene.
         result.HdrPreparation = result.Graph.AddPass(
-            {"HDR world UI and camera effects", {result.HdrScene, toneMapDependency}, {hdrPrepared}});
+            {"HDR world UI and camera effects", {result.HdrScene, transparencyComplete}, {hdrPrepared}});
         std::vector toneMapInputs{result.HdrScene, result.GBufferVelocity, hdrPrepared};
         if (bloomEnabled)
         {

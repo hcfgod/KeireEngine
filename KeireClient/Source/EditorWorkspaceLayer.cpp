@@ -958,7 +958,7 @@ void EditorWorkspaceLayer::OnAttach()
             }
             if (requiresSynchronousImport)
             {
-                m_PendingStartupScene = startupCandidate;
+                m_SceneTransitions->DeferStartupScene(startupCandidate);
                 ImportAssets(KeireEditor::AssetOperationPriority::AutomaticRefresh);
             }
             else
@@ -1024,7 +1024,7 @@ void EditorWorkspaceLayer::OnAttach()
                     }
                     return Keire::EventFlow::Handled;
                 });
-            if (!m_PendingStartupScene)
+            if (!m_SceneTransitions->PendingStartupScene())
                 RequestInitialScene(startupCandidate);
             if (project->Descriptor().DefaultInput)
             {

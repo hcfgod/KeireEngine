@@ -28,7 +28,8 @@ namespace Keire::RenderBackend
         auto operator<=>(const MaterialBlendPolicy&) const noexcept = default;
     };
 
-    [[nodiscard]] constexpr MaterialBlendPolicy MaterialBlending(const MaterialAlphaMode mode) noexcept
+    [[nodiscard]] constexpr MaterialBlendPolicy MaterialBlending(const MaterialAlphaMode mode,
+                                                                 const bool volumeAware = false) noexcept
     {
         using enum MaterialBlendFactor;
         switch (mode)
@@ -42,7 +43,7 @@ namespace Keire::RenderBackend
         case MaterialAlphaMode::AlphaComposite:
             return {One, OneMinusSourceAlpha, One, OneMinusSourceAlpha, true, false};
         case MaterialAlphaMode::AlphaHoldout:
-            return {Zero, OneMinusSourceAlpha, Zero, OneMinusSourceAlpha, true, false};
+            return {volumeAware ? One : Zero, OneMinusSourceAlpha, Zero, OneMinusSourceAlpha, true, false};
         case MaterialAlphaMode::Opaque:
         case MaterialAlphaMode::Mask:
         default:

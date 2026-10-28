@@ -154,8 +154,8 @@ TEST_CASE("static scene frame graph declares the complete production pass sequen
 {
     const auto scene = Keire::RenderBackend::BuildStaticSceneFrameGraph();
     CHECK(scene.Path == Keire::RenderPath::ForwardPlus);
-    REQUIRE(scene.Compiled.Order.size() == 19);
-    REQUIRE(scene.Compiled.Diagnostics.size() == 19);
+    REQUIRE(scene.Compiled.Order.size() == 20);
+    REQUIRE(scene.Compiled.Diagnostics.size() == 20);
     CHECK(scene.Compiled.Diagnostics.front() == "0: Resource uploads");
     CHECK(scene.Compiled.Diagnostics[1] == "1: Directional shadow maps");
     CHECK(scene.Compiled.Diagnostics[2] == "2: VFX simulation and dynamic bounds");
@@ -168,10 +168,11 @@ TEST_CASE("static scene frame graph declares the complete production pass sequen
     CHECK(scene.Compiled.Diagnostics[9] == "9: Forward+ motion-vector prepass");
     CHECK(scene.Compiled.Diagnostics[10] == "10: Opaque and mask");
     CHECK(scene.Compiled.Diagnostics[11] == "11: Sampled scene depth");
-    CHECK(scene.Compiled.Diagnostics[13] == "13: Transparency");
-    CHECK(scene.Compiled.Diagnostics[14] == "14: HDR world UI and camera effects");
-    CHECK(scene.Compiled.Diagnostics[15] == "15: ACES tone map");
-    CHECK(scene.Compiled.Diagnostics.back() == "18: Presentation");
+    CHECK(scene.Compiled.Diagnostics[13] == "13: Cloud volume");
+    CHECK(scene.Compiled.Diagnostics[14] == "14: Transparency");
+    CHECK(scene.Compiled.Diagnostics[15] == "15: HDR world UI and camera effects");
+    CHECK(scene.Compiled.Diagnostics[16] == "16: ACES tone map");
+    CHECK(scene.Compiled.Diagnostics.back() == "19: Presentation");
     const auto passPosition = [&](const Keire::RenderBackend::FrameGraphPass pass)
     {
         const auto found = std::ranges::find(scene.Compiled.Order, pass);
@@ -259,7 +260,7 @@ TEST_CASE("deferred hybrid frame graph declares typed GBuffer lighting and forwa
 
     const auto scene = BuildStaticSceneFrameGraph(Keire::RenderPath::DeferredHybrid);
     CHECK(scene.Path == Keire::RenderPath::DeferredHybrid);
-    REQUIRE(scene.Compiled.Order.size() == 25U);
+    REQUIRE(scene.Compiled.Order.size() == 26U);
     REQUIRE(scene.DepthVelocity);
     REQUIRE(scene.DeferredGBufferStandard);
     REQUIRE(scene.DeferredGBufferExtended);
@@ -282,9 +283,10 @@ TEST_CASE("deferred hybrid frame graph declares typed GBuffer lighting and forwa
     CHECK(passPosition(scene.DeferredDecals) < passPosition(scene.DeferredLighting));
     CHECK(passPosition(scene.DeferredLighting) < passPosition(scene.ForwardOpaqueTail));
     CHECK(passPosition(scene.ForwardOpaqueTail) < passPosition(scene.Transparency));
-    CHECK(passPosition(scene.Transparency) < passPosition(scene.IrradynTrace));
+    CHECK(passPosition(scene.ForwardOpaqueTail) < passPosition(scene.IrradynTrace));
     CHECK(passPosition(scene.IrradynTrace) < passPosition(scene.IrradynComposite));
-    CHECK(passPosition(scene.IrradynComposite) < passPosition(scene.HdrPreparation));
+    CHECK(passPosition(scene.IrradynComposite) < passPosition(scene.Transparency));
+    CHECK(passPosition(scene.Transparency) < passPosition(scene.HdrPreparation));
     CHECK(passPosition(scene.HdrPreparation) < passPosition(scene.ToneMap));
 
     const auto resources = scene.Graph.Resources();

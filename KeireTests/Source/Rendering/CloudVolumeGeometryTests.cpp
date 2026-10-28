@@ -2,10 +2,13 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
+#include <initializer_list>
 #include <limits>
 
 namespace
 {
+    using uint = std::uint32_t;
     using std::isfinite;
     using std::max;
     using std::min;
@@ -50,4 +53,45 @@ TEST_CASE("Cloud volume slab rejects invalid or unrepresentable geometry")
     CHECK(IntersectCloudVolumeSlab(0.0F, 1.0F, 1000.0F, -1.0F, 20000.0F).Exit == 0.0F);
     CHECK(IntersectCloudVolumeSlab(0.0F, 1.0F, 1000.0F, 500.0F, infinity).Exit == 0.0F);
     CHECK(IntersectCloudVolumeSlab(0.0F, 1.0F, 1.0e30F, 1.0F, 20000.0F).Exit == 0.0F);
+}
+
+TEST_CASE("Cloud sunlight travel uses the slab boundary and explicit distance budget")
+{
+    CHECK(CloudVolumeShadowDistance(1250.0F, 1.0F, 1000.0F, 500.0F, 20000.0F) == 250.0F);
+    CHECK(CloudVolumeShadowDistance(1250.0F, -1.0F, 1000.0F, 500.0F, 20000.0F) == 250.0F);
+    CHECK(CloudVolumeShadowDistance(1250.0F, 0.0F, 1000.0F, 500.0F, 20000.0F) == 20000.0F);
+    CHECK(CloudVolumeShadowDistance(1250.0F, 0.000099F, 1000.0F, 500.0F, 20000.0F) == 20000.0F);
+    CHECK(CloudVolumeShadowDistance(1250.0F, 0.000101F, 1000.0F, 500.0F, 20000.0F) == 20000.0F);
+    CHECK(CloudVolumeShadowDistance(1250.0F, -0.000101F, 1000.0F, 500.0F, 20000.0F) == 20000.0F);
+    CHECK(CloudVolumeShadowDistance(1250.0F, 1.0F, 1000.0F, 500.0F, 100.0F) == 100.0F);
+}
+
+TEST_CASE("Shifted cloud intervals cover the full clipped ray without gaps or overlaps")
+{
+    for (const uint steps : {1U, 2U, 48U, 128U})
+    {
+        for (const float phase : {0.0001F, 0.125F, 0.5F, 0.9999F, 1.0F})
+        {
+            for (const float entry : {0.0F, 1500.0F, 100000.0F})
+            {
+                const float exitDistance = entry + 3200.0F;
+                float previousExit = entry;
+                double integratedLength = 0.0;
+                for (uint index = 0; index <= steps; ++index)
+                {
+                    const auto interval = CloudVolumeShiftedInterval(entry, exitDistance, steps, index, phase);
+                    CHECK(interval.Entry == previousExit);
+                    CHECK(interval.Exit >= interval.Entry);
+                    CHECK(interval.Entry >= entry);
+                    CHECK(interval.Exit <= exitDistance);
+                    integratedLength += static_cast<double>(interval.Exit - interval.Entry);
+                    previousExit = interval.Exit;
+                }
+                CHECK(previousExit == exitDistance);
+                CHECK(integratedLength == doctest::Approx(3200.0));
+                const double transmission = std::exp(-0.002 * integratedLength);
+                CHECK(transmission == doctest::Approx(std::exp(-0.002 * 3200.0)));
+            }
+        }
+    }
 }

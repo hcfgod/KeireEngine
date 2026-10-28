@@ -16,9 +16,12 @@
 #include "Keire/Streaming/StreamingSystem.h"
 #include "Keire/Ui/RuntimeUi.h"
 #include "Keire/Vfx/VfxVolumeAsset.h"
+#include "KeireInternal/Rendering/CloudVolumePass.h"
 #include "KeireInternal/Rendering/DirectionalShadowPolicyInternal.h"
 #include "KeireInternal/Rendering/FrameGraphInternal.h"
 #include "KeireInternal/Rendering/GpuOcclusionPolicyInternal.h"
+#include "KeireInternal/Rendering/GpuShaderCacheInternal.h"
+#include "KeireInternal/Rendering/GpuTextureResources.h"
 #include "KeireInternal/Rendering/GpuVfxPipelineBatchInternal.h"
 #include "KeireInternal/Rendering/GpuVisibilityCandidateInternal.h"
 #include "KeireInternal/Rendering/MaterialPassRoutingInternal.h"
@@ -30,6 +33,7 @@
 #include "KeireInternal/Rendering/RenderSurfaceStateInternal.h"
 #include "KeireInternal/Rendering/RuntimeUiFontCacheInternal.h"
 #include "KeireInternal/Rendering/RuntimeUiRenderTargetInternal.h"
+#include "KeireInternal/Rendering/SkyColorUniforms.h"
 #include "KeireInternal/Rendering/SpatialLightingInternal.h"
 #include "KeireInternal/Rendering/VfxVisibilityPlanInternal.h"
 #include "KeireInternal/Rendering/VolumetricCloudUniforms.h"
@@ -91,20 +95,6 @@ namespace Keire::RenderBackend
         std::uint64_t EstimatedBytes = 0;
 
         [[nodiscard]] bool Empty() const noexcept { return !Vertices && !AssetVertices && !Indices; }
-    };
-
-    struct GpuTextureResources final
-    {
-        SDL_GPUTexture* Texture = nullptr;
-        SDL_GPUSampler* Sampler = nullptr;
-        bool HdrEncoded = false;
-        TextureEnvironmentLayout EnvironmentLayout = TextureEnvironmentLayout::Auto;
-        std::array<Vector4, 9> DiffuseIrradiance{};
-        std::uint32_t MipLevels = 1;
-        bool HasDiffuseIrradiance = false;
-        std::uint64_t EstimatedBytes = 0;
-
-        [[nodiscard]] bool Empty() const noexcept { return !Texture && !Sampler; }
     };
 
     struct GpuSkinResources;
@@ -261,24 +251,6 @@ namespace Keire::RenderBackend
         std::uint64_t LastAttemptedRevision = 0;
     };
 
-    struct GpuShaderEntry final
-    {
-        struct Pipeline final
-        {
-            SDL_GPUSampleCount Samples = SDL_GPU_SAMPLECOUNT_1;
-            MaterialAlphaMode AlphaMode = MaterialAlphaMode::Opaque;
-            bool DoubleSided = false;
-            RuntimeMaterialPassRole PassRole = RuntimeMaterialPassRole::Primary;
-            SDL_GPUGraphicsPipeline* Handle = nullptr;
-        };
-
-        AssetHandle<ShaderAsset> Handle;
-        Ref<const ShaderAsset> LastGood;
-        std::vector<Pipeline> Pipelines;
-        std::uint64_t LoadedRevision = 0;
-        std::uint64_t LastAttemptedRevision = 0;
-    };
-
     struct ResolvedAssetMaterial final
     {
         struct PropertyBinding final
@@ -308,6 +280,7 @@ namespace Keire::RenderBackend
         bool UsesSpatialLighting = false;
         bool UsesVertexMaterialParameters = false;
         std::uint8_t SpatialLightingAbiVersion = 0;
+        std::uint32_t VolumeLightingAbiVersion = 0;
         std::uint8_t InstanceAddressingAbiVersion = 0;
 
         [[nodiscard]] SDL_GPUGraphicsPipeline* PassPipeline(const RuntimeMaterialPassRole role) const noexcept
@@ -543,26 +516,6 @@ namespace Keire::RenderBackend
         std::uint32_t ContributionOrder = 0;
     };
 
-    struct SceneLightProbeVolume final
-    {
-        EntityId Entity;
-        Matrix4 LocalToWorld;
-        Matrix4 WorldToLocal;
-        Vector3 BoxExtents;
-        Vector3 Spacing;
-        std::int32_t Priority = 0;
-        float NormalBias = 0.0F;
-        float ViewBias = 0.0F;
-    };
-
-    struct SceneSpatialContribution final
-    {
-        AssetId Scene;
-        AssetId BakedLighting;
-        std::vector<Detail::SpatialReflectionProbe> ReflectionProbes;
-        std::vector<SceneLightProbeVolume> LightProbeVolumes;
-    };
-
     struct SceneRenderPacket final
     {
         AssetId Scene;
@@ -572,7 +525,9 @@ namespace Keire::RenderBackend
         RenderEnvironmentSettings Environment;
         std::array<std::array<double, 2>, MaximumCloudLayers> CloudAdvectionPhase{};
         double StarTwinklePhase = 0.0;
+        SkyColorUniforms SkyColors;
         VolumetricCloudUniforms CloudVolume;
+        float CloudBasePatternPhase = 0.0F;
         std::map<std::string, MaterialPropertyValue, std::less<>> GlobalMaterialProperties;
         SceneLighting Lighting;
         std::vector<SceneDrawItem> DrawItems;
@@ -1087,8 +1042,10 @@ namespace Keire::RenderBackend
         [[nodiscard]] SDL_GPUShader* CreateToneMapShader(bool vertex) const;
         [[nodiscard]] SDL_GPUShader* CreateBloomShader(bool vertex) const;
         void EnsureBloomPipeline();
-        void EnsureCloudVolumePipeline();
-        void RecordCloudVolume(SDL_GPUCommandBuffer* commands, const RenderSurfaceState& surface,
+        [[nodiscard]] SDL_GPUGraphicsPipeline* EnsureCloudVolumePipeline(SDL_GPUSampleCount samples,
+                                                                         CloudVolumePass pass);
+        [[nodiscard]] const GpuTextureResources& EnsureCloudNoiseTexture();
+        void RecordCloudVolume(SDL_GPUCommandBuffer* commands, RenderSurfaceState& surface,
                                const SceneRenderPacket& packet);
         SDL_GPUShader* CreateCloudVolumeShader(bool vertex) const;
         void RecordBloom(SDL_GPUCommandBuffer* commands, const RenderSurfaceState& surface,
@@ -1153,6 +1110,10 @@ namespace Keire::RenderBackend
         static void BuildGpuVfxPipelines(SDL_GPUDevice* device, GpuVfxPipelineBatch& batch, JobContext* context);
         void PublishGpuVfxPipelines(GpuVfxPipelineBatch& batch) noexcept;
         void CompleteGpuVfxPipelineWarmup();
+        void StartAssetPipelinePreparation(AssetId id, Ref<const ShaderAsset> shader, std::uint64_t revision,
+                                           std::vector<GpuShaderEntry::Pipeline> pipelines);
+        void CompleteAssetPipelinePreparation();
+        void CancelAssetPipelinePreparation(bool abandon) noexcept;
         void CancelGpuVfxPipelineWarmup(bool abandon) noexcept;
         void ReleaseGpuVfxPipelines() noexcept;
         void PrepareSkinning(SDL_GPUCommandBuffer* commands, SceneRenderPacket& packet, std::uint64_t surface);
@@ -1223,6 +1184,7 @@ namespace Keire::RenderBackend
                                                  SDL_GPUSampleCount samples, SDL_GPUTextureFormat format,
                                                  bool fullscreen = false, Vector2 time = {});
         void ReleaseRuntimeUiMaterialPipelines(bool abandon) noexcept;
+        [[nodiscard]] SDL_GPUTexture* EnsureFullscreenInput(RenderSurfaceState& surface, bool hdr);
         void RecordFullscreenEffect(SDL_GPUCommandBuffer* commands, RenderSurfaceState& surface, AssetId material,
                                     bool hdr, Vector2 time);
         void RecordRuntimeUiCameraPanels(SDL_GPUCommandBuffer* commands, RenderSurfaceState& surface);
@@ -1299,11 +1261,12 @@ namespace Keire::RenderBackend
         [[nodiscard]] SDL_GPUGraphicsPipeline* CreateGpuVfxPipeline(SDL_GPUSampleCount samples, bool ribbon = false);
         [[nodiscard]] SDL_GPUGraphicsPipeline* CreateGpuVfxMeshPipeline(SDL_GPUSampleCount samples);
         [[nodiscard]] SDL_GPUGraphicsPipeline* CreateDepthPipeline(bool depthBias);
-        [[nodiscard]] SDL_GPUGraphicsPipeline* CreateToneMapPipeline();
+        [[nodiscard]] SDL_GPUGraphicsPipeline* CreateToneMapPipeline(bool displayOutput = false);
         [[nodiscard]] SDL_GPUGraphicsPipeline* CreateDeferredGBufferPipeline();
         [[nodiscard]] SDL_GPUGraphicsPipeline* CreateDepthVelocityPipeline();
         [[nodiscard]] SDL_GPUGraphicsPipeline* CreateDeferredLightingPipeline();
-        [[nodiscard]] SDL_GPUGraphicsPipeline* CreateIrradynPipeline(bool additive);
+        [[nodiscard]] SDL_GPUGraphicsPipeline*
+        CreateIrradynPipeline(bool additive, SDL_GPUSampleCount samples = SDL_GPU_SAMPLECOUNT_1);
         [[nodiscard]] bool EnsureDeferredPipelines();
         void ReleaseDeferredPipelines() noexcept;
         void RecordDeferredDepthVelocity(SDL_GPUCommandBuffer* commands, RenderSurfaceState& surface,
@@ -1324,12 +1287,23 @@ namespace Keire::RenderBackend
                                 const SceneRenderPacket& packet, bool temporalHistoryContinuous);
         void RecordIrradynComposite(SDL_GPUCommandBuffer* commands, RenderSurfaceState& surface,
                                     const SceneRenderPacket& packet);
+        void ReleaseDisplayOutputs(SurfaceResources& resources) noexcept;
+        void RecordDisplayOutput(SDL_GPUCommandBuffer* commands, const RenderSurfaceState& surface);
         void RecordToneMap(SDL_GPUCommandBuffer* commands, const RenderSurfaceState& surface,
                            RenderAntiAliasingMode antiAliasing, bool temporalHistoryContinuous,
                            float bloomIntensity = 0.0F);
         [[nodiscard]] RenderPipelineSet& PipelinesFor(SDL_GPUSampleCount samples);
         [[nodiscard]] SDL_GPUShader* CreateAssetShader(const ShaderAssetDefinition& definition, bool vertex,
                                                        std::string_view passRole = "primary") const;
+        [[nodiscard]] static SDL_GPUShader* CreateAssetShaderForDevice(SDL_GPUDevice* device,
+                                                                       const ShaderAssetDefinition& definition,
+                                                                       bool vertex, std::string_view passRole);
+        // Caller owns stage handles even on failure and classifies device loss before releasing them.
+        [[nodiscard]] static SDL_GPUGraphicsPipeline*
+        CreateAssetPipelineForDevice(SDL_GPUDevice* device, SDL_GPUTextureFormat sceneColorFormat,
+                                     SDL_GPUTextureFormat depthFormat, const ShaderAssetDefinition& definition,
+                                     SDL_GPUSampleCount samples, MaterialSurfaceState surface,
+                                     std::string_view passRole, SDL_GPUShader*& vertex, SDL_GPUShader*& fragment);
         [[nodiscard]] SDL_GPUGraphicsPipeline* CreateAssetPipeline(const ShaderAssetDefinition& definition,
                                                                    SDL_GPUSampleCount samples,
                                                                    MaterialSurfaceState surface,
@@ -1358,13 +1332,15 @@ namespace Keire::RenderBackend
         SDL_GPUGraphicsPipeline* ShadowPipeline = nullptr;
         SDL_GPUGraphicsPipeline* SceneDepthPipeline = nullptr;
         SDL_GPUGraphicsPipeline* ToneMapPipeline = nullptr;
+        SDL_GPUGraphicsPipeline* DisplayOutputPipeline = nullptr;
         SDL_GPUGraphicsPipeline* BloomPipeline = nullptr;
-        SDL_GPUGraphicsPipeline* CloudVolumePipeline = nullptr;
+        std::array<SDL_GPUGraphicsPipeline*, CloudVolumePipelineCount> CloudVolumePipelines{};
+        std::array<SDL_GPUGraphicsPipeline*, 3> CloudTemporalPipelines{};
         SDL_GPUGraphicsPipeline* DeferredGBufferPipeline = nullptr;
         SDL_GPUGraphicsPipeline* DepthVelocityPipeline = nullptr;
         SDL_GPUGraphicsPipeline* DeferredLightingPipeline = nullptr;
         SDL_GPUGraphicsPipeline* IrradynTracePipeline = nullptr;
-        SDL_GPUGraphicsPipeline* IrradynCompositePipeline = nullptr;
+        std::array<SDL_GPUGraphicsPipeline*, 4> IrradynCompositePipelines{};
         SDL_GPUGraphicsPipeline* RuntimeUiPipeline = nullptr;
         SDL_GPUGraphicsPipeline* RuntimeUiCameraOverlayPipeline = nullptr;
         SDL_GPUGraphicsPipeline* RuntimeUiRenderTexturePipeline = nullptr;
@@ -1390,6 +1366,7 @@ namespace Keire::RenderBackend
         GpuMeshResources ErrorMesh;
         GpuTextureResources CheckerboardTexture;
         GpuTextureResources DefaultSkyTexture;
+        GpuTextureResources CloudNoiseTexture;
         GpuTextureResources BrdfIntegrationLut;
         GpuTextureResources WhiteTexture;
         GpuTextureResources FlatNormalTexture;
@@ -1481,6 +1458,7 @@ namespace Keire::RenderBackend
         Ref<JobSystem> Jobs;
         Ref<JobScope> RenderJobs;
         GpuVfxPipelineWarmupWork VfxWarmupWork;
+        AssetPipelinePreparation AssetPipelineWork;
         std::atomic<GpuVfxPipelineWarmupState> VfxPipelineWarmupState{GpuVfxPipelineWarmupState::NotStarted};
         std::unordered_map<std::uint64_t, GpuVfxWorldResources> GpuVfxWorlds;
         std::unordered_map<AssetId, GpuVfxVolumeEntry> VfxVolumeCache;
@@ -1494,6 +1472,7 @@ namespace Keire::RenderBackend
         std::uint64_t SkinningStaticBuilds = 0;
         std::uint64_t SkinningOutputBuilds = 0;
         std::vector<PendingGpuSkinOutputPublication> PendingGpuSkinOutputPublications;
+        CloudLightCachePublications PendingCloudLightCaches;
         std::uint64_t GpuSubmissionSerial = 0;
         std::uint64_t ActiveGpuSubmissionSerial = 0;
         mutable std::mutex SurfaceMutex;

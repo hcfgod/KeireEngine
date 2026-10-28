@@ -117,7 +117,7 @@ TEST_CASE("Shader Graph source and cooked assets preserve stable graph identity"
 
     const auto importer = Keire::CreateShaderGraphAssetImporter();
     CHECK(importer.Name == "Keire.ShaderGraph");
-    CHECK(importer.Version == 29);
+    CHECK(importer.Version == 48);
     CHECK(importer.Extensions == std::vector<std::string>{".keireshadergraph"});
 }
 
@@ -174,7 +174,7 @@ TEST_CASE("Shader Graph v2 catalogs stable node identities and migrates v1 sourc
 TEST_CASE("Shader Graph compatibility versions are explicit and future sources fail recoverably")
 {
     CHECK(Keire::ShaderGraphSourceSchemaVersion == 6);
-    CHECK(Keire::ShaderGraphGeneratedShaderVersion == 16);
+    CHECK(Keire::ShaderGraphGeneratedShaderVersion == 35);
     CHECK(Keire::ShaderGraphVertexLayoutVersion == 3);
 
     const auto graph = Keire::CreateDefaultShaderGraph();
@@ -184,15 +184,20 @@ TEST_CASE("Shader Graph compatibility versions are explicit and future sources f
 
     const auto& variant = compilation.Variants.front();
     const auto manifest = nlohmann::json::parse(variant.Manifest);
-    CHECK(manifest.at("schemaVersion") == 3U);
+    CHECK(manifest.at("schemaVersion") == 4U);
     CHECK(manifest.at("materialGraphSourceSchemaVersion") == Keire::ShaderGraphSourceSchemaVersion);
     CHECK(manifest.at("materialGraphGeneratedShaderVersion") == Keire::ShaderGraphGeneratedShaderVersion);
     CHECK(manifest.at("vertexLayoutVersion") == Keire::ShaderGraphVertexLayoutVersion);
     CHECK(manifest.at("instanceAddressingAbiVersion") == 2U);
     CHECK(manifest.at("occlusionSupport") == 3U);
     CHECK(manifest.at("spatialLightingAbiVersion") == 3U);
+    CHECK(manifest.at("volumeLightingAbiVersion") == 7U);
     CHECK(manifest.at("maximumWorldPositionDisplacementRadius").get<float>() == doctest::Approx(0.0F));
-    CHECK(variant.Hlsl.find("Generator version 16, source schema 6") != std::string::npos);
+    CHECK(variant.Hlsl.find("Generator version 26, source schema 6") != std::string::npos);
+    CHECK(variant.Hlsl.find("#define KEIRE_CLOUD_NOISE_TEXTURE t") != std::string::npos);
+    CHECK(variant.Hlsl.find("Texture3D<float4> VolumeCloudNoiseTexture") != std::string::npos);
+    CHECK(variant.Hlsl.find("#define KEIRE_CLOUD_NOISE_TEXTURE t9\n") != std::string::npos);
+    CHECK(variant.Hlsl.find("ForwardPlusLights : register(t10, space2)") != std::string::npos);
     REQUIRE(manifest.at("passes").size() == 3U);
     CHECK(manifest.at("passes")[0].at("role") == "depthVelocity");
     CHECK(manifest.at("passes")[1].at("role") == "deferredGBufferStandard");

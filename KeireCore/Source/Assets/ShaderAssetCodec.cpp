@@ -108,6 +108,7 @@ namespace Keire::Detail
                     {"usesInstancing", definition.UsesInstancing},
                     {"usesImageBasedLighting", definition.UsesImageBasedLighting},
                     {"spatialLightingAbiVersion", definition.SpatialLightingAbiVersion},
+                    {"volumeLightingAbiVersion", definition.VolumeLightingAbiVersion},
                     {"usesVertexMaterialParameters", definition.UsesVertexMaterialParameters},
                     {"instanceAddressingAbiVersion", definition.InstanceAddressingAbiVersion},
                     {"occlusionSupport", static_cast<std::uint8_t>(definition.OcclusionSupport)},
@@ -147,6 +148,19 @@ namespace Keire::Detail
             result.UsesInstancing = source.value("usesInstancing", false);
             result.UsesImageBasedLighting = source.value("usesImageBasedLighting", false);
             result.SpatialLightingAbiVersion = source.value("spatialLightingAbiVersion", static_cast<std::uint8_t>(0));
+            if (source.contains("volumeLightingAbiVersion") && source.at("volumeLightingAbiVersion") != 0U &&
+                source.at("volumeLightingAbiVersion") != 1U && source.at("volumeLightingAbiVersion") != 2U &&
+                source.at("volumeLightingAbiVersion") != 3U && source.at("volumeLightingAbiVersion") != 4U &&
+                source.at("volumeLightingAbiVersion") != 5U && source.at("volumeLightingAbiVersion") != 6U &&
+                source.at("volumeLightingAbiVersion") != 7U)
+            {
+                throw std::invalid_argument("Shader volume-lighting ABI version is unsupported.");
+            }
+            result.VolumeLightingAbiVersion = source.value("volumeLightingAbiVersion", 0U);
+            if (sourceSchemaVersion < 4U && result.VolumeLightingAbiVersion != 0U)
+            {
+                throw std::invalid_argument("Volume-lighting ABI requires canonical shader schema 4.");
+            }
             result.UsesVertexMaterialParameters = source.value("usesVertexMaterialParameters", false);
             result.InstanceAddressingAbiVersion =
                 source.value("instanceAddressingAbiVersion", static_cast<std::uint8_t>(0));
@@ -177,7 +191,8 @@ namespace Keire::Detail
                 decoded.Description = property.value("description", std::string{});
                 decoded.HighDynamicRange = property.value("hdr", false);
                 if (property.contains("textureTransformProperty"))
-                    decoded.TextureTransformProperty = AssetId::Parse(property.at("textureTransformProperty").get<std::string>());
+                    decoded.TextureTransformProperty =
+                        AssetId::Parse(property.at("textureTransformProperty").get<std::string>());
                 if (property.contains("minimum"))
                     decoded.Minimum = property.at("minimum").get<float>();
                 if (property.contains("maximum"))

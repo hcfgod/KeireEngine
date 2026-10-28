@@ -130,12 +130,29 @@ namespace Keire::RenderBackend
         {
             vfxSpatialUniforms.SpatialSelection[0] = InvalidAssetSpatialSelectionIndex;
             const AssetEnvironmentSpatialUniforms combined{environmentUniforms, vfxSpatialUniforms};
-            SDL_PushGPUFragmentUniformData(commands, 3, &combined, sizeof(combined));
+            if (composed->VolumeLightingAbiVersion >= 1U)
+            {
+                const AssetEnvironmentVolumeUniforms volumeUniforms{
+                    combined, MakeCloudVolumeViewUniforms(packet, surface.Width, surface.Height)};
+                SDL_PushGPUFragmentUniformData(commands, 3, &volumeUniforms,
+                                               sizeof(combined) +
+                                                   CloudVolumeUniformByteSize(composed->VolumeLightingAbiVersion));
+            }
+            else
+            {
+                SDL_PushGPUFragmentUniformData(commands, 3, &combined, sizeof(combined));
+            }
+        }
+        else if (composed->VolumeLightingAbiVersion >= 1U)
+        {
+            const auto volumeUniforms = MakeCloudVolumeViewUniforms(packet, surface.Width, surface.Height);
+            SDL_PushGPUFragmentUniformData(commands, 2, &volumeUniforms,
+                                           CloudVolumeUniformByteSize(composed->VolumeLightingAbiVersion));
         }
         else if (composed->UsesImageBasedLighting)
             SDL_PushGPUFragmentUniformData(commands, 3, &environmentUniforms, sizeof(environmentUniforms));
         if (!composed->Textures.empty() || composed->ReceivesShadows || composed->UsesImageBasedLighting ||
-            composed->UsesSpatialLighting)
+            composed->UsesSpatialLighting || composed->VolumeLightingAbiVersion >= 2U)
         {
             std::array<SDL_GPUTextureSamplerBinding, 40> bindings{};
             std::ranges::copy(composed->Textures, bindings.begin());
@@ -159,6 +176,11 @@ namespace Keire::RenderBackend
             {
                 std::ranges::copy(vfxSpatialBindings, bindings.begin() + static_cast<std::ptrdiff_t>(bindingCount));
                 bindingCount += vfxSpatialBindings.size();
+            }
+            if (composed->VolumeLightingAbiVersion >= 2U)
+            {
+                const auto& noise = EnsureCloudNoiseTexture();
+                bindings[bindingCount++] = {noise.Texture, noise.Sampler};
             }
             SDL_BindGPUFragmentSamplers(pass, 0, bindings.data(), static_cast<std::uint32_t>(bindingCount));
         }

@@ -363,6 +363,7 @@ namespace Keire::RenderBackend
                     throw std::runtime_error("Injected accepted-frame terminal failure.");
 #endif
                 CompleteGpuVfxPipelineWarmup();
+                CompleteAssetPipelinePreparation();
                 if (Specification.Mode != RenderMode::Rendered)
                 {
                     Statistics = frame->CapturedStatistics;
@@ -536,6 +537,7 @@ namespace Keire::RenderBackend
         ActiveGpuSubmissionSerial = GpuSubmissionSerial + 1U;
         FrameExecutionActive = true;
         bool gpuWorkSubmitted = false;
+        PendingCloudLightCaches.Invalidate();
 
         try
         {
@@ -550,6 +552,10 @@ namespace Keire::RenderBackend
                 if (publicationWriterIndex >= surface->Resources.FinalOutputs.size())
                     throw std::logic_error(
                         "A captured render-surface epoch has no output for the accepted frame slot.");
+                if (publicationWriterIndex >= surface->Resources.DisplayOutputs.size())
+                {
+                    throw std::logic_error("A captured surface has no display output for the accepted frame slot.");
+                }
                 if (publicationWriterIndex >= surface->Resources.TemporalHistories.size())
                     throw std::logic_error(
                         "A captured render-surface epoch has no temporal history for the accepted frame slot.");
@@ -560,6 +566,7 @@ namespace Keire::RenderBackend
                         "A captured render-surface epoch has no Irradyn history for the accepted frame slot.");
                 }
                 surface->IrradynRecordedThisFrame = false;
+                DiscardCloudTemporalRecording(surface->Resources.CloudHistory, frame->FrameSlot);
                 publicationSurfaces.push_back(std::move(surface));
             }
 
@@ -587,6 +594,7 @@ namespace Keire::RenderBackend
                     throw std::runtime_error("SDL_AcquireGPUCommandBuffer(surface) failed: " + LastSdlError());
                 surfaceCommands.push_back(surfaceCommandBuffer);
                 RecordSurface(surfaceCommandBuffer, *surface, surfaceCommands);
+                RecordDisplayOutput(surfaceCommandBuffer, *surface);
                 const auto& diagnostics = surface->GpuOcclusionDiagnostics;
                 if (diagnostics.State == GpuOcclusionSurfaceState::Active)
                 {
@@ -645,7 +653,7 @@ namespace Keire::RenderBackend
                     {
                         const auto surface = ResolveSurface(token);
                         return reinterpret_cast<std::uintptr_t>(
-                            surface ? surface->PublishedTexture.load(std::memory_order_acquire) : nullptr);
+                            surface && surface->HasOutput ? surface->Resources.PublishedDisplayColor() : nullptr);
                     });
             }
             RecordSwapchain(commands, resolvedEditorUi ? resolvedEditorUi->Data() : nullptr);
@@ -706,6 +714,7 @@ namespace Keire::RenderBackend
                 throw std::runtime_error("SDL_SubmitGPUCommandBufferAndAcquireFence failed: " + LastSdlError());
             gpuWorkSubmitted = true;
             PublishRuntimeUiRenderTextures(*frame);
+            PendingCloudLightCaches.Submit();
             if (resolvedEditorUi)
                 resolvedEditorUi->CommitGpuTextures(EditorUiTextures, frame->DeviceGeneration);
             Statistics.GpuSubmissionMilliseconds =
@@ -753,6 +762,8 @@ namespace Keire::RenderBackend
             {
                 std::swap(surface->Resources.FinalOutputs.front(),
                           surface->Resources.FinalOutputs[publicationWriterIndex]);
+                std::swap(surface->Resources.DisplayOutputs.front(),
+                          surface->Resources.DisplayOutputs[publicationWriterIndex]);
                 surface->HasOutput = true;
                 if (surface->ActiveFeatureSelection.EffectiveAntiAliasing == RenderAntiAliasingMode::Taa)
                 {
@@ -777,6 +788,7 @@ namespace Keire::RenderBackend
                     surface->IrradynHistoryValid = false;
                 }
                 surface->IrradynRecordedThisFrame = false;
+                PublishCloudTemporalHistory(surface->Resources.CloudHistory, frame->FrameSlot);
                 surface->PublishedWorksetSlot.store(frame->FrameSlot, std::memory_order_release);
                 surface->PublishedDepthAvailable.store(surface->SampledDepthValid, std::memory_order_release);
                 {
@@ -808,6 +820,7 @@ namespace Keire::RenderBackend
         }
         catch (...)
         {
+            PendingCloudLightCaches.Invalidate();
             try
             {
                 throw;
@@ -959,6 +972,7 @@ namespace Keire::RenderBackend
                 {
                     surface->SampledDepthValid = false;
                     surface->IrradynRecordedThisFrame = false;
+                    DiscardCloudTemporalRecording(surface->Resources.CloudHistory, frame->FrameSlot);
                 }
             }
             ActiveGpuSubmissionSerial = 0;

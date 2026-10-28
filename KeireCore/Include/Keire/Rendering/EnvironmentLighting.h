@@ -45,6 +45,17 @@ namespace Keire
         bool operator==(const EnvironmentTimeSample&) const noexcept = default;
     };
 
+    /// Art-directed linear HDR gradient, independent of the selected directional light.
+    struct EnvironmentSkyColors
+    {
+        std::array<float, 3> Horizon{};
+        std::array<float, 3> Zenith{};
+        float BlendWeight = 1.0F;
+        float GradientExponent = 1.0F;
+
+        bool operator==(const EnvironmentSkyColors&) const noexcept = default;
+    };
+
     /// Immutable value input for one view. Source identifies the world/preview lifetime, not an asset or entity.
     struct EnvironmentLightingSnapshot
     {
@@ -57,5 +68,7 @@ namespace Keire
         std::optional<EnvironmentAmbientLight> Ambient;
         /// Shared world or Edit-preview clock for environment animation, independent of directional ownership.
         std::optional<EnvironmentTimeSample> Time;
+        /// Empty retains the physical sky or authored environment texture.
+        std::optional<EnvironmentSkyColors> SkyColors;
     };
 } // namespace Keire

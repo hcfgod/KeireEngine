@@ -6,6 +6,17 @@ struct CloudVolumeInterval
     float Exit;
 };
 
+// Shift interval boundaries while retaining both clipped end segments. A positive phase uses
+// steps + 1 intervals; discarding the first/last partial segment would change optical thickness.
+CloudVolumeInterval CloudVolumeShiftedInterval(float entry, float exitDistance, uint steps, uint index, float phase)
+{
+    const float stepLength = (exitDistance - entry) / float(max(steps, 1U));
+    CloudVolumeInterval interval;
+    interval.Entry = max(entry, entry + (float(index) - 1.0F + phase) * stepLength);
+    interval.Exit = min(exitDistance, entry + (float(index) + phase) * stepLength);
+    return interval;
+}
+
 // A zero-length interval is a miss. maximumDistance is the smaller of scene depth and the view budget.
 // Shared scalar implementation is also compiled by the numerical regression tests.
 CloudVolumeInterval IntersectCloudVolumeSlab(float originHeight, float directionHeight, float baseHeight,
@@ -41,4 +52,14 @@ CloudVolumeInterval IntersectCloudVolumeSlab(float originHeight, float direction
         interval.Exit = exitDistance;
     }
     return interval;
+}
+
+// Shadow rays start at an interior density sample. Use the same explicit distance budget as view rays;
+// a near-horizontal sun must not switch abruptly to an unrelated pattern-size cutoff.
+float CloudVolumeShadowDistance(float sampleHeight, float sunHeight, float baseHeight,
+                                float thickness, float maximumDistance)
+{
+    const CloudVolumeInterval interval =
+        IntersectCloudVolumeSlab(sampleHeight, sunHeight, baseHeight, thickness, maximumDistance);
+    return interval.Exit;
 }

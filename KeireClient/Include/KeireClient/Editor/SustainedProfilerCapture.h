@@ -27,6 +27,11 @@ namespace KeireEditor
             bool GpuTimingSupported = false;
             float Admission = 0, Queue = 0, CpuPreparation = 0, Swapchain = 0, GpuDuration = 0, Completion = 0;
             std::uint32_t Outstanding = 0;
+            float CpuSubmission = 0;
+            float CommandRecording = 0;
+            std::uint32_t CloudLightCacheBuilds = 0;
+            std::uint32_t CloudLightCacheReuses = 0;
+            std::uint64_t CloudLightCacheCells = 0;
         };
         enum class State
         {
@@ -124,7 +129,12 @@ namespace KeireEditor
                  statistics->SwapchainWaitMilliseconds,
                  statistics->GpuFrameMilliseconds,
                  statistics->GpuCompletionLatencyMilliseconds,
-                 statistics->OutstandingFrames};
+                 statistics->OutstandingFrames,
+                 statistics->GpuSubmissionMilliseconds,
+                 statistics->CommandRecordingMilliseconds,
+                 statistics->CloudLightCacheBuilds,
+                 statistics->CloudLightCacheReuses,
+                 statistics->CloudLightCacheCells};
         }
         void Stop() noexcept
         {
@@ -201,7 +211,8 @@ namespace KeireEditor
             if (m_RendererEnabled)
                 out << ",renderer_available,observed_renderer_frame,observed_gpu_timing_frame,gpu_timing_supported,"
                        "admission_ms,queue_ms,renderer_cpu_preparation_ms,swapchain_ms,gpu_duration_ms,completion_ms,"
-                       "outstanding";
+                       "outstanding,cpu_submission_ms,command_recording_ms,cloud_cache_builds,cloud_cache_reuses,"
+                       "cloud_cache_cells";
             out << '\n';
             for (std::size_t index = 0; index < m_Frames.size(); ++index)
             {
@@ -220,10 +231,12 @@ namespace KeireEditor
                             << r.Admission << ',' << r.Queue << ',' << r.CpuPreparation << ',' << r.Swapchain << ',';
                         if (r.GpuTimingSupported && r.GpuTimingFrame != 0)
                             out << r.GpuDuration;
-                        out << ',' << r.Completion << ',' << r.Outstanding;
+                        out << ',' << r.Completion << ',' << r.Outstanding << ',' << r.CpuSubmission << ','
+                            << r.CommandRecording << ',' << r.CloudLightCacheBuilds << ',' << r.CloudLightCacheReuses
+                            << ',' << r.CloudLightCacheCells;
                     }
                     else
-                        out << ",,,,,,,,,,";
+                        out << ",,,,,,,,,,,,,,,";
                 }
                 out << '\n';
             }

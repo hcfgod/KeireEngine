@@ -422,6 +422,12 @@ namespace Keire::RenderBackend
                     command.ElemCount = 0;
                 }
 
+                // Empty commands (including sanitized reset callbacks) must not bind a texture in SDL.
+                if (command.ElemCount == 0)
+                {
+                    continue;
+                }
+
                 if (command.TexRef._TexData)
                 {
                     const auto logicalId = copyTexture(command.TexRef._TexData);
@@ -431,7 +437,9 @@ namespace Keire::RenderBackend
                     continue;
                 }
                 if (command.GetTexID() == ImTextureID_Invalid)
-                    continue;
+                {
+                    throw std::invalid_argument("Dear ImGui non-empty draw command has no texture.");
+                }
                 const auto textureIdentity = static_cast<std::uintptr_t>(command.GetTexID());
                 const auto surface =
                     std::ranges::find_if(surfaces, [textureIdentity](const auto& candidate)
@@ -570,6 +578,17 @@ namespace Keire::RenderBackend
             throw std::logic_error("Captured Dear ImGui texture snapshot is missing from the render view.");
         }
         std::vector<std::pair<std::size_t, std::size_t>> unavailableSurfaces;
+        for (std::size_t listIndex = 0; listIndex < resolved->DrawLists.size(); ++listIndex)
+        {
+            const auto& commands = resolved->DrawLists[listIndex]->CmdBuffer;
+            for (int commandIndex = 0; commandIndex < commands.Size; ++commandIndex)
+            {
+                if (commands[commandIndex].ElemCount == 0)
+                {
+                    unavailableSurfaces.emplace_back(listIndex, static_cast<std::size_t>(commandIndex));
+                }
+            }
+        }
         for (const auto& binding : m_Impl->SurfaceBindings)
         {
             auto& command = resolved->DrawLists[binding.DrawList]->CmdBuffer[static_cast<int>(binding.Command)];

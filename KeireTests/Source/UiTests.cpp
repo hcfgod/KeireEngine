@@ -13,6 +13,7 @@
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <future>
@@ -187,6 +188,14 @@ namespace
                 Keire::UiColor hdrColor{4.0F, 2.0F, 0.5F, 1.0F};
                 CHECK_FALSE(ui.ColorEditHdr("HDR shader color", hdrColor));
                 CHECK(hdrColor.Red == 4.0F);
+                std::array<float, 3> hdrRgb{4.0F, 2.0F, 0.5F};
+                CHECK_FALSE(ui.ColorEditHdrRgb("HDR sky color", hdrRgb));
+                CHECK(hdrRgb[0] == 4.0F);
+                auto invalidRgb = hdrRgb;
+                invalidRgb[1] = std::numeric_limits<float>::infinity();
+                CHECK_THROWS_AS((void)ui.ColorEditHdrRgb("Invalid HDR RGB", invalidRgb), std::invalid_argument);
+                CHECK(invalidRgb[0] == 4.0F);
+                CHECK(std::isinf(invalidRgb[1]));
                 CHECK_THROWS_AS((void)ui.ColorEdit("Display color", hdrColor), std::invalid_argument);
                 auto invalidColor = hdrColor;
                 invalidColor.Blue = std::numeric_limits<float>::infinity();

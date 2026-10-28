@@ -58,7 +58,7 @@ namespace Keire::Detail
         }
 
       private:
-        static constexpr std::size_t MaximumBytes = 64U * 1024U;
+        static constexpr std::size_t MaximumBytes = 256U * 1024U;
 
         [[nodiscard]] static std::filesystem::path Path(const std::filesystem::path& projectRoot)
         {

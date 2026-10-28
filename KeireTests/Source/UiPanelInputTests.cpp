@@ -355,7 +355,7 @@ namespace
         {
             ui.SetNextWindowSize({400.0F, 240.0F});
             auto panel = ui.BeginPanel(m_Panel);
-            if (m_Frame == 13)
+            if (m_Frame == 26)
             {
                 CHECK_FALSE(m_Panel.Visible());
                 Owner().RequestExit();
@@ -367,9 +367,10 @@ namespace
             const float inset = style.FramePadding.x + ImGui::GetFontSize() * 0.5F;
             const float y = window->Pos.y + style.FramePadding.y + ImGui::GetFontSize() * 0.5F;
             auto& io = ImGui::GetIO();
-            if (m_Frame == 1 || m_Frame == 4)
+            // Allow the hover, press and release frames to finish before checking window transitions.
+            if (m_Frame == 2 || m_Frame == 8)
             {
-                if (m_Frame == 4)
+                if (m_Frame == 8)
                 {
                     CHECK(window->Collapsed);
                     CHECK(m_Panel.Visible());
@@ -379,9 +380,9 @@ namespace
                 if (m_FastClick)
                     io.AddMouseButtonEvent(0, false);
             }
-            if (m_Frame == 2 || m_Frame == 5 || m_Frame == 9 || m_Frame == 12)
+            if (m_Frame == 4 || m_Frame == 10 || m_Frame == 18 || m_Frame == 24)
                 io.AddMouseButtonEvent(0, false);
-            if (m_Frame == 7)
+            if (m_Frame == 14)
             {
                 CHECK_FALSE(window->Collapsed);
                 m_OriginalX = window->Pos.x;
@@ -395,9 +396,9 @@ namespace
                     io.AddMouseButtonEvent(0, false);
                 }
             }
-            if (m_Frame == 8 && !m_FastClick)
+            if (m_Frame == 16 && !m_FastClick)
                 io.AddMousePosEvent(m_DragX + 80.0F, m_DragY + 40.0F);
-            if (m_Frame == 11)
+            if (m_Frame == 22)
             {
                 CHECK(window->Pos.x > m_OriginalX + 40.0F);
                 io.AddMousePosEvent(window->Pos.x + window->Size.x - inset, y);
@@ -923,6 +924,9 @@ TEST_CASE("UI input queue preserves pointer action order and cancellation")
     };
     io.AddMousePosEvent(100.0F, 100.0F);
     io.AddMouseButtonEvent(0, true);
+    frame();
+    CHECK_FALSE(io.MouseDown[0]);
+    REQUIRE(context->InputEventsQueue.size() == 1);
     frame();
     REQUIRE(io.MouseDown[0]);
 

@@ -8,7 +8,7 @@ namespace KeireEditor::Detail
     inline bool DrawBloomControls(Keire::UiFrame& ui, const Keire::UiThemeDefinition& theme,
                                   Keire::BloomSettings& settings, bool& commit)
     {
-        auto section = ui.BeginTreeNode("HDR Bloom");
+        auto section = ui.BeginSection("HDR Bloom");
         if (!section)
         {
             return false;

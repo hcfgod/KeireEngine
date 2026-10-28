@@ -1,3 +1,5 @@
+#include "DisplayTransfer.hlsli"
+
 struct VertexOutput
 {
     float2 UV : TEXCOORD0;
@@ -155,6 +157,19 @@ float3 ApplyTaa(const float2 uv, const float3 center)
 
 float4 PSMain(const VertexOutput input) : SV_Target0
 {
+    if (ToneMapParameters.z > 2.5F)
+    {
+        const float4 source = HdrSceneTexture.SampleLevel(HdrSceneSampler, input.UV, 0.0F);
+        const uint2 pixel = uint2(input.Position.xy);
+        uint hash = pixel.x * 1973U + pixel.y * 9277U + 0x68bc21ebU;
+        hash = (hash ^ (hash >> 16U)) * 0x7feb352dU;
+        hash = (hash ^ (hash >> 15U)) * 0x846ca68bU;
+        hash ^= hash >> 16U;
+        const float noise = (float(hash & 65535U) + 0.5F) / 65536.0F - 0.5F;
+        const float3 encoded = float3(DitherDisplaySrgb(source.r, noise), DitherDisplaySrgb(source.g, noise),
+            DitherDisplaySrgb(source.b, noise));
+        return float4(encoded, source.a);
+    }
     const bool taa = ToneMapParameters.z > 1.5F;
     const float4 hdr = HdrSceneTexture.SampleLevel(HdrSceneSampler, input.UV, 0.0F);
     const float3 toneMapped = AcesFitted(ComposeBloom(input.UV, hdr.rgb));

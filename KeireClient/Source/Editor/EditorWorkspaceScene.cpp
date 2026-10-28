@@ -238,8 +238,10 @@ void EditorWorkspaceLayer::RequestInitialScene(const Keire::AssetId candidate)
 
 void EditorWorkspaceLayer::OpenPendingStartupScene()
 {
-    if (m_PendingStartupScene)
-        RequestInitialScene(std::exchange(m_PendingStartupScene, {}));
+    if (const auto startup = m_SceneTransitions->TakeStartupScene())
+    {
+        RequestInitialScene(startup);
+    }
 }
 
 void EditorWorkspaceLayer::RequestOpenScene(const Keire::AssetId asset)

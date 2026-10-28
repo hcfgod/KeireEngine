@@ -279,6 +279,7 @@ namespace Keire::RenderBackend
         ShadowPipeline = CreateDepthPipeline(true);
         SceneDepthPipeline = CreateDepthPipeline(false);
         ToneMapPipeline = CreateToneMapPipeline();
+        DisplayOutputPipeline = CreateToneMapPipeline(true);
         (void)EnsureDeferredPipelines();
         Msaa2Capability.store(ResolveSamples(RenderSampleCount::Two) == SDL_GPU_SAMPLECOUNT_2,
                               std::memory_order_release);
@@ -887,7 +888,8 @@ namespace Keire::RenderBackend
         {
             SDL_GPUTextureCreateInfo sampled{};
             sampled.type = SDL_GPU_TEXTURETYPE_2D;
-            sampled.format = ColorFormat;
+            // Keep dark gradients and TAA history linear and unquantized until SDR presentation.
+            sampled.format = SceneColorFormat;
             sampled.usage = SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER;
             sampled.width = surface.RequestedWidth;
             sampled.height = surface.RequestedHeight;
@@ -908,6 +910,17 @@ namespace Keire::RenderBackend
                 if (!history)
                     throw std::runtime_error("SDL_CreateGPUTexture(temporal history) failed: " + LastSdlError());
             }
+            sampled.format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
+            result.DisplayOutputs.resize(result.FinalOutputs.size());
+            for (auto*& output : result.DisplayOutputs)
+            {
+                output = SDL_CreateGPUTexture(Device, &sampled);
+                if (!output)
+                {
+                    throw std::runtime_error("SDL_CreateGPUTexture(display output) failed: " + LastSdlError());
+                }
+            }
+            sampled.format = ColorFormat;
             result.Worksets.resize(Specification.MaximumFramesInFlight);
             const bool deferredResources = DeferredCapability.load(std::memory_order_acquire);
             if (deferredResources)
@@ -1397,7 +1410,7 @@ namespace Keire::RenderBackend
         }
     }
 
-    SDL_GPUGraphicsPipeline* RenderSharedState::CreateToneMapPipeline()
+    SDL_GPUGraphicsPipeline* RenderSharedState::CreateToneMapPipeline(const bool displayOutput)
     {
         SDL_GPUShader* vertex = CreateToneMapShader(true);
         SDL_GPUShader* fragment = nullptr;
@@ -1405,7 +1418,7 @@ namespace Keire::RenderBackend
         {
             fragment = CreateToneMapShader(false);
             SDL_GPUColorTargetDescription color{};
-            color.format = ColorFormat;
+            color.format = displayOutput ? SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM : SceneColorFormat;
             SDL_GPUGraphicsPipelineCreateInfo information{};
             information.vertex_shader = vertex;
             information.fragment_shader = fragment;

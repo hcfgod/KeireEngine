@@ -1,3 +1,7 @@
+#define KEIRE_CLOUD_NOISE_TEXTURE t5
+#define KEIRE_CLOUD_NOISE_SAMPLER s5
+#include "CloudVolumeView.hlsli"
+
 struct VertexInput
 {
     float3 Position : TEXCOORD0;
@@ -94,6 +98,7 @@ cbuffer FragmentSpatialLightingConstants : register(b3, space3)
     float4 AmbientColorIntensity;
     float4 DirectionalDirectionEnabled;
     float4 DirectionalColorIntensity;
+    CloudVolumeView SurfaceCloudVolume;
 };
 
 Texture2DArray<float> DirectionalShadowTexture : register(t0, space2);
@@ -291,5 +296,9 @@ float4 PSMain(VertexOutput input) : SV_Target0
     const float3 specular = reflectionRadiance *
                            (FresnelSchlickRoughness(noV, 0.04F.xxx, roughness) * integratedBrdf.x + integratedBrdf.y);
     const float3 ambient = baseColor * AmbientColorIntensity.rgb * AmbientColorIntensity.a / Pi;
-    return float4((ambient + diffuse + specular + directLighting) * CameraPositionExposure.w, input.BaseColor.a);
+    const float3 surfaceRadiance = (ambient + diffuse + specular + directLighting) * CameraPositionExposure.w;
+    const CloudVolumeViewTransport volume = EvaluateCloudVolumeView(
+        input.Position.xy * SurfaceCloudVolume.CameraControls.zw, input.Position.z, SurfaceCloudVolume, true);
+    // Built-in transparency uses SRC_ALPHA / ONE_MINUS_SRC_ALPHA (straight alpha).
+    return float4(volume.Radiance + volume.Transmission * surfaceRadiance, input.BaseColor.a);
 }

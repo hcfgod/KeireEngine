@@ -1,6 +1,7 @@
 #pragma once
 
 #include "KeireInternal/Environment/EnvironmentLightingProfile.h"
+#include "KeireInternal/Environment/EnvironmentSkyRecord.h"
 
 #include <nlohmann/json.hpp>
 
@@ -30,15 +31,23 @@ namespace Keire::Detail
                 }
             }
             const auto shadows = profile.Shadows();
-            return {{"version", ambient ? 3 : 2},
-                    {"ownership",
-                     profile.Ownership() == EnvironmentDirectionalOwnership::Authored ? "authored" : "environment"},
-                    {"keyframes", std::move(keys)},
-                    {"shadows",
-                     {{"quality", static_cast<int>(shadows.Quality)},
-                      {"resolution", static_cast<int>(shadows.Resolution)},
-                      {"strength", shadows.Strength},
-                      {"bias", shadows.Bias}}}};
+            nlohmann::json result{{"version", profile.Sky() ? 4
+                                              : ambient     ? 3
+                                                            : 2},
+                                  {"ownership", profile.Ownership() == EnvironmentDirectionalOwnership::Authored
+                                                    ? "authored"
+                                                    : "environment"},
+                                  {"keyframes", std::move(keys)},
+                                  {"shadows",
+                                   {{"quality", static_cast<int>(shadows.Quality)},
+                                    {"resolution", static_cast<int>(shadows.Resolution)},
+                                    {"strength", shadows.Strength},
+                                    {"bias", shadows.Bias}}}};
+            if (profile.Sky())
+            {
+                result["sky"] = EncodeEnvironmentSky(*profile.Sky());
+            }
+            return result;
         }
 
         [[nodiscard]] static EnvironmentLightingProfile Decode(const nlohmann::json& record)
@@ -46,9 +55,12 @@ namespace Keire::Detail
             try
             {
                 if (!record.is_object() || !record.at("version").is_number_integer() ||
-                    (record.at("version") != 1 && record.at("version") != 2 && record.at("version") != 3) ||
-                    record.size() != (record.at("version") == 1 ? 3U : 4U) || !record.at("ownership").is_string() ||
-                    !record.at("keyframes").is_array() ||
+                    (record.at("version") != 1 && record.at("version") != 2 && record.at("version") != 3 &&
+                     record.at("version") != 4) ||
+                    record.size() != (record.at("version") == 1   ? 3U
+                                      : record.at("version") == 4 ? 5U
+                                                                  : 4U) ||
+                    !record.at("ownership").is_string() || !record.at("keyframes").is_array() ||
                     record.at("keyframes").size() > EnvironmentLightingProfile::MaximumKeyframes)
                 {
                     throw std::invalid_argument("Unsupported or malformed environment lighting record.");
@@ -80,7 +92,8 @@ namespace Keire::Detail
                 keys.reserve(record.at("keyframes").size());
                 for (const auto& encoded : record.at("keyframes"))
                 {
-                    const bool ambient = record.at("version") == 3;
+                    const bool ambient =
+                        record.at("version") == 3 || (record.at("version") == 4 && encoded.contains("ambient"));
                     if (!encoded.is_object() || encoded.size() != (ambient ? 6U : 5U) ||
                         !encoded.at("phase").is_number() || !encoded.at("azimuth").is_number() ||
                         !encoded.at("elevation").is_number() || !encoded.at("intensity").is_number() ||
@@ -124,10 +137,11 @@ namespace Keire::Detail
                     }
                     keys.push_back(key);
                 }
-                return EnvironmentLightingProfile(ownership == "authored"
-                                                      ? EnvironmentDirectionalOwnership::Authored
-                                                      : EnvironmentDirectionalOwnership::Environment,
-                                                  std::move(keys), shadows);
+                return EnvironmentLightingProfile(
+                    ownership == "authored" ? EnvironmentDirectionalOwnership::Authored
+                                            : EnvironmentDirectionalOwnership::Environment,
+                    std::move(keys), shadows,
+                    record.at("version") == 4 ? std::optional(DecodeEnvironmentSky(record.at("sky"))) : std::nullopt);
             }
             catch (const nlohmann::json::exception&)
             {

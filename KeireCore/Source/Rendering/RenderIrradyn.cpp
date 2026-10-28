@@ -170,6 +170,24 @@ namespace Keire::RenderBackend
             throw std::logic_error("Irradyn trace resources are unavailable for an active render surface.");
         }
 
+        // Trace opaque lighting before transparency. Keep the multisample attachment alive for
+        // the indirect-light composite and the subsequent cloud/transparency passes.
+        if (workset.MultisampleHdrColor)
+        {
+            SDL_GPUColorTargetInfo opaque{};
+            opaque.texture = workset.MultisampleHdrColor;
+            opaque.load_op = SDL_GPU_LOADOP_LOAD;
+            opaque.store_op = SDL_GPU_STOREOP_RESOLVE_AND_STORE;
+            opaque.resolve_texture = workset.HdrColor;
+            auto* resolve = SDL_BeginGPURenderPass(commands, &opaque, 1U, nullptr);
+            if (!resolve)
+            {
+                throw std::runtime_error("SDL_BeginGPURenderPass(Irradyn opaque resolve) failed: " + LastSdlError());
+            }
+            SDL_EndGPURenderPass(resolve);
+            ++Statistics.Passes;
+        }
+
         const auto beginTracePass = [&]
         {
             SDL_GPUColorTargetInfo target{};
@@ -320,15 +338,27 @@ namespace Keire::RenderBackend
                                                             packet.Environment.RequestedIrradynQuality);
         if (policy.IrradynStrength <= 0.0F)
             return;
-        if (!IrradynCompositePipeline || !DeferredSampler || !workset.IrradynRadiance || !workset.HdrColor ||
+        if (!IrradynCompositePipelines[0] || !DeferredSampler || !workset.IrradynRadiance || !workset.HdrColor ||
             !workset.Depth || !workset.GBufferBaseColorMetallic || !workset.GBufferNormalRoughness ||
             !workset.GBufferMaterial || !workset.GBufferVelocity || !BlackDataTexture.Texture)
         {
             throw std::logic_error("Irradyn composite resources are unavailable for an active render surface.");
         }
 
+        const auto samples =
+            workset.MultisampleHdrColor ? ToSdlSampleCount(surface.ActualSamples) : SDL_GPU_SAMPLECOUNT_1;
+        const auto pipelineIndex = static_cast<std::size_t>(samples);
+        if (pipelineIndex >= IrradynCompositePipelines.size())
+        {
+            throw std::invalid_argument("Unsupported Irradyn composite sample count.");
+        }
+        auto*& pipeline = IrradynCompositePipelines[pipelineIndex];
+        if (!pipeline)
+        {
+            pipeline = CreateIrradynPipeline(true, samples);
+        }
         SDL_GPUColorTargetInfo target{};
-        target.texture = workset.HdrColor;
+        target.texture = workset.MultisampleHdrColor ? workset.MultisampleHdrColor : workset.HdrColor;
         target.load_op = SDL_GPU_LOADOP_LOAD;
         target.store_op = SDL_GPU_STOREOP_STORE;
         auto* pass = SDL_BeginGPURenderPass(commands, &target, 1U, nullptr);
@@ -351,7 +381,7 @@ namespace Keire::RenderBackend
                                   SDL_GPUTextureSamplerBinding{workset.GBufferVelocity, DeferredSampler},
                                   SDL_GPUTextureSamplerBinding{workset.IrradynRadiance, DeferredSampler},
                                   SDL_GPUTextureSamplerBinding{workset.GBufferBaseColorMetallic, DeferredSampler}};
-        SDL_BindGPUGraphicsPipeline(pass, IrradynCompositePipeline);
+        SDL_BindGPUGraphicsPipeline(pass, pipeline);
         SDL_BindGPUFragmentSamplers(pass, 0U, bindings.data(), static_cast<std::uint32_t>(bindings.size()));
         SDL_PushGPUFragmentUniformData(commands, 0U, &uniforms, sizeof(uniforms));
         SDL_PushGPUFragmentUniformData(commands, 1U, &cacheUniforms, sizeof(cacheUniforms));

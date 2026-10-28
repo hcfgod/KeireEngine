@@ -1,3 +1,4 @@
+#include "KeireInternal/Rendering/CloudVolumeViewUniforms.h"
 #include "KeireInternal/Rendering/RenderBackendInternal.h"
 #include "KeireInternal/Rendering/RenderGeometryMathInternal.h"
 #include "KeireInternal/Rendering/TransparencyInternal.h"
@@ -7,6 +8,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <limits>
 #include <memory>
@@ -235,6 +237,7 @@ namespace Keire::RenderBackend
                                     const ShadowFrameData& shadows, const PreparedCpuVfx& preparedCpu)
     {
         auto& pipelines = PipelinesFor(ToSdlSampleCount(surface.ActualSamples));
+        const auto cloudVolume = MakeCloudVolumeViewUniforms(packet, surface.Width, surface.Height);
         if (pipelines.GpuVfx && pipelines.GpuVfxRibbon && pipelines.GpuVfxMesh)
         {
             for (std::size_t snapshotIndex = 0; snapshotIndex < packet.VfxSnapshots.size(); ++snapshotIndex)
@@ -262,7 +265,10 @@ namespace Keire::RenderBackend
                     std::array<float, 4> DirectionalDirection{};
                     std::array<float, 4> MaterialTint{};
                     std::array<float, 4> SurfaceParameters{};
+                    CloudVolumeViewUniforms CloudVolume;
                 };
+                static_assert(sizeof(MaterialUniforms) == 96 + sizeof(CloudVolumeViewUniforms));
+                static_assert(offsetof(MaterialUniforms, CloudVolume) == 96);
                 const auto cameraWorld = Math::Inverse(packet.Camera.View);
                 const auto right = Math::TransformDirection(cameraWorld, {1.0F, 0.0F, 0.0F});
                 const auto up = Math::TransformDirection(cameraWorld, {0.0F, 1.0F, 0.0F});
@@ -286,6 +292,7 @@ namespace Keire::RenderBackend
                      packet.Lighting.Enabled ? 1.0F : 0.0F},
                     {1.0F, 1.0F, 1.0F, 1.0F},
                     {},
+                    cloudVolume,
                 };
                 const auto samples = ToSdlSampleCount(surface.ActualSamples);
                 for (const auto& snapshotEmitter : snapshot.GpuEmitters())
@@ -376,6 +383,12 @@ namespace Keire::RenderBackend
                             SDL_BindGPUGraphicsPipeline(pass, pipelines.GpuVfxMesh);
                             SDL_PushGPUVertexUniformData(commands, 0, &camera, sizeof(camera));
                             SDL_PushGPUFragmentUniformData(commands, 0, &material, sizeof(material));
+                            const auto& noise = EnsureCloudNoiseTexture();
+                            const std::array bindings{
+                                SDL_GPUTextureSamplerBinding{WhiteTexture.Texture, WhiteTexture.Sampler},
+                                SDL_GPUTextureSamplerBinding{noise.Texture, noise.Sampler}};
+                            SDL_BindGPUFragmentSamplers(pass, 0, bindings.data(),
+                                                        static_cast<std::uint32_t>(bindings.size()));
                         }
                         SDL_DrawGPUIndexedPrimitivesIndirect(pass, renderIndirect, 0, 1);
                     }
@@ -408,7 +421,11 @@ namespace Keire::RenderBackend
                         const SDL_GPUTextureSamplerBinding textureBinding =
                             materialTexture ? composed->Textures.front()
                                             : SDL_GPUTextureSamplerBinding{texture.Texture, texture.Sampler};
-                        SDL_BindGPUFragmentSamplers(pass, 0, &textureBinding, 1);
+                        const auto& noise = EnsureCloudNoiseTexture();
+                        const std::array bindings{textureBinding,
+                                                  SDL_GPUTextureSamplerBinding{noise.Texture, noise.Sampler}};
+                        SDL_BindGPUFragmentSamplers(pass, 0, bindings.data(),
+                                                    static_cast<std::uint32_t>(bindings.size()));
                         SDL_DrawGPUPrimitivesIndirect(pass, renderIndirect, 0, 1);
                     }
                     if (maskedOutput)
@@ -433,7 +450,10 @@ namespace Keire::RenderBackend
         {
             std::array<float, 4> Tint{};
             std::array<float, 4> SurfaceParameters{};
+            CloudVolumeViewUniforms CloudVolume;
         };
+        static_assert(sizeof(CpuMaterialUniforms) == 32 + sizeof(CloudVolumeViewUniforms));
+        static_assert(offsetof(CpuMaterialUniforms, CloudVolume) == 32);
         SDL_PushGPUVertexUniformData(commands, 0, &uniforms, sizeof(uniforms));
         const SDL_GPUBufferBinding vertexBinding{preparedCpu.SpriteBuffer, 0};
         SDL_BindGPUVertexBuffers(pass, 0, &vertexBinding, 1);
@@ -452,9 +472,11 @@ namespace Keire::RenderBackend
             {
                 SDL_BindGPUGraphicsPipeline(pass, pipelines.Vfx);
                 SDL_PushGPUVertexUniformData(commands, 0, &uniforms, sizeof(uniforms));
-                CpuMaterialUniforms material{{1.0F, 1.0F, 1.0F, 1.0F}, batch.SurfaceParameters};
+                CpuMaterialUniforms material{{1.0F, 1.0F, 1.0F, 1.0F}, batch.SurfaceParameters, cloudVolume};
                 SDL_PushGPUFragmentUniformData(commands, 0, &material, sizeof(material));
-                SDL_BindGPUFragmentSamplers(pass, 0, &batch.Texture, 1);
+                const auto& noise = EnsureCloudNoiseTexture();
+                const std::array bindings{batch.Texture, SDL_GPUTextureSamplerBinding{noise.Texture, noise.Sampler}};
+                SDL_BindGPUFragmentSamplers(pass, 0, bindings.data(), static_cast<std::uint32_t>(bindings.size()));
             }
             SDL_DrawGPUPrimitives(pass, batch.VertexCount, 1, batch.FirstVertex, 0);
             ++Statistics.DrawCalls;

@@ -6,6 +6,7 @@
 #include "KeireClientInternal/Editor/CloudControls.h"
 #include "KeireClientInternal/Editor/EnvironmentLightingControls.h"
 #include "KeireClientInternal/Editor/EnvironmentPreviewControls.h"
+#include "KeireClientInternal/Editor/EnvironmentSkyControls.h"
 #include "KeireClientInternal/Editor/EnvironmentTimelineControls.h"
 #include "KeireClientInternal/Editor/StarFieldControls.h"
 #include "KeireClientInternal/Editor/VolumetricCloudControls.h"
@@ -117,6 +118,8 @@ namespace KeireEditor
                 activeCategory = 1;
                 if (auto content = ui.BeginChild("EnvironmentSkyContent", {0.0F, 0.0F}); content)
                 {
+                    commit |= Detail::DrawSkyColorControls(ui, theme, m_Document,
+                                                           m_Controller.ProjectEnvironmentPreview(), m_SkySelectedKeys);
                     changed |= Detail::DrawAtmosphereControls(ui, theme, settings.Atmosphere, commit);
                     changed |= Detail::DrawStarFieldControls(ui, theme, settings.Stars, commit);
                 }

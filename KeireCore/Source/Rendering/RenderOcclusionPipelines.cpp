@@ -251,7 +251,7 @@ namespace Keire::RenderBackend
                                                                 false, 0U, 0U, 1U);
 
                     SDL_GPUColorTargetDescription pyramidColor{};
-                    pyramidColor.format = ColorFormat;
+                    pyramidColor.format = SceneColorFormat;
                     SDL_GPUGraphicsPipelineCreateInfo pyramid{};
                     pyramid.vertex_shader = debugPyramidVertex;
                     pyramid.fragment_shader = debugPyramidFragment;
@@ -297,7 +297,7 @@ namespace Keire::RenderBackend
                         createGraphicsShader(OcclusionShader::DebugBoundsFragment, "PSDebugBounds", false, 0U, 0U, 0U);
 
                     SDL_GPUColorTargetDescription boundsColor{};
-                    boundsColor.format = ColorFormat;
+                    boundsColor.format = SceneColorFormat;
                     boundsColor.blend_state.src_color_blendfactor = SDL_GPU_BLENDFACTOR_SRC_ALPHA;
                     boundsColor.blend_state.dst_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
                     boundsColor.blend_state.color_blend_op = SDL_GPU_BLENDOP_ADD;

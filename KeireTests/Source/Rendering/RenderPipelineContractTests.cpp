@@ -1399,6 +1399,50 @@ TEST_CASE("ImGui recovery omits unavailable surfaces without shifting surviving 
 
 TEST_CASE("ImGui frame packets reject raw GPU textures borrowed pixels and arbitrary callbacks")
 {
+    SUBCASE("non-empty command without a texture")
+    {
+        ImGuiContextScope contextScope;
+        BeginImGuiPacketFrame(contextScope);
+        ImGui::GetForegroundDrawList()->AddImage(ImTextureRef(ImTextureID_Invalid), {4.0F, 4.0F}, {28.0F, 28.0F});
+        ImGui::Render();
+        CHECK_THROWS_WITH_AS((void)Keire::RenderBackend::OwnedImGuiDrawData::Capture(ImGui::GetDrawData(), {}),
+                             "Dear ImGui non-empty draw command has no texture.", std::invalid_argument);
+    }
+
+    SUBCASE("reset callback with no texture does not reach the GPU draw path")
+    {
+        ImGuiContextScope contextScope;
+        BeginImGuiPacketFrame(contextScope);
+        auto* drawList = ImGui::GetForegroundDrawList();
+        drawList->AddCallback(ImDrawCallback_ResetRenderState, nullptr);
+        drawList->AddRectFilled({4.0F, 4.0F}, {28.0F, 28.0F}, IM_COL32_WHITE);
+        ImGui::Render();
+        auto* data = ImGui::GetDrawData();
+        REQUIRE(data);
+        for (auto* list : data->CmdLists)
+        {
+            for (auto& command : list->CmdBuffer)
+            {
+                if (command.UserCallback)
+                {
+                    command.TexRef = {};
+                }
+            }
+        }
+        const auto captured = Keire::RenderBackend::OwnedImGuiDrawData::Capture(data, {});
+        Keire::RenderBackend::ImGuiTextureCache cache;
+        const auto resolved = captured->ResolveForRender(cache, 1U, {});
+        REQUIRE(resolved->Data()->TotalIdxCount > 0);
+        for (const auto* list : resolved->Data()->CmdLists)
+        {
+            for (const auto& command : list->CmdBuffer)
+            {
+                CHECK(command.ElemCount > 0);
+                CHECK(command.UserCallback == nullptr);
+            }
+        }
+    }
+
     SUBCASE("raw GPU texture")
     {
         ImGuiContextScope contextScope;

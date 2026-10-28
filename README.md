@@ -23,6 +23,25 @@ Development builds also provide **Window > Environment**, a dockable Lighting/Sk
 Project Settings' document, Undo history and temporary preview clock. A 24-hour intensity graph provides key markers,
 a preview cursor and snapped time scrubbing without saving. Its desktop acceptance and advanced timeline
 work remain in progress; see the [workspace guide](Docs/ProjectSettings.md#environment-workspace-development).
+Environment settings use framed section headings: click the heading or its row to expand or collapse the controls.
+Experimental volumetric clouds offer editable **Soft bodies**, **Defined billows** and **Dense billows** starting points while
+preserving placement, wind, lighting and rendering budgets. See [cloud shaping](Docs/ProjectSettings.md#shaping-volumetric-clouds)
+for the controls and current visual limitations.
+**Ambient Sky Occlusion** in Scattering and Wind optionally darkens cloud interiors without changing their shape
+or opacity. Zero preserves existing lighting; enabling it adds sky-shadow sampling work.
+The Sky tab now includes independent Horizon and Zenith gradient timelines, HDR key colors, interpolation choices,
+and a sky-only daylight preset/reset. This development workflow still awaits desktop and cooked-player acceptance.
+Experimental volume controls also expose multiple-scattering contribution and occlusion, with legacy appearance
+preserved for that scattering setting when loading older authored volumes. Experimental density now adds sampling-aware
+shape and erosion detail; this revises cloud appearance and still needs visual/performance qualification.
+Regional Coverage and Region Scale group clouds independently of shape displacement; older volumes retain uniform
+coverage. These controls are experimental and still need integrated desktop and player validation.
+See [cloud rendering limits](Docs/Rendering.md#experimental-cloud-volume-shader-interface).
+Regenerated opaque/masked particle materials now include foreground media when drawn after the cloud pass;
+focused composition checks pass, but rendered particle overlap remains unverified.
+Shape Detail and Cloud Erosion are independent controls in the current source. Older settings initialize erosion
+from their former shared detail value. Fixed-view density and shape-detail edits, Undo and save restoration have
+passed in the development editor; direct erosion edits, motion and player parity still need validation.
 
 The Environment tab offers **Apply Daylight Preset** for an editable eight-key sunrise/noon/sunset lighting cycle,
 with retained shadow settings, optional animated ambient illumination and Undo. A readable preview clock and midnight/dawn/noon/dusk buttons make it easy
@@ -816,6 +835,7 @@ should begin with the [Kéire 0.4.8 User Manual](Docs/Manual/README.md):
 
 The Profiler supports bounded 10/30-second application-loop captures with warmup and deferred CSV export; see
 [Profiling](Docs/Profiling.md#sustained-normal-editor-capture) for timing semantics and measurement limits.
+Save sustained captures to `Library/Diagnostics/Profiler/latest-sustained.csv` from the Profiler to retain hitch evidence.
 
 Repository Markdown is canonical. The public Starlight site synchronizes the complete inventory, renders Mermaid
 diagrams to responsive accessible SVG at build time, and adds navigation, full-text search, page outlines, and mobile
@@ -1024,3 +1044,12 @@ binding also require one fresh sign-in; user projects and installed packages are
 The native OAuth client verifies Ed25519 ID tokens using keys fetched from the configured HTTPS issuer.
 It checks audience, issuer, token times, nonce on initial sign-in, and the SHA-512 access-token binding on both
 sign-in and refresh. Key retrieval precedes token exchange, and native account transports reject redirects.
+
+
+Development rendering note: editor scene images and player SDR presentation now use an explicit display-color
+conversion while lighting and temporal history retain linear sampling. This correction is undergoing native
+lifecycle, visual, and frame-time validation; see [Rendering](Docs/Rendering.md).
+
+The development cloud renderer skips disabled weather channels and zero-sun shadow work, reuses night lighting
+across sun-direction changes, and skips cache dispatch for optically empty clouds. Linear half-float intermediates
+and final display dithering preserve dark gradients. Native appearance and performance acceptance remain pending.

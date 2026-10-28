@@ -10,6 +10,7 @@
 #include "KeireClientInternal/Editor/SettingsEditSurfaceTracker.h"
 #include "KeireInternal/Rendering/DynamicResolutionInternal.h"
 
+#include <array>
 #include <cstdint>
 #include <filesystem>
 #include <memory>
@@ -483,5 +484,6 @@ namespace KeireEditor
         int m_SettingsCategory = -1;
         int m_EnvironmentCategory = -1;
         std::size_t m_EnvironmentSelectedKey = 0;
+        std::array<std::size_t, 2> m_SkySelectedKeys{};
     };
 } // namespace KeireEditor

@@ -65,7 +65,9 @@ namespace Keire
             {
                 renderState.RequireRenderThread("ReadbackRGBA8");
                 const auto resolved = renderState.ResolveSurface(token);
-                auto* const published = resolved ? resolved->PublishedTexture.load(std::memory_order_acquire) : nullptr;
+                // Read encoded RGBA8 presentation pixels, not the linear RGBA16F scene/history texture.
+                auto* const published =
+                    resolved && resolved->HasOutput ? resolved->Resources.PublishedDisplayColor() : nullptr;
                 if (!published || resolved->Width == 0 || resolved->Height == 0)
                 {
                     throw std::logic_error("Render surface is not available for readback.");

@@ -1646,12 +1646,31 @@ Assert-True ($corePremake.Contains('prepare-generated-content.ps1') -and
              $builtinShaderScript.Contains('BuiltinIrradyn')) `
     "First-party built-in shader generation"
 Assert-True ($builtinShaderScript.Contains('BuiltinLighting.hlsli') -and
+             $builtinShaderScript.Contains('AtmosphereMedium.hlsli') -and
              $builtinShaderScript.Contains('VolumeTransport.hlsli') -and
              $builtinShaderScript.Contains('BuiltinCloudVolume.hlsl') -and
              $builtinShaderScript.Contains('CloudVolumeGeometry.hlsli') -and
+             $builtinShaderScript.Contains('CloudVolumeDensity.hlsli') -and
+             $builtinShaderScript.Contains('CloudVolumeView.hlsli') -and
+             $builtinShaderScript.Contains('VolumeSurfaceComposition.hlsli') -and
              $builtinShaderScript.Contains('+ $Includes') -and
              $builtinShaderScript.Contains("'-I', `$Temporary")) `
     "Shared built-in lighting includes are fingerprinted and passed to the compiler"
+Assert-True ($builtinShaderScript.Contains('CloudVolumeSource.h') -and
+             $builtinShaderScript.Contains('CloudVolumeShaderSource') -and
+             $builtinShaderScript.Contains("@('VolumeTransport', 'AtmosphereMedium',") -and
+             $builtinShaderScript.Contains('Test-Path -LiteralPath $GeneratedSource -PathType Leaf')) `
+    "Installed editor cloud shader source is embedded and required for a generated-content cache hit"
+$vfxShaderScript = Get-Content (Join-Path $Windows 'builtin-vfx.ps1') -Raw
+Assert-True ($builtinShaderScript.Contains('BuiltinCloudLightCache.hlsl') -and
+             $builtinShaderScript.Contains('ComputeDxil') -and
+             $builtinShaderScript.Contains('ComputeSpirV') -and
+             $builtinShaderScript.Contains('ComputeMsl') -and
+             $builtinShaderScript.Contains('foreach ($Variant in $SourceVariants)')) `
+    "Cloud light cache generation selects compute variants for all rendering backends"
+Assert-True ($vfxShaderScript.Contains('"AtmosphereMedium.hlsli"') -and
+             $vfxShaderScript.Contains('+ $Includes')) `
+    "Built-in VFX stages and fingerprints the shared atmosphere include"
 $renderSource = (Get-ChildItem (Join-Path (Get-RepositoryRoot) 'KeireCore\Source\Rendering') -File |
     Where-Object { $_.Name -like 'Render*.cpp' -or $_.Name -like 'Render*.h' } |
     Get-Content -Raw) -join "`n"

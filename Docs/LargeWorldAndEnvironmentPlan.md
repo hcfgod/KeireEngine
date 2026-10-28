@@ -33,9 +33,10 @@ decision, not an instruction to publish or mutate Git now.
 - Navigation node positions, audio positions, camera matrices, and world-space UI matrices also use current float types.
 - `StreamingSystem` supplies asset-segment residency and budgets. That is useful infrastructure, not proof of spatial
   world partition, planetary patch residency, HLOD, or transactional simulation-region transfer.
-- `RenderEnvironmentSettings` currently exposes ambient/environment lighting, sky visibility, exposure, shadows,
-  and rendering-quality selections. These controls alone do not establish the day/night, atmosphere, cloud, weather,
-  or planetary contracts specified below.
+- `RenderEnvironmentSettings` now exposes atmosphere, layered and experimental volumetric clouds, bloom and stars
+  alongside ambient/environment lighting, sky visibility, exposure, shadows and rendering-quality selections.
+  Environment profiles also supply daily lighting and sky-color tracks. These integrations do not establish the
+  complete weather, planetary geometry, surface-to-space or visual-quality contracts specified below.
 - The VFX roadmap explicitly leaves world streaming and large-world rebasing open.
 
 Before implementation, produce a checked inventory of every absolute-coordinate producer/consumer, binary layout,
@@ -61,7 +62,7 @@ every position consumer has been enumerated. Paths below are repository-relative
 | Physics queries and results | `KeireCore/Include/Keire/Physics/PhysicsSystem.h`: body positions, query origins/centers and hit/contact points use `Vector3`, alongside local geometry and directions. | Classify each field as position, displacement, direction or local geometry; convert relative to the accepted simulation region. |
 | Navigation | `KeireCore/Include/Keire/Navigation/NavigationSystem.h`: nodes, routes, endpoints, nearest-point/raycast and agent targets use `Vector3`. | Bind local tiles/routes to explicit high-precision origins and frame revisions; migrate author-facing queries. |
 | Audio | `KeireCore/Include/Keire/Audio/AudioSystem.h`: source/listener positions and velocities use `Vector3`. | Compute listener-relative values before narrowing; retain frame-aware velocity for Doppler. |
-| Environment persistence | `KeireCore/Include/Keire/Rendering/RenderSystem.h`: `RenderEnvironmentSettingsSchemaVersion` is 5. | Preserve existing settings migration while introducing versioned environment profiles and simulation state; a schema number is not feature coverage. |
+| Environment persistence | `KeireCore/Include/Keire/Rendering/RenderSystem.h`: `RenderEnvironmentSettingsSchemaVersion` is 8 as checked October 26, 2026. | Preserve existing settings migration alongside the separate versioned environment profiles and simulation state; a schema number is not feature coverage. |
 
 The prerequisite rotation restoration defect is fixed and checked with 17 focused test cases / 1,236 assertions.
 The staged DevDist Editor also passed light-toggle, Undo, Redo, Undo and clean close in the sandbox QA project.
@@ -391,7 +392,7 @@ ambient settings. Version-1 records remain readable with shadows disabled. Ambie
 controls passed combined DevDist, focused Release/ASan render capture, limited Windows authoring/Play checks and a
 77-asset cook with a 30-frame headless player run. Rendered standalone/backend and soak acceptance remain open. The private
 `EnvironmentLightingSettingsStore` adapter reads/writes the project-default payload at
-`ProjectSettings/EnvironmentLighting.keiresettings` (outer schema 1), with a 64 KiB bound, atomic replacement and
+`ProjectSettings/EnvironmentLighting.keiresettings` (outer schema 1), with a 256 KiB bound, atomic replacement and
 authored-light compatibility when absent. The Editor document loads it before replacing the current project and
 includes it in Save, Cancel, Reset and Undo/Redo snapshots. Failed saves retain dirty state. Settings now prepare all
 four payloads before grouped publication through an independent recovery journal. The payload is now included in
@@ -579,13 +580,25 @@ must migrate with stars disabled; older readers must reject new required records
 Implementation checkpoint: a separate local-frame cloud volume kernel, slab/depth clipping shader and validated
 authoring record are now implemented in development. Cloud record version 3 preserves authored volume settings;
 sheet-only projects retain version 2 when the volume has its exact defaults. Both Environment and Project Settings
-expose grouped volume authoring controls through the existing document commit flow, explicitly labeled as having
-no viewport effect until renderer integration is complete. Shader generation includes DXIL, SPIR-V and MSL variants.
+expose grouped volume authoring controls through the existing document commit flow, explicitly labeled in development.
+Shader generation includes DXIL, SPIR-V and MSL variants.
 Per-camera packets capture bounded wind phase, camera-relative geometry and integer quality/seed values; lazy pipeline
-creation, device cleanup and draw-recording code exist but have not yet been compiled or scheduled by the graph.
+creation, device cleanup and draw-recording code compiled in the DevDist checkpoint. The current source batch adds
+an actual graph pass after opaque indirect lighting and before transparency, with sampled-depth admission.
+The authoring UI enable/Undo/save smoke check passed with the QA settings restored byte-for-byte. The current integration
+batch adds per-sample-count volume pipelines and preserves multisample HDR color for the later transparency resolve;
+this does not yet establish correct sampled-depth edges or transparent-material rendering.
+The background shader now consumes a shared view/depth evaluator intended for transparent fragments as well.
+Its radiance follows the existing pre-exposed HDR convention, with finite-target clamping after exposure and
+opacity left unchanged. Built-in straight-alpha surfaces now receive the same view constants and integrate to
+their fragment depth. Generated material shaders now opt into the explicit volume ABI, including composed VFX,
+with mode-specific straight/premultiplied/additive/holdout composition and pixel-depth-offset clipping. Legacy shaders,
+multiplicative front-scattering compensation remain unfinished. Built-in CPU particles and GPU sprite/ribbon/mesh
+fallbacks now evaluate cloud transport to their fragment depth with straight-alpha composition. The new recording path has not
+passed rendered acceptance. Do not use this intermediate state as a production cloud feature.
 
-This is not usable volumetric rendering yet. Remaining integration includes graph scheduling, current depth admission,
-MSAA resolve ordering, transparent-material composition, atmosphere/planet interaction, ground shadows and GPU
+This is not production-ready volumetric rendering. Remaining integration includes the material/VFX gaps above,
+MSAA edge handling, atmosphere/planet interaction, ground shadows and GPU
 acceptance. The current volume model is a local horizontal slab, not the required planetary shell model. Kernel
 compilation and CPU geometry/codec checks do not prove cloud appearance, performance or traversal correctness.
 
@@ -593,6 +606,14 @@ compilation and CPU geometry/codec checks do not prove cloud appearance, perform
   movement, lighting, horizon fade, and blended layers. Useful as an artistic choice and a lower-cost quality mode.
 - Volumetric clouds: editable shape/detail noise, coverage/weather maps, density, extinction/scattering,
   layer bases/thicknesses, erosion, wind/advection, cloud type, and planet-aware geometry.
+- Authoring priority: the default preset should aim for a natural appearance with convincing dense cores, soft
+  boundaries and irregular large-scale placement. Expose body scale, detail scale, macro variation strength/scale
+  and density shaping independently; do not force every style through one pattern-size slider or hard-coded warp.
+  Retain deterministic seeds, explicit metre/unitless labels, Undo/Redo, reset and reusable presets. Existing authored
+  records require explicit migration defaults, and CPU validation, GPU uniforms, generated materials, cooking and
+  player loading must carry every control consistently. Qualify presets with wide-horizon and moving-camera checks
+  for repeated placement, sliding, aliasing and abrupt transitions, as well as below/inside/above views. Artistic
+  styles remain supported; natural defaults are a visual target, not a current production-quality claim.
 - Integrate sun/moon illumination, self-shadowing, ground cloud shadows, atmospheric interaction, and aerial perspective.
   Flying below, inside, above, and through clouds must all be supported.
 - Budget ray steps, light/shadow sampling, resolution, update cadence, temporal reconstruction, and memory.
@@ -859,10 +880,15 @@ retains technical defaults, while the dedicated workspace prioritizes scene auth
 
 Development status: a first dockable Environment panel is implemented through the existing Project Settings
 owner, with Lighting, Sky, Clouds and Bloom tabs, shared save-error state and preview visibility tracking.
-It is not yet acceptance-tested or production-ready. Timeline authoring, complete weather controls,
-cross-panel gesture isolation, panel-close behavior and responsive desktop acceptance remain open gates.
-Focus/close boundaries now have an implementation that commits without implicitly saving, plus deterministic
-transition tests; successful compilation and real desktop behavior must still be verified for that follow-up.
+It is not production-ready. A Windows DevDist session verified full-row section expansion/collapse, volume-cloud
+numeric editing, visible cloud attenuation, resetting volume settings and restoring the original settings files.
+That session did not qualify visual quality, cross-panel gesture isolation, keyboard-only authoring, Play/player
+parity or responsive layouts. Focus/close boundaries have an implementation that commits without implicitly saving,
+plus deterministic transition tests; their complete desktop workflow still needs validation. The subsequent
+multiple-scattering controls also passed a staged Windows Edit-mode check: changing contribution from zero to one
+visibly brightened the same paused-time volume, committing the numeric edit cleared the dirty state, and Reset
+Volume Settings restored both baseline settings files exactly. Clouds still appeared overly smooth/banded, and
+numeric fields lacked idle contrast. This does not establish Play/player, performance or production visual quality.
 
 - `EditorWorkspaceLayer` owns the existing ProjectSettingsDocument and EnvironmentPreviewClock. The dedicated panel
   must borrow them through the existing controller boundary, never create another ticking clock or settings document.
@@ -878,6 +904,98 @@ transition tests; successful compilation and real desktop behavior must still be
   transient, and save failures must retain the candidate with a visible retry path.
 - Register the panel through UiWorkspace, expose it in the Window menu, and draw through the existing editor-workspace
   lifecycle. Keep technical asset selection and rendering defaults accessible in Project Settings.
+
+### Sky-Color Timeline Implementation Boundary
+
+The initial source audit found directional/ambient interpolation but no sky-color result. The implementation now
+adds independent gradient tracks to the profile, snapshot and sky shader; changing directional-light color remains
+separate from authored horizon/zenith gradients.
+
+The internal `EnvironmentColorTrack` and `EnvironmentColorTrackRecord` now provide bounded linear-HDR color keys,
+per-segment Linear/Smooth/Hold interpolation and versioned records. Focused numerical tests cover midnight wrapping,
+exact-key boundaries, distant dates and invalid records. Shared authoring controls now expose Horizon/Zenith strips,
+selected-key numeric editing, interpolation, insertion, removal and sky-only preset/reset in both settings surfaces.
+The shared lighting profile now retains optional independent Horizon/Zenith tracks in record version 4, evaluates
+them into validated snapshot colors even with authored directional-light ownership, and preserves them across
+lighting-key edits and daylight presets. Project serialization accepts this record and has a 256 KiB bound, tested
+with maximum-size light and color tracks. Renderer consumption is now implemented with a copied 32-byte gradient
+block and composition before stars/clouds, preserving the sun and physical planet-ground response. Native/shader
+compilation passes. Desktop preset, scrubbing, Undo/save and preview reset have been exercised; full authoring
+acceptance, rendered quality and matched-camera cooked visual parity remain pending. Older records
+keep no artistic sky override; older readers reject the new record rather than dropping it.
+
+The current validation evidence has these limits:
+
+| Boundary | Verified evidence | Remaining acceptance |
+| --- | --- | --- |
+| Authoring | Preset changes the Edit sky; scrubbing changes transient time; RGB picker edits update the key and rendered sky; selected-key preview seeks exactly; Undo/save and preview reset restore the baseline | Picker drag history, precise HDR edits, crowded keys, Redo, save/reopen and narrow layouts |
+| Persistence | Runtime JSON round-trip retains enabled/disabled HDR tracks, interpolation and distant-day time; malformed records reject | Additional migration cases as the profile gains more tracks |
+| Actual cook | Isolated project cooked 77 assets; cooked lighting JSON exactly matched the authored profile | Repeat after subsequent schema or cooker changes |
+| Player loading | Explicitly waited bounded player process exited successfully with the cooked profile | Longer sessions, transitions and multiple views |
+| Player rendering | D3D12 player visibly rendered the authored HDR sky and scene | Matched camera/time/exposure Edit/Play/player comparison, sun/ground boundary checks and other backends |
+| Clouds | Layered clouds visible in that player scene; generator 25 volume-only Edit comparison confirms optical density increases opacity without shrinking bodies, with Undo/save restoring the baseline | Natural appearance still fails: soft bodies and repetitive horizon bands persist at both 48 and 128 view samples. Motion, performance and matched player checks remain open. |
+| Cloud noise transfer and sampling | Complete 4-cubed and 64-cubed mip readbacks matched CPU bytes on local D3D12/Vulkan; 416 shader samples across integer/fractional mips and negative coordinates matched the CPU reference within 0.004; D3D12 AddressSanitizer probes passed | These checks establish transfer and sampled-atlas agreement, not rendered quality. Cache recovery, transparency, other devices and Metal execution remain unqualified. |
+| Regional cloud grouping | Generator 26 DevDist and fixed-view desktop edits pass: regional strength/scale affect grouping, and Undo/save restores all prior rendering values with the expected record migration. Focused settings/layout and D3D12/Vulkan offscreen checks pass | The combined shape trial has sharper outlines but retains repeated rows and horizon banding. Natural defaults, motion/wind, Editor/player parity and performance remain unqualified. |
+
+See [Cloud and weather implementation checkpoint](CloudWeatherImplementation.md#current-acceptance-summary) for the
+latest cloud acceptance table and the limits of each diagnostic. Older implementation notes describe intermediate
+revisions; they do not override the current evidence or close outstanding gates.
+
+For the next cloud comparison, retain the isolated upward camera, paused 09:00 clock, fixed seed, zero wind, exposure
+one, render scale one, disabled dynamic resolution, disabled layered sheets and inactive showcase VFX. Wait for material
+reimport to finish before assessing either appearance or cost. The Profiler exposes GPU frame milliseconds when timestamp
+queries are supported; its other pass timings are CPU measurements. Record warmed enabled/disabled GPU frame samples
+under the same viewport conditions as an initial estimate, not a cloud-pass measurement or cross-device performance claim.
+For sustained CSV captures, enable renderer telemetry before starting, require a completed capture, and retain its
+warmup and viewport settings. Only use rows with available renderer telemetry, supported GPU timing and a nonzero
+`observed_gpu_timing_frame`; deduplicate that ID before summarizing `gpu_duration_ms`. Repeated asynchronous
+observations are not additional GPU frames, and application sequence IDs must not be treated as GPU frame joins.
+Report sample count and distribution for both enabled and disabled runs; a difference between full-frame summaries
+is only an estimate under those scene conditions, not a timestamp measurement of the cloud pass itself.
+
+The sky-color work must retain coverage of the complete path:
+
+- Independent named sky tracks, with explicit physical-only versus artistic override modes. Sky animation must not
+  depend on taking ownership of an authored directional light. Disabled tracks preserve the current renderer.
+- Linear HDR horizon and zenith colors, gradient shape and override weight, evaluated from the same split day/time
+  used by Edit preview, Play and the cooked player. Define midnight wrapping and per-segment interpolation once;
+  use that evaluator for both timeline previews and submitted values.
+- Versioned persistence with old profiles retaining physical-only behavior, bounded key counts and input ranges,
+  strict malformed-record rejection and explicit cooked-runtime compatibility. The current lighting settings store
+  now has a 256 KiB limit; continue checking that bound as additional tracks are integrated rather than truncating keys.
+- Immutable per-view submission, validation, native uniform packing and matching shader layout. Apply artistic sky
+  color before celestial/cloud composition so a sky adjustment does not recolor stars or clouds accidentally.
+  Specify the planet-ground and horizon behavior before integrating the shader.
+- Named timeline rows with gradient previews, key selection, numeric color/time controls, interpolation selection,
+  undoable presets and scoped resets. Both Environment and Project Settings use the existing document and save/error
+  flow; preview scrubbing does not save the start time.
+- Focused migration, invalid-input, exact-key, midnight-continuity, disabled-identity and shared-clock tests, followed
+  by native/shader builds and actual save/reopen, Undo/Redo, Edit/Play/player visual comparisons. A passing evaluator
+  fixture alone does not complete the feature.
+
+Moon phase/orientation, volumetric fog, weather transitions and planetary cloud geometry remain separate required
+work in this milestone. The sky-color batch does not replace them or qualify surface-to-space travel.
+
+### Next Integration Boundaries
+
+The October 26 source audit confirms these implementation gaps, beyond the cloud appearance work:
+
+- `AtmosphereSettings` supplies solar irradiance and angular radius, but no lunar appearance or orbital record.
+  `EnvironmentLightingSnapshot` has one optional directional light; a moon disc alone would not provide moonlit
+  surfaces, cloud illumination or the requested multiple celestial lights. Add explicit celestial appearance and
+  lighting records, shared-clock evaluation, strict migration and renderer submission together. Keep astronomical
+  positioning separate from artistic direction/phase overrides, and define ownership alongside authored lights.
+- `BuiltinSky.hlsl` composes its background and sun, artistic gradient, stars, then layered clouds. Lunar radiance
+  must use the same atmosphere/ground visibility and cloud occlusion boundaries, with phase and orientation evaluated
+  before exposure. Validate new/full/quarter phases, horizon crossing, night lighting and Edit/Play/player parity;
+  a textured circle in the sky is not acceptance for the requested moon system.
+- `VolumeTransport.h` is a homogeneous-segment numerical reference, not fog rendering. Fog still needs authored
+  global/local volume records, bounded heterogeneous sampling, lighting/shadow input, per-view submission and
+  depth-aware GPU integration. Fog and clouds must share a defined overlapping-medium composition policy; applying
+  two independent full-ray overlays in an arbitrary order is insufficient. Transparent surfaces, indoor boundaries,
+  camera-inside cases, exposure, history invalidation and quality budgets require rendered validation.
+
+These are implementation requirements for subsequent batches, not claims that the corresponding systems exist.
 
 ## Migration And Release Rules
 

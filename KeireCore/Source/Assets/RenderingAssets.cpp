@@ -468,14 +468,17 @@ namespace Keire
             const auto expectedFragmentUniformBuffers = ui ? 2U : definition.UsesImageBasedLighting ? 4U : 3U;
             const bool unlit = !definition.ReceivesShadows && !definition.UsesForwardPlus &&
                                !definition.UsesImageBasedLighting && !spatialLighting;
-            const auto minimumFragmentUniformBuffers = ui                                  ? 2U
+            const auto minimumFragmentUniformBuffers = definition.VolumeLightingAbiVersion >= 1U
+                                                           ? (spatialLighting ? 4U : 3U)
+                                                       : ui                                ? 2U
                                                        : unlit                             ? 1U
                                                        : definition.UsesImageBasedLighting ? 4U
                                                        : definition.ReceivesShadows        ? 3U
                                                                                            : 2U;
-            const auto expectedSamplers =
-                textureCount + definition.UserResourceSlots + (definition.ReceivesShadows ? 2U : 0U) +
-                (definition.UsesImageBasedLighting ? 2U : 0U) + (spatialLighting ? 5U : 0U) + (ui ? 1U : 0U);
+            const auto expectedSamplers = textureCount + definition.UserResourceSlots +
+                                          (definition.ReceivesShadows ? 2U : 0U) +
+                                          (definition.UsesImageBasedLighting ? 2U : 0U) + (spatialLighting ? 5U : 0U) +
+                                          (ui ? 1U : 0U) + (definition.VolumeLightingAbiVersion >= 2U ? 1U : 0U);
             const auto expectedFragmentStorageBuffers = (definition.UsesForwardPlus ? 3U : 0U) +
                                                         (definition.SpatialLightingAbiVersion == 3U ? 1U : 0U) +
                                                         definition.UserReadOnlyBuffers;
@@ -693,7 +696,7 @@ namespace Keire
         [[nodiscard]] ShaderAssetDefinition ParseShaderManifest(const Json& manifest)
         {
             const auto sourceSchemaVersion = manifest.is_object() ? manifest.value("schemaVersion", 0U) : 0U;
-            if (sourceSchemaVersion == 0U || sourceSchemaVersion > 3U)
+            if (sourceSchemaVersion == 0U || sourceSchemaVersion > 4U)
                 throw std::invalid_argument("Shader manifest has an unsupported schema.");
             ShaderAssetDefinition result;
             result.Source = manifest.at("source").get<std::string>();
@@ -725,6 +728,19 @@ namespace Keire
             result.UsesImageBasedLighting = manifest.value("usesImageBasedLighting", false);
             result.SpatialLightingAbiVersion =
                 manifest.value("spatialLightingAbiVersion", static_cast<std::uint8_t>(0));
+            if (manifest.contains("volumeLightingAbiVersion") && manifest.at("volumeLightingAbiVersion") != 0U &&
+                manifest.at("volumeLightingAbiVersion") != 1U && manifest.at("volumeLightingAbiVersion") != 2U &&
+                manifest.at("volumeLightingAbiVersion") != 3U && manifest.at("volumeLightingAbiVersion") != 4U &&
+                manifest.at("volumeLightingAbiVersion") != 5U && manifest.at("volumeLightingAbiVersion") != 6U &&
+                manifest.at("volumeLightingAbiVersion") != 7U)
+            {
+                throw std::invalid_argument("Shader volume-lighting ABI version is unsupported.");
+            }
+            result.VolumeLightingAbiVersion = manifest.value("volumeLightingAbiVersion", 0U);
+            if (sourceSchemaVersion < 4U && result.VolumeLightingAbiVersion != 0U)
+            {
+                throw std::invalid_argument("Volume-lighting ABI requires shader manifest schema 4.");
+            }
             result.UsesVertexMaterialParameters = manifest.value("usesVertexMaterialParameters", false);
             result.InstanceAddressingAbiVersion =
                 manifest.value("instanceAddressingAbiVersion", static_cast<std::uint8_t>(0));

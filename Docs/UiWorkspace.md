@@ -14,6 +14,23 @@ windows. Modal keyboard handlers can use it to defer Enter/Escape to a child sel
 previous and current frame when dismissing or submitting a parent modal, so a selector's closing key does not also
 activate the newly refocused parent.
 
+## Settings Sections
+
+With input trickling enabled, a pointer move followed immediately by a press is processed across frames:
+the movement establishes hover first, then the queued press and release retain their order. This lets tabs
+and overlapping controls respond to a single quick click, including on a slow-rendering frame. It adds
+one frame before the press when movement and pressing arrive in the same event batch. Focus loss still
+cancels input immediately; explicitly disabling input trickling retains immediate processing.
+
+For HDR radiance authoring, use `UiFrame::ColorEditHdrRgb` with `std::array<float, 3>` to provide an RGB picker
+without an opacity field. Values may exceed one and must be finite; invalid edits leave the caller's array unchanged.
+The existing `ColorEditHdr` retains its RGBA controls. Display/theme colors still use the normalized `ColorEdit`.
+
+Use `UiFrame::BeginSection(label)` for collapsible settings groups. A single click on the heading or unused row
+space toggles the group; the returned scope balances indentation and IDs when expanded. Reuse a stable label or
+`##` identity suffix to preserve expansion state. This does not select an object or change settings values.
+`BeginTreeNode` reserves label clicks for the caller's selection handling; the arrow or a double-click toggles expansion.
+
 ## Responsive Checkbox Rows
 
 The existing `Checkbox(label, value)` starts a normal new item row. For a compact toolbar, opt into continuing the
@@ -150,6 +167,10 @@ Profile names are exact and case-sensitive. They must contain 1–64 UTF-8 bytes
 space, and cannot contain control characters or path separators.
 
 ## Theme Workflow
+
+Editable field backgrounds use the theme's raised-panel surface instead of the child-panel surface. Hovering uses
+the hover accent; active editing retains the selection color. Custom themes should distinguish these surfaces so
+numeric fields remain discoverable without moving the pointer over them.
 
 Kéire Dark, Kéire Light, and Classic are immutable built-in themes. Discover them and all custom themes through
 `Themes()`; do not persist numeric IDs outside the workspace catalog.

@@ -432,6 +432,19 @@ namespace Keire
             m_Impl->OpenScope(UiScope::Kind::TreeNode);
         return UiTreeNodeScope(*this, visible);
     }
+    UiTreeNodeScope UiFrame::BeginSection(const std::string_view label)
+    {
+        m_Impl->RequireActive("BeginSection");
+        const std::string safeLabel(label);
+        constexpr ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_Framed | ImGuiTreeNodeFlags_SpanAvailWidth;
+        const bool visible = ImGui::TreeNodeEx(safeLabel.c_str(), flags);
+        if (visible)
+        {
+            m_Impl->OpenScope(UiScope::Kind::TreeNode);
+        }
+        return UiTreeNodeScope(*this, visible);
+    }
+
     UiDisabledScope UiFrame::BeginDisabled(const bool disabled)
     {
         m_Impl->RequireActive("BeginDisabled");

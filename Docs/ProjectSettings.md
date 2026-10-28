@@ -37,6 +37,8 @@ it does not undo unrelated scene changes. Changes restored through history remai
 Open **Window > Environment** for a dockable environment-authoring view. Its **Lighting**, **Sky**, **Clouds**,
 and **Bloom** tabs edit the same project settings as Project Settings; opening both does not create a second
 environment or preview clock. This workspace is under development and still requires desktop acceptance testing.
+Framed settings headings expand or collapse with a single click on their label or unused row space. This applies
+to lighting keys, time-preview options, atmosphere, stars, clouds and bloom; expansion does not create an Undo entry.
 Each section has its own scrolling content area below the preview controls and tabs, keeping navigation available
 while browsing long lighting-key or atmosphere settings. Very short windows still need enough height for transport.
 
@@ -78,9 +80,94 @@ gesture without automatically saving it. Use **Save Environment** or **Save Sett
 is present. These actions save the shared settings document, not just the currently visible tab. Save errors are
 shared by both views and pending edits are retained for recovery.
 
-Atmosphere and layered clouds remain experimental. The panel does not establish volumetric cloud interiors,
-weather simulation, planetary navigation, or a production-ready timeline editor. Technical skybox asset selection,
+Atmosphere, layered clouds and the separate local volumetric-cloud path remain experimental. Cloud interiors,
+weather simulation, planetary navigation and production timeline acceptance are unfinished. Technical skybox asset selection,
 IBL defaults and render-path options remain in Project Settings.
+
+### Shaping Volumetric Clouds
+
+In **Clouds**, expand **Volumetric Clouds (In Development)** and turn on **Enable Volume**. Layered cloud sheets
+are independent: disable them when judging the volume by itself. Expand **Shape and Density** to adjust its look.
+
+Use **Shape Starting Point** to apply **Defined billows** for stronger erosion and regional grouping, **Dense billows**
+for the same shape with greater light absorption, or **Soft bodies** to restore the default shape.
+These replace coverage, density, detail, erosion, core concentration and variation values;
+they preserve placement, seed, wind, scattering and quality budgets. Applying a preset does not enable a disabled volume.
+Continue editing any control afterward, and use Undo to recover the previous settings. These are artistic starting
+points, not fully validated realistic weather presets; ambient lighting still strongly affects the result.
+The selector displays the matching shape preset, or **Custom** when shape values have been edited. Changing wind,
+placement, lighting or quality alone keeps the shape preset label. Reapplying a preset replaces custom shape values.
+
+| Control | What it changes |
+| --- | --- |
+| Base Height / Thickness | The bottom altitude and vertical depth of the local horizontal cloud layer, in metres. |
+| Pattern Size | The world scale of cloud bodies. Changing it also changes the displayed Variation Scale. |
+| Volume Coverage | How much of the density field contains clouds; zero removes the volume. |
+| Cloud Density | Opacity and light absorption, independently of the shape field. One is the default; increasing it makes the existing cloud optically thicker. The saved physical extinction value remains in inverse metres. |
+| Shape Detail / Detail Frequency | Fine structure in the body and erosion along its edges, and its frequency relative to the body. Unresolved detail fades with march spacing. |
+| Variation Strength / Variation Scale | The amount of coordinate distortion and its repeat distance in metres or kilometres. Zero strength disables distortion; smaller scales change shapes more rapidly. |
+| Core Concentration | How strongly density concentrates in cloud cores. One retains linear density; higher values remove thin edges and can make clouds look smaller. Use Cloud Density for thicker clouds. |
+| Independent Weather | Uses separate seeded horizontal fields for coverage, cloud type and base-height variation. Older scenes keep their existing weather until this is enabled. |
+| Cloud Type / Type Variation | Changes vertical development within the authored profile: zero gives shallow layers and one allows the full profile. Variation mixes types across regions. |
+| Base Height Variation (m) | Moves regional cloud bases above and below Base Height, up to the chosen amount, without changing the local thickness. Zero keeps a common base. Requires Independent Weather. |
+| Regional Coverage / Region Scale | Groups clouds and clear areas without stretching cloud shapes. Strength zero keeps uniform coverage. Full strength in independent mode can create fully clear and fully cloudy regions, with smooth transitions; intermediate strength mixes these with uniform coverage. In independent mode, scale is the largest weather-cell size and also controls type and height variation. In legacy mode, it is the coverage field's repeat distance. Both follow Pattern Size; empty and full coverage stay unchanged. |
+| Volume Seed | A repeatable change in pattern placement. It does not generate a new noise texture. |
+
+For uneven skies, enable **Independent Weather**, raise **Regional Coverage**, and adjust **Region Scale** to
+control the size of cloudy and clearer regions. Add **Type Variation** for different vertical development and
+**Base Height Variation (m)** for cloud bases at different altitudes. These spatial weather fields move with
+horizontal cloud wind and repeat after 256 Pattern Sizes. They do not yet simulate weather fronts or provide
+painted weather maps. Large height variation expands the lighting cache's vertical range and can reduce its
+effective vertical detail; native visual and performance acceptance for this path remains pending.
+
+#### Building a Partly Cloudy Sky
+
+1. Pause the environment preview clock and disable layered cloud sheets while shaping the volume. Keep the
+   camera and seed fixed so you can see what each control changes.
+2. Choose coverage between empty and full, then enable **Independent Weather**. Increase **Regional Coverage**
+   to separate cloudy banks from clearer regions. At fully covered or empty endpoints, regional variation does
+   not create a partly cloudy sky.
+3. Adjust **Region Scale** for the size of those regions. Use **Pattern Size** for individual cloud bodies;
+   it also rescales weather, so revisit Region Scale after changing it.
+4. Adjust **Cloud Type** and **Type Variation** for a mix of shallow and taller clouds. Add **Base Height
+   Variation (m)** gradually for different regional altitudes. This shifts one continuous layer; it does not
+   create multiple independently overlapping decks.
+5. Increase **Cloud Density** to thicken existing clouds. Keep **Core Concentration**, coverage and erosion
+   fixed for this comparison: those shape controls can remove thin edges and shrink the visible footprint.
+6. Resume horizontal wind and inspect overhead and horizon views while moving the camera. Regional weather
+   should move continuously with the clouds. A seed change deliberately changes placement; camera movement
+   should not reshuffle it. Save Environment when satisfied, or Undo to restore an earlier setting.
+
+This workflow exposes the available controls; the current development build still has unresolved repetition
+and visual-quality findings. It is not a promise of validated realistic defaults. Inspect the intended scene
+and quality budget rather than relying on an isolated overhead preview.
+
+Use **Scattering and Wind** for illumination response, cloud color and motion. **Quality Budget** controls view and
+shadow samples and maximum distance; increasing sample counts can substantially increase rendering cost.
+
+**Ambient Sky Occlusion** darkens interiors by estimating how much of the upper sky the cloud blocks. Zero
+retains unoccluded ambient lighting; increasing it changes lighting without changing the density field. It adds
+sampling work and is an artistic approximation, not a complete multiple-scattering simulation.
+
+When dense clouds show fine bands, compare a fixed camera and time with a higher view-sample count first.
+View samples integrate the cloud along the camera ray; shadow samples estimate illumination toward the sun.
+Increasing shadow samples alone did not remove the bands in the current dense-cloud diagnostic. A 128-view-step
+comparison reduced them, but its performance still needs checking in the intended scene and player. Keep
+coverage, seed, wind and time unchanged during this comparison, and use Undo to recover the original budget.
+General TAA currently lacks cloud-specific motion/history treatment, so it is not a validated replacement
+for sufficient cloud sampling. Broad repeated cloud shapes are a separate limitation from fine sampling bands.
+
+The development renderer now has a separate cloud-history path for non-MSAA views. It accumulates shifted
+cloud samples, reprojects horizontal wind and camera motion, and rejects history after incompatible depth or
+environment changes. Foreground edges use depth-aware upsampling, with an exact-ray fallback where the lower
+resolution has no matching surface. MSAA and transparent materials retain their existing cloud integration.
+This path is awaiting native visual and performance validation; it does not establish realistic defaults or fix
+repeated cloud shapes by itself. Vertical wind currently resets history because it deforms the cloud relative
+to the authored height profile. There is no separate history-quality control in the editor yet.
+
+**Reset Volume Settings** restores all volume defaults, including disabling the volume. Save or Undo through the
+shared settings workflow above. Defaults aim for a natural appearance, but current visual quality, customization,
+motion, transparent overlap and backend performance still need acceptance testing; this is not a finished weather system.
 
 ## Player Build Settings
 
@@ -137,7 +224,7 @@ remain valid in settings and appear as `Layer N` in the Inspector so every slot 
 - ambient intensity in the supported `0..16` engine range;
 - exposure in the supported `0.01..16` engine range;
 - skybox asset identity, sky visibility, rotation, and diffuse/specular environment intensity;
-- experimental atmosphere parameters and two optional artistic layered-cloud sheets;
+- experimental atmosphere parameters, two optional artistic layered-cloud sheets and a separate local cloud volume;
 - directional-shadow distance, cascade count, resolution, and split lambda;
 - requested render path, anti-aliasing, GPU occlusion, global illumination, and Irradyn quality;
 - render scale, dynamic-resolution mode, minimum/maximum scale, and target frame time.
@@ -147,11 +234,15 @@ tab reports requested and effective settings separately so a fallback is visible
 
 Daily time and daily directional lighting are separate documents: `EnvironmentTime.keiresettings` and
 `EnvironmentLighting.keiresettings`. Both use outer schema 1; directional-only profiles use record version 2 and
-profiles with ambient animation use version 3. Rendering schemas 1–5 load with atmosphere and cloud layers disabled.
+profiles with ambient animation use version 3. Development profiles containing independent sky-color tracks use
+record version 4 and a 256 KiB settings-file bound. Data evaluation and renderer consumption are implemented, but
+sky-color controls are implemented with visual validation pending; existing records preserve the physical sky.
+See [sky timeline authoring](Rendering.md#sky-color-timeline-development). Rendering schemas 1–5
+load with atmosphere and cloud layers disabled.
 Within rendering schema 6 and later, cloud record version 2 adds appearance and pattern seed. Version-1 records migrate to
 Legacy unlit rather than changing their look automatically. Choose Natural lit in a layer's Appearance control to
 upgrade explicitly; Undo restores the previous choice. New layers and Reset Layer use Natural lit with seed 1.
-The development sky controls are experimental, not volumetric clouds or a complete weather system. Their authored
+The sky controls and separate local volumetric-cloud controls remain experimental, with no complete weather system. Their authored
 values are included in cooked runtime manifest schema 9; use matching development player binaries when recooking.
 
 Rendering schema 7 introduced a versioned bloom record (enabled, intensity, threshold, soft knee, and radius).

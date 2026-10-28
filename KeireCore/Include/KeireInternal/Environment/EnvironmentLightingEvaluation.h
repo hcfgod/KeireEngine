@@ -15,6 +15,10 @@ namespace Keire::Detail
     {
         EnvironmentLightingSnapshot result{source, revision, std::nullopt};
         result.Time = EnvironmentTimeSample{clock.Day, clock.DayFraction, clock.SecondsPerDay};
+        if (profile.Sky())
+        {
+            result.SkyColors = profile.Sky()->Evaluate(clock);
+        }
         if (const auto evaluated = profile.Evaluate(clock))
         {
             EnvironmentDirectionalLight light;

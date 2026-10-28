@@ -17,7 +17,7 @@ namespace Keire::RenderBackend
     MakeSkyUniforms(const RenderCamera& camera, const RenderEnvironmentSettings& environment,
                     const SceneLighting& lighting, const Vector3 observer,
                     const std::array<std::array<double, 2>, MaximumCloudLayers>& cloudPhase, const bool cloudsEnabled,
-                    const float textureLayout, const double starPhase)
+                    const float textureLayout, const double starPhase, const SkyColorUniforms& skyColors)
     {
         const auto atmosphere = MakeAtmosphereUniforms(
             environment.Atmosphere, observer, {lighting.Direction.X, lighting.Direction.Y, lighting.Direction.Z});
@@ -30,6 +30,7 @@ namespace Keire::RenderBackend
                               : CloudUniforms{},
                 MakeCloudLightingUniforms(environment.AmbientColor, environment.AmbientIntensity,
                                           lighting.ColorAndIntensity, lighting.Enabled, atmosphere.SunHeight),
-                MakeStarFieldUniforms(environment.Stars, starPhase)};
+                MakeStarFieldUniforms(environment.Stars, starPhase),
+                skyColors};
     }
 } // namespace Keire::RenderBackend

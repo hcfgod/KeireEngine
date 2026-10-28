@@ -265,7 +265,8 @@ namespace Keire::RenderBackend
         }
     }
 
-    SDL_GPUGraphicsPipeline* RenderSharedState::CreateIrradynPipeline(const bool additive)
+    SDL_GPUGraphicsPipeline* RenderSharedState::CreateIrradynPipeline(const bool additive,
+                                                                      const SDL_GPUSampleCount samples)
     {
         SDL_GPUShader* vertex = CreateIrradynShader(true);
         SDL_GPUShader* fragment = nullptr;
@@ -292,7 +293,7 @@ namespace Keire::RenderBackend
             information.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
             information.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
             information.rasterizer_state.front_face = SDL_GPU_FRONTFACE_CLOCKWISE;
-            information.multisample_state.sample_count = SDL_GPU_SAMPLECOUNT_1;
+            information.multisample_state.sample_count = samples;
             information.target_info.color_target_descriptions = &color;
             information.target_info.num_color_targets = 1;
             auto* pipeline = SDL_CreateGPUGraphicsPipeline(Device, &information);
@@ -317,7 +318,7 @@ namespace Keire::RenderBackend
         if (DeferredPipelinesAttempted)
         {
             return DepthVelocityPipeline && DeferredGBufferPipeline && DeferredLightingPipeline &&
-                   IrradynTracePipeline && IrradynCompositePipeline && DeferredSampler;
+                   IrradynTracePipeline && IrradynCompositePipelines[0] && DeferredSampler;
         }
         DeferredPipelinesAttempted = true;
         DeferredCapability.store(false, std::memory_order_release);
@@ -352,7 +353,7 @@ namespace Keire::RenderBackend
             DeferredGBufferPipeline = CreateDeferredGBufferPipeline();
             DeferredLightingPipeline = CreateDeferredLightingPipeline();
             IrradynTracePipeline = CreateIrradynPipeline(false);
-            IrradynCompositePipeline = CreateIrradynPipeline(true);
+            IrradynCompositePipelines[0] = CreateIrradynPipeline(true);
             SDL_GPUSamplerCreateInfo sampler{};
             sampler.min_filter = SDL_GPU_FILTER_NEAREST;
             sampler.mag_filter = SDL_GPU_FILTER_NEAREST;
@@ -383,8 +384,14 @@ namespace Keire::RenderBackend
             SDL_ReleaseGPUSampler(Device, DeferredSampler);
         if (DeferredLightingPipeline)
             SDL_ReleaseGPUGraphicsPipeline(Device, DeferredLightingPipeline);
-        if (IrradynCompositePipeline)
-            SDL_ReleaseGPUGraphicsPipeline(Device, IrradynCompositePipeline);
+        for (auto*& pipeline : IrradynCompositePipelines)
+        {
+            if (pipeline)
+            {
+                SDL_ReleaseGPUGraphicsPipeline(Device, pipeline);
+                pipeline = nullptr;
+            }
+        }
         if (IrradynTracePipeline)
             SDL_ReleaseGPUGraphicsPipeline(Device, IrradynTracePipeline);
         if (DepthVelocityPipeline)
@@ -394,7 +401,6 @@ namespace Keire::RenderBackend
             SDL_ReleaseGPUGraphicsPipeline(Device, DeferredGBufferPipeline);
         DeferredSampler = nullptr;
         DeferredLightingPipeline = nullptr;
-        IrradynCompositePipeline = nullptr;
         IrradynTracePipeline = nullptr;
         DeferredGBufferPipeline = nullptr;
         DeferredPipelinesAttempted = false;

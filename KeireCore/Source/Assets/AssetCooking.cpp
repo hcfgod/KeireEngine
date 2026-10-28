@@ -16,6 +16,7 @@
 #include <string>
 #include <thread>
 #include <type_traits>
+#include <unordered_map>
 
 namespace Keire
 {
@@ -395,6 +396,9 @@ namespace Keire
                 std::erase_if(asset.Dependencies, [&availableTypes](const AssetId dependency)
                               { return !availableTypes.contains(dependency); });
         }
+        // These immutable decodes are shared only within this cook, so source changes cannot reuse stale validation.
+        std::unordered_map<AssetId, Ref<ShaderAsset>> decodedShaders;
+        std::unordered_map<AssetId, TextureImportSettings> decodedTextureSettings;
         for (auto& asset : prepared)
         {
             if (asset.Type != MaterialAsset::StaticType())
@@ -414,7 +418,11 @@ namespace Keire
             if (prepared[shaderIndex->second].Type != ShaderAsset::StaticType())
                 throw std::runtime_error("Material shader dependency is missing or has the wrong type: " +
                                          material->Definition().Shader.ToString());
-            const auto shader = ShaderAsset::Decode(prepared[shaderIndex->second].Imported.Bytes);
+            auto& shader = decodedShaders[material->Definition().Shader];
+            if (!shader)
+            {
+                shader = ShaderAsset::Decode(prepared[shaderIndex->second].Imported.Bytes);
+            }
             ValidateMaterialAgainstShader(material->Definition(), shader->Definition());
             for (const auto& property : shader->Definition().Properties)
             {
@@ -446,8 +454,13 @@ namespace Keire
                 if (prepared[textureIndex->second].Type != Texture2DAsset::StaticType())
                     throw std::runtime_error("Material texture property '" + property.Name +
                                              "' is missing or has the wrong asset type.");
-                const auto textureAsset = Texture2DAsset::Decode(prepared[textureIndex->second].Imported.Bytes);
-                const auto& settings = textureAsset->Settings();
+                auto textureSettings = decodedTextureSettings.find(texture);
+                if (textureSettings == decodedTextureSettings.end())
+                {
+                    const auto decoded = Texture2DAsset::Decode(prepared[textureIndex->second].Imported.Bytes);
+                    textureSettings = decodedTextureSettings.emplace(texture, decoded->Settings()).first;
+                }
+                const auto& settings = textureSettings->second;
                 const bool compatible =
                     property.TextureSemantic == ShaderTextureSemantic::Generic ||
                     ((property.TextureSemantic == ShaderTextureSemantic::BaseColor ||
@@ -467,6 +480,8 @@ namespace Keire
                                              "' has incompatible semantic or color-space import settings.");
             }
         }
+        decodedShaders.clear();
+        decodedTextureSettings.clear();
         std::unordered_set<AssetId> included;
         if (profile.Roots.empty())
         {

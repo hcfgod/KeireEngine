@@ -138,8 +138,11 @@ Create a **Fullscreen Effect** Shader Graph, then create a Material using that s
 that material under **Fullscreen Effects** to **Before Tonemapping**, **After Tonemapping**, or **After UI**. Each slot
 accepts one material and can be cleared independently. The camera slots determine execution order; the graph's
 injection-point metadata does not override an explicit camera assignment. Camera assignments participate in scene
-save/load, duplication, reset, and Inspector undo. The editor Scene view follows the selected game camera's effects;
-Game view, camera preview, and the runtime player use the same renderer path.
+save/load, duplication, reset, and Inspector undo. The editor Scene view uses the effects of the camera chosen
+by the scene's camera-selection rules, not simply the entity highlighted in the Hierarchy. Among enabled cameras
+on active entities with a Transform, Primary cameras take precedence, then higher Priority, with entity ID breaking
+ties. The Scene view keeps its own navigation camera while copying those effect assignments. Game view, camera
+preview, and the runtime player execute effects through the same renderer path.
 
 For a tint effect, connect **UV0 → Scene Color.UV**, multiply **Scene Color.Color** by an exposed Color parameter,
 and connect the result to **Fullscreen Shader Output.Color**. A graph can also generate a replacement color or
@@ -155,12 +158,23 @@ arbitrary user-scheduled render passes are not provided by this path. Invalid or
 current image intact; invalid shader reloads retain the last executable shader. UI/fullscreen materials cannot be
 executed as mesh shaders.
 
+If an effect does not appear:
+
+1. Check that the Material uses a Fullscreen shader and that it is assigned to the intended Camera slot.
+2. Confirm the Camera and its entity are enabled. In scenes with multiple cameras, check Primary and Priority;
+   highlighting a different camera in the Hierarchy does not switch the Scene view's effect source.
+3. Inspect the camera image in Scene/Game view, rather than judging Scene Color from the graph thumbnail.
+4. Check the selected slot: Before Tonemapping receives linear HDR values, so an effect tuned for display color
+   can look different there. The graph's injection-point metadata does not move an explicitly assigned effect.
+5. Check import/compiler diagnostics if the image stays unchanged. An unavailable effect preserves the existing
+   image; unchanged output alone does not prove the effect executed successfully.
+
 Material creation now accepts Surface, UI, Fullscreen, VFX, and Custom Graphics shaders. Replacement shader choices
 stay within the resolved material's target. Retained UI uses UI materials. VFX materials execute authored graph logic
 on CPU and GPU Sprite/Ribbon outputs and the existing mesh consumer. Volumetric VFX retains built-in density shading.
 Custom Graphics has the existing mesh consumer; it does not expose arbitrary render-pass scheduling.
 
-The current Shader Graph generator version is 16 and the Shader Graph importer version is 29. These versions describe
+The current Shader Graph generator version is 35 and the Shader Graph importer version is 48. These versions describe
 generated binaries and cache invalidation, not the serialized graph schema or the engine release number.
 
 C++ uses `CameraComponent::SetFullscreenEffect(CameraEffectStage::AfterTonemapping, materialId)`.
@@ -248,7 +262,7 @@ Saving stages generated HLSL and manifests outside the asset root, compiles thro
 transactionally replaces `Assets/Generated/ShaderGraphs/<graph-id>/`. Each keyword variant is a stable generated
 `ShaderAsset`. Legacy Surface graphs retain a private default `MaterialAsset` for preview and compatibility; program
 targets publish only shader variants. DXIL, SPIR-V, and MSL outputs pass the same reflection and ABI validation as raw
-shaders. Cooked shader asset schema 3 identifies every binary lane by both its exact material/program pass role and
+shaders. Cooked shader asset schema 4 retains schema 3's identification of every binary lane by its exact material/program pass role and
 backend format. Schema-1/2 assets migrate in memory to the `primary` role, while new multi-pass assets may carry
 coexisting roles such as `primary` and `deferredGBufferStandard` without ambiguous first-format selection. The shader importer compiles each bounded role/format lane with its optional pass define, rejects duplicate roles or defines
 and collisions with global defines, and keeps reflection selection independent of manifest order.

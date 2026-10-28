@@ -1,6 +1,8 @@
 #pragma once
 
 #include "Keire/Rendering/RenderSystem.h"
+#include "KeireInternal/Rendering/CloudLightCacheResources.h"
+#include "KeireInternal/Rendering/CloudTemporalResources.h"
 #include "KeireInternal/Rendering/GpuOcclusionPolicyInternal.h"
 #include "KeireInternal/Rendering/IrradynSceneCacheInternal.h"
 #include "KeireInternal/Rendering/RenderFramePacketInternal.h"
@@ -79,10 +81,13 @@ namespace Keire::RenderBackend
     {
         // Index zero is the published output. Indices 1..N are writer outputs owned by accepted frame slots 0..N-1.
         std::vector<SDL_GPUTexture*> FinalOutputs;
+        // Encoded UNORM copies for SDR presentation; linear consumers retain FinalOutputs.
+        std::vector<SDL_GPUTexture*> DisplayOutputs;
         // Temporal history mirrors final-output ownership so an accepted frame never samples a texture it writes.
         std::vector<SDL_GPUTexture*> TemporalHistories;
         // Reduced-resolution Irradyn history follows the same published/writer ownership contract.
         std::vector<SDL_GPUTexture*> IrradynHistories;
+        CloudTemporalResources CloudHistory;
         std::vector<struct SurfaceFrameWorkset> Worksets;
 
         [[nodiscard]] bool Empty() const noexcept;
@@ -90,6 +95,17 @@ namespace Keire::RenderBackend
         [[nodiscard]] SDL_GPUTexture* PublishedColor() const noexcept
         {
             return FinalOutputs.empty() ? nullptr : FinalOutputs.front();
+        }
+
+        [[nodiscard]] SDL_GPUTexture* PublishedDisplayColor() const noexcept
+        {
+            return DisplayOutputs.empty() ? nullptr : DisplayOutputs.front();
+        }
+
+        [[nodiscard]] SDL_GPUTexture* WriterDisplayColor(const std::uint32_t frameSlot) const noexcept
+        {
+            const auto index = static_cast<std::size_t>(frameSlot) + 1U;
+            return index < DisplayOutputs.size() ? DisplayOutputs[index] : nullptr;
         }
 
         [[nodiscard]] SDL_GPUTexture* WriterColor(const std::uint32_t frameSlot) const noexcept
@@ -313,6 +329,7 @@ namespace Keire::RenderBackend
         SDL_GPUTexture* DirectionalShadow = nullptr;
         SDL_GPUTexture* LocalShadow = nullptr;
         GpuOcclusionFrameResources GpuOcclusion;
+        CloudLightCacheResources CloudLightCache;
         std::vector<SDL_GPUTexture*> TransientTextures;
         std::uint32_t DirectionalShadowResolution = 0;
         std::uint32_t DirectionalShadowLayers = 0;
@@ -331,13 +348,15 @@ namespace Keire::RenderBackend
                    !GBufferMaterial && !GBufferLighting && !GBufferVelocity && !DBufferBaseColor && !DBufferNormal &&
                    !DBufferMaterial && !IrradynRadiance && !Depth && !MultisampleDepth && !SampledDepth &&
                    !DirectionalShadow && !LocalShadow && GpuOcclusion.Empty() && TransientTextures.empty() &&
-                   ForwardPlus.Empty() && SpatialSelection.Empty() && GpuVfx.Empty() && DynamicUploads.Empty();
+                   ForwardPlus.Empty() && SpatialSelection.Empty() && GpuVfx.Empty() && DynamicUploads.Empty() &&
+                   CloudLightCache.Empty();
         }
     };
 
     inline bool SurfaceResources::Empty() const noexcept
     {
-        return FinalOutputs.empty() && TemporalHistories.empty() && IrradynHistories.empty() &&
+        return FinalOutputs.empty() && DisplayOutputs.empty() && TemporalHistories.empty() &&
+               IrradynHistories.empty() && CloudHistory.Empty() &&
                std::ranges::all_of(Worksets, &SurfaceFrameWorkset::Empty);
     }
 

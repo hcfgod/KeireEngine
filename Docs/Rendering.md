@@ -1,5 +1,14 @@
 # Rendering
 
+## Opaque Lighting And Transparency Order
+
+The development frame graph completes deferred indirect-light tracing and compositing before transparent
+surfaces. This prevents an opaque receiver's indirect light from being added on top of already-blended glass or
+particles. For MSAA, tracing reads an opaque-color resolve while the original multisample color is retained;
+the indirect-light composite targets that multisample color and transparency performs the final resolve.
+The new ordering still requires rendered backend/MSAA regression acceptance. It does not enable cloud or fog
+composition by itself, nor does it add transparent-surface indirect-light evaluation.
+
 ## Experimental Planetary Atmosphere
 
 In the development editor, open **Project Settings > Environment > Planetary Atmosphere (Experimental)** and
@@ -21,10 +30,13 @@ Within each view segment, constant extinction is integrated analytically with a 
 Density and incoming sun lighting still use midpoint samples: this reduces attenuation error at low sample budgets,
 but does not make a coarse march equivalent to a high-quality integration through varying density or shadows.
 
-This is a single-scattering sky, not a completed weather renderer. Ambient, baked illumination and texture-based
-reflections remain independent. It does not yet provide aerial perspective on geometry, multiple scattering,
-LUT acceleration, volumetric clouds or planetary-frame gameplay precision. Solar radiance is capped at the finite
-RGBA16F target range before storage to prevent infinities entering temporal processing.
+The atmosphere uses single scattering and is not a completed weather renderer. The development renderer also
+integrates finite-distance aerial perspective on supported scene surfaces and composes experimental volumetric
+clouds. Surface transport does not hide authored geometry below the atmosphere reference sphere; sky and solar
+transport retain planet occlusion. Multiple-scattering atmosphere, LUT acceleration, moon illumination, and
+planetary-frame gameplay precision remain unfinished. Baked illumination and authored HDR environment assets
+retain their separate controls. With an evaluated ambient track and no HDR environment asset, fallback environment
+energy follows that track. Solar radiance is capped at the finite RGBA16F target range before storage.
 
 ### Experimental Stars
 
@@ -54,6 +66,69 @@ extinction; the opaque planet blocks them. Small stars use approximate energy-pr
 very coarse pixel footprints fade out rather than alias. The bounded procedural search visits 27 candidates
 normally and up to 125 for large footprints/discs. GPU budgets, motion stability, night appearance, Play/player
 parity and backend visual acceptance are not yet qualified. This does not add moons, sky-color tracks or volumetric fog.
+
+### Experimental Cloud Volume Shader Interface
+
+The development renderer also has an experimental local cloud-volume path. Its background pass follows opaque
+lighting and precedes transparency. Shader manifest/canonical schema 4 supports `volumeLightingAbiVersion: 1`:
+unlit mesh shaders receive the 272-byte `CloudVolumeViewUniforms` layout at fragment b2/space3; spatial-lighting
+ABI v3 shaders receive it after the existing 944-byte environment/spatial block at fragment b3/space3. Legacy
+shaders default to version zero and retain their existing binding layouts. Version 2 retains those uniform layouts
+and appends a combined 3D noise texture/sampler after material, user-resource and fixed-lighting sampler slots. It
+counts toward the portable 16-sampler limit. Version 3 appends a 16-byte shape-control vector, making the view block
+288 bytes and the combined environment/spatial/view block 1232 bytes. Version 4 adds regional controls for a
+304-byte view. Version 5 adds RGB atmosphere transport for a 416-byte view and a 1360-byte combined block.
+Generated materials use version 5; version-1 through version-4 binaries keep their original uniform prefixes.
+Generator 28 uses the reserved regional-control W lane for `1 + erosionAmount`; zero retains the older coupled
+detail behavior. This leaves uniform sizes unchanged. Older compiled shaders ignore the extension and need
+regeneration to support independent erosion. The Z lane remains reserved for the background blend-pass selector.
+Generator 29/importer 42 adds opaque-ray termination at remaining transmission 0.00001. Both background blend
+passes snap that residual transmission to zero at the same point. The omitted transport is bounded by that
+fraction of the remaining background and maximum source radiance; this is an approximation, not exact integration.
+Focused CPU and D3D12/Vulkan checks, DevDist staging and bounded D3D12 runtime smoke checks pass. Native image and
+performance validation remain pending. This change does not alter cloud shapes, quality settings or uniform layouts.
+The built-in background shader also has a single-march composition mode for non-MSAA targets. It reads a copied
+HDR background and writes `radiance + RGB transmission * background`; the scene alpha matches the separate blend
+passes. MSAA retains those separate draws to preserve per-sample colors. The copy reuses the frame workset's
+fullscreen HDR scratch input, with one additional nearest-sampled texture binding in the built-in shader only.
+This does not add a sampler to generated materials or change their volume ABI. Native output, resize/recovery and
+performance validation remain pending.
+Version-1 binaries keep their original
+binding layout. UI and other lighting layouts cannot
+opt in. Mesh and composed VFX consumers supply the constants, but shader code must explicitly evaluate the shared
+cloud kernel and compose the result for its blend mode. Generated material shaders now opt in, including composed
+VFX variants, and integrate to their effective fragment depth (including pixel-depth offset). Straight alpha,
+premultiplied, additive and holdout modes use different source-color calculations so front scattering is retained
+once. Unlit world surfaces receive scene exposure; UI/fullscreen shaders retain their existing behavior.
+Generator 28 also transports opaque/masked particle radiance after the media pass;
+ordinary opaque scene draws receive disabled media uniforms to avoid integrating twice. This path has focused
+composition coverage but still requires rendered particle acceptance. Multiplicative
+materials still need front-scattering compensation, and legacy custom shaders still need integration. Built-in CPU
+particles, GPU sprites/ribbons and fallback meshes now carry the same view constants after their existing fragment
+material block, evaluate to particle depth, and preserve straight-alpha coverage. Their rendered overlap acceptance
+is still pending.
+This is not complete material/VFX volume support or a visually qualified feature.
+
+**Scattering and Wind** includes **Multiple Scattering** and **Scattering Occlusion**, both bounded to [0,1].
+**Ambient Sky Occlusion** independently blends attenuation of incoming sky light from zero to one. Zero keeps
+the previous ambient illumination and skips its extra sampling. The experimental approximation averages four
+upper-hemisphere directions with four density intervals per direction; it is not a full multiple-scattering solution.
+It changes interior lighting, not cloud opacity or shape. Native background rendering caches this attenuation with
+sun transmission; moving fields and direct material/VFX paths pay additional sampling cost. Older records load
+with zero strength. Changing a positive strength reuses the light field; enabling or disabling it rebuilds the field.
+Contribution zero retains single scattering. Positive contribution adds two approximate orders using the existing
+sampled light optical depth; lower occlusion reduces shadow depth for those additional orders. Each order halves
+the phase anisotropy and scales its weight by contribution again. This is an artistic approximation, not an
+energy-conserving solution. It adds phase/exponential evaluations without additional shadow-density samples.
+New volumes default to 0.5 for both controls; version-1 volume records migrate with contribution zero to preserve
+their authored appearance. Volume record version 2 persists both controls, including customized disabled settings.
+The 80-byte volume binding retains its size: Albedo.w stores contribution and PatternOrigin.w
+stores occlusion. Generated shaders are reimported with the updated shared kernel.
+
+The approach follows the general octave-approximation strategy described in
+[Epic's volumetric cloud rendering reference](https://dev.epicgames.com/documentation/en-us/unreal-engine/volumetric-clouds?application_version=4.27).
+The Kéire implementation still needs day/night visual comparisons and measured GPU budgets; these controls do not
+add cloud ground shadows, atmospheric multiple scattering, planetary shells or volumetric fog.
 
 ### Layered Clouds
 
@@ -226,12 +301,42 @@ Its intensity values are artistic defaults, not lux.
 **Animate Ambient Lighting** enables per-key ambient RGB and intensity controls. Enabling starts every ambient key
 from the current project settings; customize them inside each Key. Disabling removes these optional keys and returns
 to project ambient settings; Undo restores them. All daily keys either carry ambient values or omit them together.
-Profiles using ambient animation write lighting record version 3. Profiles without it retain version 2; versions 1
+Profiles without sky-color tracks using ambient animation write lighting record version 3. Profiles without either
+retain version 2. Development record version 4 retains independent sky-color tracks. The renderer blends the evaluated
+horizon/zenith gradient before stars and clouds, retaining the sun disc and physical planet-ground response. Authoring
+controls are implemented in the development Environment workspace; visual acceptance is pending. Versions 1
 and 2 load without ambient animation. Older readers reject version 3, so use matching development player binaries
 and recook content rather than mixing versions. Focused render-packet tests and a Windows Editor preset/save,
 midnight-preview, Play/Stop and Undo/Redo check pass for this addition. A 77-asset QA cook preserved the authored
 version-3 profile and completed a 30-frame headless player run. This is not rendered standalone evidence;
 cross-backend comparisons and long-session qualification remain separate gates.
+
+### Sky Color Timeline (Development)
+
+Open **Window > Environment > Sky > Sky Color Timeline**, or the equivalent section in **Project Settings >
+Environment**. Enable **Use artistic sky colors**, or apply **Daylight Sky Preset**. This preset affects only sky
+tracks; it preserves directional/ambient lighting and shadows. **Artistic blend** mixes the physical background with
+the gradient. **Horizon gradient exponent** shapes its transition toward the zenith. These two controls are currently
+constant profile values, not animated scalar tracks.
+
+Expand **Horizon** or **Zenith** to see its daily gradient. Drag the strip to scrub the temporary preview clock, and
+click a gold marker or use **Selected key** to choose a key. Crowded markers select the nearest key; use the
+dropdown when markers overlap at the current panel width. Numeric time editing stays between neighboring keys;
+24:00 is represented by the next day's 00:00. Add a key at the preview time to sample the existing curve, then edit
+its linear HDR RGB values with the color swatch/picker or precise channel fields. The picker has no opacity control;
+sky radiance channels are bounded to 0–65504. At an existing key time, the button becomes **Select key at preview time** and selects
+that key without changing the profile. **Preview selected key** pauses the preview exactly at the selected key;
+neither selection nor preview changes the saved start time. At least one key must remain.
+**To next key** selects Linear, Smooth or Hold interpolation, including the segment across midnight. Inserting a
+key in a Smooth segment retains its sampled color but can reshape interpolation on either side.
+
+The strip compresses HDR values for display; it is not an exposure-matched screenshot of the sky. Preview scrubbing
+does not save the project's start time. Profile edits use shared settings Undo/Redo and save/error handling. Disabling
+artistic colors retains keys; **Reset to Physical Sky** removes only the optional sky profile, and Undo restores it.
+During Play, authoring affects the next session and preview scrubbing is unavailable. Native/shader builds and focused
+editing tests pass. Desktop preset, scrubbing, Undo/save and preview-reset checks passed. An isolated cook preserved
+the authored lighting record exactly, and the D3D12 player visibly rendered the authored sky. Full key editing,
+matched-camera Edit/Play/player comparison, narrow-layout and cross-backend visual acceptance remain pending.
 
 In Edit Mode, the preview shows a 24-hour clock. **Midnight**, **Dawn**, **Noon** and **Dusk** jump to 00:00, 06:00,
 12:00 and 18:00 on the current preview day. These are fixed authoring landmarks, not calculated sunrise/sunset times.
@@ -298,7 +403,8 @@ capabilities after backend probing. Scene, Game, and runtime view owners resolve
 surface sample contract before UI, presentation, or readback work captures the surface epoch. None and FXAA use a
 single-sample surface; supported MSAA requests create the matching multisample epoch for either render path. Deferred
 Hybrid keeps single-sample depth, velocity, GBuffer, DBuffer, and Irradyn inputs while a multisampled forward coverage
-subpass shades opaque geometry, decals, transparency, and VFX into HDR and resolves once before Irradyn. FXAA executes
+subpass shades opaque geometry and decals into HDR. An opaque resolve supplies Irradyn tracing while preserving
+multisample color for indirect compositing, transparency and VFX, followed by the final resolve. FXAA executes
 as part of the tone-map pass. TAA on both Forward+ and Deferred Hybrid jitters each accepted camera frame, reprojects
 the published per-surface history with object/deformation velocity, and clamps history to a padded current 3x3
 neighborhood. Once history passes that spatial validity check, expected sub-pixel edge luminance changes do not reject
@@ -314,13 +420,22 @@ Motion excludes the temporal jitter itself, and the frame graph keeps velocity l
 cascade fitting uses the unjittered projection so temporal samples cannot move shadow texel bounds. Reduced render
 scale is presented with spatial upscaling; it is not advertised as TAAU.
 
-Irradyn is a staged Deferred-Hybrid GI path. After opaque, forward-only, transparent, and VFX rendering, a reduced-
-resolution trace pass gathers the fully lit HDR scene with depth-tested screen-space visibility rays. This means local
+Experimental volumetric clouds have a separate trace, temporal resolve, and depth-aware HDR composite before
+general scene TAA. Cloud reprojection tracks camera displacement and wrapped horizontal weather advection;
+vertical deformation, large camera cuts, incompatible settings, and abrupt lighting changes reject history.
+The resolve checks cloud and scene depths and clamps decoded linear radiance to the current neighborhood.
+Cloud history stores encoded HDR radiance; it is decoded before interpolation and accumulation. This does not
+provide cloud motion vectors to general scene TAA. Moving-cloud ghosting, fast time-preview transitions, and
+backend performance still require native acceptance. Do not lower cloud view samples solely because TAA is enabled.
+
+Irradyn is a staged Deferred-Hybrid GI path. After opaque and forward-only opaque rendering, a reduced-
+resolution trace pass gathers lit opaque HDR color with depth-tested screen-space visibility rays. This means local
 and directional lights, their shadows and cookies, DBuffer decals, baked/environment lighting, and visible emissive
 radiance feed the same indirect-light estimate instead of being approximated again in the deferred-lighting shader.
 The trace reprojects a separately owned Irradyn history through the velocity buffer, rejects depth discontinuities,
 clamps stale energy, and retains a small bounded feedback term for stable multi-bounce response. A second pass performs
-depth/normal-aware bilateral upsampling and additively composites diffuse indirect before tone mapping.
+depth/normal-aware bilateral upsampling and additively composites diffuse indirect before transparency and VFX.
+Transparent and VFX screen color is not sampled by this opaque-depth trace; their scene-card contributions remain separate.
 
 Screen-space data is supplemented by a render-thread-owned, incrementally updated scene-card cache. Opaque and masked
 meshes contribute conservative world bounds; authored world-position displacement expands those bounds. Forward-only
@@ -497,6 +612,14 @@ Scene color is linear RGBA16F. Multisampling resolves in HDR before a fullscreen
 display surface. The renderer selects D32, D24, then D16 depth and falls back through 4x, 2x, then 1x sampling when a
 requested format is unsupported. A hidden, minimized, zero-sized, or unavailable swapchain skips presentation safely.
 Viewport surfaces keep their last valid image through transient zero-sized layout changes.
+
+The development presentation path retains the scene output and temporal history for linear sampling, then creates
+an sRGB-encoded UNORM display copy for editor viewport images and player SDR presentation. This avoids decoding an
+sRGB scene texture into a plain SDR target without re-encoding. Camera post effects and overlays precede the display
+conversion. Display copies follow the surface's published/writer frame-slot ownership and are released with it.
+Native GPU output, lifecycle, and editor visual acceptance for this correction remain pending; the additional
+fullscreen conversion pass also needs frame-time measurement.
+
 
 ## Resolution Scaling
 

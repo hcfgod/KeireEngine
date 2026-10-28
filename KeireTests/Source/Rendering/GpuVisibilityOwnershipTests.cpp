@@ -99,22 +99,30 @@ TEST_CASE("surface frame ownership provides one writer per bounded slot")
         SurfaceResources resources;
         resources.Worksets.resize(depth);
         resources.FinalOutputs.resize(depth + 1U);
+        resources.DisplayOutputs.resize(depth + 1U);
         resources.TemporalHistories.resize(depth + 1U);
         for (std::uint32_t index = 0; index <= depth; ++index)
         {
             resources.FinalOutputs[index] = reinterpret_cast<SDL_GPUTexture*>(static_cast<std::uintptr_t>(index + 1U));
+            resources.DisplayOutputs[index] =
+                reinterpret_cast<SDL_GPUTexture*>(static_cast<std::uintptr_t>(index + 2U * depth + 3U));
             resources.TemporalHistories[index] =
                 reinterpret_cast<SDL_GPUTexture*>(static_cast<std::uintptr_t>(index + depth + 2U));
         }
 
         CHECK(resources.PublishedColor() == resources.FinalOutputs.front());
+        CHECK(resources.PublishedDisplayColor() == resources.DisplayOutputs.front());
         CHECK(resources.PublishedTemporalHistory() == resources.TemporalHistories.front());
         for (std::uint32_t slot = 0; slot < depth; ++slot)
         {
             CHECK(resources.WriterColor(slot) == resources.FinalOutputs[slot + 1U]);
+            CHECK(resources.WriterDisplayColor(slot) == resources.DisplayOutputs[slot + 1U]);
+            CHECK(resources.WriterDisplayColor(slot) != resources.PublishedDisplayColor());
+            CHECK(resources.WriterDisplayColor(slot) != resources.WriterColor(slot));
             CHECK(resources.WriterTemporalHistory(slot) == resources.TemporalHistories[slot + 1U]);
         }
         CHECK(resources.WriterColor(depth) == nullptr);
+        CHECK(resources.WriterDisplayColor(depth) == nullptr);
         CHECK(resources.WriterTemporalHistory(depth) == nullptr);
     }
 }
@@ -243,4 +251,16 @@ TEST_CASE("current-pose generation mismatches force skinned draws visible")
         draw.CurrentPoseSubmeshBounds.pop_back();
         checkMismatch();
     }
+}
+
+TEST_CASE("display output allocation alone participates in surface retirement")
+{
+    Keire::RenderBackend::SurfaceResources resources;
+    CHECK(resources.Empty());
+    CHECK(resources.PublishedDisplayColor() == nullptr);
+    CHECK(resources.WriterDisplayColor(0) == nullptr);
+    resources.DisplayOutputs.resize(2, nullptr);
+    CHECK_FALSE(resources.Empty());
+    resources.DisplayOutputs.clear();
+    CHECK(resources.Empty());
 }

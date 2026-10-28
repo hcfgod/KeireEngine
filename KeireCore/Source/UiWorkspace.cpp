@@ -157,8 +157,9 @@ namespace Keire
             colors[ImGuiCol_PopupBg] = ToImVec4(theme.RaisedPanel);
             colors[ImGuiCol_Border] = ToImVec4(theme.Border);
             colors[ImGuiCol_BorderShadow] = {0.0F, 0.0F, 0.0F, 0.0F};
-            colors[ImGuiCol_FrameBg] = ToImVec4(theme.Panel);
-            colors[ImGuiCol_FrameBgHovered] = ToImVec4(theme.RaisedPanel);
+            // Editable fields must remain distinguishable inside child panels before hovering.
+            colors[ImGuiCol_FrameBg] = ToImVec4(theme.RaisedPanel);
+            colors[ImGuiCol_FrameBgHovered] = ToImVec4(theme.AccentHovered);
             colors[ImGuiCol_FrameBgActive] = ToImVec4(theme.Selection);
             colors[ImGuiCol_TitleBg] = ToImVec4(theme.Panel);
             colors[ImGuiCol_TitleBgActive] = ToImVec4(theme.RaisedPanel);

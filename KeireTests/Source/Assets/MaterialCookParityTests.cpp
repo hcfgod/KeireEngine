@@ -104,6 +104,11 @@ TEST_CASE("property-only materials cook and load in the runtime without shader r
     const auto material =
         database->CreateAsset("Materials/CookedMaterial.keirematerial", Keire::CreateMaterialGraphAssetImporter(),
                               Keire::MaterialAsset::EncodeAuthoringSource(source));
+    auto sharedShaderSource = source;
+    sharedShaderSource.PropertyOverrides.front().Value = 0.65F;
+    const auto sharedShaderMaterial =
+        database->CreateAsset("Materials/SharedShaderMaterial.keirematerial", Keire::CreateMaterialGraphAssetImporter(),
+                              Keire::MaterialAsset::EncodeAuthoringSource(sharedShaderSource));
     REQUIRE(shaderImports->load() == 1);
     (void)database->ImportAll();
     shaderImports->store(0);
@@ -137,13 +142,17 @@ TEST_CASE("property-only materials cook and load in the runtime without shader r
     CHECK(sourceRecord->Dependencies == std::vector<Keire::AssetId>{shader});
     REQUIRE(sourceRecord->SubAssets.size() == 1);
     const auto runtimeMaterial = sourceRecord->SubAssets.front();
+    const auto sharedShaderRecord = database->Find(sharedShaderMaterial);
+    REQUIRE(sharedShaderRecord);
+    REQUIRE(sharedShaderRecord->SubAssets.size() == 1);
+    const auto sharedRuntimeMaterial = sharedShaderRecord->SubAssets.front();
 
     Keire::AssetBuildProfile profile;
     profile.Strict = true;
-    profile.Roots = {runtimeMaterial};
+    profile.Roots = {runtimeMaterial, sharedRuntimeMaterial};
     const auto cooked = Keire::AssetCooker::Cook(*database, profile, fixture.Root / "Cooked");
     CHECK_NOTHROW(Keire::AssetCooker::Validate(cooked.CatalogPath));
-    CHECK(cooked.AssetCount == 2);
+    CHECK(cooked.AssetCount == 3);
     CHECK(shaderImports->load() == 0);
 
     Keire::AssetSystemSpecification runtimeSpecification;
@@ -181,5 +190,10 @@ TEST_CASE("property-only materials cook and load in the runtime without shader r
                                        ? std::get<float>(loaded.Require()->Definition().Properties.at("Roughness"))
                                        : shaderDefinition.Properties.front().DefaultValue.X;
     CHECK(resolvedRoughness == doctest::Approx(expectedRoughness));
+    const auto sharedLoaded = runtime->Load<Keire::MaterialAsset>(sharedRuntimeMaterial);
+    WaitFor(*runtime, [&sharedLoaded] { return sharedLoaded.State() == Keire::AssetState::Ready; });
+    REQUIRE(sharedLoaded.Get());
+    CHECK(sharedLoaded.Require()->Definition().Shader == shader);
+    CHECK(std::get<float>(sharedLoaded.Require()->Definition().Properties.at("Roughness")) == doctest::Approx(0.65F));
     runtime->Close();
 }

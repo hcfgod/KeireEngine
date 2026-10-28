@@ -13,6 +13,10 @@ project(ProjectConfig.CLIENT_TARGET)
     filter { "system:linux or macosx" }
         buildoptions { "-include KeireClient/ClientPch.h" }
 
+    -- Full editor symbols exceed the 4 KiB-page PDB limit. Retain symbols without incremental PDB growth.
+    filter { "system:windows", "toolset:msc", "configurations:DevDist" }
+        linkoptions { "/PDBPAGESIZE:16384", "/INCREMENTAL:NO" }
+
     filter {}
 
     files

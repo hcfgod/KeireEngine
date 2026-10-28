@@ -8,6 +8,8 @@ namespace KeireEditor
     {
         if (m_Request || m_State == SceneTransitionState::Committing)
             return false;
+        // A user transition supersedes the startup intent even if its later load fails or is cancelled.
+        m_StartupScene = {};
         m_Request = request;
         m_State = SceneTransitionState::Queued;
         m_Diagnostic.clear();
@@ -47,6 +49,18 @@ namespace KeireEditor
     {
         return m_Request.has_value() || m_State == SceneTransitionState::Committing;
     }
+
+    void SceneTransitionCoordinator::DeferStartupScene(const Keire::AssetId asset) noexcept
+    {
+        if (!Pending())
+        {
+            m_StartupScene = asset;
+        }
+    }
+
+    Keire::AssetId SceneTransitionCoordinator::PendingStartupScene() const noexcept { return m_StartupScene; }
+
+    Keire::AssetId SceneTransitionCoordinator::TakeStartupScene() noexcept { return std::exchange(m_StartupScene, {}); }
 
     SceneTransitionState SceneTransitionCoordinator::State() const noexcept { return m_State; }
 

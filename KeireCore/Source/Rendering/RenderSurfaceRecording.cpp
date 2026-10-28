@@ -116,6 +116,8 @@ namespace Keire::RenderBackend
         PreparedCpuVfx preparedCpuVfx;
         bool sampledDepthRecorded = false;
         bool gpuDepthCollisionRequired = false;
+        const bool cloudVolumeRequired = request != requests.end() && (request->Packet.CloudVolume.Quality[0] != 0U ||
+                                                                       request->Packet.Environment.Atmosphere.Enabled);
         if (request != requests.end())
         {
             auto started = std::chrono::steady_clock::now();
@@ -655,12 +657,25 @@ namespace Keire::RenderBackend
                 if (frameGraphPass == frameGraph.ResolveDepth)
                 {
                     const auto started = std::chrono::steady_clock::now();
-                    if (request != requests.end() && gpuDepthCollisionRequired && !sampledDepthRecorded)
+                    if (request != requests.end() && (gpuDepthCollisionRequired || cloudVolumeRequired) &&
+                        !sampledDepthRecorded)
+                    {
                         RecordSampledDepth(commands, surface, request->Packet, preparedDraws.Opaque);
-                    else if (!gpuDepthCollisionRequired)
+                    }
+                    else if (!gpuDepthCollisionRequired && !cloudVolumeRequired)
+                    {
                         surface.SampledDepthValid = false;
+                    }
                     Statistics.DepthPassMilliseconds +=
                         std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - started).count();
+                    return;
+                }
+                if (frameGraphPass == frameGraph.CloudVolume)
+                {
+                    if (cloudVolumeRequired)
+                    {
+                        RecordCloudVolume(commands, surface, request->Packet);
+                    }
                     return;
                 }
                 if (frameGraphPass == frameGraph.Transparency)

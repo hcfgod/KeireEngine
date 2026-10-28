@@ -18,8 +18,11 @@ namespace KeireEditor::Detail
     inline bool DrawCloudScalar(Keire::UiFrame& ui, const std::string_view label, double& value, const double speed,
                                 const double minimum, const double maximum, bool& commit)
     {
+        auto id = ui.PushId(label);
+        ui.TextWrapped(label);
+        ui.SetNextItemWidth(-1.0F);
         double candidate = value;
-        const bool edited = ui.DragScalar(label, candidate, speed, minimum, maximum);
+        const bool edited = ui.DragScalar("##Value", candidate, speed, minimum, maximum);
         commit |= ui.LastItemState().DeactivatedAfterEdit;
         if (!edited || !std::isfinite(candidate))
         {
@@ -96,7 +99,7 @@ namespace KeireEditor::Detail
     inline bool DrawCloudControls(Keire::UiFrame& ui, const Keire::UiThemeDefinition& theme,
                                   Keire::CloudSettings& settings, bool& commit)
     {
-        auto section = ui.BeginTreeNode("Layered Clouds (Experimental)");
+        auto section = ui.BeginSection("Layered Clouds (Experimental)");
         if (!section)
         {
             return false;
@@ -117,7 +120,7 @@ namespace KeireEditor::Detail
         for (std::size_t index = 0; index < settings.Layers.size(); ++index)
         {
             auto id = ui.PushId(std::to_string(index));
-            auto layer = ui.BeginTreeNode("Layer " + std::to_string(index + 1));
+            auto layer = ui.BeginSection("Layer " + std::to_string(index + 1));
             if (layer)
             {
                 changed |= DrawCloudLayerControls(ui, settings.Layers[index], commit);

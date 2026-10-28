@@ -3,6 +3,44 @@
 #include <doctest/doctest.h>
 
 #include <limits>
+#include <stdexcept>
+
+TEST_CASE("Runtime manifests preserve HDR sky curves and disabled authoring across JSON serialization")
+{
+    using namespace Keire::Detail;
+    for (const bool enabled : {false, true})
+    {
+        EnvironmentSkyProfile sky;
+        sky.Enabled = enabled;
+        sky.BlendWeight = 0.375;
+        sky.GradientExponent = 2.25;
+        sky.Horizon = EnvironmentColorTrack({{0.125, {12.0, 0.25, 2.0}, EnvironmentKeyInterpolation::Hold},
+                                             {0.75, {0.1, 6.0, 0.5}, EnvironmentKeyInterpolation::Smooth}});
+        sky.Zenith = EnvironmentColorTrack({{0.0, {65504.0, 0.0, 1.0}}, {0.5, {0.0, 0.5, 3.0}}});
+        const EnvironmentLightingProfile profile(EnvironmentDirectionalOwnership::Authored, {}, {}, sky);
+        const EnvironmentClockState clock{1234567890123456789LL, 0.875};
+        const nlohmann::json manifest{{"schemaVersion", EnvironmentRuntimeManifest::CurrentSchema},
+                                      {"environmentTime", EnvironmentClockRecord::Encode(clock)},
+                                      {"environmentLighting", EnvironmentLightingRecord::Encode(profile)},
+                                      {"rendering",
+                                       {{"atmosphere", EncodeAtmosphere({})},
+                                        {"clouds", EncodeCloudSettings({})},
+                                        {"bloom", EncodeBloomSettings({})},
+                                        {"stars", EncodeStarField({})}}}};
+        const auto decoded = EnvironmentRuntimeManifest::DecodeState(nlohmann::json::parse(manifest.dump()));
+        CHECK(decoded.Lighting == profile);
+        CHECK(decoded.Time == clock);
+        REQUIRE(decoded.Lighting.Sky());
+        CHECK(decoded.Lighting.Sky()->Evaluate(decoded.Time) == sky.Evaluate(clock));
+
+        auto malformed = manifest;
+        malformed["environmentLighting"]["sky"]["horizon"]["version"] = 999;
+        CHECK_THROWS_AS((void)EnvironmentRuntimeManifest::DecodeState(malformed), std::invalid_argument);
+        malformed = manifest;
+        malformed["environmentLighting"]["version"] = 3;
+        CHECK_THROWS_AS((void)EnvironmentRuntimeManifest::DecodeState(malformed), std::invalid_argument);
+    }
+}
 
 namespace
 {

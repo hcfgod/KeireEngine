@@ -946,7 +946,6 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     Keire::AssetId m_SelectedAsset;
     std::filesystem::path m_ExecutablePath;
     std::filesystem::path m_EditorSessionPath;
-    Keire::AssetId m_PendingStartupScene;
     struct PendingPrefabCreation
     {
         Keire::AssetId Object;

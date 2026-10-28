@@ -28,5 +28,15 @@ namespace Keire::Detail
         const auto& ambient = *snapshot->Ambient;
         settings.AmbientColor = {ambient.LinearColor[0], ambient.LinearColor[1], ambient.LinearColor[2], 1.0F};
         settings.AmbientIntensity = ambient.Intensity;
+        if (!settings.Environment)
+        {
+            // The built-in sky is a fallback lighting template, not a separately authored HDR environment.
+            // Its energy follows evaluated ambient light so it cannot illuminate a zero-light night.
+            const float ambientLuminance =
+                0.2126F * ambient.LinearColor[0] + 0.7152F * ambient.LinearColor[1] + 0.0722F * ambient.LinearColor[2];
+            const float fallbackEnergy = ambient.Intensity * ambientLuminance;
+            settings.EnvironmentDiffuseIntensity *= fallbackEnergy;
+            settings.EnvironmentSpecularIntensity *= fallbackEnergy;
+        }
     }
 } // namespace Keire::Detail

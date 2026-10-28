@@ -40,12 +40,17 @@ namespace KeireEditor
         void Fail(std::string diagnostic) noexcept;
         void Cancel() noexcept;
 
+        void DeferStartupScene(Keire::AssetId asset) noexcept;
+        [[nodiscard]] Keire::AssetId PendingStartupScene() const noexcept;
+        [[nodiscard]] Keire::AssetId TakeStartupScene() noexcept;
+
         [[nodiscard]] bool Pending() const noexcept;
         [[nodiscard]] SceneTransitionState State() const noexcept;
         [[nodiscard]] std::string_view Diagnostic() const noexcept;
 
       private:
         std::optional<SceneTransitionRequest> m_Request;
+        Keire::AssetId m_StartupScene;
         SceneTransitionState m_State = SceneTransitionState::Idle;
         std::string m_Diagnostic;
     };

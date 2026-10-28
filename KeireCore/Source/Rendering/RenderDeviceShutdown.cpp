@@ -36,6 +36,7 @@ namespace Keire::RenderBackend
     void RenderSharedState::DestroyDeviceAndResources(bool abandon, const bool preserveSurfaceEpochs) noexcept
     {
         CancelGpuVfxPipelineWarmup(abandon);
+        CancelAssetPipelinePreparation(abandon);
         GpuDestructionThread = std::this_thread::get_id();
         try
         {
@@ -256,6 +257,7 @@ namespace Keire::RenderBackend
             ReleaseRuntimeUiMaterialPipelines(false);
             ReleaseTextureResources(CheckerboardTexture);
             ReleaseTextureResources(DefaultSkyTexture);
+            ReleaseTextureResources(CloudNoiseTexture);
             ReleaseTextureResources(BrdfIntegrationLut);
             ReleaseTextureResources(WhiteTexture);
             ReleaseTextureResources(FlatNormalTexture);
@@ -310,16 +312,32 @@ namespace Keire::RenderBackend
             if (ToneMapPipeline)
                 SDL_ReleaseGPUGraphicsPipeline(Device, ToneMapPipeline);
             ToneMapPipeline = nullptr;
+            if (DisplayOutputPipeline)
+            {
+                SDL_ReleaseGPUGraphicsPipeline(Device, DisplayOutputPipeline);
+            }
+            DisplayOutputPipeline = nullptr;
             if (BloomPipeline)
             {
                 SDL_ReleaseGPUGraphicsPipeline(Device, BloomPipeline);
             }
             BloomPipeline = nullptr;
-            if (CloudVolumePipeline)
+            for (auto*& pipeline : CloudVolumePipelines)
             {
-                SDL_ReleaseGPUGraphicsPipeline(Device, CloudVolumePipeline);
+                if (pipeline)
+                {
+                    SDL_ReleaseGPUGraphicsPipeline(Device, pipeline);
+                    pipeline = nullptr;
+                }
             }
-            CloudVolumePipeline = nullptr;
+            for (auto*& pipeline : CloudTemporalPipelines)
+            {
+                if (pipeline)
+                {
+                    SDL_ReleaseGPUGraphicsPipeline(Device, pipeline);
+                    pipeline = nullptr;
+                }
+            }
             if (const auto pipeline = std::exchange(RuntimeUiPipeline, nullptr))
                 SDL_ReleaseGPUGraphicsPipeline(Device, pipeline);
             if (const auto pipeline = std::exchange(RuntimeUiCameraOverlayPipeline, nullptr))

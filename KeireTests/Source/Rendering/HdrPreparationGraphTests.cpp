@@ -63,9 +63,22 @@ TEST_CASE("HDR preparation is an explicit dependency before tone mapping in both
             REQUIRE(found != scene.Compiled.Order.end());
             return std::ranges::distance(scene.Compiled.Order.begin(), found);
         };
-        const auto lastScenePass =
-            path == Keire::RenderPath::DeferredHybrid ? scene.IrradynComposite : scene.Transparency;
-        CHECK(position(lastScenePass) < position(scene.HdrPreparation));
+        CHECK(position(scene.Transparency) < position(scene.HdrPreparation));
+        CHECK(position(scene.ResolveDepth) < position(scene.CloudVolume));
+        CHECK(position(scene.Sky) < position(scene.CloudVolume));
+        CHECK(position(scene.CloudVolume) < position(scene.Transparency));
+        if (path == Keire::RenderPath::DeferredHybrid)
+        {
+            CHECK(position(scene.ForwardOpaqueTail) < position(scene.IrradynTrace));
+            CHECK(position(scene.IrradynTrace) < position(scene.IrradynComposite));
+            CHECK(position(scene.IrradynComposite) < position(scene.CloudVolume));
+            const auto& composite = scene.Graph.Passes()[scene.IrradynComposite.Value];
+            const auto& volume = scene.Graph.Passes()[scene.CloudVolume.Value];
+            for (const auto output : composite.Writes)
+            {
+                CHECK(std::ranges::find(volume.Reads, output) != volume.Reads.end());
+            }
+        }
         CHECK(position(scene.HdrPreparation) < position(scene.ToneMap));
         CHECK(position(scene.ToneMap) < position(scene.Overlays));
         // The completion token is ordering-only; it must not allocate an otherwise unused GPU buffer.

@@ -2,6 +2,162 @@
 
 ## Unreleased
 
+- Reduce cloud weather sampling and zero-sun lighting work; reuse night caches and skip optically empty cache builds.
+  Preserve dark gradients with half-float intermediates and final display dithering. Focused CPU, ASan lifecycle,
+  and D3D12/Vulkan shader checks pass; native appearance and frame-time acceptance remain pending.
+
+- Scale unassigned fallback environment illumination with evaluated day/night ambient energy; explicit HDR
+  environment assets retain their authored intensities. Focused tests and the QA noon/midnight floor check pass;
+  broader material and sky acceptance remains pending.
+
+- Include cloud-light cache build/reuse counts and dispatched cell counts in sustained profiler CSV captures.
+  Counts identify the renderer frame; asynchronous GPU timings retain their separate frame identifier.
+
+- Keep authored geometry below atmosphere sea level visible by separating surface aerial perspective from
+  synthetic planet occlusion. GPU regressions pass on D3D12/Vulkan; the original QA floor is visibly lit in DevDist.
+
+- Add a separate SDR display conversion for scene viewports and player presentation, retaining linear scene
+  sampling and temporal history. Native output and lifecycle acceptance remain pending.
+
+- Skip cloud body and erosion texture reads where weather coverage or the height profile proves density is zero;
+  native editor frame-time acceptance remains pending.
+
+- Add project-local sustained profiler CSV export and retain CPU submission/command recording timings for hitch diagnosis.
+
+- Omit empty ImGui draw commands before SDL texture binding and reject non-empty commands without textures.
+  Focused packet tests pass; the reported native UI crash remains under investigation.
+
+- Reuse cloud lighting during horizontal movement within a cache cell and vertical movement preserving the
+  normalized cloud field by separating build and camera-relative lookup coordinates. Native frame-time validation
+  is pending.
+
+- Allow independent cloud weather to form fully clear regions and dense banks at full regional strength,
+  preserving legacy weather and uniform coverage at zero strength. Native visual acceptance remains pending.
+
+- Preserve bright and faint cloud radiance in the experimental temporal history using encoded half-float storage,
+  with filtering in linear light. Native D3D12/Vulkan attachment checks pass; editor motion acceptance is pending.
+
+- Preserve quick move-and-click input on tabs by establishing hover before the queued press. Input trickling
+  adds one frame for combined movement/press events; focus-loss cancellation remains immediate.
+
+- Add a Dense billows cloud starting point with firmer optical bodies and unchanged placement, lighting, wind and
+  quality budgets. Existing defaults remain unchanged; native visual acceptance is pending.
+
+- Add optional cloud ambient sky occlusion independently of density and shape, with legacy records retaining
+  unoccluded lighting. The approximation adds sampling cost; native visual/performance acceptance remains pending.
+
+- Show the matching cloud shape preset or Custom after edits, with a full-width selector for narrow environment panels.
+
+- Reuse experimental cloud-light buffers only after successful frame submission with matching light-field inputs;
+  invalidate pending writes on failure and resource retirement. Native motion/performance acceptance is pending.
+
+- Add editable volumetric-cloud shape starting points for defined billows and soft bodies, preserving authored
+  placement, wind, lighting and quality budgets. Focused preservation tests pass; native UI acceptance is pending.
+
+- Wire the experimental cloud-light cache into the native background pass with per-workset storage,
+  per-frame rebuilding and blended direct-light fallback. Shader and C++ compilation checks pass;
+  native lifecycle, performance and visual acceptance remain pending.
+
+- Reject invalid internal cloud render-pass values before pipeline lookup; preserve the nine supported
+  single-sample/MSAA pipeline slots in a separately tested contract.
+
+- Average experimental cloud density over three subintervals after coverage and erosion shaping.
+  Generator 30/importer 43 refreshes shaders; optical checks pass, while native quality and cost remain pending.
+
+- Correct Game view empty-state guidance: an enabled Camera on an active entity is sufficient; Primary selects
+  between cameras rather than being mandatory.
+
+- Add single-march cloud/atmosphere background composition for non-MSAA views, reusing the frame workset's HDR
+  fullscreen input. MSAA retains separate RGB blend draws to preserve sample colors. Composition tests and shader
+  compilation pass; native image, lifecycle and performance acceptance remain pending.
+
+- Stop experimental cloud marches once remaining transmission is at most 0.00001, using the same cutoff in both
+  blend passes. Generator 29/importer 42 invalidates older generated shaders. Focused transport-bound tests and
+  D3D12/Vulkan invariants, DevDist staging and bounded native smoke checks pass; image and performance acceptance
+  remain pending.
+
+- Separate experimental cloud Shape Detail from Cloud Erosion. Volume settings version 5 migrates earlier records
+  without changing their coupled values. Focused settings/density checks pass; integrated visual acceptance is pending.
+
+- Apply foreground atmosphere and cloud transport to regenerated opaque/masked particle materials drawn after
+  the media pass. Ordinary opaque scene draws retain their separate media pass. Generator 28/importer 41 invalidates
+  older generated shaders; focused composition tests pass, while integrated particle acceptance remains pending.
+
+- Integrate experimental RGB atmosphere transport with cloud backgrounds, opaque geometry, built-in transparency,
+  VFX and regenerated materials. Volume ABI 5 preserves older uniform prefixes; generator 27/importer 40 updates
+  current materials. Shader and focused GPU checks pass; native, visual and performance acceptance remains pending.
+
+- Clip solar-transmission integration to the atmosphere entry for observers in space, so adding empty space before
+  the same atmospheric chord no longer changes its attenuation. GPU invariants pass on D3D12 and Vulkan;
+  integrated space-travel visual acceptance remains pending.
+
+- Add experimental Regional Coverage and Region Scale controls to group cloud bodies independently of shape
+  displacement. Volumetric settings version 4 migrates older volumes with regional variation disabled; volume ABI 4
+  preserves earlier material uniform prefixes. Integrated Editor and player acceptance remains pending.
+
+- Add an opt-in offscreen cloud appearance diagnostic using the production volume shader and noise atlas, so shader
+  comparisons can run without rebuilding the Editor. This diagnostic does not replace integrated visual acceptance.
+
+- Shape experimental volumetric cloud boundaries with the vertical profile before coverage thresholding, so thin
+  regions taper toward the base and crown instead of retaining wide, translucent silhouettes. Cloud Density remains
+  an independent optical-thickness control. Focused numerical tests pass; integrated visual acceptance is pending.
+
+- Tighten experimental cloud displacement filtering using the exhaustive fixed-atlas derivative bound. Stack cloud
+  frequency, variation, seed and quality labels above full-width fields for consistent narrow-panel editing.
+  The filtering change still needs integrated visual acceptance.
+
+- Separate Cloud Density (optical thickness) from Core Concentration (the shape control that removes thin edges).
+  Reuse the filtered cloud-detail sample for body structure as well as edge erosion. GPU atlas sampling matches the
+  CPU reference on local Direct3D 12 and Vulkan; the revised appearance still requires visual acceptance.
+
+- Add experimental cloud detail frequency, variation strength/scale and density contrast controls, with versioned
+  settings migration and shared Editor controls. Volume shader ABI 3 appends shape constants while preserving older
+  material layouts. Natural default appearance and repetition reduction still require Editor visual acceptance.
+
+- Add cached 3D cloud noise with a complete mip chain and shared sampling across cloud backgrounds, built-in
+  surfaces, particles and generated materials. Volume shader ABI 2 appends a sampler while preserving older binary
+  layouts; shader caches rebuild for the new binding. Transfer probes pass on local Direct3D 12 and Vulkan, but
+  integrated rendering, visual quality and GPU-cost acceptance remain pending.
+
+- Revise experimental cloud density with secondary shape detail and two erosion bands. Added noise bands fade toward
+  their mean when view or shadow march spacing cannot resolve them. Invalidate generated material caches so installed
+  editors use the same density kernel. Visual quality and GPU-cost qualification remain pending.
+  Embed cloud shader source in adjacent bounded literals to avoid MSVC's single-string size limit as the kernel grows.
+
+- Add internal HDR sky-color tracks and version-4 environment profile persistence/evaluation. Lighting edits and
+  presets retain independent horizon/zenith tracks. The sky renderer consumes the gradient while retaining the sun
+  and physical planet-ground response. Both environment settings surfaces expose gradient timelines, selected-key
+  HDR editing, interpolation and sky-only preset/reset. Crowded timeline markers select the nearest key.
+  Existing preview-time keys can be selected without a duplicate-key error; selected keys can be previewed directly.
+  Add an RGB-only HDR picker for sky keys alongside precise numeric channels, without an irrelevant opacity field.
+  Desktop preset, scrubbing, Undo/save and preview-reset checks passed; full visual acceptance remains pending.
+
+- Use raised surfaces for editable UI fields so numeric controls remain visible against child-panel backgrounds,
+  with the theme's hover accent identifying the active pointer target.
+
+- Add experimental multiple-scattering contribution and occlusion controls for local cloud volumes. Two bounded
+  additional light orders reuse existing shadow samples. Version-1 authored volumes retain single scattering;
+  new settings use the approximation by default. Visual quality and GPU cost remain unqualified.
+
+- Give environment settings framed, full-row section controls that expand with a single click. Hierarchy tree interaction
+  remains unchanged; the additive `UiFrame::BeginSection` API is available to native tools.
+
+- Integrate experimental cloud transport into built-in CPU particles and GPU sprite, ribbon and fallback mesh
+  outputs. Shared cloud includes participate in Windows/Unix VFX shader-cache invalidation. Rendered overlap
+  acceptance remains pending.
+
+- Cancel deferred startup-scene loading when a user scene transition is accepted, preventing background asset
+  import completion from replacing a scene the user has already opened.
+
+- Add a versioned experimental cloud-view binding for mesh and composed VFX shaders. Shader schema 4 rejects
+  unsupported volume layouts while preserving legacy assets with volume lighting disabled. Generated materials
+  adopt the interface with depth-aware alpha/additive/holdout composition and matching unlit world exposure.
+  Multiplicative materials, legacy custom shaders and rendered acceptance remain pending.
+
+- Composite deferred opaque indirect lighting before transparency. Multisampled views resolve opaque color
+  for tracing while retaining the multisample target for indirect lighting and subsequent transparent draws.
+  GPU visual regression acceptance remains pending in the current development batch.
+
 - Opt MSVC-built Windows executable hosts into long-path handling through a shared application manifest,
   covering nested asset-cache paths as well as the existing extended-length rename boundary.
 

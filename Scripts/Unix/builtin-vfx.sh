@@ -7,6 +7,15 @@ source "$cache_helper"
 compiler="$ROOT/Build/Tools/ShaderCompiler/KeireShaderCompiler"
 source_file="$ROOT/KeireCore/Shaders/BuiltinVfx.hlsl"
 visibility_source_file="$ROOT/KeireCore/Shaders/BuiltinVfxVisibility.hlsl"
+includes=("$ROOT/KeireCore/Shaders/CloudVolumeView.hlsli"
+          "$ROOT/KeireCore/Shaders/CloudVolume.hlsli"
+          "$ROOT/KeireCore/Shaders/AtmosphereMedium.hlsli"
+          "$ROOT/KeireCore/Shaders/CloudVolumeGeometry.hlsli"
+          "$ROOT/KeireCore/Shaders/CloudVolumeLighting.hlsli"
+          "$ROOT/KeireCore/Shaders/CloudVolumeDensity.hlsli"
+          "$ROOT/KeireCore/Shaders/CloudWeather.hlsli"
+          "$ROOT/KeireCore/Shaders/VolumeSurfaceComposition.hlsli"
+          "$ROOT/KeireCore/Shaders/VolumeTransport.hlsli")
 generated_directory="$ROOT/Build/Generated/Keire"
 header="$generated_directory/BuiltinVfxShaders.h"
 stamp="$generated_directory/BuiltinVfxShaders.stamp"
@@ -18,7 +27,7 @@ lock="$ROOT/Build/Generated/.locks/builtin-vfx.lock"
 }
 
 fingerprint="$(generated_content_fingerprint builtin-vfx-v2 "${BASH_SOURCE[0]}" "$cache_helper" \
-  "$compiler" "$source_file" "$visibility_source_file")"
+  "$compiler" "$source_file" "$visibility_source_file" "${includes[@]}")"
 generated_content_is_current "$header" "$stamp" "$fingerprint" && exit 0
 
 mkdir -p "$generated_directory"
@@ -68,7 +77,7 @@ for stage_row in "${stages[@]}"; do
   for variant_row in "${variants[@]}"; do
     read -r destination variant extension <<< "$variant_row"
     "$compiler" "$stage_source" --source HLSL --dest "$destination" --stage "$stage" --entrypoint "$entry" \
-      --output "$temporary/$name-$variant.$extension"
+      -I "$ROOT/KeireCore/Shaders" --output "$temporary/$name-$variant.$extension"
   done
 done
 

@@ -1,6 +1,7 @@
 #include "KeireInternal/Assets/AssetDatabaseImplementation.h"
 
 #include <algorithm>
+#include <chrono>
 #include <memory>
 #include <stdexcept>
 #include <unordered_map>
@@ -254,6 +255,9 @@ namespace Keire
                                                           AssetOperationProgressCallback progress,
                                                           const bool refreshSources)
     {
+        const auto operationStarted = std::chrono::steady_clock::now();
+        const auto elapsedMilliseconds = [](const auto started)
+        { return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count(); };
         ThrowIfOperationCancelled(cancellation);
         ReportOperationProgress(progress, AssetOperationPhase::Scanning, 0, 0);
         if (refreshSources)
@@ -345,6 +349,8 @@ namespace Keire
             }
         }
         ReportOperationProgress(progress, AssetOperationPhase::Importing, 0, records.size());
+        KEIRE_CORE_INFO("Asset import scan and selection completed (assets={}, elapsed_ms={:.3f}).", records.size(),
+                        elapsedMilliseconds(operationStarted));
         m_Impl->ResetCookInputs();
         m_Impl->CacheFiles->CreateDirectories("Objects");
         AssetImportResult result;
@@ -356,6 +362,7 @@ namespace Keire
         successfulSourceAssets.reserve(records.size());
         for (std::size_t next = 0; next < records.size(); ++next)
         {
+            const auto assetStarted = std::chrono::steady_clock::now();
             auto record = records[next];
             ThrowIfOperationCancelled(cancellation);
             AssetImportStatus status;
@@ -367,9 +374,20 @@ namespace Keire
                 auto validated = m_Impl->TakeValidatedImport(record);
                 auto restored = validated ? std::optional<AssetImportOutput>{} : m_Impl->RestoreCachedImport(record);
                 const bool restoredFromCache = restored.has_value();
+                const bool reusedValidatedImport = validated.has_value();
                 auto imported = validated  ? std::move(*validated)
                                 : restored ? std::move(*restored)
                                            : m_Impl->Import(record);
+                const auto preparationMilliseconds = elapsedMilliseconds(assetStarted);
+                if (preparationMilliseconds >= 100.0)
+                {
+                    KEIRE_CORE_INFO("Slow asset preparation (asset={}, source={}, elapsed_ms={:.3f}).",
+                                    record.RelativePath.generic_string(),
+                                    reusedValidatedImport ? "validated"
+                                    : restoredFromCache   ? "cache"
+                                                          : "importer",
+                                    preparationMilliseconds);
+                }
                 const auto effectiveType = imported.PrimaryType.value_or(record.Type);
                 UpdateMetadataImportOutput(*m_Impl->SourceFiles,
                                            record.MetadataPath.lexically_relative(m_Impl->SourceRoot), effectiveType,
@@ -533,9 +551,11 @@ namespace Keire
         try
         {
             ThrowIfOperationCancelled(cancellation);
+            const auto catalogStarted = std::chrono::steady_clock::now();
             const auto cooked = AssetCooker::CookUnlocked(*this, AssetBuildProfile{}, m_Impl->CacheRoot / "Runtime",
                                                           cancellation, progress, sourceAssets, replacedAssets);
             result.CatalogPath = cooked.CatalogPath;
+            KEIRE_CORE_INFO("Asset catalog published (elapsed_ms={:.3f}).", elapsedMilliseconds(catalogStarted));
         }
         catch (const AssetOperationCancelled&)
         {
@@ -551,6 +571,8 @@ namespace Keire
                 result.CatalogPath = previous;
         }
         ReportOperationProgress(progress, AssetOperationPhase::Completed, records.size(), records.size());
+        KEIRE_CORE_INFO("Asset import completed (assets={}, imported={}, cache_hits={}, elapsed_ms={:.3f}).",
+                        records.size(), result.Imported, result.CacheHits, elapsedMilliseconds(operationStarted));
         return result;
     }
 

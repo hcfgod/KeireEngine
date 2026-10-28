@@ -1,5 +1,6 @@
 #include "CloudLayered.hlsl"
-#include "VolumeTransport.hlsli"
+#include "AtmosphereMedium.hlsli"
+#include "SkyColorGradient.hlsli"
 
 struct VertexOutput
 {
@@ -34,6 +35,8 @@ cbuffer SkyConstants : register(b0, space3)
     float4 StarTintRotation;
     float4 StarTwinkleFade;
     uint4 StarIdentity;
+    float4 SkyHorizonWeight;
+    float4 SkyZenithExponent;
 };
 
 Texture2D EnvironmentTexture : register(t0, space2);
@@ -132,31 +135,22 @@ float2 CubemapAtlasUv(float3 direction, int layout)
 
 // All lengths below are kilometres and all scattering/extinction coefficients are inverse kilometres.
 // This bounded single-scattering reference path deliberately does not approximate multiple scattering or aerial perspective.
-bool AtmosphereSphereInterval(float3 origin, float3 direction, float radius, out float2 interval)
+AtmosphereMedium CurrentAtmosphereMedium()
 {
-    const float along = dot(origin, direction);
-    const float originRadius = length(origin);
-    // Factoring the radial difference preserves surface roots; subtracting two squared radii loses metres.
-    const float constant = (originRadius - radius) * (originRadius + radius);
-    const float discriminant = mad(along, along, -constant);
-    const float roundoff = 4.0F * 1.192092896e-7F * max(along * along, abs(constant));
-    interval = 0.0F;
-    if (discriminant < -roundoff)
-    {
-        return false;
-    }
-    const float root = sqrt(max(discriminant, 0.0F));
-    const float stableRoot = -along - (along >= 0.0F ? root : -root);
-    const float otherRoot = stableRoot != 0.0F ? constant / stableRoot : 0.0F;
-    interval = float2(min(stableRoot, otherRoot), max(stableRoot, otherRoot));
-    return interval.y >= 0.0F;
+    AtmosphereMedium medium;
+    medium.ObserverRadius = AtmosphereObserverRadius;
+    medium.SunHeight = AtmosphereSunHeight;
+    medium.RayleighScale = AtmosphereRayleighScale;
+    medium.Mie = AtmosphereMie;
+    medium.AbsorptionPeak = AtmosphereAbsorptionPeak;
+    medium.SolarWidth = AtmosphereSolarWidth;
+    medium.Controls = AtmosphereControls;
+    return medium;
 }
 
 bool AtmosphereGroundIntersection(float3 origin, float3 direction, out float2 interval)
 {
-    // Surface-outward and exact tangent rays see the atmosphere; inward surface rays stop at distance zero.
-    return AtmosphereSphereInterval(origin, direction, AtmosphereObserverRadius.w, interval) &&
-           dot(origin, direction) < 0.0F && interval.x >= 0.0F;
+    return AtmosphereMediumGroundIntersection(origin, direction, CurrentAtmosphereMedium(), interval);
 }
 
 float AtmosphereSunCoverage(float3 direction, float angularRadius)
@@ -172,47 +166,14 @@ float AtmosphereSunCoverage(float3 direction, float angularRadius)
            areaRatio * areaRatio;
 }
 
-float3 AtmosphereDensity(float3 position)
-{
-    const float altitude = max(length(position) - AtmosphereObserverRadius.w, 0.0F);
-    return float3(exp(-altitude / AtmosphereRayleighScale.w),
-                  exp(-altitude / AtmosphereMie.w),
-                  saturate(1.0F - abs(altitude - AtmosphereAbsorptionPeak.w) / AtmosphereSolarWidth.w));
-}
-
-float3 AtmosphereExtinction(float3 integratedDensity)
-{
-    return AtmosphereRayleighScale.xyz * integratedDensity.x + AtmosphereMie.y * integratedDensity.y +
-           AtmosphereAbsorptionPeak.xyz * integratedDensity.z;
-}
-
 float3 AtmosphereSunTransmission(float3 position)
 {
-    const float3 sunDirection = AtmosphereSunHeight.xyz;
-    float2 groundInterval;
-    if (AtmosphereGroundIntersection(position, sunDirection, groundInterval))
-    {
-        return 0.0F;
-    }
-    float2 atmosphereInterval;
-    if (!AtmosphereSphereInterval(position, sunDirection,
-                                  AtmosphereObserverRadius.w + AtmosphereSunHeight.w, atmosphereInterval))
-    {
-        return 1.0F;
-    }
-    const uint samples = (uint)AtmosphereControls.z;
-    const float stepLength = max(atmosphereInterval.y, 0.0F) / samples;
-    float3 integratedDensity = 0.0F;
-    [loop]
-    for (uint index = 0; index < samples; ++index)
-    {
-        integratedDensity += AtmosphereDensity(position + sunDirection * ((index + 0.5F) * stepLength)) * stepLength;
-    }
-    return exp(-AtmosphereExtinction(integratedDensity));
+    return AtmosphereMediumSunTransmission(position, CurrentAtmosphereMedium());
 }
 
-float3 AtmosphereRadiance(float3 direction, out float3 backgroundTransmission)
+float3 AtmosphereRadiance(float3 direction, out float3 backgroundTransmission, out float3 sunRadiance)
 {
+    sunRadiance = 0.0F;
     backgroundTransmission = 0.0F;
     const float pi = 3.14159265359F;
     const float3 observer = AtmosphereObserverRadius.xyz;
@@ -227,45 +188,20 @@ float3 AtmosphereRadiance(float3 direction, out float3 backgroundTransmission)
         observer, direction, planetRadius + AtmosphereSunHeight.w, atmosphereInterval);
     float2 groundInterval;
     const bool groundHit = AtmosphereGroundIntersection(observer, direction, groundInterval);
-    float3 radiance = 0.0F;
-    float3 integratedDensity = 0.0F;
-    if (intersectsAtmosphere)
-    {
-        const float startDistance = max(atmosphereInterval.x, 0.0F);
-        const float endDistance = groundHit ? min(atmosphereInterval.y, groundInterval.x) : atmosphereInterval.y;
-        const uint samples = (uint)AtmosphereControls.y;
-        const float stepLength = max(endDistance - startDistance, 0.0F) / samples;
-        const float cosineTheta = dot(direction, AtmosphereSunHeight.xyz);
-        const float rayleighPhase = 3.0F * (1.0F + cosineTheta * cosineTheta) / (16.0F * pi);
-        const float anisotropy = AtmosphereMie.z;
-        const float miePhase = (1.0F - anisotropy * anisotropy) /
-                               (4.0F * pi * pow(max(1.0F + anisotropy * anisotropy -
-                                                    2.0F * anisotropy * cosineTheta, 1.0e-5F), 1.5F));
-        [loop]
-        for (uint index = 0; index < samples; ++index)
-        {
-            const float3 position = observer + direction * (startDistance + (index + 0.5F) * stepLength);
-            const float3 segmentDensity = AtmosphereDensity(position) * stepLength;
-            const float3 segmentExtinction = AtmosphereExtinction(segmentDensity);
-            const float3 segmentWeight = float3(VolumeSegmentWeight(segmentExtinction.x),
-                                                VolumeSegmentWeight(segmentExtinction.y),
-                                                VolumeSegmentWeight(segmentExtinction.z));
-            const float3 transmission = exp(-AtmosphereExtinction(integratedDensity)) * segmentWeight;
-            const float3 scattering = AtmosphereRayleighScale.xyz * segmentDensity.x * rayleighPhase +
-                                      AtmosphereMie.x * segmentDensity.y * miePhase;
-            radiance += transmission * AtmosphereSunTransmission(position) * scattering;
-            integratedDensity += segmentDensity;
-        }
-    }
+    const float maximumDistance = intersectsAtmosphere ? max(atmosphereInterval.y, 0.0F) : 0.0F;
+    const AtmosphereTransport transport = IntegrateAtmosphereMedium(
+        observer, direction, maximumDistance, CurrentAtmosphereMedium());
+    float3 radiance = transport.Radiance;
     const float sunCoverage = AtmosphereSunCoverage(direction, AtmosphereControls.w);
     if (!groundHit && sunCoverage > 0.0F)
     {
         const float sineHalfRadius = sin(AtmosphereControls.w * 0.5F);
         const float sunSolidAngle = 4.0F * pi * sineHalfRadius * sineHalfRadius;
-        radiance += exp(-AtmosphereExtinction(integratedDensity)) * (sunCoverage / sunSolidAngle);
+        sunRadiance = transport.Transmission * (sunCoverage / sunSolidAngle) * AtmosphereSolarWidth.xyz;
+        radiance += sunRadiance;
     }
-    backgroundTransmission = groundHit ? 0.0F : exp(-AtmosphereExtinction(integratedDensity));
-    return radiance * AtmosphereSolarWidth.xyz;
+    backgroundTransmission = groundHit ? 0.0F : transport.Transmission;
+    return radiance;
 }
 
 uint StarHash(uint value)
@@ -377,9 +313,10 @@ float4 PSMain(VertexOutput input) : SV_Target0
     float3 direction = normalize(mul((float3x3)InverseView, viewPosition.xyz / max(abs(viewPosition.w), 1.0e-6F)));
     float3 radiance = 0.0F;
     float3 backgroundTransmission = 1.0F;
+    float3 sunRadiance = 0.0F;
     if (AtmosphereControls.x > 0.5F)
     {
-        radiance = AtmosphereRadiance(direction, backgroundTransmission);
+        radiance = AtmosphereRadiance(direction, backgroundTransmission, sunRadiance);
     }
     else if (SkyParameters.w >= 0.0F)
     {
@@ -396,6 +333,32 @@ float4 PSMain(VertexOutput input) : SV_Target0
                               : CubemapAtlasUv(environmentDirection, layout);
         const float4 sampleValue = EnvironmentTexture.SampleLevel(EnvironmentSampler, uv, 0.0F);
         radiance = (SkyParameters.w >= 16.0F ? DecodeRgbe(sampleValue) : sampleValue.rgb) * SkyParameters.y;
+    }
+    if (SkyHorizonWeight.w > 0.0F)
+    {
+        float3 up = float3(0.0F, 1.0F, 0.0F);
+        bool visibleSky = true;
+        if (AtmosphereControls.x > 0.5F)
+        {
+            const float observerRadius = length(AtmosphereObserverRadius.xyz);
+            up = AtmosphereObserverRadius.xyz / max(observerRadius, 1.0e-6F);
+            float2 groundInterval;
+            visibleSky = observerRadius >= AtmosphereObserverRadius.w &&
+                !AtmosphereGroundIntersection(AtmosphereObserverRadius.xyz, direction, groundInterval);
+        }
+        if (visibleSky)
+        {
+            // Override only the background, retaining the solar disc and later stars/clouds.
+            const float3 background = max(radiance - sunRadiance, 0.0F);
+            const float cosineZenith = dot(direction, up);
+            radiance = float3(
+                BlendSkyColorChannel(background.r, SkyHorizonWeight.r, SkyZenithExponent.r,
+                    cosineZenith, SkyHorizonWeight.w, SkyZenithExponent.w),
+                BlendSkyColorChannel(background.g, SkyHorizonWeight.g, SkyZenithExponent.g,
+                    cosineZenith, SkyHorizonWeight.w, SkyZenithExponent.w),
+                BlendSkyColorChannel(background.b, SkyHorizonWeight.b, SkyZenithExponent.b,
+                    cosineZenith, SkyHorizonWeight.w, SkyZenithExponent.w)) + sunRadiance;
+        }
     }
     radiance += StarRadiance(direction) * backgroundTransmission;
     float4 cloud0 = EvaluateCloudLayer(direction, CloudGeometry0, CloudPattern0, CloudColor0, CloudNoise0,
@@ -431,6 +394,6 @@ float4 PSMain(VertexOutput input) : SV_Target0
     // Keep the atmosphere's finite RGBA16F storage contract after cloud composition and exposure.
     const float3 exposed = radiance * SkyParameters.z;
     const bool finiteSkyRequired = AtmosphereControls.x > 0.5F || CloudGeometry0.w > 0.0F ||
-                                   CloudGeometry1.w > 0.0F || StarIdentity.y != 0U;
+                                   CloudGeometry1.w > 0.0F || StarIdentity.y != 0U || SkyHorizonWeight.w > 0.0F;
     return float4(finiteSkyRequired ? min(exposed, 65504.0F) : exposed, 1.0F);
 }

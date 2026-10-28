@@ -9,6 +9,7 @@
 #include "Keire/Rendering/RenderSystem.h"
 #include "Keire/Scenes/Scene.h"
 #include "KeireInternal/Rendering/GpuVisibilityCandidateInternal.h"
+#include "KeireInternal/Rendering/SpatialLightingInternal.h"
 
 #include <SDL3/SDL.h>
 
@@ -32,6 +33,26 @@ namespace Keire::RenderBackend
         DeferredDecal,
         DeferredForwardOpaqueTail,
         DeferredSky
+    };
+
+    struct SceneLightProbeVolume final
+    {
+        EntityId Entity;
+        Matrix4 LocalToWorld;
+        Matrix4 WorldToLocal;
+        Vector3 BoxExtents;
+        Vector3 Spacing;
+        std::int32_t Priority = 0;
+        float NormalBias = 0.0F;
+        float ViewBias = 0.0F;
+    };
+
+    struct SceneSpatialContribution final
+    {
+        AssetId Scene;
+        AssetId BakedLighting;
+        std::vector<Detail::SpatialReflectionProbe> ReflectionProbes;
+        std::vector<SceneLightProbeVolume> LightProbeVolumes;
     };
 
     struct SceneLighting final

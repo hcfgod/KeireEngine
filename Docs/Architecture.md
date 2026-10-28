@@ -1,5 +1,17 @@
 # Architecture
 
+`CloudVolumePass.h` owns the internal cloud-pass enumeration and checked pipeline-slot mapping. The renderer
+continues to own and release the nine GPU pipelines; extracting the value-only contract does not transfer
+resource ownership. Composite accepts only the single-sample slot, and unsupported pass values are rejected.
+
+Cloud-light transmission storage and its compute pipeline belong to `SurfaceFrameWorkset`. Allocation publishes
+both resources together after successful creation, and surface cleanup releases both. The background cloud pass
+reuses only successfully submitted transmission with matching light-field inputs. Horizontal build coordinates
+are aligned to cloud cells horizontally and to the cloud base vertically, while lookup coordinates remain
+camera-relative. Horizontal movement within a cell and vertical movement preserving the normalized light-field
+key can reuse the buffer. Crossing a horizontal cell boundary or changed light-field inputs rebuilds it.
+Failed or abandoned recordings invalidate reuse. Native motion, performance and device-recovery validation remain open.
+
 Shader Graph CPU previews retain one request-local private evaluator state. Callers own graph/property/texture
 storage; synchronous preview requests borrow stable views, while the evaluator owns indexes, per-sample values, and
 traversal flags. `ShaderGraphPreviewEvaluator.cpp` owns graph traversal and cache invalidation. A direct typed switch
@@ -167,6 +179,15 @@ Stopping Play closes runtime scene history without discarding source asset histo
 Captured editor UI packets resolve surface textures against the current device generation. If a surface has not
 published an output after recovery, its draw command is removed from that resolved view. The captured packet remains
 intact for later resolution, and unrelated draws retain their vertex/index offsets and texture bindings.
+The development renderer resolves editor surface bindings to a separate encoded-UNORM display ring. Original scene
+outputs and temporal histories use linear RGBA16F to preserve dark gradients until final display conversion. Stable
+half-code dithering is applied only at the encoded 8-bit display boundary, outside temporal feedback. This increases
+surface memory and bandwidth relative to 8-bit intermediate textures. Display conversion runs after
+camera post effects and overlays. Display and scene writer slots publish together only after successful submission;
+failed frames do not rotate either ring. Allocation failures release partial display resources through the existing
+surface cleanup path, and device shutdown releases the separate conversion pipeline. Player SDR presentation uses
+the same display representation. Native engine lifecycle and visual acceptance remain pending.
+
 
 Variant parent selection validates source ancestry independently of runtime asset availability. Ordinary property
 edits do not require missing parents to resolve. Source snapshots belong to the asset browser undo context and resolve
@@ -470,7 +491,8 @@ creation; unsupported formats or any partial creation failure release the entire
 the replacement device. Deferred capability is published only after the complete probe. Single-sample surfaces route
 standard deferred materials into the GBuffer and forward-only materials into the opaque tail. Supported multisample
 surfaces keep those single-sample data passes, then shade final geometry through a multisampled forward coverage
-subpass and resolve before Irradyn. Unsupported hardware or missing resources retains Forward+ without changing
+subpass. Opaque color resolves before Irradyn tracing without discarding multisample color; the indirect composite
+uses a lazily created sample-matched pipeline, and transparency performs the final resolve. Unsupported hardware or missing resources retains Forward+ without changing
 project intent.
 
 CPU skinning owns retained current/previous asset and built-in vertex streams plus one staging buffer per
@@ -1275,8 +1297,8 @@ directional cascade construction always consumes the unjittered camera projectio
 jitter to both camera transforms so static output does not inherit the Halton sample displacement, and its lifetime is
 declared through tone mapping to prevent transient aliasing before TAA samples it.
 Irradyn owns a second reduced-resolution published/writer history set. The Deferred-Hybrid graph runs its trace after
-transparency and VFX, copies the accumulated result into the accepted frame slot's writer history, then resolves it
-through a bilateral additive pass before tone mapping. Irradyn history rotates only after successful frame publication
+opaque lighting, copies the accumulated result into the accepted frame slot's writer history, then composites it
+through a bilateral additive pass before transparency and VFX. Irradyn history rotates only after successful frame publication
 and is invalidated with surface resize, camera discontinuity, path changes, and device recovery. Its persistent CPU
 scene-card cache is surface-owned and render-thread-affine; bounded rolling updates keep transformed opaque/masked/WPO
 bounds plus low-density transparent, hair, volume, and VFX aggregates without exposing renderer implementation state
@@ -1299,6 +1321,14 @@ Lighting record version 2 stores the shadow configuration; version 1 reads with 
 tracks use version 3, with all keys carrying validated color/intensity. Legacy tracks preserve project ambient values.
 Evaluated ambient samples are copied into the render packet without mutating request settings; world/preview profile
 revision changes invalidate temporal history. Older record readers reject version 3 rather than dropping its data.
+Development record version 4 adds independent Horizon/Zenith HDR color tracks. The profile evaluates these outside
+directional ownership and places validated values in `EnvironmentLightingSnapshot::SkyColors`. Profile copy/move,
+lighting edits and presets preserve both tracks; project serialization includes them within a 256 KiB bound.
+Render packets copy these values into a 32-byte gradient block appended to the 528-byte sky constants. The sky shader
+blends the background before stars/clouds, preserves the solar disc, and skips the override for physical planet-ground
+rays and interior observers. Native compilation and shader-format checks pass. Both settings surfaces use shared sky
+controls and document history; desktop and visual acceptance remain pending. Legacy profiles omit the block's blend
+weight and retain physical sky behavior.
 Environment-tab controls edit these values through the settings document. The daylight/ambient batch has bounded
 desktop Edit/Play and Undo/Redo acceptance; broader backend, standalone rendering and long-session gates remain open.
 The project document snapshots include rendering, authoring, environment time and the private daily-lighting profile. Snapshot copies
@@ -1403,6 +1433,9 @@ Textured triangles reject images from a different or closed UI runtime before ac
 Project actions, internal drops, and post-import external drops enqueue requests; the next update preflights the target
 before replacing the document. Dirty-scene and Play-change decisions approve or cancel that same request, and duplicate
 requests remain non-destructive. Panels use `Scene::IsOpen()`-filtered document views so an obsolete reference is inert.
+The coordinator also owns the deferred startup scene while initial asset import runs. An accepted explicit scene
+transition clears that startup intent immediately; later cancellation or failure does not restore it. Import completion
+consumes any remaining startup intent once, so it cannot replace a scene the user has already chosen.
 Minimized or unavailable swapchain textures are skipped safely. Docking is active, while multi-viewports are forced off
 because detached native windows require a separate ownership milestone.
 Existing floating panels are constrained to the main viewport before window submission so hit testing and first-wheel
@@ -2658,6 +2691,29 @@ An ordering-only completion token makes tone mapping depend on this finished HDR
 consumes that dependency rather than sampling the scene before those contributors are recorded. Tone mapping
 still precedes the camera's LDR effect and camera-space UI. This boundary does not itself enable bloom.
 
+The internal cloud-noise generator returns an owned CPU value containing linear RGBA8 mip arrays, with X varying
+fastest, then Y and Z. Generation has no SDL dependency, global cache or render-device ownership. It accepts bounded
+power-of-two dimensions from 4 through 64 and produces all mip levels down to one texel. The upload boundary validates
+the complete chain before creating a sampled 3D texture, submits it on the GPU timeline, and releases partial resources
+on failure. The renderer's lazy resource slot owns the texture; samplers remain cache-owned. Shutdown releases the
+texture and device recovery clears its handle for regeneration. The fixed atlas is shared across views; generation
+must not run per view or per frame. Background, built-in mesh and particle shaders bind this atlas; generated material
+shaders declare volume ABI 5 and append the atlas after their existing fragment samplers. Shape controls append
+16 bytes to the existing 272-byte view prefix; regional coverage appends another 16 bytes. Atmosphere appends
+112 bytes for a 416-byte view block. Older volume ABI 1/2 materials receive 272 bytes, ABI 3 receives 288 bytes,
+and ABI 4 retains 304 bytes;
+ABI 1 also keeps its sampler layout. Shared density uses explicit mip selection from ray spacing, avoiding implicit derivatives in
+divergent marches. Integrated runtime and visual acceptance of these bindings remains pending.
+
+For a single-sample HDR target, the cloud background pass copies the scene into the frame workset's existing
+fullscreen HDR input and evaluates radiance and RGB transmission once. It writes the composed result without
+fixed-function blending. Multisample targets retain separate attenuation and radiance draws so each sample's
+background color survives; resolving first would discard edge information. The scratch input remains owned by
+`SurfaceFrameWorkset::TransientTextures`, is reused by later fullscreen camera effects, and follows existing
+workset retirement and device-recovery lifetime. It costs one RGBA16F surface per workset that uses the path
+(eight bytes per pixel); it is allocated lazily, not per draw. Native lifecycle, image and performance validation
+of this new call site remain pending.
+
 The experimental star field shares the sky draw and adds no render target. Authored settings travel through rendering
 schema 8 and runtime manifest 9; packet capture evaluates a bounded twinkle phase from the environment clock.
 Camera history includes authored star settings. Sky uniforms preserve seed bits as integers. The shader evaluates
@@ -2674,3 +2730,13 @@ retirement path. Tone mapping adds filtered bloom before ACES, including its ant
 The initial integrated DevDist build, settings/capture tests and enabled-bloom cook/player parity checks passed.
 Those checks do not establish final visual quality, every GPU backend, resize recovery or long-session stability;
 these remain acceptance gates rather than implied production guarantees.
+
+### Experimental cloud-light cache publication
+
+Each surface frame workset owns its cloud transmission buffer and compute pipeline. A separate shared validity
+record contains input keys only, with no GPU handles. The frame's publication transaction retains these records
+for all recorded cloud passes, including nested views. Successful frame submission publishes their keys; failed
+frames invalidate pending writes. Resource release also invalidates the record before releasing handles, so later
+publication cannot revive retired contents. Reuse requires exact submitted-key equality. This avoids dependence
+on frame serials that can be reused after failure and avoids pointers into movable workset storage. Native motion,
+wind and device-recovery acceptance remain required in addition to the isolated ASan lifecycle tests.

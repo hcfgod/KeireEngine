@@ -53,7 +53,7 @@ namespace KeireEditor::Detail
     inline bool DrawAtmosphereControls(Keire::UiFrame& ui, const Keire::UiThemeDefinition& theme,
                                        Keire::AtmosphereSettings& settings, bool& commit)
     {
-        auto section = ui.BeginTreeNode("Planetary Atmosphere (Experimental)");
+        auto section = ui.BeginSection("Planetary Atmosphere (Experimental)");
         if (!section)
         {
             return false;
@@ -76,7 +76,7 @@ namespace KeireEditor::Detail
                               "Reset preserves enabled state and places the surface at local Y = 0. "
                               "All distances are metres; Ctrl-click numeric controls to enter exact values.");
         auto disabled = ui.BeginDisabled(!settings.Enabled);
-        if (auto planet = ui.BeginTreeNode("Planet and Density"); planet)
+        if (auto planet = ui.BeginSection("Planet and Density"); planet)
         {
             constexpr std::array centerLabels{"Planet Center X (m)", "Planet Center Y (m)", "Planet Center Z (m)"};
             for (std::size_t axis = 0; axis < settings.PlanetCenter.size(); ++axis)
@@ -102,7 +102,7 @@ namespace KeireEditor::Detail
                                   "Center uses the scene coordinate frame. Changing radius does not move the center. "
                                   "Reducing radius/thickness clamps dependent density and absorption heights.");
         }
-        if (auto scattering = ui.BeginTreeNode("Scattering and Absorption"); scattering)
+        if (auto scattering = ui.BeginSection("Scattering and Absorption"); scattering)
         {
             changed |= DrawAtmosphereSpectrum(ui, "Rayleigh Scattering (1/m)", settings.RayleighScattering, 1.0e-7,
                                               0.01, commit);
@@ -123,7 +123,7 @@ namespace KeireEditor::Detail
                 "Coefficients are inverse metres, not colors. Extinction includes scattering "
                 "and cannot be lower than Mie scattering. Positive anisotropy favors forward scattering.");
         }
-        if (auto sunlight = ui.BeginTreeNode("Sun and Quality Budget"); sunlight)
+        if (auto sunlight = ui.BeginSection("Sun and Quality Budget"); sunlight)
         {
             changed |= DrawAtmosphereSpectrum(ui, "Top-of-atmosphere Solar Irradiance", settings.SolarIrradiance, 0.1,
                                               100'000.0, commit);

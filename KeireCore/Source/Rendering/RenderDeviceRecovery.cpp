@@ -185,6 +185,7 @@ namespace Keire::RenderBackend
     void RenderSharedState::AbandonLostDeviceResources(const std::shared_ptr<RenderFramePacket>& interrupted) noexcept
     {
         CancelGpuVfxPipelineWarmup(true);
+        CancelAssetPipelinePreparation(true);
 #if defined(KEIRE_ENABLE_TEST_HOOKS)
         std::uint64_t abandonedHandles = 0;
         for (auto* query : TimestampQueries)
@@ -269,10 +270,13 @@ namespace Keire::RenderBackend
         SceneDepthPipeline = nullptr;
         ToneMapPipeline = nullptr;
         BloomPipeline = nullptr;
-        CloudVolumePipeline = nullptr;
+        CloudVolumePipelines.fill(nullptr);
+        CloudTemporalPipelines.fill(nullptr);
         DeferredGBufferPipeline = nullptr;
         DepthVelocityPipeline = nullptr;
         DeferredLightingPipeline = nullptr;
+        IrradynTracePipeline = nullptr;
+        IrradynCompositePipelines.fill(nullptr);
         RuntimeUiPipeline = nullptr;
         RuntimeUiCameraOverlayPipeline = nullptr;
         RuntimeUiRenderTexturePipeline = nullptr;
@@ -298,6 +302,7 @@ namespace Keire::RenderBackend
         ErrorMesh = {};
         CheckerboardTexture = {};
         DefaultSkyTexture = {};
+        CloudNoiseTexture = {};
         BrdfIntegrationLut = {};
         WhiteTexture = {};
         FlatNormalTexture = {};

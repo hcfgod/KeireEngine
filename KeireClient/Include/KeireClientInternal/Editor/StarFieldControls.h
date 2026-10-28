@@ -15,7 +15,7 @@ namespace KeireEditor::Detail
     inline bool DrawStarFieldControls(Keire::UiFrame& ui, const Keire::UiThemeDefinition& theme,
                                       Keire::StarFieldSettings& settings, bool& commit)
     {
-        auto section = ui.BeginTreeNode("Star Field (Experimental)");
+        auto section = ui.BeginSection("Star Field (Experimental)");
         if (!section)
         {
             return false;
@@ -68,7 +68,7 @@ namespace KeireEditor::Detail
         }
         changed |=
             DrawAtmosphereScalar(ui, "Star Rotation (degrees)", settings.RotationDegrees, 1.0, 0.0, 360.0, commit);
-        if (auto animation = ui.BeginTreeNode("Twinkle and Night Visibility"); animation)
+        if (auto animation = ui.BeginSection("Twinkle and Night Visibility"); animation)
         {
             ui.TextColoredWrapped(theme.MutedText,
                                   "Twinkle is off by default. Zero amplitude prevents flicker. No clock means a "

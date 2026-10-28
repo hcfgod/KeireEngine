@@ -229,8 +229,9 @@ namespace Keire::RenderBackend
                 const bool submitted = std::ranges::any_of(
                     ActiveFrame->Requests, [&presentation](const auto& request)
                     { return request.Surface.Id == presentation->Id && request.Surface.Epoch == presentation->Epoch; });
-                auto* const source = submitted ? presentation->Resources.WriterColor(ActiveFrame->FrameSlot)
-                                               : presentation->PublishedTexture.load(std::memory_order_acquire);
+                auto* const source =
+                    submitted ? presentation->Resources.WriterDisplayColor(ActiveFrame->FrameSlot)
+                              : (presentation->HasOutput ? presentation->Resources.PublishedDisplayColor() : nullptr);
                 if (source)
                 {
                     SDL_GPUBlitInfo blit{};
@@ -895,6 +896,7 @@ namespace Keire::RenderBackend
         }
         for (auto& workset : resources.Worksets)
         {
+            ReleaseCloudLightCache(Device, workset.CloudLightCache);
             ReleaseGpuOcclusionFrameResources(workset.GpuOcclusion);
             ReleaseForwardPlusResources(workset.ForwardPlus);
             ReleaseSpatialSelectionFrameResources(workset.SpatialSelection);
@@ -919,12 +921,14 @@ namespace Keire::RenderBackend
         for (auto* texture : resources.FinalOutputs)
             if (texture)
                 SDL_ReleaseGPUTexture(Device, texture);
+        ReleaseDisplayOutputs(resources);
         for (auto* texture : resources.TemporalHistories)
             if (texture)
                 SDL_ReleaseGPUTexture(Device, texture);
         for (auto* texture : resources.IrradynHistories)
             if (texture)
                 SDL_ReleaseGPUTexture(Device, texture);
+        ReleaseCloudTemporalResources(Device, resources.CloudHistory);
         resources = {};
     }
 
@@ -934,7 +938,7 @@ namespace Keire::RenderBackend
         information.stage = vertex ? SDL_GPU_SHADERSTAGE_VERTEX : SDL_GPU_SHADERSTAGE_FRAGMENT;
         information.num_uniform_buffers = Detail::BuiltinShaderUniformBufferCount(vertex);
         information.num_storage_buffers = vertex ? 1U : 0U;
-        information.num_samplers = vertex ? 0U : 5U;
+        information.num_samplers = vertex ? 0U : 6U;
 
         const auto formats = SDL_GetGPUShaderFormats(Device);
         if (formats & SDL_GPU_SHADERFORMAT_DXIL)

@@ -891,6 +891,7 @@ void EditorWorkspaceLayer::DrawProfiler(Keire::UiFrame& ui)
             {
                 sustained.Start(seconds, latestSummary, 2, profilerState.SustainedRendererTelemetry);
                 profilerState.SustainedError.clear();
+                profilerState.SustainedExportStatus.clear();
             }
             catch (const std::exception& error)
             {
@@ -900,6 +901,10 @@ void EditorWorkspaceLayer::DrawProfiler(Keire::UiFrame& ui)
         ui.Text("Sustained capture: " + std::string(sustained.Label()));
         if (!profilerState.SustainedError.empty())
             ui.Text(profilerState.SustainedError);
+        if (!profilerState.SustainedExportStatus.empty())
+        {
+            ui.Text(profilerState.SustainedExportStatus);
+        }
         ui.Text("2-second warmup; application frames, not displayed FPS. Capacity: 50,000 frames.");
         if (sustained.Active())
             ui.Text("Recorded: " + std::to_string(sustained.ElapsedMicroseconds() / 1e6) + " seconds; " +
@@ -913,8 +918,30 @@ void EditorWorkspaceLayer::DrawProfiler(Keire::UiFrame& ui)
             ui.SameLine();
             if (ui.Button("Start 30-second capture") && latestSummary.Sequence != 0)
                 startSustained(30);
-            if (!sustained.Frames().empty() && ui.Button("Copy sustained CSV"))
-                Owner().Windows()->SetClipboardText(sustained.Csv());
+            if (!sustained.Active() && !sustained.Frames().empty())
+            {
+                if (ui.Button("Copy sustained CSV"))
+                {
+                    Owner().Windows()->SetClipboardText(sustained.Csv());
+                }
+                if (Owner().GetProject() && ui.Button("Save sustained CSV to project diagnostics"))
+                {
+                    try
+                    {
+                        const auto destination = Owner().GetProject()->Root() / "Library" / "Diagnostics" / "Profiler" /
+                                                 "latest-sustained.csv";
+                        Keire::Detail::WriteTextFileAtomically(destination, sustained.Csv());
+                        profilerState.SustainedExportStatus = "Saved: " + destination.string();
+                        profilerState.SustainedError.clear();
+                    }
+                    catch (const std::exception& error)
+                    {
+                        profilerState.SustainedExportStatus.clear();
+                        profilerState.SustainedError = std::string("Capture could not be saved: ") + error.what();
+                    }
+                }
+                ui.Text("Save replaces Library/Diagnostics/Profiler/latest-sustained.csv.");
+            }
         }
         else if (ui.Button("Stop sustained capture"))
             sustained.Stop();

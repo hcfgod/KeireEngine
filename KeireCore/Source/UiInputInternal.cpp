@@ -69,6 +69,19 @@ namespace Keire::Detail
                     position = {event.MousePos.PosX, event.MousePos.PosY};
                     moved = position.x != io.MousePos.x || position.y != io.MousePos.y;
                 }
+                if (event.Type == ImGuiInputEventType_MouseButton && event.MouseButton.Down && moved &&
+                    ImGui::IsMousePosValid(&position))
+                {
+                    // Overlapping widgets such as tabs require a prior hovered frame. Preserve a quick
+                    // move/press/release as ordered events instead of losing its press on first arrival.
+                    deferred.Events.reserve(context.InputEventsQueue.Size - index);
+                    for (int tail = index; tail < context.InputEventsQueue.Size; ++tail)
+                    {
+                        deferred.Events.push_back(context.InputEventsQueue[tail]);
+                    }
+                    context.InputEventsQueue.resize(index);
+                    break;
+                }
                 if (event.Type != ImGuiInputEventType_MouseButton || event.MouseButton.Down || !moved ||
                     !ImGui::IsMousePosValid(&position))
                     continue;

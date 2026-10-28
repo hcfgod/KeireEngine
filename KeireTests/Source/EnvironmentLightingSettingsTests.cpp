@@ -100,7 +100,12 @@ TEST_CASE("Project lighting settings reject corruption oversized input and direc
     }
     WriteTextFileAtomically(fixture.File(), "{");
     CHECK_THROWS((void)EnvironmentLightingSettingsStore::Load(fixture.Root));
-    WriteTextFileAtomically(fixture.File(), std::string(65537, ' '));
+    auto bounded = valid.dump();
+    bounded.resize(256U * 1024U, ' ');
+    WriteTextFileAtomically(fixture.File(), bounded);
+    CHECK(EnvironmentLightingSettingsStore::Load(fixture.Root) == EnvironmentLightingProfile{});
+    bounded.push_back(' ');
+    WriteTextFileAtomically(fixture.File(), bounded);
     CHECK_THROWS((void)EnvironmentLightingSettingsStore::Load(fixture.Root));
     CHECK_THROWS_AS((void)EnvironmentLightingSettingsStore::Load({}), std::invalid_argument);
     LightingSettingsFixture directoryFixture;

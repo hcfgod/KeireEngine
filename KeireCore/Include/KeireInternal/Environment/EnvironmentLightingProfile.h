@@ -1,6 +1,7 @@
 #pragma once
 
 #include "KeireInternal/Environment/EnvironmentClock.h"
+#include "KeireInternal/Environment/EnvironmentSkyProfile.h"
 #include "KeireInternal/Rendering/EnvironmentLightingValidation.h"
 
 #include <algorithm>
@@ -53,8 +54,9 @@ namespace Keire::Detail
 
         explicit EnvironmentLightingProfile(
             const EnvironmentDirectionalOwnership ownership = EnvironmentDirectionalOwnership::Authored,
-            std::vector<EnvironmentLightingKeyframe> keyframes = {}, EnvironmentShadowSettings shadows = {})
-            : m_Ownership(ownership), m_Keyframes(std::move(keyframes)), m_Shadows(shadows)
+            std::vector<EnvironmentLightingKeyframe> keyframes = {}, EnvironmentShadowSettings shadows = {},
+            std::optional<EnvironmentSkyProfile> sky = {})
+            : m_Ownership(ownership), m_Keyframes(std::move(keyframes)), m_Shadows(shadows), m_Sky(std::move(sky))
         {
             Validate();
         }
@@ -65,9 +67,11 @@ namespace Keire::Detail
 
         EnvironmentLightingProfile(EnvironmentLightingProfile&& other) noexcept
             : m_Ownership(std::exchange(other.m_Ownership, EnvironmentDirectionalOwnership::Authored)),
-              m_Keyframes(std::move(other.m_Keyframes)), m_Shadows(std::exchange(other.m_Shadows, {}))
+              m_Keyframes(std::move(other.m_Keyframes)), m_Shadows(std::exchange(other.m_Shadows, {})),
+              m_Sky(std::move(other.m_Sky))
         {
             other.m_Keyframes.clear();
+            other.m_Sky.reset();
         }
 
         EnvironmentLightingProfile& operator=(EnvironmentLightingProfile other) noexcept
@@ -75,6 +79,7 @@ namespace Keire::Detail
             std::swap(m_Ownership, other.m_Ownership);
             m_Keyframes.swap(other.m_Keyframes);
             std::swap(m_Shadows, other.m_Shadows);
+            m_Sky.swap(other.m_Sky);
             return *this;
         }
 
@@ -83,6 +88,8 @@ namespace Keire::Detail
         [[nodiscard]] const std::vector<EnvironmentLightingKeyframe>& Keyframes() const noexcept { return m_Keyframes; }
 
         [[nodiscard]] EnvironmentShadowSettings Shadows() const noexcept { return m_Shadows; }
+
+        [[nodiscard]] const std::optional<EnvironmentSkyProfile>& Sky() const noexcept { return m_Sky; }
 
         [[nodiscard]] std::optional<EnvironmentDirectionalSample> Evaluate(const EnvironmentClockState clock) const
         {
@@ -142,6 +149,10 @@ namespace Keire::Detail
       private:
         void Validate() const
         {
+            if (m_Sky)
+            {
+                m_Sky->Validate();
+            }
             ValidateEnvironmentShadows(m_Shadows);
             if (m_Ownership != EnvironmentDirectionalOwnership::Authored &&
                 m_Ownership != EnvironmentDirectionalOwnership::Environment)
@@ -186,5 +197,6 @@ namespace Keire::Detail
         EnvironmentDirectionalOwnership m_Ownership;
         std::vector<EnvironmentLightingKeyframe> m_Keyframes;
         EnvironmentShadowSettings m_Shadows;
+        std::optional<EnvironmentSkyProfile> m_Sky;
     };
 } // namespace Keire::Detail

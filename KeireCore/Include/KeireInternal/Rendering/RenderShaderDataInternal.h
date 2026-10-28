@@ -5,7 +5,9 @@
 #include "KeireInternal/Rendering/AtmosphereUniforms.h"
 #include "KeireInternal/Rendering/CloudLightingUniforms.h"
 #include "KeireInternal/Rendering/CloudUniforms.h"
+#include "KeireInternal/Rendering/CloudVolumeViewUniforms.h"
 #include "KeireInternal/Rendering/IrradynSceneCacheInternal.h"
+#include "KeireInternal/Rendering/SkyColorUniforms.h"
 #include "KeireInternal/Rendering/StarFieldUniforms.h"
 
 #include <SDL3/SDL.h>
@@ -365,6 +367,7 @@ namespace Keire::RenderBackend
         Vector4 AmbientColorIntensity;
         Vector4 DirectionalDirectionEnabled;
         Vector4 DirectionalColorIntensity;
+        CloudVolumeViewUniforms CloudVolume;
     };
 
     struct AssetEnvironmentSpatialUniforms final
@@ -372,6 +375,15 @@ namespace Keire::RenderBackend
         AssetEnvironmentUniforms Environment;
         AssetSpatialLightingUniforms Spatial;
     };
+
+    struct AssetEnvironmentVolumeUniforms final
+    {
+        AssetEnvironmentSpatialUniforms Lighting;
+        CloudVolumeViewUniforms Volume;
+    };
+
+    static_assert(sizeof(AssetEnvironmentVolumeUniforms) == 1392U);
+    static_assert(offsetof(AssetEnvironmentVolumeUniforms, Volume) == 944U);
 
     static_assert(sizeof(AssetObjectUniforms) == sizeof(float) * 64);
     static_assert(sizeof(AssetSceneUniforms) == sizeof(float) * (24 + MaximumShaderLocalLights * 16));
@@ -383,7 +395,7 @@ namespace Keire::RenderBackend
     static_assert(sizeof(AssetEnvironmentUniforms) == sizeof(float) * 44);
     static_assert(sizeof(AssetSpatialSelectionRecord) == sizeof(float) * 120);
     static_assert(alignof(AssetSpatialSelectionRecord) == 16);
-    static_assert(sizeof(BuiltInSpatialLightingUniforms) == sizeof(float) * 28);
+    static_assert(sizeof(BuiltInSpatialLightingUniforms) == sizeof(float) * 28 + sizeof(CloudVolumeViewUniforms));
     static_assert(sizeof(AssetSpatialLightingUniforms) == sizeof(float) * 192);
     static_assert(sizeof(AssetEnvironmentSpatialUniforms) == sizeof(float) * 236);
 
@@ -396,9 +408,11 @@ namespace Keire::RenderBackend
         CloudUniforms Clouds;
         CloudLightingUniforms CloudLighting;
         StarFieldUniforms Stars;
+        SkyColorUniforms SkyColors;
     };
 
-    static_assert(sizeof(SkyUniforms) == sizeof(float) * 124);
+    static_assert(sizeof(SkyUniforms) == sizeof(float) * 132);
+    static_assert(offsetof(SkyUniforms, SkyColors) == 496);
 
     struct GridUniforms final
     {

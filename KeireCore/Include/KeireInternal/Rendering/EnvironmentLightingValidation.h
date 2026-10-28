@@ -3,6 +3,7 @@
 #include "Keire/Rendering/EnvironmentLighting.h"
 
 #include <cmath>
+#include <cstddef>
 #include <optional>
 #include <stdexcept>
 
@@ -55,6 +56,24 @@ namespace Keire::Detail
         if (snapshot->Ambient)
         {
             ValidateEnvironmentAmbient(*snapshot->Ambient);
+        }
+        if (snapshot->SkyColors)
+        {
+            const auto& sky = *snapshot->SkyColors;
+            for (std::size_t channel = 0; channel < sky.Horizon.size(); ++channel)
+            {
+                if (!std::isfinite(sky.Horizon[channel]) || sky.Horizon[channel] < 0.0F ||
+                    sky.Horizon[channel] > 65504.0F || !std::isfinite(sky.Zenith[channel]) ||
+                    sky.Zenith[channel] < 0.0F || sky.Zenith[channel] > 65504.0F)
+                {
+                    throw std::invalid_argument("Sky colors require finite linear HDR channels in [0, 65504].");
+                }
+            }
+            if (!std::isfinite(sky.BlendWeight) || sky.BlendWeight < 0.0F || sky.BlendWeight > 1.0F ||
+                !std::isfinite(sky.GradientExponent) || sky.GradientExponent < 0.1F || sky.GradientExponent > 16.0F)
+            {
+                throw std::invalid_argument("Sky gradient weight or exponent is outside its supported range.");
+            }
         }
         if (snapshot->Time && (!std::isfinite(snapshot->Time->DayFraction) || snapshot->Time->DayFraction < 0.0 ||
                                snapshot->Time->DayFraction >= 1.0 || !std::isfinite(snapshot->Time->SecondsPerDay) ||

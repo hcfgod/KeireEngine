@@ -76,7 +76,8 @@ namespace Keire::RenderBackend
             return;
         if (!RuntimeUiCameraOverlayPipeline)
         {
-            RuntimeUiCameraOverlayPipeline = CreateRuntimeUiPipeline(false, false, SDL_GPU_SAMPLECOUNT_1, ColorFormat);
+            RuntimeUiCameraOverlayPipeline =
+                CreateRuntimeUiPipeline(false, false, SDL_GPU_SAMPLECOUNT_1, SceneColorFormat);
         }
         auto* buffer = UploadRuntimeUiBuffer(commands, std::as_bytes(std::span(geometry.Vertices)), "camera overlay");
 
@@ -104,7 +105,7 @@ namespace Keire::RenderBackend
             SDL_SetGPUScissor(pass, &scissor);
             const auto texture = RuntimeUiTextureBinding(batch.Asset);
             if (!BindRuntimeUiMaterial(commands, pass, batch.Material, RuntimeUiCameraOverlayPipeline, texture, false,
-                                       false, SDL_GPU_SAMPLECOUNT_1, ColorFormat))
+                                       false, SDL_GPU_SAMPLECOUNT_1, SceneColorFormat))
                 continue;
             SDL_DrawGPUPrimitives(pass, batch.VertexCount, 1, batch.FirstVertex, 0);
             ++Statistics.DrawCalls;
@@ -115,15 +116,12 @@ namespace Keire::RenderBackend
         Statistics.RuntimeUiRenderer.RepaintCpuMilliseconds +=
             std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - started).count();
     }
-    void RenderSharedState::RecordFullscreenEffect(SDL_GPUCommandBuffer* commands, RenderSurfaceState& surface,
-                                                   const AssetId material, const bool hdr, const Vector2 time)
+
+    SDL_GPUTexture* RenderSharedState::EnsureFullscreenInput(RenderSurfaceState& surface, const bool hdr)
     {
-        if (!material)
-            return;
         auto& workset = surface.ActiveWorkset();
-        auto* target = hdr ? workset.HdrColor : surface.Resources.WriterColor(surface.ActiveWorksetSlot);
         auto*& input = workset.FullscreenInputs[hdr ? 0 : 1];
-        const auto format = hdr ? SceneColorFormat : ColorFormat;
+        const auto format = SceneColorFormat;
         if (!input)
         {
             SDL_GPUTextureCreateInfo description{};
@@ -142,6 +140,18 @@ namespace Keire::RenderBackend
                 throw std::runtime_error("Fullscreen scene input allocation failed: " + LastSdlError());
             workset.TransientTextures.push_back(input);
         }
+        return input;
+    }
+
+    void RenderSharedState::RecordFullscreenEffect(SDL_GPUCommandBuffer* commands, RenderSurfaceState& surface,
+                                                   const AssetId material, const bool hdr, const Vector2 time)
+    {
+        if (!material)
+            return;
+        auto& workset = surface.ActiveWorkset();
+        auto* target = hdr ? workset.HdrColor : surface.Resources.WriterColor(surface.ActiveWorksetSlot);
+        auto* input = EnsureFullscreenInput(surface, hdr);
+        const auto format = SceneColorFormat;
         const float width = static_cast<float>(surface.Width);
         const float height = static_cast<float>(surface.Height);
         const Color white{1, 1, 1, 1};

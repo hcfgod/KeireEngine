@@ -17,8 +17,9 @@ namespace Keire::RenderBackend
         std::array<float, 4> Geometry{};
         // Coverage, extinction per metre, erosion and scattering anisotropy.
         std::array<float, 4> Density{};
-        // Camera-relative periodic noise origin in pattern units. W is reserved.
+        // Camera-relative periodic noise origin in pattern units. W is scattering occlusion.
         std::array<float, 4> PatternOrigin{};
+        // RGB scattering albedo; W is multiple-scattering contribution.
         std::array<float, 4> Albedo{};
         // Enabled, deterministic seed, view samples and shadow samples.
         std::array<std::uint32_t, 4> Quality{};
@@ -66,6 +67,8 @@ namespace Keire::RenderBackend
         result.Density = {static_cast<float>(settings.Coverage), static_cast<float>(settings.ExtinctionPerMeter),
                           static_cast<float>(settings.DetailAmount), static_cast<float>(settings.Anisotropy)};
         result.Quality = {settings.Enabled ? 1U : 0U, settings.Seed, settings.ViewSteps, settings.ShadowSteps};
+        result.PatternOrigin[3] = static_cast<float>(settings.MultipleScatteringOcclusion);
+        result.Albedo[3] = static_cast<float>(settings.MultipleScatteringContribution);
         return result;
     }
 } // namespace Keire::RenderBackend

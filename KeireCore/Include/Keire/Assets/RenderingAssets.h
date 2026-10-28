@@ -19,7 +19,7 @@
 
 namespace Keire
 {
-    inline constexpr std::uint32_t ShaderAssetSchemaVersion = 3;
+    inline constexpr std::uint32_t ShaderAssetSchemaVersion = 4;
     inline constexpr std::size_t ShaderAssetPassRoleHardLimit = 32;
     /// Retained UI: float3 pixel position, float4 color, float2 UV; optional float perspective W at location 3.
     /// Multiply reconstructed clip position by W for perspective interpolation; viewport uniform is b0/space1.
@@ -177,6 +177,14 @@ namespace Keire
         std::vector<ShaderVariant> Variants;
         bool UsesImageBasedLighting = false;
         std::uint8_t SpatialLightingAbiVersion = 0;
+        /// Version 1 appends cloud view data to spatial b3, or uses b2 for unlit mesh shaders. Zero is legacy.
+        /// Version 2 also appends one combined 3D cloud-noise texture/sampler after all other fragment samplers.
+        /// Version 3 appends shape controls to the 272-byte view prefix, for a 288-byte view block.
+        /// Version 4 appends regional coverage controls, for a 304-byte view block.
+        /// Version 5 appends finite RGB atmosphere transport, for a 416-byte view block.
+        /// Version 6 appends normalized cloud height profiles, for a 432-byte view block.
+        /// Version 7 appends independent weather controls, for a 448-byte view block.
+        std::uint32_t VolumeLightingAbiVersion = 0;
         bool UsesVertexMaterialParameters = false;
         /// Additional graph-authored combined texture/sampler slots and fragment read-only buffers.
         std::uint8_t UserResourceSlots = 0;

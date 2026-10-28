@@ -6,6 +6,7 @@
 #include <imgui_stdlib.h>
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <cfloat>
 #include <cmath>
@@ -16,6 +17,29 @@
 
 namespace Keire
 {
+    bool UiFrame::ColorEditHdrRgb(const std::string_view label, std::array<float, 3>& color)
+    {
+        RequireActive("ColorEditHdrRgb");
+        const auto nonfinite = [](const float value) { return !std::isfinite(value); };
+        if (std::ranges::any_of(color, nonfinite))
+        {
+            throw std::invalid_argument("HDR color components must be finite.");
+        }
+        auto candidate = color;
+        const std::string safeLabel(label);
+        const bool changed =
+            ImGui::ColorEdit3(safeLabel.c_str(), candidate.data(), ImGuiColorEditFlags_HDR | ImGuiColorEditFlags_Float);
+        if (std::ranges::any_of(candidate, nonfinite))
+        {
+            throw std::invalid_argument("HDR color components must remain finite.");
+        }
+        if (changed)
+        {
+            color = candidate;
+        }
+        return changed;
+    }
+
     bool UiFrame::ColorEditHdr(std::string_view label, UiColor& color)
     {
         RequireActive("ColorEditHdr");

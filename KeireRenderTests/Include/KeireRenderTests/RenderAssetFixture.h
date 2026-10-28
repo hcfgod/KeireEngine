@@ -56,7 +56,8 @@ namespace KeireRenderTests::Detail
                                     const bool parameterDrivenVertexOffset = false,
                                     const bool includeTransparentShaderGraph = false,
                                     const bool includeOcclusionStressMesh = false,
-                                    const Keire::SkinningMethod skinning = Keire::SkinningMethod::LinearBlend)
+                                    const Keire::SkinningMethod skinning = Keire::SkinningMethod::LinearBlend,
+                                    const bool cullBackFaces = false)
             : Root(std::filesystem::temp_directory_path() /
                    ("Keire-RenderAssetTests-" +
                     std::to_string(std::chrono::steady_clock::now().time_since_epoch().count())))
@@ -179,7 +180,7 @@ namespace KeireRenderTests::Detail
                 if (!output)
                     throw std::runtime_error("The render-test legacy shader fixture could not be written.");
             }
-            const std::string shaderManifest = R"({
+            std::string shaderManifest = R"({
   "schemaVersion": 2,
   "source": "Assets/Shaders/DefaultUnlit.hlsl",
   "vertexLayoutVersion": 3,
@@ -210,6 +211,11 @@ namespace KeireRenderTests::Detail
     {"name": "RoughnessTexture", "type": "Texture2D", "semantic": "Roughness", "default": null}
   ]
 })";
+            if (cullBackFaces)
+            {
+                const std::string_view culling = "\"culling\": \"None\"";
+                shaderManifest.replace(shaderManifest.find(culling), culling.size(), "\"culling\": \"Back\"");
+            }
             Shader = Database->CreateAsset("Shader.keireshader", shaderImporter,
                                            std::as_bytes(std::span(shaderManifest.data(), shaderManifest.size())));
             auto legacyShaderManifest = shaderManifest;

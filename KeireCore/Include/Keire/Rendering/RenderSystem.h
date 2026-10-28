@@ -544,6 +544,10 @@ namespace Keire
         std::uint64_t Frame = 0;
         std::uint32_t Passes = 0;
         std::uint32_t Surfaces = 0;
+        /// Cloud-light dispatches recorded for Frame, not for the asynchronously observed GpuTimingFrame.
+        std::uint32_t CloudLightCacheBuilds = 0;
+        std::uint32_t CloudLightCacheReuses = 0;
+        std::uint64_t CloudLightCacheCells = 0;
         std::uint32_t DrawCalls = 0;
         std::uint32_t DepthDrawCalls = 0;
         std::uint32_t ShadowDrawCalls = 0;

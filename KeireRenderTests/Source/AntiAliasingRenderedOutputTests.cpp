@@ -459,3 +459,91 @@ TEST_CASE("TAA readback preserves a recorded baseline" * doctest::skip())
         }
     }
 }
+
+namespace
+{
+    class DarkDisplayReadbackLayer final : public Keire::Layer
+    {
+      public:
+        explicit DarkDisplayReadbackLayer(std::vector<std::vector<std::uint8_t>>& frames)
+            : Layer("Dark display readback"), m_Frames(frames)
+        {
+        }
+
+      protected:
+        void OnAttach() override
+        {
+            m_Scene = Keire::CreateRef<Keire::Scene>(Keire::AssetId::Parse("711ace00-0000-4000-8000-000000000033"),
+                                                     Keire::SceneAsset::EmptyDefinition("Dark display readback"),
+                                                     Keire::ComponentRegistry::CreateDefault());
+            Keire::RenderSurfaceSpecification surface;
+            surface.Name = "Dark display readback";
+            surface.Width = SurfaceSize;
+            surface.Height = SurfaceSize;
+            surface.SampleCount = Keire::RenderSampleCount::One;
+            surface.ClearColor = {0.01F, 0.02F, 0.04F, 0.375F};
+            m_View = Owner().Renderer()->CreateView(surface);
+            Keire::RenderCamera camera;
+            camera.Projection = Keire::Math::Perspective(55.0F, 1.0F, 0.1F, 100.0F);
+            camera.ClearColor = surface.ClearColor;
+            m_View->SetCamera(camera);
+        }
+
+        void OnDetach() noexcept override
+        {
+            if (m_Scene)
+            {
+                m_Scene->Close();
+            }
+            m_View.Reset();
+            m_Scene.Reset();
+        }
+
+        void OnUpdate(const Keire::Time&) override
+        {
+            if (m_Submitted != 0U)
+            {
+                m_Frames.push_back(
+                    Keire::RenderSystemInternalAccess::ReadbackRGBA8(*Owner().Renderer(), *m_View->Surface()));
+            }
+            if (m_Submitted == 6U)
+            {
+                Owner().RequestExit();
+                return;
+            }
+            Keire::RenderEnvironmentSettings environment;
+            environment.SkyVisible = false;
+            environment.AmbientIntensity = 0.0F;
+            environment.RequestedRenderPath = Keire::RenderPath::ForwardPlus;
+            environment.RequestedGlobalIllumination = Keire::GlobalIlluminationMode::Disabled;
+            environment.RequestedAntiAliasing =
+                m_Submitted < 2U ? Keire::RenderAntiAliasingMode::None : Keire::RenderAntiAliasingMode::Taa;
+            Owner().Renderer()->Submit({m_Scene, m_View, false, environment});
+            ++m_Submitted;
+        }
+
+      private:
+        std::vector<std::vector<std::uint8_t>>& m_Frames;
+        Keire::Ref<Keire::Scene> m_Scene;
+        Keire::Ref<Keire::RenderView> m_View;
+        std::uint32_t m_Submitted = 0U;
+    };
+} // namespace
+
+TEST_CASE("RGBA8 display readback preserves dark colors and alpha across temporal history")
+{
+    std::vector<std::vector<std::uint8_t>> frames;
+    Keire::Application application(RenderTestSpecification());
+    (void)application.PushLayer(std::make_unique<DarkDisplayReadbackLayer>(frames));
+    REQUIRE(application.Run() == 0);
+    REQUIRE(frames.size() == 6U);
+    for (const auto& frame : frames)
+    {
+        const auto color = MeasureCenter(frame);
+        // Independent expected display values for ACES applied to the authored linear clear color.
+        CHECK(std::abs(color.Red - (12.3F / 255.0F)) <= 1.0F / 255.0F);
+        CHECK(std::abs(color.Green - (26.3F / 255.0F)) <= 1.0F / 255.0F);
+        CHECK(std::abs(color.Blue - (49.4F / 255.0F)) <= 1.0F / 255.0F);
+        CHECK(std::abs(color.Alpha - (96.0F / 255.0F)) <= 1.0F / 255.0F);
+    }
+}

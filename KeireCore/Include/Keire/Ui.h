@@ -5,6 +5,7 @@
 #include "Keire/Ref.h"
 #include "Keire/UiWorkspace.h"
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
@@ -602,6 +603,8 @@ namespace Keire
         // Request selection for this frame only; false preserves normal user-controlled tab selection.
         [[nodiscard]] UiTabItemScope BeginTabItem(std::string_view label, bool* open, bool select);
         [[nodiscard]] UiTreeNodeScope BeginTreeNode(std::string_view label, bool selected = false);
+        // Settings sections toggle with a single click anywhere on the framed heading.
+        [[nodiscard]] UiTreeNodeScope BeginSection(std::string_view label);
         [[nodiscard]] UiDisabledScope BeginDisabled(bool disabled = true);
         [[nodiscard]] UiIdScope PushId(std::string_view id);
         [[nodiscard]] UiMainMenuBarScope BeginMainMenuBar();
@@ -689,6 +692,8 @@ namespace Keire
         [[nodiscard]] bool ColorEdit(std::string_view label, UiColor& color);
         /// Shader color components may exceed the display-color range, but must remain finite.
         [[nodiscard]] bool ColorEditHdr(std::string_view label, UiColor& color);
+        /// RGB-only HDR picker; components must remain finite. No opacity control is displayed.
+        [[nodiscard]] bool ColorEditHdrRgb(std::string_view label, std::array<float, 3>& color);
         [[nodiscard]] Ref<UiImage> CreateImage(std::uint32_t width, std::uint32_t height,
                                                std::span<const std::byte> rgbaPixels);
         void Image(const Ref<UiImage>& image, UiSize size = {});

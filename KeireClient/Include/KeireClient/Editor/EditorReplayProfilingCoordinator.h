@@ -48,6 +48,7 @@ namespace KeireEditor
         SustainedProfilerCapture Sustained;
         bool SustainedRendererTelemetry = false;
         std::string SustainedError;
+        std::string SustainedExportStatus;
         bool Paused = false;
         bool ShowAllManagedCallbacks = false;
         bool ShowAllHotspots = false;

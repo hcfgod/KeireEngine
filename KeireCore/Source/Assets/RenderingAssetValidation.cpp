@@ -29,6 +29,14 @@ namespace Keire::Detail
         constexpr auto OcclusionSupportMask = static_cast<std::uint8_t>(ShaderOcclusionSupport::ConservativeBounds |
                                                                         ShaderOcclusionSupport::DepthOnlyGeometryMatch);
         const auto occlusionSupport = static_cast<std::uint8_t>(definition.OcclusionSupport);
+        const bool unlitVolume = !definition.ReceivesShadows && !definition.UsesForwardPlus &&
+                                 !definition.UsesImageBasedLighting && definition.SpatialLightingAbiVersion == 0U;
+        if (definition.VolumeLightingAbiVersion > 7U ||
+            (definition.VolumeLightingAbiVersion >= 1U &&
+             (definition.VertexLayoutVersion != 3U || (!unlitVolume && definition.SpatialLightingAbiVersion != 3U))))
+        {
+            throw std::invalid_argument("Volume-lighting ABI v1 requires an unlit or spatial ABI v3 mesh shader.");
+        }
         if (definition.SchemaVersion != ShaderAssetSchemaVersion ||
             (definition.VertexLayoutVersion < 1 || definition.VertexLayoutVersion > UiShaderVertexLayoutVersion) ||
             definition.Topology > ShaderPrimitiveTopology::PointList || definition.Culling > ShaderCullMode::Back ||
@@ -122,7 +130,7 @@ namespace Keire::Detail
             if (property.TextureTransformProperty)
             {
                 const auto transform = std::ranges::find(definition.Properties, property.TextureTransformProperty,
-                                                        &ShaderPropertyDefinition::Id);
+                                                         &ShaderPropertyDefinition::Id);
                 if (property.Type != ShaderPropertyType::Texture2D || transform == definition.Properties.end() ||
                     transform->Type != ShaderPropertyType::Vector4)
                     throw std::invalid_argument("Texture transform must reference an existing Vector4 property.");
@@ -135,7 +143,8 @@ namespace Keire::Detail
         constexpr std::size_t portableFragmentSamplerLimit = 16;
         const auto reservedSamplers = (definition.ReceivesShadows ? 2U : 0U) +
                                       (definition.UsesImageBasedLighting ? 2U : 0U) +
-                                      (definition.SpatialLightingAbiVersion >= 2U ? 5U : 0U) + (ui ? 1U : 0U);
+                                      (definition.SpatialLightingAbiVersion >= 2U ? 5U : 0U) + (ui ? 1U : 0U) +
+                                      (definition.VolumeLightingAbiVersion >= 2U ? 1U : 0U);
         if (textureProperties + definition.UserResourceSlots + reservedSamplers > portableFragmentSamplerLimit)
             throw std::invalid_argument(
                 "Shader material textures and fixed lighting resources exceed the portable 16-sampler limit.");

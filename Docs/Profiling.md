@@ -63,7 +63,12 @@ from the warp is suppressed before gameplay look input resumes.
 The Profiler offers **Start 10-second capture** and **Start 30-second capture**, with two seconds of warmup and
 at most 50,000 summaries. Recording continues with the panel hidden. **Stop sustained capture** marks it incomplete.
 Sequence gaps, clock errors and overflow remain explicit failures. **Copy sustained CSV** is available afterward;
-export formatting and percentile sorting occur outside the measured interval.
+**Save sustained CSV to project diagnostics** also writes
+`Library/Diagnostics/Profiler/latest-sustained.csv` atomically, replacing the previous export. Copy or rename that file
+before saving a second comparison run. A failed save leaves the in-memory capture available for retry; closing the
+editor without saving loses it. Export formatting and percentile sorting occur outside the measured interval.
+Renderer-enabled exports include CPU command recording and submission durations to help investigate driver stalls;
+renderer observations retain their own frame IDs and are not joined to application frames.
 
 Average loop rate and P95/P99 use consecutive profiler frame-start timestamps, including work outside profiled spans.
 The first summary anchors the intervals: N summaries yield N-1 measured intervals. CSV retains profiled-body durations,

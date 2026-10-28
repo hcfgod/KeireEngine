@@ -413,6 +413,9 @@ namespace Keire::RenderBackend
         const auto& environment = requestedEnvironment.HasDiffuseIrradiance ? requestedEnvironment : DefaultSkyTexture;
         const auto illumination = ResolveGlobalIlluminationPolicy(
             surface.ActiveFeatureSelection.EffectiveGlobalIllumination, packet.Environment.RequestedIrradynQuality);
+        const auto cloudVolume = phase == SceneDrawPhase::Transparent
+                                     ? MakeCloudVolumeViewUniforms(packet, surface.Width, surface.Height)
+                                     : CloudVolumeViewUniforms{};
         AssetEnvironmentUniforms environmentUniforms{};
         environmentUniforms.DiffuseIrradiance = environment.DiffuseIrradiance;
         environmentUniforms.Parameters = {
@@ -611,14 +614,15 @@ namespace Keire::RenderBackend
                 CloudObserverWithinLocalDomain({observer.X, observer.Y, observer.Z}) &&
                 std::any_of(packet.Environment.Clouds.Layers.begin(), packet.Environment.Clouds.Layers.end(),
                             [](const CloudLayer& layer) { return layer.Enabled; });
-            if (HasProceduralSky(packet.Environment) || cloudsEnabled || !environment.Empty())
+            if (HasProceduralSky(packet.Environment) || packet.SkyColors.HorizonWeight[3] > 0.0F || cloudsEnabled ||
+                !environment.Empty())
             {
                 const float textureLayout = environment.Empty() ? -1.0F
                                                                 : static_cast<float>(environment.EnvironmentLayout) +
                                                                       (environment.HdrEncoded ? 16.0F : 0.0F);
                 const auto sky =
                     MakeSkyUniforms(camera, packet.Environment, lighting, observer, packet.CloudAdvectionPhase,
-                                    cloudsEnabled, textureLayout, packet.StarTwinklePhase);
+                                    cloudsEnabled, textureLayout, packet.StarTwinklePhase, packet.SkyColors);
                 const SDL_GPUTextureSamplerBinding binding{
                     environment.Empty() ? WhiteTexture.Texture : environment.Texture,
                     environment.Empty() ? WhiteTexture.Sampler : environment.Sampler};
@@ -909,12 +913,28 @@ namespace Keire::RenderBackend
                         gpuSpatialSelectionValid ? draw.SpatialSelectionRecordIndex : InvalidAssetSpatialSelectionIndex;
                     selectedSpatialUniforms.SpatialSelection[1] = item.ContributionOrder;
                     const AssetEnvironmentSpatialUniforms combined{environmentUniforms, selectedSpatialUniforms};
-                    SDL_PushGPUFragmentUniformData(commands, 3, &combined, sizeof(combined));
+                    if (material->VolumeLightingAbiVersion >= 1U)
+                    {
+                        const AssetEnvironmentVolumeUniforms volumeUniforms{combined, cloudVolume};
+                        SDL_PushGPUFragmentUniformData(
+                            commands, 3, &volumeUniforms,
+                            sizeof(combined) + CloudVolumeUniformByteSize(material->VolumeLightingAbiVersion));
+                    }
+                    else
+                    {
+                        SDL_PushGPUFragmentUniformData(commands, 3, &combined, sizeof(combined));
+                    }
+                }
+                else if (material->VolumeLightingAbiVersion >= 1U)
+                {
+                    SDL_PushGPUFragmentUniformData(commands, 2, &cloudVolume,
+                                                   CloudVolumeUniformByteSize(material->VolumeLightingAbiVersion));
+                    fragmentSlot2Binding = FragmentSlot2Binding::None;
                 }
                 else if (material->UsesImageBasedLighting)
                     SDL_PushGPUFragmentUniformData(commands, 3, &environmentUniforms, sizeof(environmentUniforms));
                 if (!material->Textures.empty() || material->ReceivesShadows || material->UsesImageBasedLighting ||
-                    material->UsesSpatialLighting)
+                    material->UsesSpatialLighting || material->VolumeLightingAbiVersion >= 2U)
                 {
                     std::array<SDL_GPUTextureSamplerBinding, 40> bindings{};
                     std::ranges::copy(material->Textures, bindings.begin());
@@ -962,6 +982,11 @@ namespace Keire::RenderBackend
                                           bindings.begin() + static_cast<std::ptrdiff_t>(bindingCount));
                         bindingCount += spatialBindings.size();
                     }
+                    if (material->VolumeLightingAbiVersion >= 2U)
+                    {
+                        const auto& noise = EnsureCloudNoiseTexture();
+                        bindings[bindingCount++] = {noise.Texture, noise.Sampler};
+                    }
                     SDL_BindGPUFragmentSamplers(pass, 0, bindings.data(), static_cast<std::uint32_t>(bindingCount));
                 }
                 auto* currentVertices = item.SkinnedAssetVertices ? item.SkinnedAssetVertices : mesh.AssetVertices;
@@ -1008,7 +1033,8 @@ namespace Keire::RenderBackend
                      packet.Environment.AmbientColor.Blue, packet.Environment.AmbientIntensity},
                     {lighting.Direction.X, lighting.Direction.Y, lighting.Direction.Z, lighting.Enabled ? 1.0F : 0.0F},
                     {lighting.ColorAndIntensity.Red, lighting.ColorAndIntensity.Green, lighting.ColorAndIntensity.Blue,
-                     lighting.ColorAndIntensity.Alpha}};
+                     lighting.ColorAndIntensity.Alpha},
+                    cloudVolume};
                 if (builtInDeferredGBuffer)
                 {
                     object.LightDirection = selectedSpatialUniforms.LightmapScaleOffset;
@@ -1038,8 +1064,11 @@ namespace Keire::RenderBackend
                     SDL_PushGPUFragmentUniformData(commands, 3, &builtInSpatialUniforms,
                                                    sizeof(builtInSpatialUniforms));
                     const auto& spatialBindings = spatialContextFor(item.ContributionOrder).Bindings;
-                    const std::array builtInBindings{shadowBindings[0], shadowBindings[1], spatialBindings[0],
-                                                     spatialBindings[1], environmentBindings[0]};
+                    const auto& noise = EnsureCloudNoiseTexture();
+                    const std::array builtInBindings{
+                        shadowBindings[0],      shadowBindings[1],
+                        spatialBindings[0],     spatialBindings[1],
+                        environmentBindings[0], SDL_GPUTextureSamplerBinding{noise.Texture, noise.Sampler}};
                     SDL_BindGPUFragmentSamplers(pass, 0, builtInBindings.data(),
                                                 static_cast<std::uint32_t>(builtInBindings.size()));
                 }
@@ -1433,68 +1462,6 @@ namespace Keire::RenderBackend
         }
         SDL_EndGPURenderPass(pass);
         ++Statistics.Passes;
-    }
-
-    void RenderSharedState::RecordToneMap(SDL_GPUCommandBuffer* commands, const RenderSurfaceState& surface,
-                                          const RenderAntiAliasingMode antiAliasing,
-                                          const bool temporalHistoryContinuous, const float bloomIntensity)
-    {
-        if (!std::isfinite(bloomIntensity) || bloomIntensity < 0.0F || bloomIntensity > 16.0F ||
-            (bloomIntensity > 0.0F && !surface.ActiveWorkset().BloomResult))
-        {
-            throw std::invalid_argument("Tone mapping requires a valid bloom intensity and a prepared bloom texture.");
-        }
-        if (!ToneMapPipeline || !ToneMapSampler || !surface.ActiveWorkset().HdrColor ||
-            !surface.Resources.WriterColor(surface.ActiveWorksetSlot) ||
-            !surface.Resources.PublishedTemporalHistory() ||
-            !surface.Resources.WriterTemporalHistory(surface.ActiveWorksetSlot) || !BlackDataTexture.Texture)
-            throw std::logic_error("Tone-map resources are unavailable for an active render surface.");
-        SDL_GPUColorTargetInfo target{};
-        target.texture = surface.Resources.WriterColor(surface.ActiveWorksetSlot);
-        target.load_op = SDL_GPU_LOADOP_DONT_CARE;
-        target.store_op = SDL_GPU_STOREOP_STORE;
-        SDL_GPURenderPass* pass = SDL_BeginGPURenderPass(commands, &target, 1, nullptr);
-        if (!pass)
-            throw std::runtime_error("SDL_BeginGPURenderPass(tone map) failed: " + LastSdlError());
-        auto* const velocity = surface.ActiveWorkset().GBufferVelocity ? surface.ActiveWorkset().GBufferVelocity
-                                                                       : BlackDataTexture.Texture;
-        const std::array bindings{
-            SDL_GPUTextureSamplerBinding{surface.ActiveWorkset().HdrColor, ToneMapSampler},
-            SDL_GPUTextureSamplerBinding{surface.Resources.PublishedTemporalHistory(), ToneMapSampler},
-            SDL_GPUTextureSamplerBinding{velocity, ToneMapSampler},
-            SDL_GPUTextureSamplerBinding{bloomIntensity > 0.0F ? surface.ActiveWorkset().BloomResult
-                                                               : BlackDataTexture.Texture,
-                                         ToneMapSampler}};
-        const bool taa = antiAliasing == RenderAntiAliasingMode::Taa;
-        const bool historyValid = taa && temporalHistoryContinuous && surface.TemporalHistoryValid &&
-                                  surface.TemporalHistoryPath == surface.ActiveFeatureSelection.EffectivePath;
-        const Vector4 parameters{1.0F / static_cast<float>(std::max(surface.Width, 1U)),
-                                 1.0F / static_cast<float>(std::max(surface.Height, 1U)),
-                                 taa                                            ? 2.0F
-                                 : antiAliasing == RenderAntiAliasingMode::Fxaa ? 1.0F
-                                                                                : 0.0F,
-                                 historyValid ? 1.0F : 0.0F};
-        SDL_BindGPUGraphicsPipeline(pass, ToneMapPipeline);
-        SDL_BindGPUFragmentSamplers(pass, 0, bindings.data(), static_cast<std::uint32_t>(bindings.size()));
-        const std::array toneMapUniforms{parameters, Vector4{bloomIntensity, 0.0F, 0.0F, 0.0F}};
-        SDL_PushGPUFragmentUniformData(commands, 0, toneMapUniforms.data(), sizeof(toneMapUniforms));
-        SDL_DrawGPUPrimitives(pass, 3, 1, 0, 0);
-        SDL_EndGPURenderPass(pass);
-        ++Statistics.Passes;
-
-        if (taa)
-        {
-            auto* copy = SDL_BeginGPUCopyPass(commands);
-            if (!copy)
-                throw std::runtime_error("SDL_BeginGPUCopyPass(temporal history) failed: " + LastSdlError());
-            const SDL_GPUTextureLocation source{
-                surface.Resources.WriterColor(surface.ActiveWorksetSlot), 0, 0, 0, 0, 0};
-            const SDL_GPUTextureLocation destination{
-                surface.Resources.WriterTemporalHistory(surface.ActiveWorksetSlot), 0, 0, 0, 0, 0};
-            SDL_CopyGPUTextureToTexture(copy, &source, &destination, surface.Width, surface.Height, 1, false);
-            SDL_EndGPUCopyPass(copy);
-            ++Statistics.Passes;
-        }
     }
 
 } // namespace Keire::RenderBackend

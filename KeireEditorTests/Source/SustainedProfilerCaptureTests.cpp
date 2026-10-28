@@ -204,3 +204,47 @@ TEST_CASE("Sustained profiler rejects renderer attachment after terminal observa
     capture.Stop();
     CHECK(capture.Csv().find(",9,0,1,0,0,0,0,,0,0") != std::string::npos);
 }
+
+TEST_CASE("Sustained profiler CSV preserves submission hitches and missing observation columns")
+{
+    KeireEditor::SustainedProfilerCapture capture;
+    capture.Start(10, Frame(1, 0), 0, true);
+    REQUIRE(capture.Observe(Frame(2, 1000)));
+    Keire::RenderStatistics statistics;
+    statistics.Frame = 9;
+    statistics.GpuSubmissionMilliseconds = 74.0F;
+    statistics.CommandRecordingMilliseconds = 0.5F;
+    statistics.CloudLightCacheBuilds = 2;
+    statistics.CloudLightCacheReuses = 1;
+    statistics.CloudLightCacheCells = 1098306;
+    capture.ObserveRenderer(2, &statistics);
+    REQUIRE(capture.Observe(Frame(3, 75000)));
+    capture.ObserveRenderer(3, nullptr);
+    capture.Stop();
+    const auto csv = capture.Csv();
+    CHECK(csv.find("maximum_us=74000") != std::string::npos);
+    CHECK(csv.find("cpu_submission_ms,command_recording_ms") != std::string::npos);
+    CHECK(csv.find(",74,0.5,2,1,1098306\n") != std::string::npos);
+    std::istringstream rows(csv);
+    std::string row;
+    std::size_t expectedColumns = 0;
+    std::size_t dataRows = 0;
+    while (std::getline(rows, row))
+    {
+        if (row.empty() || row.front() == '#')
+        {
+            continue;
+        }
+        const auto columns = static_cast<std::size_t>(std::count(row.begin(), row.end(), ',')) + 1;
+        if (expectedColumns == 0)
+        {
+            expectedColumns = columns;
+        }
+        else
+        {
+            CHECK(columns == expectedColumns);
+            ++dataRows;
+        }
+    }
+    CHECK(dataRows == 2);
+}

@@ -17,7 +17,7 @@ namespace KeireEditor::Detail
     inline bool DrawEnvironmentShadowControls(Keire::UiFrame& ui, const Keire::UiThemeDefinition& theme,
                                               ProjectSettingsDocument& document)
     {
-        auto section = ui.BeginTreeNode("Daily Light Shadows");
+        auto section = ui.BeginSection("Daily Light Shadows");
         if (!section)
         {
             return false;
@@ -77,7 +77,8 @@ namespace KeireEditor::Detail
                                                "baked lighting.");
         if (changed)
         {
-            document.UpdateEnvironmentLighting(LightingProfile(profile.Ownership(), profile.Keyframes(), shadows));
+            document.UpdateEnvironmentLighting(
+                LightingProfile(profile.Ownership(), profile.Keyframes(), shadows, profile.Sky()));
         }
         if (ui.Button("Reset Daily Shadows"))
         {
@@ -95,7 +96,7 @@ namespace KeireEditor::Detail
                                                 std::size_t* selectedKey = nullptr)
     {
         ui.Text("Daily Directional Lighting");
-        if (auto help = ui.BeginTreeNode("Lighting behavior and preset help"); help)
+        if (auto help = ui.BeginSection("Lighting behavior and preset help"); help)
         {
             ui.TextColoredWrapped(theme.MutedText,
                                   "Replaces the authored directional light, with optional ambient animation. Sky and "
@@ -111,7 +112,7 @@ namespace KeireEditor::Detail
         auto profile = document.EnvironmentLighting();
         if (ui.Button("Apply Daylight Preset"))
         {
-            document.UpdateEnvironmentLighting(DaylightPreset(profile.Shadows()));
+            document.UpdateEnvironmentLighting(DaylightPreset(profile.Shadows(), profile.Sky()));
             return true;
         }
         bool automatic = profile.Ownership() == LightingOwnership::Environment;
@@ -136,7 +137,7 @@ namespace KeireEditor::Detail
                  rendering.AmbientIntensity}));
             return true;
         }
-        if (auto help = ui.BeginTreeNode("Ambient animation help"); help)
+        if (auto help = ui.BeginSection("Ambient animation help"); help)
         {
             ui.TextColoredWrapped(theme.MutedText,
                                   "Ambient animation replaces the project's ambient color and intensity "
@@ -210,9 +211,9 @@ namespace KeireEditor::Detail
             std::optional<Keire::UiTreeNodeScope> node;
             if (selectedKey == nullptr)
             {
-                node.emplace(ui.BeginTreeNode("Key " + std::to_string(index + 1) + " - " +
-                                              EnvironmentClockLabel(keys[index].DayFraction) + " - phase " +
-                                              std::to_string(keys[index].DayFraction) + "###LightingKey"));
+                node.emplace(ui.BeginSection("Key " + std::to_string(index + 1) + " - " +
+                                             EnvironmentClockLabel(keys[index].DayFraction) + " - phase " +
+                                             std::to_string(keys[index].DayFraction) + "###LightingKey"));
             }
             if (node && !*node)
             {

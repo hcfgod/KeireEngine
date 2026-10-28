@@ -18,7 +18,7 @@ namespace KeireEditor::Detail
         ui.TextColoredWrapped(theme.MutedText, preview.Playing() ? "Playing - temporary edit-mode preview"
                                                                  : "Paused - temporary edit-mode preview");
         const bool wideTransport = ui.ContentAvailable().Width >= 360.0F;
-        if (auto help = ui.BeginTreeNode("How time preview works"); help)
+        if (auto help = ui.BeginSection("How time preview works"); help)
         {
             ui.TextColoredWrapped(
                 theme.MutedText,
@@ -66,7 +66,7 @@ namespace KeireEditor::Detail
         {
             preview.Seek(state.Day, state.DayFraction);
         }
-        if (auto advanced = ui.BeginTreeNode("Day and playback settings"); advanced)
+        if (auto advanced = ui.BeginSection("Day and playback settings"); advanced)
         {
             ui.Text("Preview Day");
             ui.SetNextItemWidth(-1.0F);

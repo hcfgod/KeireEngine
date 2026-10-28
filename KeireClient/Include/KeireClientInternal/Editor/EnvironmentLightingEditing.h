@@ -58,12 +58,12 @@ namespace KeireEditor::Detail
         {
             key.Ambient = enabled ? std::optional(baseline) : std::nullopt;
         }
-        return LightingProfile(profile.Ownership(), std::move(keys), profile.Shadows());
+        return LightingProfile(profile.Ownership(), std::move(keys), profile.Shadows(), profile.Sky());
     }
 
     [[nodiscard]] inline LightingProfile ResetLightingShadows(const LightingProfile& profile)
     {
-        return LightingProfile(profile.Ownership(), profile.Keyframes(), {});
+        return LightingProfile(profile.Ownership(), profile.Keyframes(), {}, profile.Sky());
     }
 
     [[nodiscard]] inline LightingProfile
@@ -87,7 +87,7 @@ namespace KeireEditor::Detail
         }
         auto keys = existing;
         keys[index] = replacement;
-        return LightingProfile(profile.Ownership(), std::move(keys), profile.Shadows());
+        return LightingProfile(profile.Ownership(), std::move(keys), profile.Shadows(), profile.Sky());
     }
 
     [[nodiscard]] inline LightingProfile SetLightingOwnership(const LightingProfile& profile, const bool automatic)
@@ -107,7 +107,7 @@ namespace KeireEditor::Detail
                       [](const auto& left, const auto& right) { return left.DayFraction < right.DayFraction; });
         }
         return LightingProfile(automatic ? LightingOwnership::Environment : LightingOwnership::Authored,
-                               std::move(keys), profile.Shadows());
+                               std::move(keys), profile.Shadows(), profile.Sky());
     }
 
     // Insert in the largest cyclic interval, inheriting the preceding key's art settings.
@@ -135,7 +135,7 @@ namespace KeireEditor::Detail
         keys.push_back(added);
         std::sort(keys.begin(), keys.end(),
                   [](const auto& left, const auto& right) { return left.DayFraction < right.DayFraction; });
-        return LightingProfile(profile.Ownership(), std::move(keys), profile.Shadows());
+        return LightingProfile(profile.Ownership(), std::move(keys), profile.Shadows(), profile.Sky());
     }
 
     [[nodiscard]] inline LightingProfile InsertLightingKeyAtPhase(const LightingProfile& profile, const double phase)
@@ -167,7 +167,7 @@ namespace KeireEditor::Detail
         Keire::Detail::EnvironmentLightingKeyframe added{
             phase, azimuth, elevation, sample->LinearColor, sample->Intensity, sample->Ambient};
         keys.insert(insertion, added);
-        return LightingProfile(profile.Ownership(), std::move(keys), profile.Shadows());
+        return LightingProfile(profile.Ownership(), std::move(keys), profile.Shadows(), profile.Sky());
     }
 
     [[nodiscard]] inline LightingProfile RemoveLightingKey(const LightingProfile& profile, const std::size_t index)
@@ -178,6 +178,6 @@ namespace KeireEditor::Detail
         }
         auto keys = profile.Keyframes();
         keys.erase(keys.begin() + static_cast<std::ptrdiff_t>(index));
-        return LightingProfile(profile.Ownership(), std::move(keys), profile.Shadows());
+        return LightingProfile(profile.Ownership(), std::move(keys), profile.Shadows(), profile.Sky());
     }
 } // namespace KeireEditor::Detail

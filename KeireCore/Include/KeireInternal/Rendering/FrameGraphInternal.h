@@ -246,6 +246,7 @@ namespace Keire::RenderBackend
         FrameGraphPass Opaque;
         FrameGraphPass ResolveDepth;
         FrameGraphPass Sky;
+        FrameGraphPass CloudVolume;
         FrameGraphPass Transparency;
         FrameGraphPass IrradynTrace;
         FrameGraphPass IrradynComposite;
