@@ -28,6 +28,17 @@ void CSMain(uint3 id : SV_DispatchThreadID)
     }
     const CloudVolumeParameters parameters = MakeCloudVolumeParameters(VolumeView);
     const float3 position = GridOrigin.xyz + float3(id) * CellSize.xyz;
+    if (parameters.PlanetaryCloud.Controls.x != 0U)
+    {
+        const float altitude = PlanetaryCloudAltitude(position, parameters.PlanetaryCloud);
+        const float margin = 2.0F * length(CellSize.xyz) + VolumeCloudBaseHeightVariation(parameters);
+        if (altitude < parameters.BaseHeight - margin ||
+            altitude > parameters.BaseHeight + parameters.Thickness + margin)
+        {
+            LightTransmission[index] = 1.0F.xxxx;
+            return;
+        }
+    }
     const uint shadowSteps = clamp(parameters.ShadowSteps, 1U, 16U);
     const float depth = any(VolumeView.SunRadiance.xyz > 0.0F) ?
         VolumeCloudLightOpticalDepth(position, VolumeView.SunDirection.xyz, parameters, shadowSteps) : 0.0F;

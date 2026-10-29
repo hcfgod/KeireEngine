@@ -3,6 +3,7 @@
 #include "Keire/Math/Math.h"
 #include "KeireInternal/Rendering/AtmosphereUniforms.h"
 #include "KeireInternal/Rendering/FogViewUniforms.h"
+#include "KeireInternal/Rendering/PlanetaryCloudUniforms.h"
 #include "KeireInternal/Rendering/VolumetricCloudUniforms.h"
 
 #include <cstddef>
@@ -35,9 +36,12 @@ namespace Keire::RenderBackend
         Vector4 WeatherControls;
         /// Height fog and local boxes, appended in volume ABI 8.
         FogViewUniforms Fog;
+        /// Planet-fixed shell geometry, appended in texture ABI 13 / buffer ABI 14.
+        PlanetaryCloudUniforms PlanetaryCloud;
     };
 
-    static_assert(sizeof(CloudVolumeViewUniforms) == 1520);
+    static_assert(sizeof(CloudVolumeViewUniforms) == 1616);
+    static_assert(offsetof(CloudVolumeViewUniforms, PlanetaryCloud) == 1520);
     static_assert(offsetof(CloudVolumeViewUniforms, Fog) == 448);
     static_assert(offsetof(CloudVolumeViewUniforms, Volume) == 128);
     static_assert(offsetof(CloudVolumeViewUniforms, CameraControls) == 256);
@@ -47,7 +51,8 @@ namespace Keire::RenderBackend
 
     [[nodiscard]] constexpr std::uint32_t CloudVolumeUniformByteSize(const std::uint32_t abiVersion) noexcept
     {
-        return abiVersion >= 9U   ? 1520U
+        return abiVersion >= 13U  ? 1616U
+               : abiVersion >= 9U ? 1520U
                : abiVersion >= 8U ? 1008U
                : abiVersion >= 7U ? 448U
                : abiVersion >= 6U ? 432U

@@ -22,9 +22,11 @@ namespace Keire::Detail
     [[nodiscard]] inline bool ShouldSnapCharacterToGround(const bool wasGrounded,
                                                           const float requestedVerticalDisplacement,
                                                           const Vector3 surfaceNormal,
-                                                          const float minimumWalkableNormal) noexcept
+                                                          const float minimumWalkableNormal,
+                                                          const Vector3 up = {0.0F, 1.0F, 0.0F}) noexcept
     {
-        return wasGrounded && requestedVerticalDisplacement <= 0.0F && surfaceNormal.Y >= minimumWalkableNormal;
+        const auto alignment = surfaceNormal.X * up.X + surfaceNormal.Y * up.Y + surfaceNormal.Z * up.Z;
+        return wasGrounded && requestedVerticalDisplacement <= 0.0F && alignment >= minimumWalkableNormal;
     }
 
     [[nodiscard]] inline bool ResolveCharacterGrounded(const bool hasWalkableHit, const bool wasGrounded,

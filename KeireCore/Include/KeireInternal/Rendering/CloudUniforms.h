@@ -1,6 +1,7 @@
 #pragma once
 
 #include "KeireInternal/Environment/CloudEvaluation.h"
+#include "KeireInternal/Rendering/PlanetaryCloudUniforms.h"
 
 #include <array>
 #include <cmath>
@@ -30,17 +31,25 @@ namespace Keire::RenderBackend
     static_assert(offsetof(CloudLayerUniforms, Noise) == 48);
     static_assert(sizeof(CloudUniforms) == 128);
 
+    [[nodiscard]] inline std::array<Vector4, MaximumCloudLayers>
+    MakePlanetaryCloudLayerPhases(const CloudSettings& settings, const Detail::ResolvedPlanetFrame& frame)
+    {
+        std::array<Vector4, MaximumCloudLayers> result{};
+        for (std::size_t index = 0; index < settings.Layers.size(); ++index)
+        {
+            const auto& layer = settings.Layers[index];
+            const auto phase = MakePlanetaryCloudPhase(
+                frame, layer.PatternSizeMeters, {layer.WindMetersPerSecond[0], 0.0, layer.WindMetersPerSecond[1]});
+            result[index] = {phase[0], phase[1], phase[2], 0.0F};
+        }
+        return result;
+    }
+
     [[nodiscard]] inline bool CloudObserverWithinLocalDomain(const std::array<double, 3>& observerFromAnchor) noexcept
     {
-        constexpr double maximumLocalDisplacementMeters = 1.0e9;
-        for (const double component : observerFromAnchor)
-        {
-            if (!std::isfinite(component) || std::abs(component) > maximumLocalDisplacementMeters)
-            {
-                return false;
-            }
-        }
-        return true;
+        return Detail::ValidCloudHorizontalCoordinate(observerFromAnchor[0]) &&
+               Detail::ValidCloudVerticalCoordinate(observerFromAnchor[1]) &&
+               Detail::ValidCloudHorizontalCoordinate(observerFromAnchor[2]);
     }
 
     /// Directions supplied to the shader must use the same east/up/north frame as this observer and anchor.

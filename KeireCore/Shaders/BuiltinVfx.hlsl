@@ -147,6 +147,7 @@ cbuffer VfxVisibilityDispatch : register(b1, space2)
     uint4 VisibilityExecution;
     float4 VisibilityBoundsMinimum;
     float4 VisibilityBoundsMaximum;
+    float4 VisibilitySimulationToRender;
 };
 
 static const uint VfxContextSpawn = 0;
@@ -2966,6 +2967,10 @@ void StoreVfxVisibilityCandidate(uint localIndex, float3 boundsMinimum, float3 b
     if (localIndex >= VisibilityMetadata.z)
         return;
     const uint candidateIndex = VisibilityMetadata.x + localIndex;
+    // Bounds are consumed by the camera-relative occlusion pass; retained simulation buffers stay unchanged.
+    boundsMinimum += VisibilitySimulationToRender.xyz;
+    boundsMaximum += VisibilitySimulationToRender.xyz;
+    forceVisible = forceVisible || !IsFiniteVfxFloat3(boundsMinimum) || !IsFiniteVfxFloat3(boundsMaximum);
     VfxOcclusionCandidate candidate;
     candidate.BoundsMinimum = float4(boundsMinimum, maximumWorldPositionDisplacementRadius);
     candidate.BoundsMaximum = float4(boundsMaximum, maximumWorldPositionDisplacementRadius);

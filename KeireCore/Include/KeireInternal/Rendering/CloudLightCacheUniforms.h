@@ -16,8 +16,8 @@ namespace Keire::RenderBackend
         std::array<std::uint32_t, 4> GridDimensions{};
     };
 
-    static_assert(offsetof(CloudLightCacheUniforms, GridOrigin) == 1520);
-    static_assert(offsetof(CloudLightCacheUniforms, CellSize) == 1536);
-    static_assert(offsetof(CloudLightCacheUniforms, GridDimensions) == 1552);
-    static_assert(sizeof(CloudLightCacheUniforms) == 1568);
+    static_assert(offsetof(CloudLightCacheUniforms, GridOrigin) == 1616);
+    static_assert(offsetof(CloudLightCacheUniforms, CellSize) == 1632);
+    static_assert(offsetof(CloudLightCacheUniforms, GridDimensions) == 1648);
+    static_assert(sizeof(CloudLightCacheUniforms) == 1664);
 } // namespace Keire::RenderBackend

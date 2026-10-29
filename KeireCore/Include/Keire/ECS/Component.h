@@ -4,6 +4,7 @@
 #include "Keire/Assets/Asset.h"
 #include "Keire/Math/Curves.h"
 #include "Keire/Math/Math.h"
+#include "Keire/Math/Vector3d.h"
 #include "Keire/Ref.h"
 
 #include <compare>
@@ -83,7 +84,8 @@ namespace Keire
         Event,
         Curve,
         Gradient,
-        ManagedReferenceGraph
+        ManagedReferenceGraph,
+        Vector3d
     };
 
     enum class ManagedReferenceKind : std::uint8_t
@@ -125,7 +127,7 @@ namespace Keire
 
     using ComponentPropertyValue =
         std::variant<bool, std::int64_t, double, std::string, Vector2, Vector3, Vector4, Quaternion, Color, AssetId,
-                     EntityId, ComponentEventValue, Curve1D, ColorGradient, ComponentReferenceValue>;
+                     EntityId, ComponentEventValue, Curve1D, ColorGradient, ComponentReferenceValue, Vector3d>;
     using ComponentPropertyBag = std::map<std::string, ComponentPropertyValue, std::less<>>;
 
     struct ComponentProperty
@@ -191,6 +193,7 @@ namespace Keire
         Vector3 Normal;
         float Impulse = 0.0F;
         bool Trigger = false;
+        Vector3d PointPrecise{Point.X, Point.Y, Point.Z};
     };
 
     class KEIRE_API Component : public RefCounted

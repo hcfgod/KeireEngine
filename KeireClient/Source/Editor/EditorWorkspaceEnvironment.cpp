@@ -5,9 +5,39 @@
 #include "KeireClient/Editor/SceneDocument.h"
 #include "KeireClientInternal/Editor/EnvironmentPreviewClock.h"
 #include "KeireInternal/Environment/SceneRuntimeEnvironmentAccess.h"
+#include "KeireInternal/Rendering/PlanetEnvironmentCapture.h"
+#include "KeireInternal/Scenes/SceneRuntimeRenderingInternal.h"
+#include "KeireInternal/Spatial/PlanetProjectFrameResolver.h"
 
 #include <exception>
 #include <string>
+
+std::optional<Keire::PlanetEnvironmentView>
+EditorWorkspaceLayer::SceneViewportPlanetEnvironment(const Keire::RenderCamera& camera)
+{
+    if (!m_ProjectSettingsDocument->Opened())
+    {
+        return std::nullopt;
+    }
+    if (m_PlayRuntimeWorld && m_SceneDocument->PlaySession())
+    {
+        return Keire::Internal::CaptureRuntimePlanetEnvironment(*m_PlayRuntimeWorld, camera);
+    }
+    if (!m_PlanetPreviewFrames)
+    {
+        m_PlanetPreviewFrames = std::make_unique<Keire::Detail::PlanetProjectFrameResolver>();
+    }
+    m_PlanetPreviewFrames->Configure(m_ProjectSettingsDocument->Planets());
+    const auto localObserver = Keire::Math::TransformPoint(Keire::Math::Inverse(camera.View), {});
+    const Keire::Detail::SectorPosition origin({1, 1}, {},
+                                               {camera.WorldOrigin.X, camera.WorldOrigin.Y, camera.WorldOrigin.Z});
+    const auto observer = origin.Translated({localObserver.X, localObserver.Y, localObserver.Z});
+    m_EnvironmentPreview->SynchronizeAuthored(m_ProjectSettingsDocument->EnvironmentTime());
+    const auto clock = m_EnvironmentPreview->State();
+    const auto frame = m_PlanetPreviewFrames->Resolve(observer, m_EnvironmentPreview->SimulationTime(), clock,
+                                                      m_EnvironmentPreview->Revision());
+    return frame ? std::optional{Keire::Detail::ToPlanetEnvironmentView(*frame)} : std::nullopt;
+}
 
 std::optional<Keire::EnvironmentLightingSnapshot> EditorWorkspaceLayer::SceneViewportEnvironmentLighting()
 {

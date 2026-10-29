@@ -11,6 +11,8 @@
 #include "KeireInternal/Scenes/SceneRuntimeRenderingInternal.h"
 #include "KeireInternal/Scripting/ManagedRuntimeApplicationServices.h"
 #include "KeireInternal/Scripting/ManagedRuntimeUiServices.h"
+#include "KeireInternal/Spatial/PlanetRuntimeCheckpointRecord.h"
+#include "KeireInternal/Spatial/SceneRuntimePlanetAccess.h"
 #include "KeireInternal/WindowInternal.h"
 #include "KeireRuntimeInternal/ManagedWorldRuntime.h"
 #include "KeireRuntimeInternal/RuntimeAdditiveValidation.h"
@@ -56,6 +58,7 @@ namespace
         Keire::RenderEnvironmentSettings Rendering;
         Keire::Detail::EnvironmentRuntimeManifest::State Environment;
         std::array<std::uint32_t, Keire::PhysicsCollisionLayerCount> PhysicsCollisionMatrix;
+        Keire::Vector3 PhysicsGravity{0.0F, -9.81F, 0.0F};
         std::vector<std::filesystem::path> ManagedAssemblyRoots;
         std::vector<Keire::RequiredSourceModule> RequiredModules;
         bool Scripting = false;
@@ -172,6 +175,20 @@ namespace
             throw Keire::CommandLineError("Runtime physics settings must define exactly 32 collision layers.");
         }
         auto physicsSettings = Keire::DefaultProjectAuthoringSettings();
+        if (source.at("schemaVersion") >= Keire::Detail::EnvironmentRuntimeManifest::GravitySchema &&
+            !physics.contains("gravity"))
+        {
+            throw Keire::CommandLineError("Runtime physics settings require project gravity; recook content.");
+        }
+        if (const auto gravity = physics.find("gravity"); gravity != physics.end())
+        {
+            if (!gravity->is_array() || gravity->size() != 3)
+            {
+                throw Keire::CommandLineError("Runtime gravity must contain exactly three acceleration values.");
+            }
+            physicsSettings.PhysicsGravity = {gravity->at(0).get<float>(), gravity->at(1).get<float>(),
+                                              gravity->at(2).get<float>()};
+        }
         physicsSettings.DefaultMixer = result.DefaultMixer;
         physicsSettings.Audio = result.AudioSettings;
         for (std::size_t index = 0; index < Keire::PhysicsCollisionLayerCount; ++index)
@@ -188,6 +205,7 @@ namespace
             throw Keire::CommandLineError(std::string("Runtime physics settings are invalid: ") + error.what());
         }
         result.PhysicsCollisionMatrix = physicsSettings.PhysicsCollisionMatrix;
+        result.PhysicsGravity = physicsSettings.PhysicsGravity;
         for (const auto& root : source.at("managedAssemblyRoots"))
         {
             const auto path = std::filesystem::path(root.get<std::string>()).lexically_normal();
@@ -210,6 +228,7 @@ namespace
     struct RuntimeReplayState final
     {
         Keire::Ref<Keire::SceneRuntimeSession> Session;
+        Keire::WeakRef<Keire::SceneRuntimeWorld> World;
         bool Started = false;
         bool ReportWritten = false;
     };
@@ -312,6 +331,8 @@ namespace
                 throw std::runtime_error("Runtime world initialization failed.");
             }
             Keire::Detail::SceneRuntimeEnvironmentAccess::Restore(*world, m_Environment.Time, m_Environment.Lighting);
+            Keire::Detail::SceneRuntimePlanetAccess::ConfigureProject(*world, m_Environment.Planets);
+            m_ReplayState->World = world;
             m_Load = Owner().Scenes()->Load(m_StartupScene);
             Keire::RenderSurfaceSpecification surface;
             surface.Name = "Runtime";
@@ -379,6 +400,7 @@ namespace
                 m_Runtime->Stop();
             m_Runtime.Reset();
             m_ReplayState->Session.Reset();
+            m_ReplayState->World = {};
             m_Presentation.Reset();
             m_Scene.Reset();
         }
@@ -477,13 +499,9 @@ namespace
             Keire::RenderCamera camera;
             if (selected.Camera)
             {
-                camera.View = Keire::Math::Inverse(selected.Camera->Transform->WorldMatrix());
-                camera.Projection =
-                    selected.Camera->Camera->ProjectionMatrix(static_cast<float>(width) / static_cast<float>(height));
-                camera.ClearColor = selected.Camera->Camera->ClearColor();
-                camera.NearPlane = selected.Camera->Camera->NearPlane();
-                camera.FarPlane = selected.Camera->Camera->FarPlane();
-                camera.FullscreenEffects = selected.Camera->Camera->FullscreenEffects();
+                camera =
+                    Keire::Internal::BuildPresentedSceneCamera(*selected.Camera->Camera, *selected.Camera->Transform,
+                                                               static_cast<float>(width) / static_cast<float>(height));
             }
             m_View->SetCamera(camera);
             float renderScale =
@@ -1159,30 +1177,51 @@ namespace
                      for (const auto& animator : document.at("animators"))
                          animators.push_back(KeireRuntime::DecodeAnimatorCheckpoint(animator));
                      state->Session->RestoreAnimatorCheckpoint(animators);
-                 }});
+                 },
+                 .RestoreAfter = {"runtime.scene"}});
             Replay()->RegisterSerializer(
                 {.Id = "runtime.scene.physics",
-                 .Version = 1,
+                 .Version = 5,
                  .Deterministic = true,
                  .Capture =
                      [state = m_ReplayState]
                  {
                      if (!state->Session)
                          throw std::logic_error("Runtime physics replay state is unavailable.");
+                     const auto checkpoint = state->Session->CapturePhysicsWorldCheckpoint();
+                     nlohmann::json sources = nlohmann::json::array();
+                     for (const auto& source : checkpoint.GravitySources)
+                     {
+                         sources.push_back({{"center", {source.Center.X, source.Center.Y, source.Center.Z}},
+                                            {"parameter", source.GravitationalParameter},
+                                            {"radius", source.RadiusMetres}});
+                     }
+                     nlohmann::json gravity = nullptr;
+                     if (checkpoint.Gravity)
+                     {
+                         gravity = {checkpoint.Gravity->X, checkpoint.Gravity->Y, checkpoint.Gravity->Z};
+                     }
                      nlohmann::json bodies = nlohmann::json::array();
-                     for (const auto& body : state->Session->CapturePhysicsCheckpoint())
+                     for (const auto& body : checkpoint.Bodies)
                      {
                          bodies.push_back(
                              {{"entity", body.Entity.ToString()},
                               {"position", {body.Position.X, body.Position.Y, body.Position.Z}},
+                              {"worldOrigin", {body.WorldOrigin.X, body.WorldOrigin.Y, body.WorldOrigin.Z}},
                               {"rotation", {body.Rotation.X, body.Rotation.Y, body.Rotation.Z, body.Rotation.W}},
                               {"linearVelocity", {body.LinearVelocity.X, body.LinearVelocity.Y, body.LinearVelocity.Z}},
                               {"angularVelocity",
                                {body.AngularVelocity.X, body.AngularVelocity.Y, body.AngularVelocity.Z}},
-                              {"sleeping", body.Sleeping}});
+                              {"sleeping", body.Sleeping},
+                              {"motionSettings",
+                               {body.MotionSettings.value().LinearDamping, body.MotionSettings.value().AngularDamping,
+                                body.MotionSettings.value().MaximumLinearSpeed,
+                                body.MotionSettings.value().MaximumAngularSpeed}}});
                      }
-                     const auto encoded =
-                         nlohmann::json::to_cbor(nlohmann::json{{"schemaVersion", 1}, {"bodies", std::move(bodies)}});
+                     const auto encoded = nlohmann::json::to_cbor(nlohmann::json{{"schemaVersion", 5},
+                                                                                 {"gravity", std::move(gravity)},
+                                                                                 {"sources", std::move(sources)},
+                                                                                 {"bodies", std::move(bodies)}});
                      return std::vector<std::byte>(reinterpret_cast<const std::byte*>(encoded.data()),
                                                    reinterpret_cast<const std::byte*>(encoded.data() + encoded.size()));
                  },
@@ -1194,12 +1233,41 @@ namespace
                      const auto document =
                          nlohmann::json::from_cbor(reinterpret_cast<const std::uint8_t*>(bytes.data()),
                                                    reinterpret_cast<const std::uint8_t*>(bytes.data() + bytes.size()));
-                     if (document.value("schemaVersion", 0) != 1 || !document.at("bodies").is_array())
+                     if (document.value("schemaVersion", 0) != 5 || !document.at("bodies").is_array() ||
+                         !document.at("sources").is_array() || document.at("sources").size() > 64)
                          throw std::runtime_error("Runtime physics replay checkpoint is malformed.");
-                     std::vector<Keire::ScenePhysicsCheckpointBody> bodies;
+                     Keire::ScenePhysicsWorldCheckpoint checkpoint;
+                     for (const auto& source : document.at("sources"))
+                     {
+                         const auto& center = source.at("center");
+                         if (!center.is_array() || center.size() != 3U)
+                         {
+                             throw std::runtime_error("Runtime physics checkpoint gravity source is malformed.");
+                         }
+                         checkpoint.GravitySources.push_back(
+                             {{center[0].get<double>(), center[1].get<double>(), center[2].get<double>()},
+                              source.at("parameter").get<double>(),
+                              source.at("radius").get<double>()});
+                     }
+                     const auto& gravity = document.at("gravity");
+                     if (!gravity.is_null())
+                     {
+                         if (!gravity.is_array() || gravity.size() != 3U)
+                         {
+                             throw std::runtime_error("Runtime physics checkpoint gravity is malformed.");
+                         }
+                         checkpoint.Gravity =
+                             Keire::Vector3{gravity[0].get<float>(), gravity[1].get<float>(), gravity[2].get<float>()};
+                     }
+                     auto& bodies = checkpoint.Bodies;
                      bodies.reserve(document.at("bodies").size());
                      for (const auto& encoded : document.at("bodies"))
                      {
+                         const auto& motion = encoded.at("motionSettings");
+                         if (!motion.is_array() || motion.size() != 4U)
+                         {
+                             throw std::runtime_error("Runtime physics checkpoint motion settings are malformed.");
+                         }
                          const auto vector3 = [&encoded](const char* name)
                          {
                              const auto& value = encoded.at(name);
@@ -1210,16 +1278,57 @@ namespace
                          const auto& rotation = encoded.at("rotation");
                          if (!rotation.is_array() || rotation.size() != 4U)
                              throw std::runtime_error("Runtime physics checkpoint rotation is malformed.");
-                         bodies.push_back({Keire::EntityId::Parse(encoded.at("entity").get<std::string>()),
-                                           vector3("position"),
-                                           {rotation[0].get<float>(), rotation[1].get<float>(),
-                                            rotation[2].get<float>(), rotation[3].get<float>()},
-                                           vector3("linearVelocity"),
-                                           vector3("angularVelocity"),
-                                           encoded.at("sleeping").get<bool>()});
+                         const auto& origin = encoded.at("worldOrigin");
+                         if (!origin.is_array() || origin.size() != 3U)
+                             throw std::runtime_error("Runtime physics checkpoint origin is malformed.");
+                         bodies.push_back(
+                             {Keire::EntityId::Parse(encoded.at("entity").get<std::string>()),
+                              vector3("position"),
+                              {rotation[0].get<float>(), rotation[1].get<float>(), rotation[2].get<float>(),
+                               rotation[3].get<float>()},
+                              vector3("linearVelocity"),
+                              vector3("angularVelocity"),
+                              encoded.at("sleeping").get<bool>(),
+                              {origin[0].get<double>(), origin[1].get<double>(), origin[2].get<double>()},
+                              Keire::PhysicsMotionSettings{motion[0].get<float>(), motion[1].get<float>(),
+                                                           motion[2].get<float>(), motion[3].get<float>()}});
                      }
-                     state->Session->RestorePhysicsCheckpoint(bodies);
-                 }});
+                     state->Session->RestorePhysicsWorldCheckpoint(checkpoint);
+                 },
+                 .RestoreAfter = {"runtime.scene"}});
+            Replay()->RegisterSerializer(
+                {.Id = "runtime.world.planets",
+                 .Version = 1,
+                 .Deterministic = true,
+                 .Capture =
+                     [state = m_ReplayState]
+                 {
+                     const auto world = state->World.Lock();
+                     if (!world)
+                     {
+                         throw std::logic_error("Runtime planet replay state is unavailable.");
+                     }
+                     const auto checkpoint = Keire::Detail::SceneRuntimePlanetAccess::CaptureCheckpoint(*world);
+                     const auto encoded =
+                         nlohmann::json::to_cbor(Keire::Detail::PlanetRuntimeCheckpointRecord::Encode(checkpoint));
+                     return std::vector<std::byte>(reinterpret_cast<const std::byte*>(encoded.data()),
+                                                   reinterpret_cast<const std::byte*>(encoded.data() + encoded.size()));
+                 },
+                 .Restore =
+                     [state = m_ReplayState](const std::span<const std::byte> bytes)
+                 {
+                     const auto world = state->World.Lock();
+                     if (!world)
+                     {
+                         throw std::logic_error("Runtime planet replay state is unavailable.");
+                     }
+                     const auto record =
+                         nlohmann::json::from_cbor(reinterpret_cast<const std::uint8_t*>(bytes.data()),
+                                                   reinterpret_cast<const std::uint8_t*>(bytes.data() + bytes.size()));
+                     const auto checkpoint = Keire::Detail::PlanetRuntimeCheckpointRecord::Decode(record);
+                     Keire::Detail::SceneRuntimePlanetAccess::RestoreCheckpoint(*world, checkpoint);
+                 },
+                 .RestoreAfter = {"runtime.scene.physics"}});
             Replay()->RegisterSerializer(
                 {.Id = "runtime.scene.presentation",
                  .Version = 1,
@@ -1294,7 +1403,8 @@ namespace
                               static_cast<Keire::RuntimeUiPointerButton>(event.at("button").get<std::uint8_t>())});
                      }
                      state->Session->Presentation()->RestoreCheckpoint(checkpoint);
-                 }});
+                 },
+                 .RestoreAfter = {"runtime.scene"}});
             Replay()->RegisterSerializer({.Id = "runtime.scene.vfx",
                                           .Version = 1,
                                           .Deterministic = true,
@@ -1311,7 +1421,8 @@ namespace
                                               if (!state->Session)
                                                   throw std::logic_error("Runtime VFX replay state is unavailable.");
                                               state->Session->RestoreVfxCheckpoint(bytes);
-                                          }});
+                                          },
+                                          .RestoreAfter = {"runtime.scene"}});
             if (m_Manifest.Scripting)
             {
                 Keire::ManagedReloadRequest reload;
@@ -1378,7 +1489,8 @@ namespace
                                   encoded.at("faulted").get<bool>()});
                          }
                          scripts->RestoreReplayCheckpoint(behaviours);
-                     }});
+                     },
+                     .RestoreAfter = {"runtime.scene"}});
             }
             (void)PushLayer(std::make_unique<RuntimeLayer>(
                 m_Manifest.StartupScene, m_Manifest.DefaultInput, m_Manifest.DefaultInputMap, m_Manifest.DefaultMixer,
@@ -1440,6 +1552,7 @@ namespace Keire
         {
             specification.Physics.Mode = PhysicsMode::Enabled;
             specification.Physics.CollisionMatrix = manifest.PhysicsCollisionMatrix;
+            specification.Physics.DefaultGravity = manifest.PhysicsGravity;
         }
         if (manifest.Audio)
         {

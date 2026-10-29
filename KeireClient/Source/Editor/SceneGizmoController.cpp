@@ -11,6 +11,7 @@
 #include <array>
 #include <cmath>
 #include <fstream>
+#include <limits>
 #include <optional>
 #include <sstream>
 #include <type_traits>
@@ -160,10 +161,11 @@ namespace KeireEditor
 
         void DrawCameraFrustum(Keire::UiFrame& ui, const Keire::TransformComponent& transform,
                                const Keire::CameraComponent& camera, const Keire::Matrix4& viewProjection,
-                               const Keire::UiItemRect viewport, const bool selected)
+                               const Keire::UiItemRect viewport, const bool selected, const Keire::Vector3d worldOrigin)
         {
-            const auto world = transform.WorldMatrix();
-            const auto origin = transform.WorldPosition();
+            const auto world = transform.PresentationRelativeMatrix(worldOrigin, std::numeric_limits<double>::max());
+            const auto origin = Keire::Math::TransformPoint(
+                transform.PresentationRelativeMatrix(worldOrigin, std::numeric_limits<double>::max()), {});
             const auto forward = Normalize(Keire::Math::TransformDirection(world, {0.0F, 0.0F, 1.0F}));
             const auto right = Normalize(Keire::Math::TransformDirection(world, {1.0F, 0.0F, 0.0F}));
             const auto up = Normalize(Keire::Math::TransformDirection(world, {0.0F, 1.0F, 0.0F}));
@@ -321,9 +323,9 @@ namespace KeireEditor
         void DrawColliderWireframe(Keire::UiFrame& ui, const Keire::TransformComponent& transform,
                                    const Keire::ColliderComponent& collider, const Keire::Matrix4& viewProjection,
                                    const Keire::UiItemRect viewport, const bool selected,
-                                   const MeshBoundsResolver& resolveMeshBounds)
+                                   const MeshBoundsResolver& resolveMeshBounds, const Keire::Vector3d worldOrigin)
         {
-            const auto world = transform.WorldMatrix();
+            const auto world = transform.PresentationRelativeMatrix(worldOrigin, std::numeric_limits<double>::max());
             const auto center = collider.Center();
             const auto color = ColliderWireColor(collider, selected);
             const float thickness = selected ? 2.0F : 1.0F;
@@ -394,9 +396,9 @@ namespace KeireEditor
         void DrawCharacterControllerWireframe(Keire::UiFrame& ui, const Keire::TransformComponent& transform,
                                               const Keire::CharacterControllerComponent& controller,
                                               const Keire::Matrix4& viewProjection, const Keire::UiItemRect viewport,
-                                              const bool selected)
+                                              const bool selected, const Keire::Vector3d worldOrigin)
         {
-            const auto world = transform.WorldMatrix();
+            const auto world = transform.PresentationRelativeMatrix(worldOrigin, std::numeric_limits<double>::max());
             const auto base = controller.Grounded() ? GroundedControllerColor : ControllerColor;
             const Keire::UiColor color{base.Red, base.Green, base.Blue, selected ? 0.95F : 0.38F};
             const float thickness = selected ? 2.0F : 1.0F;
@@ -432,7 +434,8 @@ namespace KeireEditor
 
         void DrawRigidBodyGizmo(Keire::UiFrame& ui, const Keire::TransformComponent& transform,
                                 const Keire::RigidBodyComponent& body, const Keire::Matrix4& viewProjection,
-                                const Keire::UiItemRect viewport, const bool selected)
+                                const Keire::UiItemRect viewport, const bool selected,
+                                const Keire::Vector3d worldOrigin)
         {
             Keire::UiColor base = DynamicBodyColor;
             if (body.Motion() == Keire::PhysicsMotionType::Static)
@@ -440,7 +443,8 @@ namespace KeireEditor
             else if (body.Motion() == Keire::PhysicsMotionType::Kinematic)
                 base = KinematicBodyColor;
             const Keire::UiColor color{base.Red, base.Green, base.Blue, selected ? 0.95F : 0.55F};
-            const auto center = transform.WorldPosition();
+            const auto center = Keire::Math::TransformPoint(
+                transform.PresentationRelativeMatrix(worldOrigin, std::numeric_limits<double>::max()), {});
             const auto projected = Project(center, viewProjection, viewport);
             if (!projected)
                 return;
@@ -466,9 +470,10 @@ namespace KeireEditor
 
         void DrawPointLightRange(Keire::UiFrame& ui, const Keire::TransformComponent& transform,
                                  const Keire::PointLightComponent& light, const Keire::Matrix4& viewProjection,
-                                 const Keire::UiItemRect viewport)
+                                 const Keire::UiItemRect viewport, const Keire::Vector3d worldOrigin)
         {
-            const auto center = transform.WorldPosition();
+            const auto center = Keire::Math::TransformPoint(
+                transform.PresentationRelativeMatrix(worldOrigin, std::numeric_limits<double>::max()), {});
             const auto color = Keire::UiColor{LightColor.Red, LightColor.Green, LightColor.Blue, 0.55F};
             DrawWorldCircle(ui, center, {1.0F, 0.0F, 0.0F}, {0.0F, 1.0F, 0.0F}, light.Range(), viewProjection, viewport,
                             color);
@@ -480,10 +485,11 @@ namespace KeireEditor
 
         void DrawSpotLightCone(Keire::UiFrame& ui, const Keire::TransformComponent& transform,
                                const Keire::SpotLightComponent& light, const Keire::Matrix4& viewProjection,
-                               const Keire::UiItemRect viewport)
+                               const Keire::UiItemRect viewport, const Keire::Vector3d worldOrigin)
         {
-            const auto world = transform.WorldMatrix();
-            const auto origin = transform.WorldPosition();
+            const auto world = transform.PresentationRelativeMatrix(worldOrigin, std::numeric_limits<double>::max());
+            const auto origin = Keire::Math::TransformPoint(
+                transform.PresentationRelativeMatrix(worldOrigin, std::numeric_limits<double>::max()), {});
             const auto forward = Normalize(Keire::Math::TransformDirection(world, {0.0F, 0.0F, 1.0F}));
             const auto right = Normalize(Keire::Math::TransformDirection(world, {1.0F, 0.0F, 0.0F}));
             const auto up = Normalize(Keire::Math::TransformDirection(world, {0.0F, 1.0F, 0.0F}));
@@ -827,7 +833,11 @@ namespace KeireEditor
                     const auto transform = entity.template GetComponent<Keire::TransformComponent>();
                     if (!transform || !entity.ActiveInHierarchy())
                         continue;
-                    const auto projected = Project(transform->WorldPosition(), viewProjection, viewport);
+                    const auto projected =
+                        Project(Keire::Math::TransformPoint(transform->PresentationRelativeMatrix(
+                                                                camera.WorldOrigin, std::numeric_limits<double>::max()),
+                                                            {}),
+                                viewProjection, viewport);
                     if (!projected)
                         continue;
                     if (cameraIcons)
@@ -838,7 +848,7 @@ namespace KeireEditor
                             const auto cameraComponent = entity.template GetComponent<Keire::CameraComponent>();
                             if (cameraComponent)
                                 DrawCameraFrustum(ui, *transform, *cameraComponent, viewProjection, viewport,
-                                                  selected == entity.Id());
+                                                  selected == entity.Id(), camera.WorldOrigin);
                         }
                     }
                     else
@@ -852,12 +862,27 @@ namespace KeireEditor
 
                     if (directionalIcons && m_Settings.ShowLightDirections)
                     {
-                        const auto direction =
-                            Normalize(Keire::Math::TransformDirection(transform->WorldMatrix(), {0.0F, 0.0F, 1.0F}));
-                        const auto end = Project({transform->WorldPosition().X + direction.X * 2.0F,
-                                                  transform->WorldPosition().Y + direction.Y * 2.0F,
-                                                  transform->WorldPosition().Z + direction.Z * 2.0F},
-                                                 viewProjection, viewport);
+                        const auto direction = Normalize(
+                            Keire::Math::TransformDirection(transform->PresentationRelativeMatrix(
+                                                                camera.WorldOrigin, std::numeric_limits<double>::max()),
+                                                            {0.0F, 0.0F, 1.0F}));
+                        const auto end = Project(
+                            {Keire::Math::TransformPoint(transform->PresentationRelativeMatrix(
+                                                             camera.WorldOrigin, std::numeric_limits<double>::max()),
+                                                         {})
+                                     .X +
+                                 direction.X * 2.0F,
+                             Keire::Math::TransformPoint(transform->PresentationRelativeMatrix(
+                                                             camera.WorldOrigin, std::numeric_limits<double>::max()),
+                                                         {})
+                                     .Y +
+                                 direction.Y * 2.0F,
+                             Keire::Math::TransformPoint(transform->PresentationRelativeMatrix(
+                                                             camera.WorldOrigin, std::numeric_limits<double>::max()),
+                                                         {})
+                                     .Z +
+                                 direction.Z * 2.0F},
+                            viewProjection, viewport);
                         if (end)
                             ui.DrawLine(*projected, *end, LightColor, selected == entity.Id() ? 2.0F : 1.0F);
                     }
@@ -874,7 +899,11 @@ namespace KeireEditor
                     const auto transform = entity.template GetComponent<Keire::TransformComponent>();
                     if (!transform || !entity.ActiveInHierarchy())
                         continue;
-                    const auto projected = Project(transform->WorldPosition(), viewProjection, viewport);
+                    const auto projected =
+                        Project(Keire::Math::TransformPoint(transform->PresentationRelativeMatrix(
+                                                                camera.WorldOrigin, std::numeric_limits<double>::max()),
+                                                            {}),
+                                viewProjection, viewport);
                     if (!projected)
                         continue;
                     DrawProbeIcon(ui, *projected, color, selected == entity.Id());
@@ -900,7 +929,7 @@ namespace KeireEditor
             if (!collider || !collider->Enabled() || !colliderTransform || !colliderEntity.ActiveInHierarchy())
                 continue;
             DrawColliderWireframe(ui, *colliderTransform, *collider, viewProjection, viewport, colliderSelected,
-                                  resolveMeshBounds);
+                                  resolveMeshBounds, camera.WorldOrigin);
         }
 
         for (const auto& controllerEntity : scene->Query<Keire::CharacterControllerComponent>())
@@ -913,7 +942,7 @@ namespace KeireEditor
             if (!controller || !controller->Enabled() || !controllerTransform || !controllerEntity.ActiveInHierarchy())
                 continue;
             DrawCharacterControllerWireframe(ui, *controllerTransform, *controller, viewProjection, viewport,
-                                             controllerSelected);
+                                             controllerSelected, camera.WorldOrigin);
         }
 
         for (const auto& rigidBodyEntity : scene->Query<Keire::RigidBodyComponent>())
@@ -925,7 +954,8 @@ namespace KeireEditor
             const auto rigidBodyTransform = rigidBodyEntity.GetComponent<Keire::TransformComponent>();
             if (!rigidBody || !rigidBody->Enabled() || !rigidBodyTransform || !rigidBodyEntity.ActiveInHierarchy())
                 continue;
-            DrawRigidBodyGizmo(ui, *rigidBodyTransform, *rigidBody, viewProjection, viewport, rigidBodySelected);
+            DrawRigidBodyGizmo(ui, *rigidBodyTransform, *rigidBody, viewProjection, viewport, rigidBodySelected,
+                               camera.WorldOrigin);
         }
 
         if (m_Settings.ShowLightDirections && selected)
@@ -935,9 +965,9 @@ namespace KeireEditor
             if (selectedTransform)
             {
                 if (const auto point = selectedLight.GetComponent<Keire::PointLightComponent>())
-                    DrawPointLightRange(ui, *selectedTransform, *point, viewProjection, viewport);
+                    DrawPointLightRange(ui, *selectedTransform, *point, viewProjection, viewport, camera.WorldOrigin);
                 if (const auto spot = selectedLight.GetComponent<Keire::SpotLightComponent>())
-                    DrawSpotLightCone(ui, *selectedTransform, *spot, viewProjection, viewport);
+                    DrawSpotLightCone(ui, *selectedTransform, *spot, viewProjection, viewport, camera.WorldOrigin);
             }
         }
 
@@ -951,23 +981,29 @@ namespace KeireEditor
                 {
                     const auto extents = reflection->BoxExtents();
                     DrawWorldBox(
-                        ui, selectedTransform->WorldMatrix(), {-extents.X, -extents.Y, -extents.Z}, extents,
-                        viewProjection, viewport,
+                        ui,
+                        selectedTransform->PresentationRelativeMatrix(camera.WorldOrigin,
+                                                                      std::numeric_limits<double>::max()),
+                        {-extents.X, -extents.Y, -extents.Z}, extents, viewProjection, viewport,
                         {ReflectionProbeColor.Red, ReflectionProbeColor.Green, ReflectionProbeColor.Blue, 0.92F}, 2.0F);
                     const auto blend = reflection->BlendDistance();
                     const Keire::Vector3 inner{std::max(0.001F, extents.X - blend), std::max(0.001F, extents.Y - blend),
                                                std::max(0.001F, extents.Z - blend)};
                     DrawWorldBox(
-                        ui, selectedTransform->WorldMatrix(), {-inner.X, -inner.Y, -inner.Z}, inner, viewProjection,
-                        viewport,
+                        ui,
+                        selectedTransform->PresentationRelativeMatrix(camera.WorldOrigin,
+                                                                      std::numeric_limits<double>::max()),
+                        {-inner.X, -inner.Y, -inner.Z}, inner, viewProjection, viewport,
                         {ReflectionProbeColor.Red, ReflectionProbeColor.Green, ReflectionProbeColor.Blue, 0.38F}, 1.0F);
                 }
                 if (const auto volume = selectedProbe.GetComponent<Keire::LightProbeVolumeComponent>())
                 {
                     const auto extents = volume->BoxExtents();
                     DrawWorldBox(
-                        ui, selectedTransform->WorldMatrix(), {-extents.X, -extents.Y, -extents.Z}, extents,
-                        viewProjection, viewport,
+                        ui,
+                        selectedTransform->PresentationRelativeMatrix(camera.WorldOrigin,
+                                                                      std::numeric_limits<double>::max()),
+                        {-extents.X, -extents.Y, -extents.Z}, extents, viewProjection, viewport,
                         {LightProbeVolumeColor.Red, LightProbeVolumeColor.Green, LightProbeVolumeColor.Blue, 0.92F},
                         2.0F);
                 }
@@ -1000,7 +1036,8 @@ namespace KeireEditor
             allowManipulation && m_Settings.EditColliders && entity && transform && collider && collider->Enabled();
         if (colliderEditing)
         {
-            const auto world = transform->WorldMatrix();
+            const auto world =
+                transform->PresentationRelativeMatrix(camera.WorldOrigin, std::numeric_limits<double>::max());
             const auto appendHandle = [&](const ColliderHandle handle, const Keire::Vector3 localPosition,
                                           const Keire::Vector3 localDirection)
             {
@@ -1197,7 +1234,10 @@ namespace KeireEditor
             return {selected, selectionActivated, pointerConsumed};
         }
 
-        const auto center = Project(transform->WorldPosition(), viewProjection, viewport);
+        const auto center = Project(
+            Keire::Math::TransformPoint(
+                transform->PresentationRelativeMatrix(camera.WorldOrigin, std::numeric_limits<double>::max()), {}),
+            viewProjection, viewport);
         if (!center)
         {
             if (selectionRequested && !selectionActivated)
@@ -1209,11 +1249,22 @@ namespace KeireEditor
             return {selected, selectionActivated, pointerConsumed};
         }
         const auto eye = Keire::Math::TransformPoint(Keire::Math::Inverse(camera.View), {});
-        const float worldLength =
-            std::clamp(Length({transform->WorldPosition().X - eye.X, transform->WorldPosition().Y - eye.Y,
-                               transform->WorldPosition().Z - eye.Z}) *
-                           0.12F,
-                       0.5F, 8.0F);
+        const float worldLength = std::clamp(
+            Length(
+                {Keire::Math::TransformPoint(
+                     transform->PresentationRelativeMatrix(camera.WorldOrigin, std::numeric_limits<double>::max()), {})
+                         .X -
+                     eye.X,
+                 Keire::Math::TransformPoint(
+                     transform->PresentationRelativeMatrix(camera.WorldOrigin, std::numeric_limits<double>::max()), {})
+                         .Y -
+                     eye.Y,
+                 Keire::Math::TransformPoint(
+                     transform->PresentationRelativeMatrix(camera.WorldOrigin, std::numeric_limits<double>::max()), {})
+                         .Z -
+                     eye.Z}) *
+                0.12F,
+            0.5F, 8.0F);
 
         struct Handle
         {
@@ -1227,8 +1278,11 @@ namespace KeireEditor
         {
             auto worldAxis = AxisVector(axes[index]);
             if (m_Settings.LocalSpace)
-                worldAxis = Normalize(Keire::Math::TransformDirection(transform->WorldMatrix(), worldAxis));
-            const auto worldPosition = transform->WorldPosition();
+                worldAxis = Normalize(Keire::Math::TransformDirection(
+                    transform->PresentationRelativeMatrix(camera.WorldOrigin, std::numeric_limits<double>::max()),
+                    worldAxis));
+            const auto worldPosition = Keire::Math::TransformPoint(
+                transform->PresentationRelativeMatrix(camera.WorldOrigin, std::numeric_limits<double>::max()), {});
             const auto end =
                 Project({worldPosition.X + worldAxis.X * worldLength, worldPosition.Y + worldAxis.Y * worldLength,
                          worldPosition.Z + worldAxis.Z * worldLength},
@@ -1291,13 +1345,15 @@ namespace KeireEditor
             m_Drag.ActiveAxis = hoveredAxis;
             m_Drag.StartPointer = pointer.Position;
             m_Drag.WorldLength = worldLength;
-            m_Drag.Pivot = transform->WorldPosition();
+            m_Drag.Pivot = transform->WorldPositionPrecise();
             m_Drag.PivotRotation = {};
             if (m_Settings.LocalSpace)
             {
                 Keire::Vector3 position;
                 Keire::Vector3 scale;
-                (void)Keire::Math::DecomposeTransform(transform->WorldMatrix(), position, m_Drag.PivotRotation, scale);
+                (void)Keire::Math::DecomposeTransform(
+                    transform->PresentationRelativeMatrix(camera.WorldOrigin, std::numeric_limits<double>::max()),
+                    position, m_Drag.PivotRotation, scale);
             }
             m_Drag.Targets = SceneTransformGroup::Capture(scene, selections, selected);
             if (hoveredAxis == Axis::Uniform)

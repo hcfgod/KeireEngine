@@ -71,9 +71,10 @@ namespace KeireEditor
     {
         Keire::Ref<Keire::TransformComponent> Transform;
         Keire::Matrix4 InitialWorld;
-        Keire::Vector3 InitialPosition;
+        Keire::Vector3d InitialPosition;
         Keire::Quaternion InitialRotation;
         Keire::Vector3 InitialScale{1.0F, 1.0F, 1.0F};
+        Keire::Vector3d InitialWorldPosition;
     };
 
     class SceneTransformGroup final
@@ -84,7 +85,7 @@ namespace KeireEditor
                                                                        Keire::EntityId primary);
         static void Restore(std::span<const SceneTransformTarget> targets);
         static void Apply(std::span<const SceneTransformTarget> targets, SceneTool tool, SceneTransformAxis axis,
-                          float amount, Keire::Vector3 worldAxis, Keire::Vector3 pivot,
+                          float amount, Keire::Vector3 worldAxis, Keire::Vector3d pivot,
                           Keire::Quaternion pivotRotation);
     };
 
@@ -184,7 +185,7 @@ namespace KeireEditor
             Axis ActiveAxis = Axis::None;
             Keire::UiPosition StartPointer;
             Keire::Vector3 WorldAxis;
-            Keire::Vector3 Pivot;
+            Keire::Vector3d Pivot;
             Keire::Quaternion PivotRotation;
             Keire::UiPosition ScreenAxis;
             float ScreenLength = 1.0F;

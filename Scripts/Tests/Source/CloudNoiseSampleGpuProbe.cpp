@@ -1,5 +1,6 @@
 // Opt-in hardware sampling comparison; does not qualify cloud appearance or frame-time budgets.
 #include "CloudNoiseSamplingReference.h"
+#include "KeireInternal/Rendering/CloudNoiseBuffer.h"
 #include "KeireInternal/Rendering/CloudNoiseUpload.h"
 
 #include <SDL3/SDL.h>
@@ -8,6 +9,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <fstream>
 #include <iostream>
 #include <iterator>
@@ -26,7 +28,8 @@ namespace
         }
     }
 
-    void CheckSamples(SDL_GPUDevice* device, const char* shaderPath, const SDL_GPUShaderFormat format)
+    void CheckSamples(SDL_GPUDevice* device, const char* shaderPath, const SDL_GPUShaderFormat format,
+                      const bool compareBuffer)
     {
         std::ifstream shaderStream(shaderPath, std::ios::binary);
         Require(shaderStream.good(), "Cannot open sampling probe shader.");
@@ -38,6 +41,7 @@ namespace
         pipelineInfo.entrypoint = "CSMain";
         pipelineInfo.format = format;
         pipelineInfo.num_samplers = 1;
+        pipelineInfo.num_readonly_storage_buffers = compareBuffer ? 1U : 0U;
         pipelineInfo.num_readwrite_storage_buffers = 1;
         pipelineInfo.threadcount_x = 64;
         pipelineInfo.threadcount_y = 1;
@@ -65,8 +69,8 @@ namespace
                                                                           releaseSampler);
         Require(sampler != nullptr, SDL_GetError());
 
-        constexpr std::uint32_t sampleCount = 416;
-        constexpr std::uint32_t byteCount = sampleCount * 4 * sizeof(float);
+        const std::uint32_t sampleCount = compareBuffer ? 512U : 416U;
+        const std::uint32_t byteCount = sampleCount * 4 * sizeof(float);
         const SDL_GPUBufferCreateInfo bufferInfo{SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_WRITE, byteCount, 0};
         const auto releaseBuffer = [device](SDL_GPUBuffer* value) { SDL_ReleaseGPUBuffer(device, value); };
         std::unique_ptr<SDL_GPUBuffer, decltype(releaseBuffer)> output(SDL_CreateGPUBuffer(device, &bufferInfo),
@@ -79,16 +83,49 @@ namespace
             SDL_CreateGPUTransferBuffer(device, &transferInfo), releaseTransfer);
         Require(transfer != nullptr, SDL_GetError());
 
+        std::unique_ptr<SDL_GPUBuffer, decltype(releaseBuffer)> noiseBuffer(nullptr, releaseBuffer);
+        std::unique_ptr<SDL_GPUTransferBuffer, decltype(releaseTransfer)> upload(nullptr, releaseTransfer);
+        std::uint32_t uploadBytes = 0;
+        if (compareBuffer)
+        {
+            const auto packed = Keire::RenderBackend::PackCloudNoiseBuffer(volume);
+            uploadBytes = static_cast<std::uint32_t>(packed.size() * sizeof(std::uint32_t));
+            const SDL_GPUBufferCreateInfo noiseInfo{SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ, uploadBytes, 0};
+            noiseBuffer.reset(SDL_CreateGPUBuffer(device, &noiseInfo));
+            Require(noiseBuffer != nullptr, SDL_GetError());
+            const SDL_GPUTransferBufferCreateInfo uploadInfo{SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD, uploadBytes, 0};
+            upload.reset(SDL_CreateGPUTransferBuffer(device, &uploadInfo));
+            Require(upload != nullptr, SDL_GetError());
+            auto* mapped = SDL_MapGPUTransferBuffer(device, upload.get(), false);
+            Require(mapped != nullptr, SDL_GetError());
+            std::memcpy(mapped, packed.data(), uploadBytes);
+            SDL_UnmapGPUTransferBuffer(device, upload.get());
+        }
+
         const auto cancelCommands = [](SDL_GPUCommandBuffer* value) { (void)SDL_CancelGPUCommandBuffer(value); };
         std::unique_ptr<SDL_GPUCommandBuffer, decltype(cancelCommands)> commands(SDL_AcquireGPUCommandBuffer(device),
                                                                                  cancelCommands);
         Require(commands != nullptr, SDL_GetError());
+        if (compareBuffer)
+        {
+            auto* uploadPass = SDL_BeginGPUCopyPass(commands.get());
+            Require(uploadPass != nullptr, SDL_GetError());
+            const SDL_GPUTransferBufferLocation source{upload.get(), 0};
+            const SDL_GPUBufferRegion destination{noiseBuffer.get(), 0, uploadBytes};
+            SDL_UploadToGPUBuffer(uploadPass, &source, &destination, false);
+            SDL_EndGPUCopyPass(uploadPass);
+        }
         const SDL_GPUStorageBufferReadWriteBinding storage{output.get(), false, 0, 0, 0};
         auto* compute = SDL_BeginGPUComputePass(commands.get(), nullptr, 0, &storage, 1);
         Require(compute != nullptr, SDL_GetError());
         SDL_BindGPUComputePipeline(compute, pipeline.get());
         const SDL_GPUTextureSamplerBinding binding{texture.get(), sampler.get()};
         SDL_BindGPUComputeSamplers(compute, 0, &binding, 1);
+        if (compareBuffer)
+        {
+            auto* noise = noiseBuffer.get();
+            SDL_BindGPUComputeStorageBuffers(compute, 0, &noise, 1);
+        }
         SDL_DispatchGPUCompute(compute, (sampleCount + 63) / 64, 1, 1);
         SDL_EndGPUComputePass(compute);
         auto* copy = SDL_BeginGPUCopyPass(commands.get());
@@ -118,8 +155,10 @@ namespace
             for (std::size_t channel = 0; channel < 4; ++channel)
             {
                 const double expected =
-                    std::lerp(KeireTest::SampleCloudChannel(volume.Mips[lowerMip], point, channel),
-                              KeireTest::SampleCloudChannel(volume.Mips[upperMip], point, channel), blend);
+                    compareBuffer
+                        ? 0.0
+                        : std::lerp(KeireTest::SampleCloudChannel(volume.Mips[lowerMip], point, channel),
+                                    KeireTest::SampleCloudChannel(volume.Mips[upperMip], point, channel), blend);
                 const double actual = values[index * 4 + channel];
                 finite = finite && std::isfinite(actual);
                 maximumError = std::max(maximumError, std::abs(actual - expected));
@@ -135,7 +174,8 @@ int main(int argc, char** argv)
 {
     try
     {
-        Require(argc == 3, "Usage: cloud-sample-gpu direct3d12|vulkan compiled-shader-path");
+        Require(argc == 3 || (argc == 4 && std::string(argv[3]) == "--compare-buffer"),
+                "Usage: cloud-sample-gpu direct3d12|vulkan compiled-shader-path [--compare-buffer]");
         const std::string backend = argv[1];
         Require(backend == "direct3d12" || backend == "vulkan", "Unsupported probe backend.");
         Require(SDL_Init(SDL_INIT_VIDEO), SDL_GetError());
@@ -145,7 +185,7 @@ int main(int argc, char** argv)
             SDL_CreateGPUDevice(format, false, backend.c_str()), destroyDevice);
         Require(device != nullptr, SDL_GetError());
         std::cout << "Backend: " << SDL_GetGPUDeviceDriver(device.get()) << '\n';
-        CheckSamples(device.get(), argv[2], format);
+        CheckSamples(device.get(), argv[2], format, argc == 4);
         device.reset();
         SDL_Quit();
         return 0;

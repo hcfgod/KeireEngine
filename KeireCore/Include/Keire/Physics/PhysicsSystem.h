@@ -2,6 +2,7 @@
 
 #include "Keire/Api.h"
 #include "Keire/Math/Math.h"
+#include "Keire/Math/Vector3d.h"
 #include "Keire/Ref.h"
 
 #include <array>
@@ -33,6 +34,7 @@ namespace Keire
             result.fill(~0U);
             return result;
         }();
+        Vector3 DefaultGravity{0.0F, -9.81F, 0.0F};
     };
 
     enum class PhysicsMotionType : std::uint8_t
@@ -96,6 +98,16 @@ namespace Keire
         std::uint64_t m_Value = 0;
     };
 
+    struct PhysicsMotionSettings
+    {
+        float LinearDamping = 0.05F;
+        float AngularDamping = 0.05F;
+        float MaximumLinearSpeed = 500.0F;     // Metres per second.
+        float MaximumAngularSpeed = 47.12389F; // Radians per second; preserves the backend default.
+
+        bool operator==(const PhysicsMotionSettings&) const = default;
+    };
+
     struct PhysicsBodyDefinition
     {
         PhysicsMotionType Motion = PhysicsMotionType::Static;
@@ -117,6 +129,17 @@ namespace Keire
         float Restitution = 0.0F;
         PhysicsMaterialCombineMode FrictionCombine = PhysicsMaterialCombineMode::Average;
         PhysicsMaterialCombineMode RestitutionCombine = PhysicsMaterialCombineMode::Average;
+        PhysicsMotionSettings MotionSettings;
+    };
+
+    struct PhysicsGravitySource
+    {
+        Vector3d Center;
+        // Standard gravitational parameter in m^3/s^2. Interior uses a uniform-density sphere.
+        double GravitationalParameter = 0.0;
+        double RadiusMetres = 1.0;
+
+        bool operator==(const PhysicsGravitySource&) const = default;
     };
 
     struct PhysicsBodyState
@@ -236,6 +259,7 @@ namespace Keire
         std::size_t DroppedBodies = 0;
         std::size_t DroppedContacts = 0;
         std::size_t DroppedQueries = 0;
+        Vector3d WorldOrigin{};
     };
 
     struct PhysicsDebugCaptureConfiguration
@@ -253,11 +277,28 @@ namespace Keire
         class Impl;
         ~PhysicsWorld() override;
         [[nodiscard]] bool IsOpen() const noexcept;
+        // Body, query, hit and contact positions are local to this simulation origin.
+        // Directions, velocities and shape geometry are never translated.
+        [[nodiscard]] Vector3d WorldOrigin() const;
+        /// Translates the local frame without changing absolute body positions or velocities.
+        /// Conversion/allocation failures leave the world unchanged. Caller-owned local caches must also translate.
+        void RebaseOrigin(Vector3d origin, double maximumError = 0.001);
+        [[nodiscard]] Vector3 ToLocalPosition(Vector3d worldPosition, double maximumError) const;
+        [[nodiscard]] Vector3d ToWorldPosition(Vector3 localPosition) const;
         [[nodiscard]] PhysicsBodyId CreateBody(const PhysicsBodyDefinition& definition);
         void DestroyBody(PhysicsBodyId body);
         void SetKinematicTarget(PhysicsBodyId body, Vector3 position, Quaternion rotation);
         void SetBodyState(PhysicsBodyId body, const PhysicsBodyState& state);
         void SetGravityEnabled(PhysicsBodyId body, bool enabled);
+        void SetMotionSettings(PhysicsBodyId body, const PhysicsMotionSettings& settings);
+        [[nodiscard]] PhysicsMotionSettings GetMotionSettings(PhysicsBodyId body) const;
+        /// Uniform acceleration in simulation axes, in metres per second squared.
+        /// Changing gravity wakes dynamic bodies that use gravity. Translation rebasing preserves it.
+        void SetGravity(Vector3 acceleration);
+        [[nodiscard]] Vector3 Gravity() const;
+        /// Sources add to uniform gravity. At most 64; changes wake gravity-enabled dynamic bodies.
+        void SetGravitySources(std::vector<PhysicsGravitySource> sources);
+        [[nodiscard]] std::vector<PhysicsGravitySource> GravitySources() const;
         [[nodiscard]] std::optional<PhysicsBodyState> TryGetBody(PhysicsBodyId body) const;
         [[nodiscard]] std::vector<PhysicsQueryHit> RayCast(const PhysicsRayQuery& query) const;
         [[nodiscard]] std::optional<PhysicsQueryHit> CastCapsule(const PhysicsCapsuleCastQuery& query) const;
@@ -284,7 +325,11 @@ namespace Keire
         ~PhysicsSystem() override;
         [[nodiscard]] bool IsOpen() const noexcept;
         [[nodiscard]] Ref<PhysicsWorld> CreateWorld();
+        [[nodiscard]] Ref<PhysicsWorld> CreateWorld(Vector3d worldOrigin);
         void ConfigureCollisionMatrix(std::array<std::uint32_t, 32> matrix);
+        // Applies to subsequently created worlds; existing world overrides remain unchanged.
+        void ConfigureDefaultGravity(Vector3 acceleration);
+        [[nodiscard]] Vector3 DefaultGravity() const;
         [[nodiscard]] std::array<std::uint32_t, 32> CollisionMatrix() const;
         void Close();
 

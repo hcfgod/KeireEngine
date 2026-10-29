@@ -10,6 +10,30 @@ results below apply to the earlier layered model unless explicitly stated otherw
 or LWE-6. Independent regional influence, scale and base-height variation were exercised in the native editor;
 wind, final Undo/reopen, motion and player checks remain incomplete after the editor hang.
 
+## Comparing Environments Far From The Origin
+
+With spherical atmosphere enabled, the authored sky-color gradient now fades with altitude above
+that planet: full strength at its surface and zero at the outer atmosphere. Physical scattering,
+the solar disc and stars are evaluated separately. Global distance from `(0,0,0)` does not enter
+this fade. Shader/build and visual acceptance for this change are tracked in the large-world plan.
+
+Moving scene objects does not move the atmosphere's planet. With spherical atmosphere enabled,
+`PlanetCenter`, `PlanetRadius` and `Height` define its physical location and extent. For example,
+a planet centred at `(0, -6360000, 0)` with radius `6360000` has its surface near the world origin;
+a copied platform at `X = 10000000000` is outside that planet's atmosphere, even if its Y coordinate
+is still zero. A different sky there is not by itself a precision failure.
+
+For a translation comparison, translate the planet centre and scene together and keep camera altitude,
+orientation, time, exposure and lighting identical. For a travel comparison, keep the planet fixed and
+move the camera away: leaving the atmosphere should change the sky. Compare Scene and Game views
+from matching poses; an editor camera far away and a game camera at the original platform do not
+show the same environment location.
+
+Layered and volumetric clouds currently use a flat east/up/north model with periodic horizontal
+patterns. They are not spherical cloud shells. Extending their coordinate domain does not establish
+planetary weather, local horizon orientation or surface-to-space acceptance. Those integrations
+remain tracked in [the large-world plan](LargeWorldAndEnvironmentPlan.md).
+
 ## Startup and responsiveness investigation
 
 The October 27 generator-34/importer-47 QA session completed 33 imports with 60 cache hits,
@@ -385,7 +409,8 @@ time: a changing wind requires integrated displacement and a save/replay contrac
 | Horizon fade cosine magnitude | 0.01 to 1 |
 | X/Z wind component | -1,000 to 1,000 m/s |
 | Linear RGB component | 0 to 16 |
-| Anchor-relative observer component | +/-1e9 m |
+| Anchor-relative horizontal observer (X/Z) | +/-1e12 m; wrapped in double precision before GPU upload |
+| Anchor-relative vertical observer (Y) | +/-1e9 m |
 
 Validation rejects nonfinite inputs even in disabled authored layers. These limits protect a local model; they are
 not measured guarantees of visual precision over the complete domain. At a coplanar observer the sheet is invisible.

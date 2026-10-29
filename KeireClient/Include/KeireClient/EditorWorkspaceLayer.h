@@ -97,6 +97,11 @@ namespace Keire::Internal
     class DiagnosticBundleDialogController;
 }
 
+namespace Keire::Detail
+{
+    class PlanetProjectFrameResolver;
+}
+
 class EditorWorkspaceLayer final : public Keire::Layer,
                                    private KeireEditor::ISceneViewportController,
                                    private KeireEditor::IHierarchyController,
@@ -197,6 +202,8 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     [[nodiscard]] float UiBuilderDisplayScale() const noexcept override;
     [[nodiscard]] const Keire::RenderEnvironmentSettings& SceneViewportSettings() const noexcept override;
     [[nodiscard]] std::optional<Keire::EnvironmentLightingSnapshot> SceneViewportEnvironmentLighting() override;
+    [[nodiscard]] std::optional<Keire::PlanetEnvironmentView>
+    SceneViewportPlanetEnvironment(const Keire::RenderCamera& camera) override;
     [[nodiscard]] Keire::Ref<Keire::WindowSystem> SceneViewportWindows() const noexcept override;
     [[nodiscard]] Keire::WindowId SceneViewportWindow() const noexcept override;
     [[nodiscard]] float SceneViewportDisplayScale() const noexcept override;
@@ -444,9 +451,9 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     void QueueLightingBake(bool force) override;
     void OpenDroppedScene(Keire::AssetId asset) override;
     void OpenDroppedInputActions(Keire::AssetId asset) override;
-    void InstantiateDroppedPrefab(Keire::AssetId asset, Keire::Vector3 position) override;
-    void CreateDroppedMeshEntity(Keire::AssetId asset, Keire::Vector3 position) override;
-    void CreateDroppedVfxEntity(Keire::AssetId asset, Keire::Vector3 position) override;
+    void InstantiateDroppedPrefab(Keire::AssetId asset, Keire::Vector3d position) override;
+    void CreateDroppedMeshEntity(Keire::AssetId asset, Keire::Vector3d position) override;
+    void CreateDroppedVfxEntity(Keire::AssetId asset, Keire::Vector3d position) override;
     void AssignDroppedMaterial(Keire::EntityId entity, Keire::AssetId asset) override;
     void ConfigureAssetImporters(Keire::AssetDatabaseSpecification& specification) const;
     void
@@ -713,6 +720,15 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     CapsuleCastManaged(const Keire::ManagedCapsuleCastQuery& query) noexcept override;
     [[nodiscard]] std::vector<Keire::AssetId>
     OverlapSphereManaged(const Keire::ManagedSphereOverlapQuery& query) override;
+    [[nodiscard]] std::optional<Keire::ManagedRaycastHitPrecise>
+    RaycastManagedPrecise(const Keire::ManagedRaycastQueryPrecise& query) override;
+
+    [[nodiscard]] std::optional<Keire::ManagedRaycastHitPrecise>
+    CapsuleCastManagedPrecise(const Keire::ManagedCapsuleCastQueryPrecise& query) override;
+
+    [[nodiscard]] std::vector<Keire::AssetId>
+    OverlapSphereManagedPrecise(const Keire::ManagedSphereOverlapQueryPrecise& query) override;
+
     void SetManagedCursorVisible(bool visible) noexcept override;
     void SetManagedCursorLocked(bool locked) noexcept override;
     [[nodiscard]] bool IsManagedCursorVisible() const noexcept override;
@@ -876,6 +892,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     KeireEditor::MaterialGraphDocument* m_MaterialGraphDocument = nullptr;
     KeireEditor::ProjectSettingsDocument* m_ProjectSettingsDocument = nullptr;
     std::unique_ptr<KeireEditor::EnvironmentPreviewClock> m_EnvironmentPreview;
+    std::unique_ptr<Keire::Detail::PlanetProjectFrameResolver> m_PlanetPreviewFrames;
     KeireEditor::MaterialDocument* m_MaterialDocument = nullptr;
     std::vector<Keire::AssetId> m_PendingMaterialSelectionImports;
     std::unique_ptr<KeireEditor::UiBuilderDocument> m_UiBuilderDocument;

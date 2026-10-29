@@ -1,5 +1,6 @@
 #pragma once
 
+#include "KeireInternal/Environment/CloudCoordinateDomain.h"
 #include "KeireInternal/Environment/EnvironmentCloudPhase.h"
 #include "KeireInternal/Environment/VolumetricCloudValidation.h"
 
@@ -41,7 +42,8 @@ namespace Keire::RenderBackend
         for (std::size_t axis = 0; axis < observerFromAnchor.size(); ++axis)
         {
             const double observer = observerFromAnchor[axis];
-            if (!std::isfinite(observer) || std::abs(observer) > 1.0e9)
+            if (!(axis == 1 ? Detail::ValidCloudVerticalCoordinate(observer)
+                            : Detail::ValidCloudHorizontalCoordinate(observer)))
             {
                 throw std::invalid_argument("Volumetric cloud observer exceeds the local frame domain.");
             }

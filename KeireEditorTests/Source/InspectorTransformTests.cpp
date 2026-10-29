@@ -6,6 +6,8 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <limits>
+#include <stdexcept>
 #include <variant>
 
 TEST_CASE("continuous Inspector Transform undo stores one compact command and the final drag sample")
@@ -53,6 +55,38 @@ TEST_CASE("continuous Inspector Transform undo stores one compact command and th
     separateEdit.Scope = context;
     context->Execute(KeireEditor::CreateInspectorTransformUndoCommand(scene, true, std::move(separateEdit), apply));
     CHECK(context->UndoCount() == 2);
+}
+
+TEST_CASE("precise Inspector position undo retains distant coordinates and rejects invalid payloads")
+{
+    const auto service = Keire::CreateRef<Keire::UndoService>();
+    const auto context = service->CreateContext({.Name = "Precise Inspector"});
+    const auto scene = Keire::AssetId::Generate();
+    const auto entity = Keire::EntityId(Keire::AssetId::Generate());
+    const Keire::Vector3d initial{1e15 + 0.125, -1e15 - 0.25, 6371000.001};
+    const Keire::Vector3d moved{initial.X + 0.5, initial.Y - 0.75, initial.Z + 100000.0};
+    auto position = initial;
+    const KeireEditor::InspectorTransformApply apply =
+        [&](Keire::EntityId, KeireEditor::InspectorTransformProperty, const KeireEditor::InspectorTransformValue& value)
+    { position = std::get<Keire::Vector3d>(value); };
+    auto edit = KeireEditor::MakeInspectorTransformEdit(entity, KeireEditor::InspectorTransformProperty::Position,
+                                                        initial, moved, 1);
+    edit.Scope = context;
+    context->Execute(KeireEditor::CreateInspectorTransformUndoCommand(scene, false, edit, apply));
+    CHECK(position == moved);
+    REQUIRE(context->Undo());
+    CHECK(position == initial);
+    REQUIRE(context->Redo());
+    CHECK(position == moved);
+
+    edit.After = Keire::Vector3d{std::numeric_limits<double>::infinity(), 0, 0};
+    CHECK_THROWS_AS((void)KeireEditor::CreateInspectorTransformUndoCommand(scene, false, edit, apply),
+                    std::invalid_argument);
+    edit.After = moved;
+    edit.Property = KeireEditor::InspectorTransformProperty::Scale;
+    CHECK_THROWS_AS((void)KeireEditor::CreateInspectorTransformUndoCommand(scene, false, edit, apply),
+                    std::invalid_argument);
+    CHECK(position == moved);
 }
 
 TEST_CASE("targeted Play Transform tracking preserves editor and mixed origin without scene mutation snapshots")

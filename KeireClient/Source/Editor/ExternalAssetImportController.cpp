@@ -27,7 +27,7 @@ namespace KeireEditor
 
     void ExternalAssetImportController::Queue(const std::span<const std::filesystem::path> paths,
                                               const std::filesystem::path& destinationFolder, const bool viewport,
-                                              const Keire::EntityId viewportTarget, Keire::Vector3 viewportPosition,
+                                              const Keire::EntityId viewportTarget, Keire::Vector3d viewportPosition,
                                               const Keire::Ref<Keire::AssetDatabase>& database,
                                               AssetOperationService& operations,
                                               const Keire::Ref<Keire::Scene>& viewportScene)

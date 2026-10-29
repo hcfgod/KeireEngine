@@ -4,6 +4,7 @@
 #include "Keire/Assets/Asset.h"
 #include "Keire/Audio/AudioSystem.h"
 #include "Keire/ECS/EntityLayer.h"
+#include "Keire/Math/Math.h"
 
 #include <array>
 #include <cstddef>
@@ -37,6 +38,7 @@ namespace Keire
         std::filesystem::path ExternalEditorExecutable;
         std::array<std::string, PhysicsCollisionLayerCount> PhysicsLayerNames;
         std::array<std::uint32_t, PhysicsCollisionLayerCount> PhysicsCollisionMatrix;
+        Vector3 PhysicsGravity{0.0F, -9.81F, 0.0F};
 
         [[nodiscard]] bool operator==(const ProjectAuthoringSettings&) const = default;
     };

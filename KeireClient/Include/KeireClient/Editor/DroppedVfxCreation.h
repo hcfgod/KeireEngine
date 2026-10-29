@@ -13,7 +13,7 @@ namespace KeireEditor
 {
     [[nodiscard]] inline Keire::EntityId CreateDroppedVfxEmitter(SceneDocument& document, std::string name,
                                                                  const Keire::AssetId effect,
-                                                                 const Keire::Vector3 position)
+                                                                 const Keire::Vector3d position)
     {
         if (!effect)
             throw std::invalid_argument("A dropped VFX effect requires a valid asset ID.");

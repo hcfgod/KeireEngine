@@ -21,7 +21,8 @@ namespace Keire
             static constexpr std::uint64_t DefaultLogicalWorld = 1;
             static constexpr std::uint64_t RootFrame = 1;
 
-            // Owner-thread access only. The borrowed registry requires the world object to remain alive.
+            // Owner-thread access only. The borrowed registry requires the world object to remain alive and no
+            // successful startup planet reconfiguration; acquire it after SceneRuntimePlanetAccess::Configure.
             // Logical keys are local to this runtime context; live handles distinguish separate instances.
             [[nodiscard]] static KEIRE_API const FrameRegistry& Frames(const SceneRuntimeWorld& world);
 

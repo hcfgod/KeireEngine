@@ -20,6 +20,7 @@ TEST_CASE("Runtime manifests preserve HDR sky curves and disabled authoring acro
         const EnvironmentLightingProfile profile(EnvironmentDirectionalOwnership::Authored, {}, {}, sky);
         const EnvironmentClockState clock{1234567890123456789LL, 0.875};
         const nlohmann::json manifest{{"schemaVersion", EnvironmentRuntimeManifest::CurrentSchema},
+                                      {"planets", PlanetProjectSettingsRecord::Encode({})},
                                       {"environmentTime", EnvironmentClockRecord::Encode(clock)},
                                       {"environmentLighting", EnvironmentLightingRecord::Encode(profile)},
                                       {"rendering",
@@ -282,6 +283,7 @@ TEST_CASE("Runtime fog preserves authored volumes and rejects missing malformed 
     CHECK_THROWS_AS((void)EnvironmentRuntimeManifest::DecodeState(manifest), std::invalid_argument);
     Keire::FogSettings fog;
     fog.Enabled = true;
+    fog.PlanetaryHeight = true;
     fog.LocalVolumes.emplace_back();
     fog.LocalVolumes.front().Center = {1.0e12 + 0.125, 25.0, -30.0};
     fog.LocalVolumes.front().Enabled = false;
@@ -300,6 +302,6 @@ TEST_CASE("Runtime fog preserves authored volumes and rejects missing malformed 
     }
     manifest["rendering"]["fog"]["localVolumes"][0]["halfExtent"] = {0, 1, 1};
     CHECK_THROWS_AS((void)EnvironmentRuntimeManifest::DecodeState(manifest), std::invalid_argument);
-    manifest["schemaVersion"] = EnvironmentRuntimeManifest::FogSchema + 1;
+    manifest["schemaVersion"] = EnvironmentRuntimeManifest::CurrentSchema + 1;
     CHECK_THROWS_AS((void)EnvironmentRuntimeManifest::DecodeState(manifest), std::invalid_argument);
 }

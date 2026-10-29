@@ -341,6 +341,16 @@ namespace
                 Keire::Vector3 vector{1.0F, 2.0F, 3.0F};
                 CHECK_FALSE(ui.DragVector3("Vector", vector));
                 CHECK_THROWS_AS((void)ui.DragVector3("", vector), std::invalid_argument);
+                Keire::Vector3d precisePosition{1e15 + 0.125, -1e15 - 0.25, 6371000.001};
+                const auto originalPrecisePosition = precisePosition;
+                CHECK_FALSE(ui.DragVector3d("Precise Position", precisePosition));
+                CHECK(precisePosition == originalPrecisePosition);
+                CHECK_THROWS_AS((void)ui.DragVector3d("", precisePosition), std::invalid_argument);
+                CHECK_THROWS_AS((void)ui.DragVector3d("Precise Position", precisePosition, 0.0F),
+                                std::invalid_argument);
+                CHECK(precisePosition == originalPrecisePosition);
+                Keire::Vector3d invalidPosition{std::numeric_limits<double>::infinity(), 0.0, 0.0};
+                CHECK_THROWS_AS((void)ui.DragVector3d("Invalid Position", invalidPosition), std::invalid_argument);
                 std::string text = "editable";
                 (void)ui.InputText("Text", text);
                 (void)ui.InputTextWithHint("Search", "Search items", text);

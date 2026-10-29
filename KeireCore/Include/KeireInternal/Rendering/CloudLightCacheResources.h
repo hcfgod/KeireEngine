@@ -39,5 +39,6 @@ namespace Keire::RenderBackend
     [[nodiscard]] CloudLightCacheLookupUniforms
     RecordCloudLightCache(SDL_GPUDevice* device, SDL_GPUCommandBuffer* commands, CloudLightCacheResources& resources,
                           const CloudVolumeViewUniforms& view, const GpuTextureResources& noise,
-                          std::optional<float> cloudBasePatternPhase = std::nullopt);
+                          std::optional<float> cloudBasePatternPhase = std::nullopt,
+                          const Detail::ResolvedPlanetFrame* planetFrame = nullptr);
 } // namespace Keire::RenderBackend

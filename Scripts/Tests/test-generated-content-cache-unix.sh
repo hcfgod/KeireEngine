@@ -34,12 +34,17 @@ for platform in Linux Mac; do
 done
 
 for generator in builtin-shaders builtin-vfx; do
-  for dependency in FogDensity.hlsli FogExclusion.hlsli FogRayIntervals.hlsli; do
+  for dependency in FogDensity.hlsli FogExclusion.hlsli FogRayIntervals.hlsli CloudNoiseBuffer.hlsli \
+    PlanetaryCloudIntersections.hlsli PlanetaryCloudGeometry.hlsli PlanetaryCloudWeather.hlsli; do
     assert_true grep -F -q "$dependency" "$ROOT/Scripts/Unix/$generator.sh"
   done
 done
 assert_true grep -F -q 'AtmosphereGround.hlsli' "$ROOT/Scripts/Unix/builtin-shaders.sh"
+assert_true grep -F -q 'PlanetaryCloudLayered.hlsli' "$ROOT/Scripts/Unix/builtin-shaders.sh"
+assert_true grep -F -q 'PlanetaryCloudIntersections PlanetaryCloudGeometry PlanetaryCloudWeather' "$ROOT/Scripts/Unix/builtin-shaders.sh"
 assert_true grep -F -q 'FogTerrainShadow.hlsli' "$ROOT/Scripts/Unix/builtin-shaders.sh"
+assert_true grep -F -q 'FogExclusion FogDensity' "$ROOT/Scripts/Unix/builtin-shaders.sh"
+assert_true grep -F -q 'CloudNoiseBuffer CloudVolume' "$ROOT/Scripts/Unix/builtin-shaders.sh"
 fixture="$(mktemp -d)"
 lock_held=0
 waiter=""

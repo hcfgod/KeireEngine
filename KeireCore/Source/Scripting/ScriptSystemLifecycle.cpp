@@ -725,10 +725,10 @@ namespace Keire
             ++ManagedInteropCalls;
             const RuntimeScope scope(*this);
             ClearRuntimeException();
-            instance.Object.InvokeMethod("RuntimePhysicsContact", static_cast<std::uint8_t>(phase),
+            instance.Object.InvokeMethod("RuntimePhysicsContactPrecise", static_cast<std::uint8_t>(phase),
                                          contact.Trigger ? std::uint8_t{1} : std::uint8_t{0},
                                          contact.Other.Value().High(), contact.Other.Value().Low(), contact.Point,
-                                         contact.Normal, contact.Impulse);
+                                         contact.Normal, contact.Impulse, contact.PointPrecise);
             ThrowRuntimeException();
         }
         catch (const std::exception& error)

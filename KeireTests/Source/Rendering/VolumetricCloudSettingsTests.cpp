@@ -34,7 +34,7 @@ TEST_CASE("Volumetric cloud GPU packing retains seed and camera relative periodi
         CHECK(phase >= 0.0F);
         CHECK(phase < 256.0F);
     }
-    CHECK_THROWS_AS((void)Keire::RenderBackend::MakeVolumetricCloudUniforms(settings, {1.0e10, 0.0, 0.0}, {}),
+    CHECK_THROWS_AS((void)Keire::RenderBackend::MakeVolumetricCloudUniforms(settings, {1.0e12 + 1.0, 0.0, 0.0}, {}),
                     std::invalid_argument);
 }
 
@@ -426,4 +426,26 @@ TEST_CASE("Regional cloud base height preserves legacy records and rejects inval
         settings.BaseHeightVariationMeters = invalid;
         CHECK_THROWS_AS(Keire::Detail::EncodeVolumetricCloudSettings(settings), std::invalid_argument);
     }
+}
+
+TEST_CASE("Distant horizontal cloud packing retains periodic detail without extending altitude")
+{
+    Keire::VolumetricCloudSettings settings;
+    settings.Enabled = true;
+    settings.PatternSizeMeters = 100.0;
+    settings.WindMetersPerSecond = {};
+    for (const double distance : {1.0e10, -1.0e10, 1.0e12 - 1.0, -1.0e12 + 1.0})
+    {
+        CAPTURE(distance);
+        const double x = distance + 0.125;
+        const double z = distance - 0.25;
+        const auto distant = Keire::RenderBackend::MakeVolumetricCloudUniforms(settings, {x, 500.0, z}, {});
+        const auto local = Keire::RenderBackend::MakeVolumetricCloudUniforms(
+            settings, {std::fmod(x, 25600.0), 500.0, std::fmod(z, 25600.0)}, {});
+        CHECK(distant.Quality[0] == 1U);
+        CHECK(distant.Geometry == local.Geometry);
+        CHECK(distant.PatternOrigin == local.PatternOrigin);
+    }
+    CHECK_THROWS_AS((void)Keire::RenderBackend::MakeVolumetricCloudUniforms(settings, {0.0, 1.0e9 + 1.0, 0.0}, {}),
+                    std::invalid_argument);
 }

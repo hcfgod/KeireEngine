@@ -43,6 +43,10 @@ namespace Keire
         std::filesystem::path CatalogPath;
         int Priority = 0;
         bool AllowOverrides = false;
+        /// Omit these assets and their transitive dependants from this mount. Existing handles are not revoked.
+        std::vector<AssetId> ExcludedAssets;
+        /// When present, reject entries absent from this allowlist as well. Empty permits no entries.
+        std::optional<std::vector<AssetId>> AllowedAssets;
     };
 
     struct AssetSystemSpecification

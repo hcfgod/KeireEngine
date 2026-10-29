@@ -2,6 +2,9 @@
 
 #include <nlohmann/json.hpp>
 
+#include "Keire/Rendering/ShaderGraphResources.h"
+
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -145,6 +148,12 @@ namespace Keire::Detail
         const bool fullscreen = definition.Target.Target == ShaderGraphTarget::Fullscreen;
         const bool screenSpace = ui || fullscreen;
         const bool lit = definition.Output != ShaderGraphOutput::Unlit && !fullscreen;
+        const auto propertyTextures = static_cast<std::uint32_t>(
+            std::ranges::count(properties, ShaderPropertyType::Texture2D, &ShaderPropertyDefinition::Type));
+        const auto resources =
+            GenerateShaderGraphResourceDeclarations(definition.Resources, propertyTextures, propertyTextures);
+        const auto noiseSlot = std::max(resources.NextTextureRegister, resources.NextSamplerRegister) + (lit ? 9U : 0U);
+        const auto volumeAbi = screenSpace ? 0U : (noiseSlot >= 16U ? 14U : 13U);
         Json passes = Json::array();
         const auto addPass = [&](const std::string_view role, const std::string_view define)
         {
@@ -208,13 +217,14 @@ namespace Keire::Detail
             {"usesForwardPlus", lit},
             {"usesInstancing", !screenSpace},
             {"instanceAddressingAbiVersion", screenSpace ? 0 : 2},
+            {"vfxRenderOriginAbiVersion", screenSpace ? 0 : 1},
             {"occlusionSupport",
              static_cast<std::uint8_t>(screenSpace ? ShaderOcclusionSupport::None : occlusionSupport)},
             {"maximumWorldPositionDisplacementRadius",
              maximumWorldPositionDisplacementRadius ? Json(*maximumWorldPositionDisplacementRadius) : Json(nullptr)},
             {"usesImageBasedLighting", lit},
             {"spatialLightingAbiVersion", lit ? 3 : 0},
-            {"volumeLightingAbiVersion", screenSpace ? 0 : 9},
+            {"volumeLightingAbiVersion", volumeAbi},
             {"usesVertexMaterialParameters", usesVertexMaterialParameters},
             {"stages", {{"vertex", "VSMain"}, {"fragment", "PSMain"}}},
             {"defines", std::move(defines)},

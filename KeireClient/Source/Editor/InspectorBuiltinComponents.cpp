@@ -28,12 +28,12 @@ namespace KeireEditor
             {
                 m_Ui.TextColored(m_Theme.MutedText, "Required | Local space");
                 m_Ui.Separator();
-                auto position = transform->LocalPosition();
+                auto position = transform->LocalPositionPrecise();
                 const auto previousPosition = position;
                 const auto currentOrientation = transform->LocalRotation();
                 auto rotation = m_Panel.m_RotationDisplay.Read(transform);
                 auto scale = transform->LocalScale();
-                const bool positionChanged = m_Ui.DragVector3("Position", position, 0.05F);
+                const bool positionChanged = m_Ui.DragVector3d("Position", position, 0.05F);
                 const auto positionState = m_Ui.LastItemState();
                 const bool rotationChanged = m_Ui.DragVector3("Rotation", rotation, 0.25F);
                 const auto rotationState = m_Ui.LastItemState();
@@ -135,7 +135,7 @@ namespace KeireEditor
                 if (m_Ui.Button("Reset"))
                 {
                     m_Panel.m_Controller.RecordInspectorUndo();
-                    const SceneDocument::TransformValues defaults{.Position = Keire::Vector3{},
+                    const SceneDocument::TransformValues defaults{.Position = Keire::Vector3d{},
                                                                   .EulerDegrees = Keire::Vector3{},
                                                                   .Scale = Keire::Vector3{1.0F, 1.0F, 1.0F}};
                     if (m_MultiEditing)

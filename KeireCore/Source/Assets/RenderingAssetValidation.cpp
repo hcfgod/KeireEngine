@@ -31,11 +31,19 @@ namespace Keire::Detail
         const auto occlusionSupport = static_cast<std::uint8_t>(definition.OcclusionSupport);
         const bool unlitVolume = !definition.ReceivesShadows && !definition.UsesForwardPlus &&
                                  !definition.UsesImageBasedLighting && definition.SpatialLightingAbiVersion == 0U;
-        if (definition.VolumeLightingAbiVersion > 9U ||
+        if (definition.VolumeLightingAbiVersion > 14U ||
             (definition.VolumeLightingAbiVersion >= 1U &&
              (definition.VertexLayoutVersion != 3U || (!unlitVolume && definition.SpatialLightingAbiVersion != 3U))))
         {
             throw std::invalid_argument("Volume-lighting ABI v1 requires an unlit or spatial ABI v3 mesh shader.");
+        }
+        if (definition.VfxRenderOriginAbiVersion > 1U ||
+            (definition.VfxRenderOriginAbiVersion == 1U &&
+             (definition.VertexLayoutVersion != 3U || !definition.UsesInstancing ||
+              definition.InstanceAddressingAbiVersion != 2U)))
+        {
+            throw std::invalid_argument(
+                "Shader VFX render-origin ABI v1 requires mesh vertex layout 3 and instance-addressing ABI v2.");
         }
         if (definition.SchemaVersion != ShaderAssetSchemaVersion ||
             (definition.VertexLayoutVersion < 1 || definition.VertexLayoutVersion > UiShaderVertexLayoutVersion) ||
@@ -144,12 +152,13 @@ namespace Keire::Detail
         const auto reservedSamplers = (definition.ReceivesShadows ? 2U : 0U) +
                                       (definition.UsesImageBasedLighting ? 2U : 0U) +
                                       (definition.SpatialLightingAbiVersion >= 2U ? 5U : 0U) + (ui ? 1U : 0U) +
-                                      (definition.VolumeLightingAbiVersion >= 2U ? 1U : 0U);
+                                      (VolumeLightingUsesNoiseTexture(definition.VolumeLightingAbiVersion) ? 1U : 0U);
         if (textureProperties + definition.UserResourceSlots + reservedSamplers > portableFragmentSamplerLimit)
             throw std::invalid_argument(
                 "Shader material textures and fixed lighting resources exceed the portable 16-sampler limit.");
         const auto reservedReadOnlyBuffers =
-            (definition.UsesForwardPlus ? 3U : 0U) + (definition.SpatialLightingAbiVersion == 3U ? 1U : 0U);
+            (definition.UsesForwardPlus ? 3U : 0U) + (definition.SpatialLightingAbiVersion == 3U ? 1U : 0U) +
+            (VolumeLightingUsesNoiseBuffer(definition.VolumeLightingAbiVersion) ? 1U : 0U);
         if (definition.UserReadOnlyBuffers + reservedReadOnlyBuffers > 8U)
             throw std::invalid_argument("Shader read-only buffers exceed the portable eight-buffer limit.");
         constexpr std::size_t maximumStageBinaryBytes = 64ULL * 1024ULL * 1024ULL;

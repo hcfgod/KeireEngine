@@ -1,4 +1,6 @@
 #include "KeireClient/EditorWorkspaceLayer.h"
+#include "KeireClientInternal/Editor/StartupAssetReadiness.h"
+#include "KeireInternal/Spatial/PlanetProjectFrameResolver.h"
 
 #include "Keire/ECS/Components/AudioComponents.h"
 #include "Keire/Project/SharedShaderLibrary.h"
@@ -180,6 +182,11 @@ namespace
         {
             return Track(m_Ui.DragVector3(label, value, static_cast<float>(step)));
         }
+        bool EditVector3d(const std::string_view label, Keire::Vector3d& value, const double step) override
+        {
+            return Track(m_Ui.DragVector3d(label, value, static_cast<float>(step)));
+        }
+
         bool EditVector4(const std::string_view label, Keire::Vector4& value, const double step) override
         {
             return Track(m_Ui.DragVector4(label, value, static_cast<float>(step)));
@@ -857,7 +864,10 @@ void EditorWorkspaceLayer::OnAttach()
             {
                 authoringSettings = Keire::LoadProjectAuthoringSettings(project->Root());
                 if (const auto physics = Owner().Physics())
+                {
                     physics->ConfigureCollisionMatrix(authoringSettings.PhysicsCollisionMatrix);
+                    physics->ConfigureDefaultGravity(authoringSettings.PhysicsGravity);
+                }
             }
             catch (const std::exception& error)
             {
@@ -935,38 +945,42 @@ void EditorWorkspaceLayer::OnAttach()
             const auto catalog = project->AssetCatalog();
             std::error_code catalogError;
             const bool hasPublishedCatalog = std::filesystem::is_regular_file(catalog, catalogError) && !catalogError;
-            bool requiresSynchronousImport = !hasPublishedCatalog;
-            if (!requiresSynchronousImport)
+            auto incompatibleAssets = KeireEditor::IncompatibleStartupAssets(*m_AssetDatabase, m_AssetRecords);
+            bool requiresStartupRefresh = !hasPublishedCatalog;
+            if (!requiresStartupRefresh)
             {
-                requiresSynchronousImport =
-                    std::ranges::any_of(m_AssetRecords,
-                                        [this](const Keire::AssetSourceRecord& record)
-                                        {
-                                            const auto importer =
-                                                m_AssetDatabase->FindImporterForPath(record.RelativePath);
-                                            return importer && importer->Name == record.Importer &&
-                                                   importer->Version > record.ImporterVersion;
-                                        });
+                requiresStartupRefresh = !incompatibleAssets.empty();
             }
-            if (!requiresSynchronousImport && startupCandidate)
+            if (!requiresStartupRefresh && startupCandidate)
             {
                 const auto startup = m_AssetDatabase->Find(startupCandidate);
                 const auto catalogTime = std::filesystem::last_write_time(catalog, catalogError);
-                requiresSynchronousImport =
+                requiresStartupRefresh =
                     catalogError || !startup ||
                     FileIsNewerThan(project->AssetsDirectory() / startup->RelativePath, catalogTime) ||
                     FileIsNewerThan(startup->MetadataPath, catalogTime);
             }
-            if (requiresSynchronousImport)
+            if (hasPublishedCatalog)
             {
-                m_SceneTransitions->DeferStartupScene(startupCandidate);
+                if (const auto assets = Owner().Assets())
+                {
+                    (void)assets->Unmount(catalog);
+                    assets->Mount(KeireEditor::CompatibleStartupMount(catalog, *m_AssetDatabase, m_AssetRecords,
+                                                                      requiresStartupRefresh ? startupCandidate
+                                                                                             : Keire::AssetId{}));
+                }
+            }
+            if (requiresStartupRefresh)
+            {
+                // Open the source document now. Only cooked dependencies wait for their compatible refresh.
+                m_SceneTransitions->RequireStartupRefresh(startupCandidate);
                 if (hasPublishedCatalog && startupCandidate && m_AssetDatabase->Find(startupCandidate))
                 {
                     // Refresh the scene's dependency closure before unrelated importer migrations.
                     m_AssetOperations->QueueAssetImport(
                         startupCandidate, KeireEditor::AssetOperationPriority::ExplicitAction,
                         {.Reason = "startup-scene-refresh", .StartupSceneRefresh = true});
-                    m_AssetStatus = "Preparing the startup scene and its dependencies.";
+                    m_AssetStatus = "Scene source is available. Refreshing incompatible assets in the background.";
                 }
                 else
                 {

@@ -475,13 +475,14 @@ namespace Keire
                                                        : definition.UsesImageBasedLighting ? 4U
                                                        : definition.ReceivesShadows        ? 3U
                                                                                            : 2U;
-            const auto expectedSamplers = textureCount + definition.UserResourceSlots +
-                                          (definition.ReceivesShadows ? 2U : 0U) +
-                                          (definition.UsesImageBasedLighting ? 2U : 0U) + (spatialLighting ? 5U : 0U) +
-                                          (ui ? 1U : 0U) + (definition.VolumeLightingAbiVersion >= 2U ? 1U : 0U);
-            const auto expectedFragmentStorageBuffers = (definition.UsesForwardPlus ? 3U : 0U) +
-                                                        (definition.SpatialLightingAbiVersion == 3U ? 1U : 0U) +
-                                                        definition.UserReadOnlyBuffers;
+            const auto expectedSamplers =
+                textureCount + definition.UserResourceSlots + (definition.ReceivesShadows ? 2U : 0U) +
+                (definition.UsesImageBasedLighting ? 2U : 0U) + (spatialLighting ? 5U : 0U) + (ui ? 1U : 0U) +
+                (VolumeLightingUsesNoiseTexture(definition.VolumeLightingAbiVersion) ? 1U : 0U);
+            const auto expectedFragmentStorageBuffers =
+                (definition.UsesForwardPlus ? 3U : 0U) + (definition.SpatialLightingAbiVersion == 3U ? 1U : 0U) +
+                (VolumeLightingUsesNoiseBuffer(definition.VolumeLightingAbiVersion) ? 1U : 0U) +
+                definition.UserReadOnlyBuffers;
             const auto expectedVertexUniformBuffers = 1U + (definition.UsesVertexMaterialParameters ? 1U : 0U) +
                                                       (definition.InstanceAddressingAbiVersion == 2U ? 1U : 0U);
             if (!noStorageTextures(vertex) || !noStorageTextures(fragment) ||
@@ -733,7 +734,9 @@ namespace Keire
                 manifest.at("volumeLightingAbiVersion") != 3U && manifest.at("volumeLightingAbiVersion") != 4U &&
                 manifest.at("volumeLightingAbiVersion") != 5U && manifest.at("volumeLightingAbiVersion") != 6U &&
                 manifest.at("volumeLightingAbiVersion") != 7U && manifest.at("volumeLightingAbiVersion") != 8U &&
-                manifest.at("volumeLightingAbiVersion") != 9U)
+                manifest.at("volumeLightingAbiVersion") != 9U && manifest.at("volumeLightingAbiVersion") != 10U &&
+                manifest.at("volumeLightingAbiVersion") != 11U && manifest.at("volumeLightingAbiVersion") != 12U &&
+                manifest.at("volumeLightingAbiVersion") != 13U && manifest.at("volumeLightingAbiVersion") != 14U)
             {
                 throw std::invalid_argument("Shader volume-lighting ABI version is unsupported.");
             }
@@ -745,6 +748,14 @@ namespace Keire
             result.UsesVertexMaterialParameters = manifest.value("usesVertexMaterialParameters", false);
             result.InstanceAddressingAbiVersion =
                 manifest.value("instanceAddressingAbiVersion", static_cast<std::uint8_t>(0));
+            if (manifest.contains("vfxRenderOriginAbiVersion") &&
+                (!manifest.at("vfxRenderOriginAbiVersion").is_number_integer() ||
+                 (manifest.at("vfxRenderOriginAbiVersion") != 0U && manifest.at("vfxRenderOriginAbiVersion") != 1U)))
+            {
+                throw std::invalid_argument("Shader VFX render-origin ABI version is unsupported.");
+            }
+            result.VfxRenderOriginAbiVersion =
+                manifest.value("vfxRenderOriginAbiVersion", static_cast<std::uint8_t>(0));
             result.OcclusionSupport = static_cast<ShaderOcclusionSupport>(
                 manifest.value("occlusionSupport", static_cast<std::uint8_t>(ShaderOcclusionSupport::None)));
             if (sourceSchemaVersion >= 2U && manifest.contains("maximumWorldPositionDisplacementRadius") &&
@@ -1176,7 +1187,7 @@ namespace Keire
             throw std::invalid_argument("Shader importer formats must be unique and include SPIR-V reflection data.");
         AssetImporterRegistration result;
         result.Name = "Keire.Shader";
-        result.Version = 11;
+        result.Version = 12;
         result.Type = ShaderAsset::StaticType();
         result.Extensions = {".keireshader"};
         result.ContextualImport =

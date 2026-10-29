@@ -28,6 +28,11 @@ namespace KeireEditor
             switch (property)
             {
             case InspectorTransformProperty::Position:
+                if (const auto* precise = std::get_if<Keire::Vector3d>(&value))
+                {
+                    return Keire::Math::IsFinite(*precise);
+                }
+                return std::holds_alternative<Keire::Vector3>(value);
             case InspectorTransformProperty::Scale:
                 return std::holds_alternative<Keire::Vector3>(value);
             case InspectorTransformProperty::Rotation:
@@ -601,7 +606,7 @@ namespace KeireEditor
         if (values.Scale && !Keire::TransformComponent::IsValidLocalScale(*values.Scale))
             throw std::invalid_argument("Transform scale axes must be finite with a magnitude of at least 0.000001.");
         if (values.Position)
-            transform->SetLocalPosition(*values.Position);
+            transform->SetLocalPositionPrecise(*values.Position);
         if (values.EulerDegrees)
             transform->SetLocalEulerAngles(*values.EulerDegrees);
         if (values.Scale)
@@ -631,7 +636,7 @@ namespace KeireEditor
         for (const auto& transform : transforms)
         {
             if (values.Position)
-                transform->SetLocalPosition(*values.Position);
+                transform->SetLocalPositionPrecise(*values.Position);
             if (values.EulerDegrees)
                 transform->SetLocalEulerAngles(*values.EulerDegrees);
             if (values.Scale)

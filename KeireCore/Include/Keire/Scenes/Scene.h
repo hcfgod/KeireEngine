@@ -153,6 +153,57 @@ namespace Keire
         Vector3 LinearVelocity;
         Vector3 AngularVelocity;
         bool Sleeping = false;
+        Vector3d WorldOrigin{};
+        // Omitted by legacy callers: preserve destination settings.
+        std::optional<PhysicsMotionSettings> MotionSettings;
+    };
+
+    struct ScenePhysicsWorldCheckpoint
+    {
+        // A missing gravity value identifies a session without a physics world.
+        std::optional<Vector3> Gravity;
+        std::vector<PhysicsGravitySource> GravitySources;
+        std::vector<ScenePhysicsCheckpointBody> Bodies;
+    };
+
+    struct ScenePhysicsRayQueryPrecise
+    {
+        Vector3d Origin;
+        Vector3 Direction{0.0F, 0.0F, -1.0F};
+        float MaximumDistance = 1000.0F;
+        std::uint32_t Mask = ~0U;
+        bool IncludeTriggers = true;
+        std::uint32_t Layer = 1;
+    };
+
+    struct ScenePhysicsQueryHitPrecise
+    {
+        EntityId Entity;
+        PhysicsBodyId Body;
+        Vector3d Position;
+        Vector3 Normal;
+        float Distance = 0.0F;
+    };
+
+    struct ScenePhysicsCapsuleCastQueryPrecise
+    {
+        Vector3d Origin;
+        Quaternion Rotation;
+        float Radius = 0.5F;
+        float Height = 1.0F;
+        Vector3 Displacement;
+        std::uint32_t Mask = ~0U;
+        bool IncludeTriggers = false;
+        std::uint32_t Layer = 1;
+    };
+
+    struct ScenePhysicsSphereOverlapQueryPrecise
+    {
+        Vector3d Center;
+        float Radius = 0.5F;
+        std::uint32_t Mask = ~0U;
+        bool IncludeTriggers = true;
+        std::uint32_t Layer = 1;
     };
 
     struct SceneAnimatorCheckpoint
@@ -179,6 +230,8 @@ namespace Keire
         [[nodiscard]] Ref<PhysicsWorld> Physics() const noexcept;
         [[nodiscard]] std::vector<ScenePhysicsCheckpointBody> CapturePhysicsCheckpoint() const;
         void RestorePhysicsCheckpoint(std::span<const ScenePhysicsCheckpointBody> bodies);
+        [[nodiscard]] ScenePhysicsWorldCheckpoint CapturePhysicsWorldCheckpoint() const;
+        void RestorePhysicsWorldCheckpoint(const ScenePhysicsWorldCheckpoint& checkpoint);
         [[nodiscard]] std::vector<SceneAnimatorCheckpoint> CaptureAnimatorCheckpoint() const;
         void RestoreAnimatorCheckpoint(std::span<const SceneAnimatorCheckpoint> animators);
         void SetDeterministicSimulation(bool enabled);
@@ -203,6 +256,12 @@ namespace Keire
         [[nodiscard]] bool SetVfxParameter(EntityId entity, const VfxParameterOverride& value);
         [[nodiscard]] std::vector<ScenePhysicsQueryHit> RayCast(const PhysicsRayQuery& query,
                                                                 EntityId ignoredEntity = {}) const;
+        [[nodiscard]] std::vector<ScenePhysicsQueryHitPrecise> RayCastPrecise(const ScenePhysicsRayQueryPrecise& query,
+                                                                              EntityId ignoredEntity = {}) const;
+        [[nodiscard]] std::optional<ScenePhysicsQueryHitPrecise>
+        CastCapsulePrecise(const ScenePhysicsCapsuleCastQueryPrecise& query, EntityId ignoredEntity = {}) const;
+        [[nodiscard]] std::vector<EntityId> OverlapSpherePrecise(const ScenePhysicsSphereOverlapQueryPrecise& query,
+                                                                 EntityId ignoredEntity = {}) const;
         [[nodiscard]] std::optional<ScenePhysicsQueryHit> CastCapsule(const PhysicsCapsuleCastQuery& query,
                                                                       EntityId ignoredEntity = {}) const;
         [[nodiscard]] std::vector<EntityId> OverlapSphere(const PhysicsSphereOverlapQuery& query,
@@ -218,9 +277,26 @@ namespace Keire
         void Update(float deltaSeconds);
         void Update(float deltaSeconds, float interpolationAlpha);
         void ReplaceRuntime(SceneDefinition definition);
+        /// Changes the solver origin between callbacks, preserving scene poses and local support/grounding caches.
+        /// Uses a 1 mm conversion budget; invalid or unrepresentable translations leave state unchanged.
+        void RebasePhysicsOrigin(Vector3d origin);
+        /// Coordinates physics/support caches and VFX at a safe owner-thread boundary using a 1 mm CPU budget.
+        /// Validation and allocation failures leave both subsystem origins unchanged. Authored poses do not move.
+        /// This explicit operation does not select a moving origin or rotate the simulation reference frame.
+        void RebaseSimulationOrigin(Vector3d origin);
+        /// Follows a live entity from this runtime scene at fixed-step boundaries. Empty clears the focus.
+        /// Inactive entities suspend following; deletion or scene replacement clears it without retargeting IDs.
+        /// Must be assigned outside callbacks on the owner thread. Does not stream or retire distant bodies.
+        void SetSimulationFocus(Entity focus = {}, double rebaseDistanceMetres = 8192.0,
+                                double gridSpacingMetres = 1024.0);
+        [[nodiscard]] Entity SimulationFocus() const;
         void Stop() noexcept;
 
       private:
+        void AdvanceSimulationOrigin();
+        void RestorePhysicsCheckpointState(std::span<const ScenePhysicsCheckpointBody> bodies,
+                                           std::optional<Vector3> gravity,
+                                           const std::vector<PhysicsGravitySource>* sources = nullptr);
         class Impl;
         std::unique_ptr<Impl> m_Impl;
     };

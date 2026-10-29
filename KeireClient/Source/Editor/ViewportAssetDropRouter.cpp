@@ -5,7 +5,7 @@
 namespace KeireEditor
 {
     void ViewportAssetDropRouter::Route(const Keire::AssetTypeId type, const Keire::AssetId asset,
-                                        const Keire::EntityId target, Keire::Vector3 position,
+                                        const Keire::EntityId target, Keire::Vector3d position,
                                         IViewportAssetDropCommands& commands) const
     {
         if (!asset)

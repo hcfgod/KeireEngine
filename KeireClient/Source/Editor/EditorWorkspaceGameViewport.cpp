@@ -261,6 +261,7 @@ void EditorWorkspaceLayer::DrawGame(Keire::UiFrame& ui)
                 renderRequest->EvaluatedEnvironment = SceneViewportEnvironmentLighting();
             }
             renderRequest->MaterialTimeSeconds = static_cast<float>(materialTime.TimeSinceStartup().Seconds());
+            renderRequest->PlanetEnvironment = SceneViewportPlanetEnvironment(camera);
             renderRequest->MaterialDeltaSeconds = static_cast<float>(materialTime.DeltaTime().Seconds());
             renderRequest->FrameIndex = materialTime.FrameCount();
             Owner().Renderer()->Submit(std::move(*renderRequest));

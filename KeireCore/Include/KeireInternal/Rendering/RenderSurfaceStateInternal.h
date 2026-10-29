@@ -401,6 +401,7 @@ namespace Keire::RenderBackend
         Detail::ShadowAtlasAllocator ShadowAtlas{4096, 256};
         Matrix4 SampledDepthViewProjection;
         Matrix4 SampledDepthInverseViewProjection;
+        Vector3d SampledDepthWorldOrigin;
         bool SampledDepthValid = false;
         GpuOcclusionSurfaceDiagnostics GpuOcclusionDiagnostics;
         GpuOcclusionSurfaceDiagnostics PublishedGpuOcclusionDiagnostics;

@@ -50,6 +50,20 @@ namespace KeireEditor::Detail
         return changed;
     }
 
+    [[nodiscard]] inline Keire::AtmosphereSettings ResetAtmosphereAppearance(const Keire::AtmosphereSettings& authored)
+    {
+        Keire::AtmosphereSettings result;
+        result.Enabled = authored.Enabled;
+        result.PlanetCenter = authored.PlanetCenter;
+        result.PlanetRadius = authored.PlanetRadius;
+        result.Height = authored.Height;
+        result.RayleighScaleHeight = std::min(result.RayleighScaleHeight, result.Height);
+        result.MieScaleHeight = std::min(result.MieScaleHeight, result.Height);
+        result.AbsorptionPeakAltitude = std::min(result.AbsorptionPeakAltitude, result.Height);
+        result.AbsorptionHalfWidth = std::min(result.AbsorptionHalfWidth, result.Height);
+        return result;
+    }
+
     inline bool DrawAtmosphereControls(Keire::UiFrame& ui, const Keire::UiThemeDefinition& theme,
                                        Keire::AtmosphereSettings& settings, bool& commit)
     {
@@ -64,16 +78,14 @@ namespace KeireEditor::Detail
                               "lighting remain independent. This is not volumetric clouds or aerial perspective.");
         bool changed = ui.Checkbox("Enable Atmosphere Sky", settings.Enabled);
         commit |= changed;
-        if (ui.Button("Reset Earth-like Atmosphere"))
+        if (ui.Button("Reset Atmosphere Appearance"))
         {
-            const bool enabled = settings.Enabled;
-            settings = {};
-            settings.Enabled = enabled;
+            settings = ResetAtmosphereAppearance(settings);
             changed = true;
             commit = true;
         }
         ui.TextColoredWrapped(theme.MutedText,
-                              "Reset preserves enabled state and places the surface at local Y = 0. "
+                              "Reset preserves enabled state, planet center, radius and atmosphere thickness. "
                               "All distances are metres; Ctrl-click numeric controls to enter exact values.");
         auto disabled = ui.BeginDisabled(!settings.Enabled);
         if (auto planet = ui.BeginSection("Planet and Density"); planet)
@@ -131,7 +143,8 @@ namespace KeireEditor::Detail
                                               1.0, commit);
             ui.TextColoredWrapped(theme.MutedText,
                                   "Colors the reference planet below the horizon. This does not create terrain or "
-                                  "change scene materials. Sunlight and environment ambient light illuminate it.");
+                                  "change scene materials or the space background. Sunlight and environment ambient "
+                                  "light illuminate it.");
         }
         if (auto sunlight = ui.BeginSection("Sun and Quality Budget"); sunlight)
         {

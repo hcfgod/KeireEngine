@@ -79,7 +79,7 @@ namespace KeireEditor
         std::uint64_t Generation = 0;
         bool Viewport = false;
         Keire::EntityId ViewportTarget;
-        Keire::Vector3 ViewportPosition;
+        Keire::Vector3d ViewportPosition;
         Keire::WeakRef<Keire::Scene> ViewportScene;
         AssetOperationFollowUp FollowUp = AssetOperationFollowUp::None;
         std::string UndoName;

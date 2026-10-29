@@ -157,5 +157,5 @@ Removing a box and adding one are individual committed edits. Numeric positions 
 Ray Samples trades GPU cost for density detail; local-volume boundaries also split the ray automatically.
 Maximum Distance clips fog without changing opaque geometry. These controls are in development: terrain shadowing,
 exclusion volumes, native motion quality and performance acceptance are not complete. The new tab is awaiting
-native testing in the batched DevDist build. Cooked manifest schema 10 carries the same authored fog record;
+native testing in the batched DevDist build. Cooked manifest schema 11 carries the same authored fog record;
 use matching development player binaries. Older manifests load with fog disabled.

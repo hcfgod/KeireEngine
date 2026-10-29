@@ -4,6 +4,7 @@
 #include <doctest/doctest.h>
 
 #include <initializer_list>
+#include <ostream>
 
 TEST_CASE("Cloud shape starting points preserve scene placement lighting and quality")
 {

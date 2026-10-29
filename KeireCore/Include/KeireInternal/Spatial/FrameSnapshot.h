@@ -54,6 +54,10 @@ namespace Keire::Detail
 
         [[nodiscard]] SpatialIdentity ParentIdentity() const noexcept { return m_ParentOrigin.Identity(); }
 
+        [[nodiscard]] FrameRotation Rotation() const noexcept { return m_Rotation; }
+
+        [[nodiscard]] const std::array<double, 3>& AngularVelocity() const noexcept { return m_AngularVelocity; }
+
         [[nodiscard]] SpatialMotion ToParent(const SpatialMotion& child) const
         {
             Validate(child.Velocity);

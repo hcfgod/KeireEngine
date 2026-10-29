@@ -4,6 +4,7 @@
 #include "Keire/Assets/Asset.h"
 #include "Keire/Assets/RenderingAssets.h"
 #include "Keire/Math/Math.h"
+#include "Keire/Math/Vector3d.h"
 #include "Keire/Ref.h"
 #include "Keire/Rendering/Atmosphere.h"
 #include "Keire/Rendering/Bloom.h"
@@ -11,6 +12,7 @@
 #include "Keire/Rendering/EnvironmentLighting.h"
 #include "Keire/Rendering/Fog.h"
 #include "Keire/Rendering/FrameGraphSnapshot.h"
+#include "Keire/Rendering/PlanetEnvironmentView.h"
 #include "Keire/Rendering/StarField.h"
 #include "Keire/Ui/RuntimeUi.h"
 #include "Keire/Vfx/VfxSystem.h"
@@ -375,6 +377,10 @@ namespace Keire
         float FarPlane = 1000.0F;
         // Materials with a Fullscreen shader; stages match CameraComponent::FullscreenEffects.
         std::array<AssetId, 3> FullscreenEffects{};
+        // View and captured spatial data use coordinates relative to WorldOrigin.
+        // Environment settings use coordinates relative to EnvironmentAnchor in the same frame.
+        Vector3d WorldOrigin;
+        Vector3d EnvironmentAnchor;
     };
 
     inline constexpr std::uint32_t RenderEnvironmentSettingsSchemaVersion = 9;
@@ -466,6 +472,8 @@ namespace Keire
         bool DepthTest = true;
         /// Optional material whose shader uses the runtime UI vertex ABI. Applies to this submitted subtree.
         AssetId Material;
+        /// Coordinate origin used by World. Zero preserves absolute-world submissions.
+        Vector3d WorldOrigin{};
     };
 
     struct SceneRenderContribution
@@ -502,6 +510,8 @@ namespace Keire
         bool DrawSceneContributions = true;
         /// Optional evaluated lighting; omission preserves the existing authored-light path.
         std::optional<EnvironmentLightingSnapshot> EvaluatedEnvironment;
+        /// Omission retains legacy flat cloud geometry and the authored atmosphere placement.
+        std::optional<PlanetEnvironmentView> PlanetEnvironment;
         SceneGridSettings Grid;
     };
 

@@ -2,6 +2,7 @@
 
 #include "Keire/Api.h"
 #include "Keire/Math/Math.h"
+#include "Keire/Math/Vector3d.h"
 #include "Keire/Ref.h"
 #include "Keire/UiWorkspace.h"
 
@@ -669,6 +670,7 @@ namespace Keire
                                       std::optional<double> minimum = {}, std::optional<double> maximum = {});
         [[nodiscard]] bool DragVector2(std::string_view label, Vector2& value, float speed = 0.1F);
         [[nodiscard]] bool DragVector3(std::string_view label, Vector3& value, float speed = 0.1F);
+        [[nodiscard]] bool DragVector3d(std::string_view label, Vector3d& value, float speed = 0.1F);
         [[nodiscard]] bool DragVector4(std::string_view label, Vector4& value, float speed = 0.1F);
         [[nodiscard]] bool DragQuaternion(std::string_view label, Quaternion& value, float speed = 0.01F);
         [[nodiscard]] bool SliderFloat(std::string_view label, float& value, float minimum, float maximum);

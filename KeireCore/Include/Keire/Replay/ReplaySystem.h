@@ -77,6 +77,9 @@ namespace Keire
         bool Deterministic = true;
         std::function<std::vector<std::byte>()> Capture;
         std::function<void(std::span<const std::byte>)> Restore;
+        /// Serializer IDs that must restore first, including when recovering the pre-restore checkpoint.
+        /// Missing dependencies and cycles are rejected before recording or playback starts.
+        std::vector<std::string> RestoreAfter;
     };
 
     struct ReplayDivergence

@@ -28,6 +28,7 @@ namespace KeireEditor
             proposed.Restore(authored);
             proposed.Configure(authored.SecondsPerDay, 1.0, false);
             m_Clock = proposed;
+            m_SimulationTime = 0.0;
             m_Authored = authored;
             m_Bound = true;
             m_Playing = false;
@@ -116,6 +117,8 @@ namespace KeireEditor
         void Seek(const std::int64_t day, const double fraction)
         {
             RequireBound();
+            // Calendar scrubbing changes lighting/weather phase, not the independent local simulation epoch.
+            // A signed calendar day must never be flattened into absolute double seconds for frame rotation.
             m_Clock.Seek(day, fraction);
         }
 
@@ -135,8 +138,22 @@ namespace KeireEditor
             }
             if (m_Playing && editMode && previewVisible)
             {
-                m_Clock.Advance(elapsedSeconds);
+                const double proposedTime = m_SimulationTime + elapsedSeconds;
+                if (!std::isfinite(proposedTime))
+                {
+                    throw std::overflow_error("Environment preview simulation time exhausted.");
+                }
+                auto proposedClock = m_Clock;
+                proposedClock.Advance(elapsedSeconds);
+                m_Clock = proposedClock;
+                m_SimulationTime = proposedTime;
             }
+        }
+
+        [[nodiscard]] double SimulationTime() const
+        {
+            RequireBound();
+            return m_SimulationTime;
         }
 
         [[nodiscard]] Keire::Detail::EnvironmentClockState State() const
@@ -188,5 +205,6 @@ namespace KeireEditor
         std::uint64_t m_LightingClockRevision = 0;
         bool m_Bound = false;
         bool m_Playing = false;
+        double m_SimulationTime = 0.0;
     };
 } // namespace KeireEditor

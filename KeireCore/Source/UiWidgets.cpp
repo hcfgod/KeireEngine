@@ -12,6 +12,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <type_traits>
 
 namespace Keire
 {
@@ -216,54 +217,84 @@ namespace Keire
         return Detail::DrawExpressionVector(safeLabel.c_str(), &value.X, 2, speed, "%.3f");
     }
 
+    namespace
+    {
+        template <typename Vector>
+        bool DrawTransformVector(const std::string_view label, Vector& value, const float speed,
+                                 const ImGuiDataType type, const char* format)
+        {
+            using Scalar = std::remove_reference_t<decltype(value.X)>;
+            const std::string safeLabel(label);
+            ImGui::PushID(safeLabel.c_str());
+            ImGui::BeginGroup();
+
+            const float rowStart = ImGui::GetCursorPosX();
+            const float available = std::max(ImGui::GetContentRegionAvail().x, 1.0F);
+            const bool compact = available < 300.0F;
+            ImGui::AlignTextToFramePadding();
+            const auto visibleLabel = label.substr(0, label.find("##"));
+            ImGui::TextUnformatted(visibleLabel.data(), visibleLabel.data() + visibleLabel.size());
+            if (!compact)
+            {
+                ImGui::SameLine();
+                ImGui::SetCursorPosX(std::max(ImGui::GetCursorPosX(), rowStart + 72.0F));
+            }
+
+            const auto drawAxis =
+                [speed, type, format](const char* axis, auto& component, const ImVec4 color, const float width)
+            {
+                ImGui::TextColored(color, "%s", axis);
+                ImGui::SameLine();
+                ImGui::SetNextItemWidth(width);
+                const auto id = std::string("##") + axis;
+                return Detail::DrawNumericExpression(
+                    id.c_str(), component, type, format, static_cast<const Scalar*>(nullptr),
+                    static_cast<const Scalar*>(nullptr), [&](auto& candidate)
+                    { return ImGui::DragScalar(id.c_str(), type, &candidate, speed, nullptr, nullptr, format); });
+            };
+
+            const auto& style = ImGui::GetStyle();
+            const float controlsWidth = std::max(ImGui::GetContentRegionAvail().x, 90.0F);
+            const float axisLabelWidth = ImGui::CalcTextSize("X").x;
+            const float fieldWidth =
+                std::max(24.0F, (controlsWidth - axisLabelWidth * 3.0F - style.ItemSpacing.x * 5.0F) / 3.0F);
+            bool changed = drawAxis("X", value.X, {0.95F, 0.35F, 0.35F, 1.0F}, fieldWidth);
+            ImGui::SameLine();
+            changed |= drawAxis("Y", value.Y, {0.40F, 0.85F, 0.45F, 1.0F}, fieldWidth);
+            ImGui::SameLine();
+            changed |= drawAxis("Z", value.Z, {0.35F, 0.60F, 1.0F, 1.0F}, fieldWidth);
+
+            ImGui::EndGroup();
+            ImGui::PopID();
+            return changed;
+        }
+    } // namespace
+
     bool UiFrame::DragVector3(const std::string_view label, Vector3& value, const float speed)
     {
         RequireActive("DragVector3");
         if (label.empty() || !std::isfinite(speed) || speed <= 0.0F)
+        {
             throw std::invalid_argument("DragVector3 requires a label and a finite positive speed.");
-
-        const std::string safeLabel(label);
-        ImGui::PushID(safeLabel.c_str());
-        ImGui::BeginGroup();
-
-        const float rowStart = ImGui::GetCursorPosX();
-        const float available = std::max(ImGui::GetContentRegionAvail().x, 1.0F);
-        const bool compact = available < 300.0F;
-        ImGui::AlignTextToFramePadding();
-        const auto visibleLabel = label.substr(0, label.find("##"));
-        ImGui::TextUnformatted(visibleLabel.data(), visibleLabel.data() + visibleLabel.size());
-        if (!compact)
-        {
-            ImGui::SameLine();
-            ImGui::SetCursorPosX(std::max(ImGui::GetCursorPosX(), rowStart + 72.0F));
         }
+        return DrawTransformVector(label, value, speed, ImGuiDataType_Float, "%.3f");
+    }
 
-        const auto drawAxis = [speed](const char* axis, float& component, const ImVec4 color, const float width)
+    bool UiFrame::DragVector3d(const std::string_view label, Vector3d& value, const float speed)
+    {
+        RequireActive("DragVector3d");
+        if (label.empty() || !std::isfinite(speed) || speed <= 0.0F || !Math::IsFinite(value))
         {
-            ImGui::TextColored(color, "%s", axis);
-            ImGui::SameLine();
-            ImGui::SetNextItemWidth(width);
-            const auto id = std::string("##") + axis;
-            return Detail::DrawNumericExpression(
-                id.c_str(), component, ImGuiDataType_Float, "%.3f", static_cast<const float*>(nullptr),
-                static_cast<const float*>(nullptr),
-                [&](auto& candidate) { return ImGui::DragFloat(id.c_str(), &candidate, speed, 0.0F, 0.0F, "%.3f"); });
-        };
-
-        const auto& style = ImGui::GetStyle();
-        const float controlsWidth = std::max(ImGui::GetContentRegionAvail().x, 90.0F);
-        const float axisLabelWidth = ImGui::CalcTextSize("X").x;
-        const float fieldWidth =
-            std::max(24.0F, (controlsWidth - axisLabelWidth * 3.0F - style.ItemSpacing.x * 5.0F) / 3.0F);
-        bool changed = drawAxis("X", value.X, {0.95F, 0.35F, 0.35F, 1.0F}, fieldWidth);
-        ImGui::SameLine();
-        changed |= drawAxis("Y", value.Y, {0.40F, 0.85F, 0.45F, 1.0F}, fieldWidth);
-        ImGui::SameLine();
-        changed |= drawAxis("Z", value.Z, {0.35F, 0.60F, 1.0F, 1.0F}, fieldWidth);
-
-        ImGui::EndGroup();
-        ImGui::PopID();
-        return changed;
+            throw std::invalid_argument("DragVector3d requires a label, finite position and positive speed.");
+        }
+        auto candidate = value;
+        const bool changed = DrawTransformVector(label, candidate, speed, ImGuiDataType_Double, "%.17g");
+        if (!changed || !Math::IsFinite(candidate))
+        {
+            return false;
+        }
+        value = candidate;
+        return true;
     }
 
     bool UiFrame::DragVector4(const std::string_view label, Vector4& value, const float speed)

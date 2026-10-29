@@ -9,7 +9,7 @@ namespace Keire::RenderBackend
     void RenderSharedState::BindVfxMaterial(SDL_GPUCommandBuffer* commands, SDL_GPURenderPass* pass,
                                             RenderSurfaceState& surface, const SceneRenderPacket& packet,
                                             const ShadowFrameData& shadows, const ResolvedAssetMaterial* composed,
-                                            const AssetId bakedLighting)
+                                            const AssetId bakedLighting, const Matrix4 simulationToRender)
     {
         const auto& requestedEnvironment =
             packet.Environment.Environment ? ResolveTexture(packet.Environment.Environment) : DefaultSkyTexture;
@@ -75,6 +75,13 @@ namespace Keire::RenderBackend
                                             surface.ActiveWorkset().ForwardPlus.Tiles,
                                             surface.ActiveWorkset().ForwardPlus.LightIndices};
         const auto deviceGeneration = DeviceGeneration.load(std::memory_order_acquire);
+        const std::uint32_t cloudNoiseStorageCount =
+            VolumeLightingUsesNoiseBuffer(composed->VolumeLightingAbiVersion) ? 1U : 0U;
+        if (cloudNoiseStorageCount != 0U)
+        {
+            auto* noiseBuffer = EnsureCloudNoiseBuffer();
+            SDL_BindGPUFragmentStorageBuffers(pass, 0, &noiseBuffer, 1);
+        }
         if (composed->SpatialLightingAbiVersion == 3U)
         {
             if (!SpatialSelectionFallbackBuffer || SpatialSelectionFallbackDeviceGeneration != deviceGeneration)
@@ -84,15 +91,15 @@ namespace Keire::RenderBackend
             }
             const std::array storageBuffers{forwardPlusBuffers[0], forwardPlusBuffers[1], forwardPlusBuffers[2],
                                             SpatialSelectionFallbackBuffer};
-            SDL_BindGPUFragmentStorageBuffers(pass, 0, storageBuffers.data(),
+            SDL_BindGPUFragmentStorageBuffers(pass, cloudNoiseStorageCount, storageBuffers.data(),
                                               static_cast<std::uint32_t>(storageBuffers.size()));
         }
         else if (composed->UsesForwardPlus)
         {
-            SDL_BindGPUFragmentStorageBuffers(pass, 0, forwardPlusBuffers.data(),
+            SDL_BindGPUFragmentStorageBuffers(pass, cloudNoiseStorageCount, forwardPlusBuffers.data(),
                                               static_cast<std::uint32_t>(forwardPlusBuffers.size()));
         }
-        const AssetObjectUniforms object{{}, packet.Camera.View, packet.Camera.Projection, {}};
+        const AssetObjectUniforms object{simulationToRender, packet.Camera.View, packet.Camera.Projection, {}};
         AssetSceneUniforms scene{};
         scene.AmbientColorIntensity = {packet.Environment.AmbientColor.Red, packet.Environment.AmbientColor.Green,
                                        packet.Environment.AmbientColor.Blue, packet.Environment.AmbientIntensity};
@@ -110,7 +117,7 @@ namespace Keire::RenderBackend
         SDL_PushGPUVertexUniformData(commands, 0, &object, sizeof(object));
         if (composed->InstanceAddressingAbiVersion == 2U)
         {
-            constexpr std::array<std::uint32_t, 4> addressing{};
+            constexpr std::array<std::uint32_t, 4> addressing{0U, 1U, 0U, 0U};
             SDL_PushGPUVertexUniformData(commands, 2, addressing.data(), sizeof(addressing));
         }
         SDL_PushGPUFragmentUniformData(commands, 0, &scene, sizeof(scene));
@@ -177,7 +184,7 @@ namespace Keire::RenderBackend
                 std::ranges::copy(vfxSpatialBindings, bindings.begin() + static_cast<std::ptrdiff_t>(bindingCount));
                 bindingCount += vfxSpatialBindings.size();
             }
-            if (composed->VolumeLightingAbiVersion >= 2U)
+            if (VolumeLightingUsesNoiseTexture(composed->VolumeLightingAbiVersion))
             {
                 const auto& noise = EnsureCloudNoiseTexture();
                 bindings[bindingCount++] = {noise.Texture, noise.Sampler};

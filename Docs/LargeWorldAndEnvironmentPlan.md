@@ -1,10 +1,10 @@
 # Large Worlds, Planets, Space, And Dynamic Environments
 
-Status: proposed implementation plan, not a supported-feature announcement.
+Status: implementation in progress, not a supported-feature announcement.
 Requested scope: large terrestrial worlds, rotating planets, surface-to-space travel, and solar-system gameplay,
 with a customizable production environment system. All are required outcomes; finishing the terrestrial milestone
 alone does not complete this plan.
-Source review: October 25, 2026.
+Source review: October 29, 2026. Earlier dated checkpoints below describe their state at that time.
 
 ## Intended Author Experience
 
@@ -20,17 +20,161 @@ tooltips, reset behavior, and a documented quality/performance consequence.
 This is an engine-wide feature release, not a same-version 0.4.8 binary hotpatch. Precise versioning is a release
 decision, not an instruction to publish or mutate Git now.
 
+## Planetary Integration Acceptance
+
+The user's distant-environment report confirms that extending a numeric cutoff alone is insufficient.
+The required end state is consistent rendering and simulation around planets placed far from the origin,
+with continuous departure, interplanetary travel and return. Existing flat-cloud domain extensions are
+interim fixes, not completion of this requirement.
+
+Implementation order after the current cloud regression build:
+
+1. Persist authored planet/environment identity and precise placement. Resolve camera and planet into
+   a common reference frame before subtracting positions; keep the planet fixed during camera travel.
+   Use the existing sector/frame foundation for astronomical placement instead of accumulating a single
+   absolute float or assuming unrestricted precision from one absolute double.
+2. Feed the same resolved frame to atmosphere, cloud shells, fog, celestial directions and lighting.
+   Preserve flat-world authoring as an explicit mode. Planetary clouds need shell geometry and a stable
+   planet-fixed weather mapping, rather than an infinite plane that silently follows the camera.
+3. Connect authored radial sources and simulation focus to editor Play and exported runtime initialization.
+   Gravity, visual surface and atmosphere must share planet identity and placement. Add local-up handling,
+   rotating-frame motion and region transfer without discarding momentum or contact state.
+4. Validate translated worlds at zero, 1e10 and 1e12 metres, plus sector-scale placements: matching local
+   poses/time/settings should give equivalent local physics and lighting within measured tolerances.
+   Then test an actual fixed-planet ascent, orbital/space segment and descent, including horizon changes,
+   clouds from below/inside/above, fog termination, night-side lighting and repeated reference-frame changes.
+5. Perform the same route in Scene/Game views and the standalone player. Record frame time, transition
+   spikes, collision/velocity continuity, save/reload and replay evidence. Keep multi-planet visibility and
+   independent simulation regions in scope; a single translated platform does not satisfy these gates.
+
+Current blockers include authored integration and planetary cloud geometry. Native orbital tests and the
+minimal script-free gravity replay have passed; they do not prove this end-to-end workflow.
+
+### Distant Environment Acceptance Matrix
+
+These are pending integration gates, not passing test results. Capture the same camera orientation, local
+altitude, time, exposure and quality settings in Scene view, Game view and the exported player.
+
+| Scenario | Required result | Failure this distinguishes |
+| --- | --- | --- |
+| Translate planet, surface, gravity source and camera together to positive and negative distant coordinates | Equivalent horizon, reference-ground radiance, clouds, fog and local gravity | Treating distance from global origin as altitude |
+| Move only the camera and platform away from a fixed planet | Planet recedes; atmosphere and ground boundary remain attached to it | Dragging the planet or a sky dome along with the camera |
+| Ascend from surface through cloud layers and atmosphere, then descend | Continuous shell intersections, haze and space transition; no loading screen | Flat cloud planes or abrupt environment cutoffs |
+| Orbit to another surface normal at the same altitude | Horizon and gravity follow local up; weather stays fixed to the planet | Hard-coded world-Y altitude and world-up assumptions |
+| Rebase at fixed physical camera and planet poses | No visible jump, weather phase change or temporal ghosting | Mixing solver, render and environment origins |
+| Observe a second planet from space | Each planet retains its own atmosphere and ground boundary | Applying one global atmosphere to every world |
+
+Record both daylight and night, with rays hitting the reference planet and rays missing it. The current
+Ground / Void controls affect only the reference-ground boundary (`AtmosphereGroundRadiance`); they do
+not establish an empty-space color or author scene terrain. Keep this distinction visible in authoring UI
+and tests rather than making distant space inherit a ground tint. Preserve the user's existing far-test
+scene; create separate translated-world and fixed-planet travel fixtures instead of silently moving its planet.
+
+Source audit for the next integration batch:
+
+- `AtmosphereUniforms.h` subtracts environment anchor and planet centre before narrowing camera position.
+  Preserve this cancellation order when resolving authored frames.
+- `RenderCloudVolume.cpp` constructs atmosphere and fog in the same view packet, but fog receives only
+  `EnvironmentRelativeObserver`; sharing a packet does not give fog a planetary height model.
+- `FogViewUniforms.h` subtracts observer Y from the authored base height. Both CPU `FogDensity.h` and shader
+  `FogDensity.hlsli` evaluate density using Y. The shader's analytic segment average also assumes a linear
+  height along the ray. A radial mode must replace that average as well as point sampling; substituting
+  radial altitude in just one function would leave transport inconsistent.
+- Local fog boxes and exclusion regions currently use axis-aligned coordinates in the environment frame.
+  Resolve their authored frame consistently before culling and sampling; rotating a planet cannot change
+  only the global height profile while leaving these regions behind.
+
+Retain the existing flat-height mode for legacy scenes. Cover radial CPU/shader density agreement,
+tangent rays, opposite surface normals, translated frames and bounded sampling cost before claiming
+planetary fog acceptance. These changes are not yet implemented.
+
 ## Current Implementation Evidence
 
+### Physics Origin Integration Gate
+
+Validated region integration now includes:
+
+- Double solver origins with checked conversion; body creation/writeback and presentation retain precise
+  translation. Initial scene startup selects a bounds-based origin on a 1024 m grid when enabled physics objects
+  exceed the default 8192 m region. VFX starts with the same origin.
+- Native precise ray/capsule/overlap queries; legacy float scene queries explicitly convert through the origin.
+  Checkpoints retain double origins and reject precision loss before mutation, including intermediate addition.
+  Native world checkpoints now preserve gravity and empty-world state. Player physics replay has been updated to
+  schema 5 with radial sources and body motion settings. A minimal script-free custom-gravity export
+  passes 300-tick separate-process strict replay (GravityPlayerQA/fixed-verify.json); managed and planetary
+  replay acceptance remain pending.
+- Precise collision/trigger points through actual native-to-C# marshaling, preserving the legacy approximate point.
+  Managed API/design-time parity and the native reload fixture pass.
+- Character movement/support carry, animation grounding probes/anchors, and VFX collision frame conversion.
+- Real solver stack/CCD tests at eight origins through 1e15 metres; actual distant scene startup, falling bodies,
+  precise raycasts, foot grounding and moving-platform carry.
+- Explicit live-origin translation preserves contacts, sleeping stacks, platform carry and foot support. Flight/impact
+  tests compare repeated rebasing with a non-rebased control; callback/thread rejection preserves state. The latest
+  focused batch passes 68 cases / 14,244 assertions (`physics-live-origin-edge-final-tests.log`).
+- Coordinated scene migration preflights VFX before committing physics/support caches and VFX. Explicit runtime
+  focus follows fixed-step movement automatically. The focused travel selection passes four cases / 15,399
+  assertions (`simulation-focus-travel-tests.log`), including more than 60 km out-and-back dynamic travel at zero
+  and 1e12 m offsets. Floor support and barrier collision during automatic shifts pass one case / 3,004 assertions
+  (`simulation-focus-contact-tests.log`). These counts overlap earlier selections and do not establish planetary travel.
+- Native uniform world-gravity control passes its focused test (18 assertions) and the physics selection
+  (20 cases / 4,624 assertions, overlapping). Native radial fields, weak-field sleep and checkpoint integration now have focused coverage;
+  character local-up and authored planetary configuration remain open.
+
+Evidence: physics-scene-origin-selection-regressions.log (44 cases / 60,273 assertions),
+physics-distant-grounding-regressions.log (53 / 197,593), physics-vfx-origin-tests.log (18 / 2,089),
+physics-far-stack-ccd-final-tests.log (2 / 1,768), and physics-precise-contact-native-tests.log (1 / 1,322),
+all under Build/Validation. Selections overlap; do not sum these counts into a unique-test total.
+
+Remaining integration gates: author-facing focus selection and persistence, multiple simultaneous
+regions, rotated reference frames/local gravity, runtime joint constraints,
+stable replay world identity, and visual editor/player travel acceptance. Fixed-region tests do not establish
+surface-to-space travel or performance at production workloads. Initial selection cannot represent an arbitrarily
+wide scene in one float solver region; partitioning remains required.
+
+Managed precise query bindings, explicit layout validation, Coral integration and editor/player consumers now pass
+focused checks. Filter/trigger and bounded-overlap tests also passed (two cases / 360 assertions in
+`precise-query-filter-final-tests.log`). The legacy float hit ABI remains compatible; precise entry points use a
+separate contract. These tests do not establish runtime region ownership or moving-frame behavior.
+Both editor and player services must route the world/context identity before invoking native precise scene queries.
+Tests must include same-world ignored entities, cross-world rejection, triggers, masks, result limits, and no-hit
+versus invalid-input behavior. Merely widening a previously rounded float hit cannot satisfy this contract.
+
+### Standalone Replay Finding
+
+A hidden standalone run using existing cooked QA content recorded 60 ticks and one checkpoint successfully
+(`Build/Validation/physics-origin-runtime-record.json`). Strict playback in a fresh process then failed with
+`Managed replay checkpoint is incompatible with the runtime behaviours`
+(`Build/Validation/physics-origin-runtime-verify.stderr.log`). This is a failed acceptance gate, not a passed replay test.
+The source trace identifies a likely cause: `Entity::World()` returns the `SceneState` pointer address, the runtime
+scripting serializer persists that numeric world value, and `ScriptSystem::RestoreReplayCheckpoint` requires an exact
+world/entity/component key match. Implement stable replay-world identity mapping, including managed serialized entity
+references and additive worlds; do not remove identity validation or match only an ambiguous entity ID. The source
+finding still needs a regression that proves the fix across separate player processes. These runs do not validate
+planetary physics or visuals. No editor window was opened.
+
+This is an integration gate, not a reason to reduce the requested scope: rotating reference frames, multiple
+simultaneous regions, surface-to-space travel, and editor/player parity remain required.
+
 - Native `Vector3` components are floats in `KeireCore/Include/Keire/Math/Math.h`.
-  `TransformComponent` stores float local positions and returns float world/presentation positions.
+  `TransformComponent` now stores double local positions and fixed-step position samples. Precise local/world
+  accessors and preserved reparenting avoid float translation matrices; legacy accessors and presentation matrices
+  still return floats. Precise presentation retains double translation until origin-relative matrix construction.
+  The render-origin integration suite passed 100 cases / 92,357 assertions; it does not verify rendered travel.
 - `SceneAsset.h` aliases `SceneVector3` to that float vector; transform/component properties, prefab overrides,
-  snapshots, recovery, and replay must therefore be included in the precision migration.
+  snapshots, recovery, and replay must therefore be included in the precision migration. Component property bags
+  now carry `Vector3d`, and Transform component schema 2 stores it with a schema-1 migration. The separate
+  `SceneTransform` summary now stores `Vector3d` positions, with focused scene/prefab round-trip coverage.
+  Remaining editing consumers still require auditing; the float `SceneVector3` alias remains for other fields.
 - Managed `MathTypes.cs` defines float `Vector3`; `Handles.cs` exposes it through local/world Transform positions.
+  The additional `LocalPositionPrecise` and `PositionPrecise` properties use `Vector3d` through version-named,
+  size-checked calls. Managed contract tests pass; actual native host integration remains pending.
   Native interop, generated service bindings, both supported IDE API targets, and reflection require coordinated changes.
 - The inspected Release dependency cache has Jolt `DOUBLE_PRECISION=OFF`.
   `PhysicsSystem.cpp` bridges positions through float `Vector3`, including its `RVec3` conversions.
-- Navigation node positions, audio positions, camera matrices, and world-space UI matrices also use current float types.
+- Navigation and audio position integration still need precision work. Camera and world-space UI matrices remain
+  floats by design, but now operate relative to an explicit double-precision origin. Editor camera focus and saved
+  positions retain double precision; runtime camera producers and UI projection/input share the relative frame.
+  Focused headless tests pass; rendered behavior remains a separate pending gate.
 - `StreamingSystem` supplies asset-segment residency and budgets. That is useful infrastructure, not proof of spatial
   world partition, planetary patch residency, HLOD, or transactional simulation-region transfer.
 - `RenderEnvironmentSettings` now exposes atmosphere, layered and experimental volumetric clouds, bloom and stars
@@ -38,6 +182,107 @@ decision, not an instruction to publish or mutate Git now.
   Environment profiles also supply daily lighting and sky-color tracks. These integrations do not establish the
   complete weather, planetary geometry, surface-to-space or visual-quality contracts specified below.
 - The VFX roadmap explicitly leaves world streaming and large-world rebasing open.
+
+### Required Far-Range Physics Acceptance
+
+User requested extensive physics validation at the distant coordinates used by the rendering tests. This is a
+required part of large-world acceptance, not an optional follow-up or a claim of present support.
+
+Current integration status: solver-local float coordinates have an explicit double world origin; precise body
+pose, presentation, native query and checkpoint boundaries have focused regression coverage. Scene startup
+now selects a distant local origin when needed. Fixed-region stacks, continuous collision, moving supports,
+grounding, and precise managed contact delivery have passed focused tests. Managed precise query integration
+passes native execution, filter/overlap-limit tests and editor/player builds. Dynamic region ownership, transfers, moving frames,
+stable replay world identity and real travel validation remain blockers. Changing only the Jolt build option
+or feeding astronomical floats into tests is insufficient.
+
+Run identical local scenarios near zero and translated to positive/negative 1 km, 100 km, 10,000 km, 1e12 and
+1e15 world origins. Preserve small local offsets when constructing fixtures. Compare body-relative results,
+contacts and query identity with the near-origin baseline; report tolerances in metres, radians and seconds.
+Use fixed seeds and fixed ticks, then repeat under variable rendered frame times and interpolation.
+
+| Workflow | Required evidence |
+| --- | --- |
+| Resting bodies and stacks | Contact persistence, penetration, drift, sleeping/waking and stability over a sustained run; repeat with friction/restitution variations. |
+| Fast and small bodies | Continuous collision against thin walls, grazing contacts and spawn/despawn bursts; count tunneling and missed contacts. |
+| Character controllers | Grounding, steps, slopes, jumps, moving platforms and changed local-up direction; compare motion and contact state after returning to the starting region. |
+| Queries and triggers | Raycasts, shape casts, overlaps and trigger enter/stay/exit; verify hit IDs, local hit points, normals and distances across a region transition. |
+| Joints and constraints | Chains and constrained pairs crossing simulation-region boundaries; measure stretch, impulse spikes and broken constraints. |
+| Moving reference frames | Translate and rotate a region during motion; verify transformed velocities, gravity, contact continuity and transfer rollback without duplicate/missing bodies. |
+| Persistence and replay | Save/reload, checkpoint restore and replay at distant origins; retain precise positions and deterministic region ownership. |
+| Editor/player parity | Repeat representative collisions, characters and queries in Play Mode and the cooked standalone player, with visual evidence and frame/physics-step timing. |
+
+Record hardware, build, body/contact counts, timestep/substeps, collision settings, p50/p95/p99 physics-step times,
+worst hitch and memory growth. Numerical frame tests and static screenshots cannot satisfy this matrix.
+Planetary surface-to-space-to-surface travel must preserve these behaviors without a loading screen.
+
+### Camera And Editor Validation
+
+Standalone camera audit found RuntimeApplication.cpp still inverted the absolute WorldMatrix and omitted
+WorldOrigin, unlike editor Game view. Replaced that duplicate construction with BuildPresentedSceneCamera.
+Added coverage for nonzero presentation offsets at 1e15, local neighboring geometry, both projection modes,
+and preservation of clip planes, clear color and fullscreen effects. Build/test and standalone rendered
+validation remain pending for this correction; the earlier Scene-view checks do not cover it.
+
+Standalone camera correction validation: DevDist KeireTests built successfully; `Precise*,World UI*,*camera*`
+passed 48 cases / 722 assertions (`Build/Validation/player-camera-origin-tests.log`). DevDist staging compiled
+and linked the actual runtime successfully in four incremental steps / 58.1 seconds
+(`Build/Validation/player-camera-origin-stage.log`). This verifies the shared camera contract and runtime
+compilation; a cooked standalone render/travel comparison is still pending.
+
+Desktop checkpoint: the staged editor opened maximized and loaded CloudHdrShowcase after startup dependency
+imports. Near-origin mesh picking, aligned translation gizmo, and F framing worked. Moving the selected
+Studio Paint sphere to X = 1,000,000,000,000.25 through the Inspector and pressing F reproduced a failure:
+the view moved, but the mesh and gizmo were absent. Undo restored X = -7.5 and F displayed the sphere again.
+The temporary edit was undone, the editor closed, and the backed-up camera/tool state restored.
+
+Source diagnosis: SceneViewportPanel computes framing bounds relative to the previous camera focus.
+ScenePicker narrows that distant displacement into a float presentation matrix before accumulating corners;
+adding the origin back in CenterPrecise cannot recover the lost center or small extents. Fix framing bounds
+to retain precise translation independently of the old camera location, and cover a near-to-distant focus jump
+in regression tests before repeating desktop QA. Existing tests with an already-nearby origin missed this path.
+Also improve Inspector position formatting: migrated float values currently show long decimal tails
+(observed Y = 1.1499999761581421); retain exact storage and deliberate precise edits.
+
+Framing repair implemented, validation pending: bounds minima/maxima and center/radius accumulation now use doubles.
+Each entity's rotation/scale matrix is evaluated relative to its own precise presentation position; its displacement
+from the bounds origin is added separately in double precision. Added a near-to-distant focus/pick/viewport-fit
+regression with both zero and opposite distant initial camera origins. Existing small-object framing coverage now
+projects corners in the camera frame explicitly. No additional rendered success is claimed until rebuild/retest.
+
+Framing repair native validation passed: the incremental DevDist editor-test build completed eight steps;
+89 selected framing/camera/placement/distant/selection/rotation cases passed 2,025 assertions
+(`Build/Validation/distant-framing-build.log`, `Build/Validation/distant-framing-tests.log`).
+The staged client rebuild and reproduction of the same UI jump remain pending.
+
+Framing repair desktop revalidation passed: DevDist staging completed in 92.1 seconds
+(`Build/Validation/distant-framing-stage.log`). In the maximized editor, setting Studio Paint X to
+1,000,000,000,000.25 and pressing F now centers the visible sphere and aligned gizmo. Dragging its X handle
+moved it by a fractional unit (Inspector displayed 1,000,000,000,000.4689); Undo restored .25, and a second
+Undo restored the original -7.5. The scene file hash matches the backup. Editor closed normally; camera/tool
+baseline restored. This validates that reproduced Scene-view workflow only, not world UI, particles, Play Mode,
+continuous travel, or planetary systems. Complete those remaining gates separately.
+
+The camera/editor/UI integration batch passed these DevDist selections on October 28, 2026:
+
+| Selection | Result | Local evidence |
+| --- | --- | --- |
+| Core cameras, precise VFX scene transforms, and world UI | 35 cases / 648 assertions | `Build/Validation/precise-camera-ui-core-tests.log` |
+| Editor camera persistence, selection, placement, and group transforms | 86 cases / 1,856 assertions | `Build/Validation/precise-camera-ui-editor-tests.log` |
+| Existing runtime UI geometry, overlays, and input routing | 9 cases / 217 assertions | `Build/Validation/precise-camera-ui-compatibility-tests.log` |
+
+These are focused selections, not the complete test suites. The actual DevDist client build completed all 181
+steps successfully (`Build/Validation/precise-camera-ui-client-build.log`). DevDist staging also passed, including
+14 runtime/tool build steps, in 110.2 seconds (`Build/Validation/precise-camera-ui-stage.log`). The normal staged
+launcher opened the QA editor; desktop validation is in progress. Editor-test compilation alone does not cover
+every workspace consumer.
+That pass must check near and distant camera movement, picking/framing, gizmos, placement, runtime UI, and particles
+in Scene and Game views. It is not evidence of completed planetary travel.
+
+The subsequent ground-to-space route still depends on planetary physics/reference frames, spatial streaming,
+stable authored material coordinates, and atmosphere/planet geometry integration. Earlier chronological entries
+below retain the findings and pending status from when they were written; use this section for the latest
+camera/editor/UI validation state.
 
 Before implementation, produce a checked inventory of every absolute-coordinate producer/consumer, binary layout,
 serialized representation, implicit float conversion, and exposed C#/native signature. Include external-editor
@@ -52,11 +297,12 @@ every position consumer has been enumerated. Paths below are repository-relative
 
 | Boundary | Current source contract | Required migration treatment |
 | --- | --- | --- |
-| Transform ownership and interpolation | `KeireCore/Include/Keire/ECS/Components/TransformComponent.h`: local, previous-fixed, current-fixed, world and presentation positions use `Vector3`; matrices use `Matrix4`. | Migrate stored, interpolated, composed and returned positions together; preserve snapshot/savepoint stability. |
+| Transform ownership and interpolation | `KeireCore/Include/Keire/ECS/Components/TransformComponent.h`: local and fixed-step samples use `Vector3d`; precise world accessors coexist with float legacy accessors and presentation matrices. | Complete presentation and relative rendering integration; preserve snapshot/savepoint stability. |
 | Hierarchy composition | `KeireCore/Include/KeireInternal/SceneState.h`: `WorldMatrix` returns the float matrix; prefab instantiation accepts `Vector3`. | Introduce high-precision composition before deriving any relative float matrix; migrate spawn inputs too. |
 | Scene persistence | `KeireCore/Include/Keire/Scenes/SceneAsset.h`: `SceneVector3` aliases `Vector3` for both position and scale. | Split position semantics from scale; version the persisted coordinate representation without globally widening unrelated vectors. |
-| Reflected values | `KeireCore/Include/Keire/ECS/Component.h`: the variant has scalar `double`, but its vector alternatives remain float vectors. | Add explicit high-precision position/vector kinds and round-trip codecs, Editor drawers, cloning and prefab override support. Scalar double support alone is insufficient. |
-| Managed Transform | `KeireManaged/Handles.cs`, `NativeRuntime.cs`, `RuntimeApi.cs`: position getters/setters and unmanaged delegates use `Vector3`. | Change public APIs, fallback runtime interface, native declarations, implementations and internal-call registration as one contract. |
+| Reflected values | `KeireCore/Include/Keire/ECS/Component.h` now appends a `Vector3d` kind and variant alternative; double codecs and a generic editor drawer are implemented. | Finish special Transform controls, managed asset metadata, cloning and prefab override validation. |
+| Managed Transform | `KeireManaged/Handles.cs` and `NativeRuntime.cs` now add precise local/world accessors and preserve precision in `Translate`; legacy properties and `RuntimeApi.cs` still use `Vector3`. | Verify actual host calls, finish presentation/fallback contracts and migrate absolute-position consumers. |
+| Editor position operations | `SceneDocument::TransformValues` now accepts `Vector3d`; undo payloads and translation-gizmo baselines retain doubles. Special numeric controls and rotation/scale pivot matrices still use floats. | Finish the double position widget and camera-relative gizmo projection; execute editor undo/multi-edit tests and obtain UI acceptance. |
 | Native implementation of managed calls | `ScriptSystemRuntimeFoundation.cpp`, `ScriptSystemRuntimeServices.cpp`, `ScriptSystemReload.cpp` under `KeireCore/Source/Scripting`, and `KeireCore/Include/KeireInternal/Scripting/ScriptSystemInternal.h`. | Reject mixed layouts before calls execute; test all local/world/presentation get/set paths. |
 | Built-in property ABI | `KeireCore/Include/KeireInternal/Scripting/ManagedBuiltinComponents.h`: `NativeBuiltinProperty` is asserted to 56 bytes and carries `Vector4`; `KeireManaged/NativeRuntime.cs` mirrors its sequential fields. | Version and verify size, offsets, alignment and kinds on both sides. Never reinterpret the existing float payload as doubles. |
 | Physics queries and results | `KeireCore/Include/Keire/Physics/PhysicsSystem.h`: body positions, query origins/centers and hit/contact points use `Vector3`, alongside local geometry and directions. | Classify each field as position, displacement, direction or local geometry; convert relative to the accepted simulation region. |
@@ -68,15 +314,20 @@ The prerequisite rotation restoration defect is fixed and checked with 17 focuse
 The staged DevDist Editor also passed light-toggle, Undo, Redo, Undo and clean close in the sandbox QA project.
 This closes that prerequisite only; the remaining LWE-0 inventory and numerical contracts remain open.
 
-### Initial Numerical Evidence
+### Initial Numerical Evidence (before the October 28 precision migration)
 
-The detailed Transform audit confirms that `TransformComponent::WorldPosition` extracts translation from a float
+The original Transform audit found that `TransformComponent::WorldPosition` extracted translation from a float
 `WorldMatrix`, and `SetWorldPosition` uses a float inverse-parent matrix. `SceneState::WorldMatrix` in `Scene.cpp`
 caches float hierarchy composition; fixed presentation samples and their interpolation also remain float. Transform
 schema 1 stores `position` as a reflected `Vector3`; both `SceneAsset.cpp` and `SceneSerialization.cpp` decode vector
 components with `get<float>()`. A storage-only double field would still lose precision through these paths. Migrate
 composition, world/local conversion, reflected property codecs, scene formats and presentation samples as one
 coherent slice, with signed/nonuniform-scale hierarchy and save/Undo regressions.
+
+October 28 update: precise translation storage, hierarchy position evaluation, local/world setters, component
+codecs and fixed-step position samples have now been migrated in the working tree. Render/presentation matrices
+still narrow to float, and preserved reparenting still uses float matrices for rotation/scale decomposition.
+The native regression build is pending; the original audit above records the starting point, not current completion.
 
 This audit also exposed a pre-existing reparent failure hazard: the parent was changed before the preserved local
 pose passed scale validation. Reparent now preflights matrix conversion, decomposition, finite position, supported
@@ -157,7 +408,8 @@ GPU shaders.
 | Rendering and local effects | Origin-relative float data created from high-precision differences | Subtract the correct origin before conversion to float, not afterward. |
 | Streaming/navigation addresses | Integer cells/patches plus high-precision origins | Resident memory and simulation cost depend on active content, not total coordinate extent. |
 
-Proposed names such as `Vector3d`, `WorldPosition`, and `SpatialFrame` are design names, not existing APIs.
+`Vector3d` now exists as a native and managed value contract; it does not yet replace authoritative transform storage.
+Names such as `WorldPosition` and `SpatialFrame` remain design names, not promises of existing APIs.
 Keep float vectors useful for normals, directions, UVs, and local geometry. Typed position-plus-displacement
 operations should make ordinary movement convenient without requiring authors to manipulate sector indices.
 Converting positions between frames must be explicit; subtracting positions in unrelated worlds must be rejected.
@@ -1348,3 +1600,1666 @@ Live shader approach correction: AtmosphereMedium.hlsli now uses closest-approac
 
 ### Requested pause checkpoint
 User requested finishing this pass, committing/pushing all source work, final UI testing, then pausing. DevDist build passed 19 actions (planetary-approach-devdist.log); stage-editor passed in 20.5 seconds. Docs validation passed 117 guides/10 groups/29 diagrams; all changed C++ formatting and diff checks passed. Windows generated-content cache harness reports passed (wrapper initially misread a residual native exit code). Updated editor PID9812 opened the saved scene and rendered fog/materials; it subsequently disappeared during window-size testing, and capture reported no screenshot targets found. Process absence verified; cause not established. Final UI smoke is incomplete, not passed. Latest Client.log also reports startup scene dependencies could not be refreshed despite worker completion; investigate on resume before acceptance. Desktop helper released. Remaining work includes this startup/UI failure, full precision transform/persistence/managed integration, planetary cloud/fog geometry, streaming/physics, continuous editor/player ground-space-return and pending fog parity/performance. Generated vc140.pdb excluded from commit and left local.
+
+Resume constraint: code-based work while user games; ask and wait before opening the editor. Startup failure root cause confirmed in operation 5a371369 worker.log: generated material HLSL references FogExclusionDensity before its declaration. Both Windows/Unix embedded-source generators now order FogExclusion before FogDensity; flattened source compiles DXIL/SPIR-V/MSL without source includes. Windows cache harness passes with order assertion; Unix assertion added, native Unix execution pending. Native rebuild/reimport and UI remain pending. This unblock precedes continued authoritative scene-position migration for planetary travel.
+
+Native migration value contract started: Keire/Math/Vector3d.h introduces explicit double frame-local coordinates, with no implicit conversions to/from Vector3. RelativeFloat subtracts before narrowing and rejects nonfinite, overflow and caller-defined precision-budget failures. World/frame identity remains separate; callers must resolve frames first. Exported through Core.h. Transform storage, scene schema/property bags and managed ABI are NOT migrated yet; this value type alone does not provide default large-world behavior. Next batch must carry the type through those authoritative paths before claiming scene integration.
+
+Precise property migration in progress: ComponentPropertyKind appends Vector3d and ComponentPropertyValue appends alternative15, keeping reference alternative14 and all earlier persisted tags stable. Scene component property and prefab codecs now carry double channels; precise decode rejects nonfinite values. PrecisePropertyTests adds round-trip coverage at 1e15 metres and malformed-shape rejection. Compilation/test validation is not yet complete; transform storage, property editor, managed payload and ABI migration remain open. Do not run the editor against this partial migration.
+
+Precision codec compile checkpoint: SceneSerialization.cpp, SceneAsset.cpp, PrefabAsset.cpp and PrecisePropertyTests.cpp compile with C++20/KEIRE_STATIC. Initial standalone command omitted KEIRE_STATIC and hit an import-linkage error; corrected command passed. Round-trip test execution and remaining variant consumers are still pending, so this is compile evidence only. No editor launch or new Git mutation.
+
+Precise-property executable validation now passes 1 case / 3 assertions: component JSON round trip preserves 1e15-plus-fraction values, malformed vectors are rejected, and nonfinite encode is rejected. All three scene/prefab encoders now reject nonfinite precise vectors rather than writing JSON null. Evidence Build/Validation/precise-properties.log. Linked freshly compiled precision test/SceneSerialization objects with existing core/assets libraries for unchanged supporting symbols; this is not a full ABI/build validation. ManagedBuiltinComponents still only maps float Vector3 and must gain a coordinated native/managed payload before transforms switch. Editor drawer support remains pending. No editor opened.
+
+Editor precision property batch: IPropertyEditor gains a double-vector fallback using three existing double scalar controls; edits publish together only if finite, and PropertyDrawerRegistry registers the new kind. Architecture tests include precise kind coverage and 1e15-plus-fraction edits. Tests added but not yet executed; production drawer compilation in progress. Actual Transform position remains float, and managed NativeBuiltinProperty still uses its old 56-byte payload. No editor launch; ask and wait before UI testing.
+
+Drawer compile completed successfully (C++20, KEIRE_STATIC, precision-drawer.obj). Runtime/editor test execution remains pending; this is compile coverage only.
+
+### Active planetary travel integration order (2026-10-28)
+
+Large-world and planetary travel is the active milestone. Do not postpone it for optional atmosphere polish.
+Keep remaining fog parity and performance gates tracked, and defer the extensive technical-review backlog until
+fog and planetary work are complete. Ask the user and wait for permission before opening the editor.
+
+1. Complete precise transform storage, parenting, interpolation, scene migration and managed interop as one
+   coherent batch. Do not silently enlarge the existing 56-byte managed property payload: establish explicit
+   compatibility checks or a separate versioned entry point first. Preserve old scene data deliberately.
+2. Connect authoritative positions to reference frames and local rendering/physics origins. Verify rebasing
+   preserves velocity, parent relationships, contacts and camera-relative precision without scene reloads.
+3. Connect planetary gravity and rotating-frame transitions with continuous atmosphere/cloud/fog altitude
+   behavior. Current world-Y fog/cloud slabs are not a complete planetary atmosphere implementation.
+4. Prepare a reproducible surface-to-orbit-to-space-and-return route, including lateral travel, landing,
+   save/reload and distant origins. CPU kernel tests alone do not establish editor or standalone travel support.
+5. Batch DevDist compilation and focused regressions, then request permission for maximized editor and player
+   acceptance. Measure frame times, transition spikes and streaming; retain honest unresolved results.
+
+Managed precision contract added: Vector3d mirrors native same-frame origin subtraction and rejects nonfinite,
+overflow and excessive narrowing error. It deliberately has no implicit float conversion. This is a value API,
+not managed Transform migration or a new wire payload. Production managed regression run is pending.
+
+Managed production regression execution passed (Release, exit 0), including PrecisePositionTests; evidence: Build/Validation/planetary-managed-precision.log. No editor or GPU test was launched. Transform migration and native/managed interop remain pending.
+
+Native transform storage batch (not yet live-editor validated): authoritative local positions and fixed-step
+samples now use Vector3d. Precise world access walks parent linear transforms without putting translations in
+float matrices; precise world edits reverse that route before publishing a finite local position. Preserved
+reparenting validates the precise translation and decomposed rotation/scale before changing hierarchy. Transform
+component schema 2 writes doubles and migrates schema-1 positions. Added detached codec/migration, hierarchy,
+reparent and scene round-trip tests. TransformComponent.cpp and the test file compile; the DevDist KeireTests
+build is running with KEIRE_BUILD_JOBS=2. Do not link this changed class layout against old scene libraries.
+Remaining migration includes SceneTransform summaries/editor consumers, managed precise calls, presentation
+matrices, renderer-relative origins, physics regions and live frame transitions. No editor opened.
+
+Managed state precision integration: Vector3d is now treated as an immutable atomic value by ordinary state,
+reference-graph and callback staging serializers. Regression coverage round-trips a 1e15-plus-fraction position,
+an array and a SerializeReference array, excluding computed IsFinite from stored JSON. All 50 managed production
+cases pass (Release, exit 0; Build/Validation/planetary-managed-state.log). The first fixture run emitted rename
+fallback warnings because its fields lacked stable IDs; adding stable IDs corrected the fixture without weakening
+precision assertions. Native Behaviour reflection now maps Vector3d and reads/writes finite double JSON channels;
+added projection/edit regression coverage, pending the ongoing native build. ScriptableObject metadata kinds and
+managed Transform access remain separate unfinished paths. Because source edits extended this batch after the
+native build began, perform a final incremental freshness build before accepting its test results.
+
+Precise managed Transform bridge: LocalPositionPrecise and PositionPrecise use separate V1 getter/setter
+function-pointer fields, a 24-byte XYZ double payload and a checked byte count. Native calls reject null buffers,
+unknown spaces, stale entities and nonfinite positions, and do not unwind through the ABI. C# rejects missing
+runtime support, failed operations and nonfinite native output explicitly. The existing generic 56-byte property
+payload is unchanged. Managed production tests pass all 50 cases, including raw double-channel layout, identity,
+local/world selection, invalid input, rejection without mutation and absent callbacks
+(Build/Validation/planetary-managed-transform.log). These use managed unmanaged-call fixtures, not the actual
+native host. The native reload integration fixture now exercises both precise properties and verifies reflected
+state at 1e15-plus-fraction coordinates; it is added but not yet executed. Native build remains active.
+
+Precision consumer audit: Transform.Translate previously round-tripped absolute coordinates through float Position,
+so small movement at distant origins disappeared. It now reads/writes PositionPrecise while retaining float local
+movement vectors and world/local rotation behavior. All 50 managed tests pass, including quarter-metre translation
+at 1e15 metres, local-axis rotation and rejection before native mutation
+(Build/Validation/planetary-managed-translate.log). This does not migrate scripts that directly modify the legacy
+float Position property. Translation-gizmo capture now stores precise local/world positions, translates via the
+precise world setter and restores precise locals when a drag is cancelled. Added a scaled-parent editor regression;
+execution remains pending. Rotation/scale pivot matrices and special numeric Transform Inspector controls are still
+float paths and must be migrated before native UI acceptance. Precise native hierarchy tests now also cover an
+exact half-turn parent rotation and overflow rejection. No editor opened; master retained, no Git mutation.
+
+AuthoringGeometry.cpp compile passed (C++20, KEIRE_STATIC; Build/Validation/precise-authoring-compile.log). Editor regression execution and UI acceptance remain pending.
+
+Inspector undo/multi-edit migration: undo values append Vector3d, position validation rejects nonfinite precise
+values, and application uses SetLocalPositionPrecise. SceneDocument TransformValues.Position is now an optional
+Vector3d; single and multi-edit setters preserve it. Updated callers explicitly distinguish position from scale.
+Added distant undo/redo and invalid multi-selection rollback tests. The special numeric widget remains float-based
+and explicitly widens its current value; it is not yet a precise authoring UI. SceneDocument.cpp and
+InspectorTransformTests.cpp compiled before the multi-edit extension; the latest multi-edit compile is pending.
+Native regression build remains active; no editor/GPU test or Git mutation.
+
+The multi-edit compile exposed two float placement adapters (imported models and dropped VFX); both now explicitly widen their existing placement vectors into SceneDocument's precise position contract. SceneDocument.cpp and SceneDocumentMultiEditTests.cpp compile successfully after that correction (precise-multiedit-compile.log). Runtime/editor tests remain pending.
+
+Post-migration audit gate: the legacy managed local/world/presentation getters are noexcept native callbacks but
+can now reach checked float narrowing or matrix composition from precise positions. A finite double outside float
+range can throw there. Before release, convert this into an explicit managed error without unwinding the ABI;
+cover both legacy and precise getters. Do not advertise the new precise accessors as complete migration of the
+legacy float surface. Current build has compiled native reflection and precise callbacks; test execution is still
+pending, and the final freshness build remains required after source changes during compilation.
+
+Legacy getter boundary fix implemented: native local/world/presentation callbacks catch conversion/composition
+exceptions and return a nonfinite sentinel through their unchanged float ABI. Managed wrappers reject nonfinite
+channels with an explicit InvalidOperationException; finite legacy values retain their existing behavior. All 50
+managed production tests pass, covering each nonfinite channel and each getter
+(Build/Validation/planetary-legacy-position.log). The actual native reload fixture now sets a finite 1e40 position,
+resets presentation interpolation, expects all three legacy getters to fail safely, verifies the precise getter
+still returns 1e40, and restores the original transform in finally. This native test is added but not executed;
+a fresh native incremental build is required because callbacks changed after their first compilation.
+
+Precise numeric authoring: Transform Inspector now reads LocalPositionPrecise and uses UiFrame::DragVector3d,
+with 17-digit double input formatting and the existing grouped axis layout. Position edits reach precise undo and
+multi-edit values directly, without widening an already-rounded float. The widget rejects nonfinite initial values
+and publishes only finite candidates. Float vector controls share the same layout helper. Added idle preservation
+and invalid-input contract checks to UiTests; test execution and interactive typing/drag/Undo acceptance are pending.
+The Ui.h change requires a fresh native/editor build after the currently running baseline build completes.
+Precise UiWidgets.cpp standalone C++20 compilation passed (Build/Validation/precise-ui-widget-compile.log). Formatting dry-run and git diff --check passed; full runtime/UI validation remains pending.
+The two production reflected-property UI adapters now override EditVector3d with the grouped precise widget rather
+than inheriting the six-digit scalar fallback. This preserves 17-digit input formatting and grouped edit tracking
+for native and managed reflected Vector3d properties. Nonfinite widget input rejection also has a regression check.
+Formatting and diff checks pass; the client build and input/undo UI checks remain pending.
+InspectorPropertyEditor.cpp standalone C++20 compilation passed (precise-inspector-property-compile.log).
+The original 350-action native build reached linking but failed with the new DragVector3d symbol unresolved:
+UiTests was compiled after the UI edit while KeireCore had already compiled before it. This is not a passing build.
+A fresh normal-launcher DevDist KeireTests build is now running (planetary-precision-fresh-devdist.log); source edits
+are frozen until it completes. Native regression results and editor acceptance remain pending.
+
+Post-storage consumer audit (October 28): SceneState::SnapshotObject still obtains its compatibility summary via
+LocalPosition(), even though its component bag stores doubles. SceneAsset::ParseTransformData also parses that
+summary through ParseVector3, and Validate checks it separately. Thus a finite double position outside float range
+can still fail snapshot/decode; precise component round trips at 1e15 do not prove the full double-range contract.
+PrefabAuthoring::InstantiatePrefab computes placement offsets from this float summary, and prefab override review
+uses its positions. Next migration must change the summary and its codecs/placement/override consumers together,
+with distant prefab placement and save/reload tests. Do not remove the summary validation to hide narrowing.
+The in-flight build remains untouched; this is a confirmed follow-up boundary, not an implemented fix.
+
+Fresh DevDist KeireTests build passed (139 actions, planetary-precision-fresh-devdist.log). Focused native suite
+passed 10 cases / 821 assertions (planetary-precision-native-tests.log): precise storage/codecs/hierarchy,
+reparent failure safety, planetary kernels and headless UI contracts. The actual managed reload host fixture ran
+1,314 assertions with four failures in its intentionally unbound replay-only entity lifecycle; the live scene
+precise-coordinate assertions passed. The new Awake probe tried to access a Transform on that unbound entity.
+Restricted the fixture's probe to Entity.IsValid (the live-scene assertions remain mandatory); a four-job incremental
+build is running before rerunning the complete fixture. This is not yet a passing host-integration result.
+Managed host rerun passed: 1 case / 1,314 assertions (planetary-precision-native-host.log). This includes live native precise callbacks, legacy overflow rejection, retained state and replay lifecycle after the fixture correction. Editor/standalone planetary travel remains unverified.
+
+Broader scene compatibility run: 40/41 cases passed, 631 assertions passed; project starter creation throws the
+portable 16-sampler limit (planetary-scene-compatibility-tests.log). Source inspection confirms the starter material
+has seven texture properties; generated lit shaders reserve two shadow, two IBL, five spatial-lighting and one
+cloud-noise sampler, totaling 17. RenderingAssetValidation correctly rejects this; do not raise the portable limit
+or silently remove starter material features. ShaderGraphManifest currently assigns volume ABI 9 to all world
+materials, including opaque passes. Fix the generated resource contract and runtime bindings together, with shader
+compile and starter-project regression coverage, before claiming project startup/creation acceptance. The already
+running editor build is not proof this runtime path works. No production source edits made during this build.
+Sampler-budget repair candidate: represent the same quantized cloud-noise mip chain in a read-only buffer only for
+material programs that cannot fit the texture binding. Main sky/cloud passes can retain hardware texture filtering.
+Before choosing this design, prove repeat wrapping, trilinear/mip interpolation and RGBA8 parity against texture
+sampling on supported GPU lanes; measure the additional material-side work. Resource registers, storage-buffer
+limits, manifest/ABI version, upload ownership, device recovery and VFX/scene bindings must change together. This
+is a candidate under investigation, not an implemented workaround or a reason to relax sampler validation.
+Noise buffer prerequisite implemented in internal CloudNoiseBuffer.h: explicit uint header/mip descriptors and
+RGBA8 words retain the texture's existing quantization and mip order. Complete bounded mip chains are validated
+before allocation; malformed dimensions, byte counts, missing levels and trailing levels are rejected. Standalone
+C++20 tests pass 2 cases / 20 assertions (cloud-noise-buffer-tests.log). No production renderer consumes it yet;
+shader filtering, GPU upload/binding, ABI/cache updates and GPU parity/performance remain required. These new files
+are not dependencies of the in-flight editor build and do not alter its compiled rendering behavior.
+CloudNoiseBuffer.hlsli now implements RGBA8 decode, normalized repeat addressing, half-texel-centered trilinear
+sampling and linear mip interpolation, matching the existing sampler configuration. A standalone fragment wrapper
+compiles to DXIL, SPIR-V and MSL using the pinned shader compiler (cloud-noise-buffer-probe.*). Compilation does not
+prove rendered equivalence; reuse the existing cloud-noise GPU probe infrastructure to compare hardware texture
+samples and buffer samples, including negative coordinates, wrap boundaries and fractional mip levels, before
+connecting the new material ABI. The file is not included by production shaders yet.
+Buffer-versus-texture GPU comparison passed on Direct3D 12 and Vulkan: 512 samples / four channels, maximum absolute difference 0.00206596 on each backend, below the existing 0.004 filtering tolerance. DXIL/SPIR-V/MSL compute compilation passed. Main editor DevDist stage also completed (planetary-precision-editor-stage.log); buffer path remains unintegrated and has no performance qualification yet.
+
+### October 28: live precise-position authoring check
+
+- Tested the staged DevDist editor maximized in CloudIsolation20261026, selecting Showcase Plinth in the hierarchy.
+- Entered X = 1000000000000000.125 through the Inspector. The editor accepted the input and moved the plinth out of the local view; the formatted field displayed 1000000000000000.1 (17 significant digits). This screenshot verifies UI acceptance, not independently the stored fractional bits.
+- Ctrl+Z restored X = 0, the visible plinth, and the clean scene state. Ctrl+Y reapplied the distant value; a final Ctrl+Z restored the baseline. Closed the editor normally without saving the temporary edit; verified the process exited.
+- Authoring follow-up: improve presentation of widened legacy values (for example -0.80000001192092896) and cramped distant coordinates without sacrificing editable double precision.
+- Stationary observations during this interaction were approximately 12–13 ms, 29 draws. These are snapshots, not a movement benchmark or planetary performance qualification.
+- Remaining gates: starter-material sampler overflow; scene/prefab summary precision migration; camera-relative rendering and moving-frame integration; actual seamless ground/space/return validation. Production readiness is not established by this authoring check.
+
+### October 28: shared cloud sampling path and cache coverage
+
+- Routed all four cloud-density atlas samples through SampleVolumeCloudNoise. The default remains the existing hardware-filtered 3D texture. Defining KEIRE_CLOUD_NOISE_BUFFER selects the packed read-only buffer implementation; no production material selects that path yet.
+- Added the buffer include to Windows/Unix shader and VFX staging/fingerprints, and embedded it before cloud consumers for installed-editor generated shaders. Extended cache regression assertions for both platforms.
+- Compiled the actual shared CloudVolume kernel's texture fragment path and buffer compute comparison to DXIL, SPIR-V, and MSL. The buffer comparison executed successfully on Direct3D 12 and Vulkan: 512 samples, four channels, maximum absolute error 0.00206596 against hardware texture filtering. This is correctness evidence, not a performance measurement or Metal runtime test.
+- Windows generated-content cache harness passed. Runtime ABI/resource ownership/bindings remain the next integration step; the seven-texture starter-material overflow is still open. The editor remains closed between validation cycles.
+
+### October 28: material volume ABI 10 integration under validation
+
+Implemented conditional generator selection, manifest/codec acceptance, import reflection counts, portable resource validation, runtime pipeline counts, scene/VFX storage binding offsets, and device-owned noise-buffer upload/release/recovery. Added six-versus-seven-texture generation coverage and advanced generated shader version to 36 so old generated material output is invalidated. Main cloud shaders and lower-resource materials retain texture filtering.
+
+Native DevDist KeireTests build is running with four jobs; log: Build/Validation/cloud-buffer-integration-build.log. Do not consider the starter-project regression resolved until that rebuilt executable passes and actual material import/runtime binding is checked. Renderer device-lifecycle changes also need failure/recovery coverage. No editor process is open.
+
+### Build-latency follow-up observed during ABI integration
+
+The Windows built-in VFX generator recompiles all 23 entry points in three formats when any shared include changes. The cloud sampling include change therefore also rebuilt compute entry points (CSSpawnInitialize, CSSpawnOutput and others) that do not consume cloud transport. This is an observed incremental-build cost, not evidence of runtime shader slowness. Evaluate per-stage dependency-aware caching after correctness gates; preserve complete invalidation for actually consumed includes and compiler/version changes. Do not skip required variants merely to shorten this build.
+
+### October 28: starter-project regression passes with ABI 10
+
+The four-job DevDist KeireTests build completed successfully (209 actions; Build/Validation/cloud-buffer-integration-build.log). The rebuilt executable passed seven focused cases / 200 assertions, covering supported/canonical volume metadata, sampler/storage capacity, six-versus-seven-texture Shader Graph selection, compatibility versioning, and Projects create isolated starter assets and hold exclusive editor locks. Evidence: Build/Validation/cloud-buffer-contract-tests.log.
+
+The original project-creation sampler-limit exception is resolved in this regression. Remaining acceptance is explicit: compile/import the seven-texture generated shader through all supported shader formats, validate actual renderer bindings and resource recovery, and measure the buffer fallback cost. The default atlas sampling path remains texture-backed. This result does not establish planetary rendering or seamless travel readiness.
+
+### October 28: seven-texture shader import verified
+
+Added a production-import regression with seven actively sampled material textures. The two-action incremental DevDist rebuild passed. The new case passed 55 assertions, decoding ABI 10 metadata and checking depthVelocity, deferredGBufferStandard and forwardOpaque binaries in DXIL, SPIR-V and MSL. The importer also validated reflected sampler/storage counts. Log: Build/Validation/seven-texture-import-tests.log. This validates generated binary/resource contracts; actual draw binding, device recovery and performance remain separate gates.
+
+### Next precision regression prepared while editor staging runs
+
+Added Precise scene snapshots retain authoring coordinates beyond float range to PreciseTransformTests.cpp. It checks both SceneTransform summary fields and decoded summaries, plus restored TransformComponent coordinates, for 1e15 fractional positions and 1e40 values. This deliberately covers the float summary gap that the earlier component-bag round trip missed. The test has not been built/run yet and the current float summary implementation is expected to fail it. It is not part of the already-passing sampler test results. Complete the scene/prefab summary migration before claiming this gate passes.
+
+The interactive sampler test must use an explicitly seven-texture graph: ordinary Create Material uses the smaller pinned Kéire/Lit graph and cannot prove ABI-10 drawing. The production-import test now has opt-in KEIRE_TEST_SHADER_FIXTURE_ROOT export to a new absolute directory, refusing existing destinations. Its exported graph source can be imported and assigned through the QA editor. This export addition is not yet rebuilt; it does not alter ordinary test output or production behavior.
+
+### October 28: runtime QA launched and summary precision gap reproduced
+
+Editor DevDist staging completed successfully (183 actions, 721.7 seconds). Fixture-export rebuild passed three actions; opt-in export/import test passed 57 assertions and wrote opaque/transparent graph sources into the QA project's Assets/Validation/CloudBuffer20261028 folder. The transparent fixture is intended for live volume sampling; its runtime import/drawing is not yet validated. Editor launched maximized at 16:01 (PID 13948) and is refreshing startup shaders after generator version 36 changed.
+
+Ran the new Precise scene snapshots retain authoring coordinates beyond float range baseline on the freshly rebuilt native executable. It fails as expected: six precision checks fail for snapshot/decoded summary fields at 1e15, and snapshotting 1e40 throws Relative coordinate exceeds the float range. Three assertions pass. Evidence: Build/Validation/precise-scene-summary-baseline.log. This is an open regression requiring SceneTransform summary, codecs and authoring consumers to migrate coherently; the separate sampler tests remain passing.
+
+### October 28: scene-summary migration under compilation
+
+Migrated SceneTransform.Position to Vector3d, snapshot capture and scene application to precise transform accessors, JSON position parsing to finite doubles, and prefab authoring offset/review consumers to preserve double coordinates. The four-job DevDist KeireTests build is running under Build/Validation/precise-scene-summary-build.log. The previously failing snapshot regression has not yet been rerun; do not count this migration as validated.
+
+Runtime integration audit confirms SceneRuntimeSpatialAccess::FrameForEntity in SceneRuntimeWorld.cpp still returns RootFrame for every owned entity. Animation grounding ray origins and procedural camera-to-animator deltas also still consume float WorldPosition. Travel acceptance must cover these consumers alongside rendering and physics: assigning moving frames without converting these boundaries would leave distant-world behavior incomplete. Preserve world-space precision until subtraction into an explicitly selected local simulation or camera frame, then narrow with range checks. Existing frame-math tests do not prove this runtime integration.
+
+### Interactive asset navigation observation
+
+With startup imports settled, the QA showcase materials again display their distinct colors; the earlier all-white capture is no longer reproduced. This does not qualify the seven-texture fixture draw. Both fixture sources now have importer metadata. Navigating into a folder retains the current-folder name filter, producing a visually empty child folder when the filter matched only the parent name. Observed twice while entering Validation and CloudBuffer20261028. Consider an explicit filtered-empty state with a clear-filter action (or a documented navigation filter policy) so users do not mistake hidden contents for missing imports. Defer this QoL implementation until the current precision build and travel blockers are addressed.
+
+### Precise prefab placement follow-up
+
+Added InstantiatePrefabPrecise with double destination coordinates; the existing float entry point explicitly widens and delegates. Placement now subtracts source-root coordinates before adding the destination, avoiding cancellation of millimetre destinations when source roots are around 1e15. Added an editor regression covering multiple root spacing and serialized override destination precision. Updated affected existing position assertions to the new double summary type. These editor changes are formatted but not yet built or tested; the current native test build does not include KeireEditorTests.
+
+### October 28: opaque seven-texture material exercised in the editor
+
+Using the maximized QA editor, created SevenTextureOpaqueQA via Material from Shader with SevenTextureVolume selected. Inspector exposed Channel0 through Channel6. Dragged the material onto the Iridescent Shield cube; Inspector showed SevenTextureOpaqueQA as its compiled material and the mesh rendered white/blue shading while the scene remained responsive. Undo restored the original MG_12_IridescentShield material and cleared the scene's unsaved indicator. This is direct opaque scene-draw evidence for the seven-texture fixture with fallback textures, not a seven-distinct-texture correctness test, transparent-path qualification, device-recovery test, or performance benchmark. The material asset remains in the isolated QA fixture folder.
+
+### October 28: scene summary precision regression passes
+
+The four-job DevDist native build completed all 192 actions and linked successfully. The focused Precise* / *Prefab* selection passed 16 cases and 102 assertions (Build/Validation/precise-scene-summary-tests.log). A separate exact-name invocation of the formerly failing snapshot test records individual assertions in Build/Validation/precise-scene-summary-regression.log. This establishes double summary/component round trips at 1e15 fractional coordinates and 1e40, not runtime rendering or physics at those coordinates. Editor prefab-placement regressions are a separate pending target; four-job DevDist KeireEditorTests compilation has started (Build/Validation/precise-prefab-editor-build.log). The later occlusion-test narrowing-warning cleanup was edited after its compilation and still needs an incremental native rebuild.
+
+### Next rendering migration boundary confirmed
+
+TransformComponent::ApplyRuntimeFixedPresentation computes a Vector3d interpolation result but immediately narrows it through LegacyPosition into m_FixedPresentationLocal. PresentationWorldMatrix recursively multiplies float matrices. RenderResourceCaches.cpp then captures that matrix into draw items and MotionHistory. Therefore subtracting a camera origin only after draw-packet construction cannot recover lost translation bits.
+
+The next coherent rendering batch must retain precise interpolated local/world translation, construct linear rotation/scale separately from translation, and subtract a frame-matched camera origin in doubles before packing draw matrices. Previous-frame transforms and previous camera origins must be paired explicitly across rebases; simply reusing old relative matrices under the new origin would introduce false motion vectors. Cover parent interpolation, position-only/full presentation overrides, multiple camera surfaces, teleport/reset, and origin changes with focused tests. Audio, world-space canvas projection, animation grounding and physics remain independent consumers requiring their own selected local-frame contracts.
+
+### Transparent live material check failed
+
+Switched the QA material to SevenTextureVolumeTransparent and explicitly selected Blend (source alphaMode 2). Applied it to the same cube. After refresh, both Scene and Game Edit preview displayed the bright magenta fallback rather than the expected translucent white fixture. Undo restored MG_12_IridescentShield and the clean scene state. The QA material asset intentionally remains pointed at the transparent graph for diagnosis, despite its original SevenTextureOpaqueQA filename. This is a failed transparent acceptance gate; do not infer success from shader source import or the earlier opaque draw. Investigate compiled pass selection/resource binding and material diagnostics before continuing the renderer qualification.
+
+Transparent ABI10 follow-up: the QA AssetOperations result c67ebbed-dd71-4ab8-8bbf-463e2ce06b57 records successful import with no diagnostics for graph 6ace59c5-59c6-4f7d-8ed3-6d6665a66c86. Subsequent material import results also report success. This narrows investigation toward runtime pipeline/pass selection or hot reload, without proving the cause. The seven-texture production importer regression now covers both Surface and Transparent output, including forwardTransparent artifacts in DXIL, SPIR-V, and MSL; execution remains pending behind the active editor build.
+
+Runtime evidence for the transparent fallback: QA Logs/Core.log records forwardTransparent pipeline creation starting at 16:24:45.701 and succeeding at 16:24:51.902 (6201.098 ms), with no corresponding pipeline error. The opaque fixture likewise spent roughly 6.25, 7.80, and 6.37 seconds creating its three passes. Distinguish asynchronous preparation fallback from persistent failure during the next live check; successful import alone was insufficient, and successful pipeline creation still does not prove binding/publication or final pixels. Preserve this first-use latency as a performance finding.
+
+Next precision acceptance cases: existing SceneRuntimeWorldTests character interpolation coverage uses small float coordinates and does not establish large-world presentation. Add distant parent/child presentation tests with fractional motion, rotated/scaled parents, alpha endpoints, reset/teleport, and reparent discontinuity. Keep translation double through fixed-step interpolation and hierarchy composition; subtract the render-camera origin before float packing. Validate current and previous frame origins together for motion vectors, and independently for multiple cameras. Values beyond float range must remain representable until the explicit relative-render conversion boundary.
+
+### October 28: precise prefab and environment editor tests verified
+
+DevDist KeireEditorTests builds successfully after correcting the remaining Vector3d fixture expectation, three environment test includes that depended on the native-test target, the cloud preset ostream include, and relocating ObserveEditSurface beside the shared ProjectSettingsPanel implementation so the editor-test target links it. Focused prefab/Inspector/environment-name selection passed 25 cases and 380 assertions (Build/Validation/precise-prefab-editor-tests.log). A separate file-scoped run covering ProjectAtmosphereSettingsTests, ProjectEnvironmentTimeTests, ProjectEnvironmentLightingTests and VolumetricCloudPresetTests passed 29 cases and 461 assertions (Build/Validation/environment-authoring-focused-tests.log). These selections overlap and are not additive unique-test counts. Transparent shader regression compilation is now running separately. Live rendering and planetary travel remain unqualified.
+
+### October 28: opaque and transparent ABI10 importer regression passed
+
+The three-action incremental KeireTests DevDist build passed. The seven-texture production importer test now passes both opaque and transparent subcases: 108 assertions, including DXIL/SPIR-V/MSL pass artifacts plus blending and depth-write metadata. Evidence: Build/Validation/transparent-volume-import-build.log and Build/Validation/transparent-volume-import-tests.log. This does not close the observed live magenta fallback; successful pipeline construction in the QA core log further requires checking binding publication and visible output after preparation completes. No build remains active at this checkpoint.
+
+### Precise presentation implementation in progress
+
+TransformComponent now separates double presentation translation from float rotation/scale, retains double fixed interpolation samples through presentation, and exposes PresentationWorldPositionPrecise plus checked PresentationRelativeMatrix(origin, maximumError). New tests cover fractional distant interpolation, rotated/scaled parent composition, reset, invalid origins and beyond-float-range presentation. These edits are formatted but not yet built or executed. RenderCamera origin and motion-history integration remain outstanding; current renderer callers still use the legacy absolute matrix API. Do not claim live large-world rendering from this intermediate API implementation.
+
+Precise presentation batch follow-up: runtime position-only overrides now have an explicit double API, legacy float overrides widen into it, and rotation queries decompose translation-free presentation matrices. Added coverage for beyond-float-range overrides, preserved gameplay rotation/scale, invalid-update rollback, unchanged simulation position, and reset. This batch remains uncompiled while camera/history consumers are being migrated.
+
+### Transparent runtime fallback reproduced after a fresh launch
+
+Reopened the staged QA editor maximized (PID 3136). Assigned SevenTextureOpaqueQA (still referencing the transparent graph with Blend) to 07 - Frosted Glass. Bright magenta persisted after more than 50 seconds and appeared in both Scene and Game Edit views. This excludes only a short first-use preparation delay; it does not establish the binding failure's cause. Undo visibly restored MG_07_FrostedGlass and cleared the unsaved scene indicator, then the editor was closed. Build activity overlapped this check, so no performance qualification is claimed.
+
+### Correction: magenta fixture pixels do not establish a binding failure
+
+Runtime shader decoding confirms ABI10, seven Generic texture parameters, forwardTransparent in DXIL/SPIR-V/MSL, Blend and no depth writes. Generic unassigned textures deliberately resolve to Texture2DAsset::Checkerboard, whose pixels include magenta; the fixture adds seven such samples. The previous expectation of neutral white was invalid, so the observed magenta must not be treated as proof of a missing material binding. Corrected all seven fixture parameters to BaseColor semantics (neutral white fallback), both in the production-import fixture generator and the two existing QA source graphs. Visual acceptance must be rerun after reimport. Removed the speculative pass-selection diagnostic added during investigation.
+
+Corrected-fixture visual retry was inconclusive: operation 1a727ec0-5046-4caa-8a4b-4351568a8034 reported both fixture shader compilers exceeding 30000 ms during the concurrent native build. Last-good data was retained, so evaluating its pixels would not validate the corrected fixture. Closed the unchanged QA editor and deferred reimport until native compilation completes. Investigate shader compilation scheduling/timeout behavior as a performance and recovery issue; do not merely increase the timeout without measurement.
+
+### Precise presentation validation completed
+
+DevDist KeireTests build completed successfully (precise-presentation-build.log). Focused Precise*, presentation-transform, position-override, and Custom fixed presentation regressions passed: 18 cases, 132 assertions (precise-presentation-tests.log). This validates the double-precision presentation foundation and existing interpolation behavior, not camera-relative rendering or planetary travel. RenderCamera origin, render consumers, and previous-frame history integration remain outstanding.
+
+### Camera-relative integration audit and required acceptance gates
+
+Source inspection after precise-presentation validation confirms the following work is still required:
+
+- SceneRuntimeRenderingInternal.h builds the camera by inverting PresentationWorldMatrix, which narrows absolute translation. Build the view from a precise origin and relative presentation matrix instead.
+- RenderResourceCaches.cpp captures mesh presentation matrices independently from camera history. Keep each previous object matrix paired with the previous camera coordinate system; handle missing object history explicitly when the origin changes. Test stationary objects across rebases, moving objects, camera cuts, and independent surfaces.
+- RenderBackendInternal.h resolves point/spot lights, reflection probes, and light-probe volumes through absolute WorldMatrix. Convert all spatial consumers consistently before enabling an origin in the live renderer.
+- CloudVolumePacket.h derives observer coordinates solely from inverse float View. Preserve observer position relative to the environment anchor in double precision; rebasing must not move the cloud pattern or alter its altitude. Audit fog, grid, VFX, spatial materials, and shadow consumers under the same contract.
+- Acceptance requires equal near-origin and distant-origin render inputs for the same local arrangement, plus stable previous-frame reprojection during origin changes. A passing transform test alone does not satisfy these gates.
+
+The next implementation batch must connect these paths together before claiming a live planetary travel milestone. Physics reference frames and seamless surface/space travel remain subsequent integration requirements.
+Corrected seven-texture production importer validation completed successfully: 1 test case, 110 assertions, including opaque/transparent variants and BaseColor fallback semantics (Build/Validation/transparent-volume-import-corrected-tests.log). Live visual reimport validation remains outstanding.
+
+Camera-coordinate implementation started: internal PresentationCameraFrame keeps a double origin paired with its translation-free view and converts object presentation matrices relative to that origin. Added near/distant/beyond-float-range camera tests and previous/current-origin independence coverage. Build and execution are pending; live render consumers deliberately remain unchanged until the spatial conversion batch is connected. This helper does not establish renderer or planetary readiness.
+
+Camera-frame validation passed: DevDist build plus Precise* selection, 13 cases / 88 assertions. Spatial integration batch now adds origin-aware capture for point/spot lights, reflection probes and light-probe volumes; directional-light orientation no longer requires absolute float translation. Added distant-offset and beyond-float directional capture regression coverage. These spatial edits are formatted but not yet compiled/tested; callers still default to zero origin pending the coordinated render-camera integration.
+
+Cloud capture now accepts explicit render and environment origins, subtracting them in double precision before adding the local camera offset. Added rebase-equivalence tests for cloud geometry/pattern at zero and 1e15 origins, cloud-base evaluation, and nonfinite-origin rejection. Lighting/probe plus cloud changes are in the spatial-origin DevDist build; live camera callers still use the zero-origin defaults until the complete packet/history integration is ready.
+
+Further coordinate-consumer audit: SkyUniformPacking.h passes a float observer to both atmosphere and regular cloud-sheet packing; RenderCloudVolume.cpp independently derives a float observer for atmosphere/fog. These callers must share the precise environment-relative observer used by volumetric clouds. AtmosphereUniforms.h currently accepts Vector3 despite double PlanetCenter settings. ScenePresentationRuntime.cpp also narrows listener/emitter positions and world UI matrices; include audio/world UI in the end-to-end large-world acceptance backlog, rather than treating a stable mesh view as planetary readiness.
+
+Spatial-origin validation completed: initial compile exposed a missing direct Vector3d include in CloudVolumePacket.h; fixed it and the incremental DevDist build passed (spatial-origin-build-retry.log). The Precise*, Cloud*, spatial-lighting capture, and directional-resolution selection passed 80 cases / 91,821 assertions (spatial-origin-tests.log). This includes existing cloud tests; the assertion count is not a count of new scenarios. Live camera-origin routing, temporal history, fog/sky callers, VFX, and editor travel validation remain outstanding.
+
+Next environment-coordinate batch (not yet compiled): shared EnvironmentRelativeObserver cancels double render/anchor origins before adding local camera offsets; volumetric capture and regular sky cloud packing use it. Atmosphere packing accepts the same origins and cancels the planet center before adding the local offset. New regression uses offsets below the absolute-coordinate double ULP near 1e15 and checks atmosphere/fog equivalence plus invalid-origin rejection. Remaining live packet/camera routing will be batched before another build.
+
+Live packet integration batch in progress (uncompiled): RenderCamera now carries validated WorldOrigin and EnvironmentAnchor metadata. Mesh/light/probe capture, volumetric clouds, sky sheets, atmosphere and fog consume those origins. Camera history retains origin/anchor; missing mesh history uses the previous origin and environment-anchor changes invalidate continuity. Editor/runtime camera producers still use zero defaults. Before enabling nonzero origins by default, finish cloud temporal reprojection, fullscreen/depth velocity reprojection, VFX/grid/spatial-material consumers and focused packet tests. This intermediate working tree is not production-ready.
+
+Temporal batch (uncompiled): cloud temporal views now retain WorldOrigin and compute scene displacement from double origin delta plus local camera delta, rejecting nonfinite/large cuts before narrowing. Added rebase-versus-real-centimetre-motion regression. Headless environment capture now tests distant mesh matrices, paired previous/current origins, invalid-camera rollback and environment-anchor history invalidation. Complete remaining spatial consumers before enabling rebasing in editor camera producers.
+
+Remaining consumer evidence: VfxWorld::SetTransform, VfxGpuEmitter.Position and VfxRenderParticle.Position/PreviousPosition are float-only; VfxRenderSnapshot has no coordinate origin. Renderer-only subtraction cannot recover precision already lost in simulation. BuiltinGrid.hlsl intersects render-space y=0 and derives line/axis coordinates directly from that position; preserve the authored plane, periodic grid phase and true axes across rebases. Include CPU/GPU particles, ribbons, depth collisions, and grid depth/phase in acceptance tests.
+
+Spatial-material audit: ShaderGraphExpressionLowering.cpp lowers WorldPosition directly to world.xyz/input.WorldPosition, and TriplanarSample scales its Position input directly. Passing camera-relative mesh matrices changes this semantic unless material coordinates carry a stable frame/anchor. Before enabling camera rebasing by default, define and implement stable authored material-position coordinates (including displacement and previous displacement), then test stationary triplanar/procedural patterns across camera movement and rebases. Merely adding a large float origin back would reintroduce the precision loss.
+
+Render-origin integration validation: the full incremental DevDist KeireTests build completed successfully (194 steps; render-origin-integration-build.log). Focused Precise*, Cloud*, Atmosphere*, Environment capture*, spatial-lighting capture and directional-resolution selection passed 100 cases / 92,357 assertions (render-origin-integration-tests.log). This includes pre-existing numerical cloud tests; it is not 92,357 independent travel scenarios. New headless capture validates distant relative mesh matrices, previous/current origin pairing, anchor history invalidation and invalid-camera rollback. Cloud reprojection validates rebasing without false motion and actual centimetre-scale movement. Rendered editor validation, nonzero-origin camera producers, VFX, grid and material-position integration remain outstanding.
+
+Grid integration batch (uncompiled): GridUniforms grows from 224 to 256 bytes with relative ground-plane height, bounded major-grid phase and actual axis positions/visibility. BuiltinGrid.hlsl intersects that plane and separates periodic line coordinates from real axes. CPU packing rejects invalid inputs and omits a grid whose plane is beyond its existing fade range. Added distant-origin/rebase, axis, height and invalid-input regressions; updated uniform-size assertion. Shader compilation on supported backends and rendered grid validation remain pending.
+
+Grid shader compilation passed for vertex and fragment stages in DXIL, SPIR-V and MSL using KeireShaderCompiler; outputs are under Build/Validation/grid-origin-shaders. Native grid packing and newly visible/skipped-frame motion-history regressions are formatted but still await the next native test build. The compiler CLI rejected an absolute output path containing the repository's accented directory name (displayed as a replacement character); relative output paths succeeded. Record this as a Unicode CLI path defect to investigate, not a shader failure.
+
+VFX frame foundation batch (uncompiled): VfxWorldSpecification and owning render snapshots carry a finite stable WorldOrigin. ActivatePrecise/SetTransformPrecise subtract the simulation origin before checked narrowing; existing float APIs operate in that local simulation frame. Checkpoint v2 records the origin and rejects cross-frame restores before mutation; v1 remains readable in zero-origin worlds. Added CPU/GPU local-equivalence, snapshot-origin, checkpoint mismatch and invalid-transform rollback tests. Renderer VFX consumption, moving-frame rebasing, scene adoption and GPU retained-particle origin handling remain pending; this is not complete large-world VFX support.
+
+### CPU particle render-frame integration
+
+CPU particle capture now converts simulation-local positions into the current render origin and previous positions into the previous camera origin. Camera-history resets select the current origin for both frames. Mesh particles use the same conversion as sprite/ribbon capture. A focused regression preserves local offsets smaller than the absolute double-coordinate spacing and checks distinct current/previous origins without mutating the snapshot.
+
+Validation: touched C++ files formatted and `git diff --check` passed; this batch is not compiled or runtime-validated yet. GPU particle conversion, camera-producer adoption, and planetary travel remain outstanding.
+
+### GPU particle origin audit before camera adoption
+
+Verified remaining coordinate consumers: `RenderVfxDrawing.cpp` supplies an unadjusted camera matrix for retained simulation-local GPU buffers, including built-in mesh/sprite/ribbon paths; composed instanced mesh materials use a separate binding path. `RenderVfxVisibility.cpp` and `BuiltinVfx.hlsl` build occlusion bounds and instance outputs directly from simulation-local particles. `RenderVfxRecording.cpp` uses sampled-depth camera matrices for collision, while `RenderSurfaceStateInternal.h` retains no origin alongside those matrices.
+
+Required integration: preserve immutable simulation coordinates, translate render outputs and visibility bounds consistently, retain the sampled-depth origin, and convert collision projection/reconstruction between simulation and sampled-depth frames. Cover composed mesh materials as well as built-in particles. Do not enable nonzero camera origins with only the sprite draw path corrected. Current grid/CPU VFX batch is building through the four-job DevDist launcher; result is pending in `Build/Validation/vfx-grid-origin-build.log`.
+
+### First ground-to-space travel acceptance route
+
+This is a pending integration gate, not a completed test or replacement for the full planetary scope.
+
+1. Use one reproducible QA scene with a named planet/atmosphere anchor, surface landmarks, an opaque terrain patch,
+   transparent materials, world-position/triplanar materials, CPU and GPU particle emitters, collision targets,
+   spatial audio, and world-space UI. Save the initial precise camera and entity positions.
+2. Verify stationary rendering and centimetre-scale movement near the starting surface. Repeat with the entire
+   coordinate setup translated far from zero; compare relative positions rather than float absolute matrices.
+3. Ascend continuously through fog/cloud altitude and beyond the atmosphere. Log frame time, origin changes,
+   camera altitude, residency transitions, and coordinate conversion failures. Check for texture sliding,
+   disappearing particles, incorrect depth collisions, shadow jumps, and discontinuous sky transitions.
+4. Travel laterally in space, change camera orientation, and return to the same landmarks without a loading screen.
+   Compare final precise coordinates and local interaction behavior against the baseline; repeat the route.
+5. Run the same route in Scene view, Play Mode, and the standalone player. Record backend, resolution, quality,
+   hardware, build revision, p50/p95/p99 frame times, worst hitch, and visual evidence. No production claim follows
+   from a headless capture test alone. Rotating reference frames, additional planets, and sustained travel/soak
+   remain separate required gates after this initial route.
+
+Current producer audit: `BuildPresentedSceneCamera` still inverts an absolute presentation matrix; the editor
+Scene camera builds a float view directly. `SceneRuntimeVfx.cpp` decomposes `WorldMatrix()` before float activation
+and transform updates, losing precision before the new API can help. Shader Graph WorldPosition outputs the
+render position directly, and TriplanarSample scales that input without an authored-frame phase correction.
+These are unresolved integration dependencies, not reasons to disable the corresponding systems in the test.
+
+Validation checkpoint: the first grid/VFX native build failed because grid drawing referenced an observer scoped to sky drawing. Grid drawing now computes and reuses its own inverse view and observer; the resumed incremental build has compiled past that failure. Results remain pending. Checkpoint coverage audit found that version-1 restore is implemented but has no direct legacy fixture regression yet; add that after this active build, alongside valid precise-transform and rejected-origin state-preservation checks. Do not infer compatibility validation from the version-2 self-round-trip alone.
+
+Grid/CPU-VFX validation result: the resumed four-job DevDist KeireTests build succeeded (`Build/Validation/vfx-grid-origin-build-retry.log`). The selection `Precise*,Grid origins*,Editor grid shader*,VFX precise*,Environment capture*,CPU mesh VFX*` passed 19 cases / 330 assertions (`Build/Validation/vfx-grid-origin-tests.log`). This covers the newly compiled coordinate helpers, grid contracts, precise activation/checkpoint frame identity, and capture history edges. It does not validate GPU-origin integration, version-1 checkpoint migration, rendered grid/particle behavior, or planetary travel.
+
+GPU depth collision integration: sampled depth now stores the camera world origin alongside its projection/inverse matrices. VFX dispatch composes those matrices with the simulation-to-depth translation and its inverse, so collision hits reconstruct back into simulation coordinates even when depth was captured under a different origin. Conversion is performed only for valid sampled depth. Added a projection/reconstruction regression at a distant origin with fractional local offsets. Formatted; compilation and execution pending in the next GPU integration batch. GPU draw/visibility/material paths remain unresolved; camera rebasing remains disabled.
+
+Built-in GPU VFX draw integration now composes the camera projection with a simulation-to-render translation, leaving retained particle buffers unchanged. The translation helper is shared with collision projection and has a nearby-offset/direction-preservation regression. Custom material bindings still consume simulation positions alongside render-local lighting and therefore need a coordinated material vertex conversion; changing only their view matrix would leave lighting incorrect. Occlusion candidate/instance conversion is also pending. These edits are formatted but uncompiled, accumulated for the next batch.
+
+Custom GPU billboard/ribbon materials now receive the simulation-to-render matrix through their existing object Model uniform. Generated VFX vertices apply that translation before evaluating world-position offsets and producing lighting/shadow inputs; normal transforms remain translation-free. CPU VFX continues using already-converted positions. Instanced custom mesh particles still need their separate instance-coordinate integration. The standalone visibility-candidate shader compiled successfully to DXIL, SPIR-V, and MSL after its origin-offset change; native and rendered validation remain pending. Generated-material cache compatibility and focused shader tests must be checked before enabling the new camera producers.
+
+Generated material cache integration: shader generator revision advances from 36 to 37 so imported materials rebuild for the GPU billboard/ribbon Model translation contract. Added a generated-source regression verifying translation precedes world-position construction and lighting output. Existing production-importer template coverage includes VFX passes on DXIL/SPIR-V/MSL and must run for this batch. No new shader compile/import result is claimed yet.
+
+Generated GPU mesh material integration now uses InstanceParameters.y to request simulation-to-render translation of the per-particle Model matrix, leaving the normal matrix unchanged. GPU VFX binding supplies the translation; ordinary draw bindings keep the flag zero. Generator revision 37 covers this unpublished batch. Added generated-source coverage. Native build, production shader imports, and rendered comparison remain pending. Authored/custom shader capability compatibility must be audited before camera adoption: older shaders may ignore the optional addressing flag.
+
+Integrated GPU VFX validation checkpoint: the built-in shader generation launcher completed successfully across its DXIL/SPIR-V/MSL variants (`Build/Validation/vfx-origin-builtin-shaders.log`, process exit 0). Capability metadata, fallback policy, shader revision 37, legacy checkpoint and precise setter tests are integrated. Four-job DevDist KeireTests build is now running (`Build/Validation/gpu-vfx-origin-build.log`). Native tests, production material-import tests, and rendered validation remain pending.
+
+Editor camera adoption audit: `EditorCameraState::Focus` remains Vector3; `SceneCameraController` forwards float SetFocus/Frame/FollowFrame and absolute ViewMatrix. `ScenePicker.cpp` uses WorldMatrix for bounds, ray intersection, and rectangle projection; ResolveSceneDropPosition returns Vector3. A camera-origin-only switch would make rendering disagree with selection and placement. Next editor batch must preserve precise focus/persistence, compute entity bounds relative to the selected camera frame, and return precise placement positions to existing double scene-document operations. Validate distant ray picks, rectangle selection, focus/lock, and drag/drop together before enabling rebasing.
+
+GPU VFX native validation: the combined four-job DevDist KeireTests build completed all 337 steps successfully (`gpu-vfx-origin-build.log`). Focused precise-coordinate, checkpoint migration/rollback, generated material contract/capability, fallback policy, environment capture, and grid selection passed 26 cases / 455 assertions (`gpu-vfx-origin-tests.log`). The production graphics-template importer test is now running separately (`gpu-vfx-origin-production-import.log`); its result is pending. Rendered GPU comparisons and camera adoption remain unverified.
+
+Editor selection integration started: ray picking and rectangle projection now use PresentationRelativeMatrix(camera.WorldOrigin) rather than absolute WorldMatrix, matching captured mesh positions. Added near/distant-origin selection and miss regression at 1e15 with a fractional target offset. This editor batch is uncompiled; precise camera focus/persistence, focus bounds, and drop positions remain pending before camera adoption. Production material-import validation continues separately.
+
+Production graphics-template import validation completed successfully: 1 case / 168 assertions across the production importer (`Build/Validation/gpu-vfx-origin-production-import.log`). Editor placement now has a precise world-coordinate resolver: ray math remains camera-relative, the ground intersection accounts for the camera origin's altitude, and the result adds the double world origin after resolving the local displacement. Added distant-origin ground and horizon fallback coverage. Existing float wrapper remains temporarily for callers; routing/import/gizmo and focus integration must migrate together before editor camera adoption is considered complete. Editor additions are formatted but not yet compiled or executed.
+
+Editor placement integration now retains Vector3d through viewport command dispatch, asynchronous external-import context/completion, mesh/emitter creation, and precise prefab instantiation. Added distant placement/scene snapshot regression and distant command-routing coverage. Focus bounds can now be evaluated relative to an explicit origin and return a precise center; Scene viewport frame/follow uses the precise camera focus. Camera and runtime VFX agent batches are integrated on disk but uncompiled. Gizmo overlays/manipulation still use absolute WorldMatrix/WorldPosition at multiple sites and must be converted before opening this editor build. No rendered or planetary-travel readiness claim is made.
+
+Gizmo integration batch: icon/frustum/light/probe/collider/controller/rigid-body overlays and transform handles now project presentation transforms in the camera origin frame. Group capture stores translation-free hierarchy matrices, precise initial world positions and a precise drag pivot. Rotation/scale transform pivot-relative offsets in double precision and preserve local rotation/scale decomposition; translation/cancellation retain precise coordinates. Added distant rotation/scale/cancellation regression. Formatting and diff checks pass; compilation, focused tests and rendered validation remain pending. Audit remaining non-gizmo overlays before UI validation.
+
+Read-only audit during editor integration build: RiggingStudioOverlay.cpp still feeds absolute PresentationWorldMatrix into PublishedRigChainPoints before projecting with the camera-relative view; migrate that overlay in the next source batch. Existing editor framing test around EditorArchitectureTests.cpp:1987 projects absolute bounds through ViewMatrix and must be updated to the explicit camera-origin contract (retain the fit-to-viewport assertions). Four-job DevDist editor-test build is active; source inputs remain frozen until terminal status.
+World UI audit: ScenePresentationCanvasProjection.cpp resolves scene cameras using inverse absolute PresentationWorldMatrix and stores absolute panel World matrices. Both must share the active RenderCamera.WorldOrigin, including cached projection identity checks and input unprojection; changing the panel matrix alone is insufficient. These are explicit next-batch dependencies, not yet implemented.
+
+UI frame capture audit: RenderFrameExecution.cpp pairs submission.World with the view's camera matrix at capture time; RuntimeUiRenderSubmission has no source-origin field. The pending fix must retain the panel source origin, translate into the capture camera frame, and validate camera-overlay identity with origin as well as matrices. Test projection/unprojection and a camera-origin change between submission and capture; merely changing cached panel.World would leave this race in coordinate frames unresolved.
+
+Editor integration build stopped at EditorArchitectureTests.cpp:640: a legacy test supplied Vector3 pivot to SceneTransformGroup::Apply after its pivot became Vector3d. Updated that caller to WorldPositionPrecise; updated the framing regression to subtract camera.PreciseFocus before projection while preserving viewport-fit assertions. Rigging chain overlay now uses PresentationRelativeMatrix(camera.WorldOrigin). Formatting and diff checks pass. Build session 10332 exited 1; no test execution occurred. Complete the coordinated world-UI origin batch before resuming incremental compilation.
+
+World UI origin integration implemented (uncompiled): RuntimeUiRenderSubmission appends WorldOrigin, default zero for compatibility; projection state retains the origin alongside World/view matrices; world panels use presentation-relative transforms; camera-overlay identity checks include origin. Capture converts submission.World into the live camera frame without adding tiny offsets to huge absolute coordinates. Finite-origin validation precedes submission acceptance. Added local-offset, changed-origin, normal/scale preservation and invalid-origin tests. UI-selected scene cameras now use BuildPresentationCameraFrame; the primary BuildPresentedSceneCamera producer must adopt the same contract before runtime UI validation. Projection/input integration tests and capture tests remain required; do not infer them from the coordinate helper test alone.
+
+Primary runtime camera adoption now uses BuildPresentationCameraFrame, matching UI-selected cameras. Updated interpolated-physics-camera regression to compare relative transforms plus exact presented origin. Added world UI projection/input round-trip coverage at zero and 1e15 origins, alongside the submission-to-capture conversion helper regression. Full batch is formatted; build/tests pending. Planetary physics, stable authored material coordinates, simulation frames, and real surface/space travel remain outstanding.
+
+Core camera/UI integration validation: DevDist KeireTests build completed successfully after correcting test fixture const entities and creating a real RuntimeUiTree root ID. Focused selection `World UI*,Scene VFX preserves*,*camera*` passed 35 cases / 648 assertions (`Build/Validation/precise-camera-ui-core-tests.log`). The VFX out-of-range error line is expected failure/recovery test coverage, not a test failure. Editor-test build is now running in the same sequence; editor tests and rendered validation remain pending.
+
+Additional UI compatibility selection passed 9 cases / 217 assertions (`Build/Validation/precise-camera-ui-compatibility-tests.log`): world-runtime-UI geometry/submission ownership, camera overlays, and runtime input capture/focus routing. This supplements the new distant-coordinate tests; it does not replace rendered desktop validation. Editor build continues.
+
+Editor validation checkpoint: DevDist KeireEditorTests completed all 229 steps (`Build/Validation/precise-camera-ui-editor-build.log`). Focused camera/placement/distant-coordinate/selection/rotation selection passed 86 cases / 1,856 assertions (`Build/Validation/precise-camera-ui-editor-tests.log`). This validates the selected headless editor workflows, not the desktop rendering or full client workspace consumers. Build/stage the actual DevDist client before visual QA.
+
+Build-iteration backlog evidence: KeireEditorTests/premake5.lua directly compiles many ../KeireClient/Source/Editor/*.cpp files, while KeireClient/premake5.lua also compiles Source/**.cpp with client PCH settings. Thus common-header edits rebuild shared editor implementations separately for tests and the actual client (observed 229-step editor-test build followed by 181-step client build). Investigate a common editor support library with equivalent compile definitions/dependencies; do not blindly reuse objects across differing PCH/settings. Defer build-graph restructuring until this visual validation checkpoint, and measure clean/incremental cost before claiming savings.
+
+Replay identity audit follow-up: ManagedStateSerializer.EntityJsonConverter persists entity IDs without a world
+address and resolves them against the restoring behaviour's current world. Therefore ordinary same-world entity
+references already avoid persisted pointers; cross-world references need separate explicit coverage. The native
+ManagedBehaviourCheckpoint.World field still persists the SceneState address. Replace that replay envelope
+identity with a stable scene/session mapping, preserving duplicate-instance and missing-world rejection.
+
+Replay scope audit: RuntimeReplayState retains only the primary SceneRuntimeSession. The scene, physics,
+animation and presentation serializers capture that session, while the scripting serializer captures all
+ScriptSystem instances. SceneRuntimeWorld can retain persistent sessions after unloading their source scene,
+and a later load can create another session for that asset. Therefore asset ID alone is not a sufficient
+checkpoint world key. The replay integration must capture the complete runtime-world session inventory,
+including persistent sessions and stable instance identity, before claiming additive/travel replay parity.
+Required regressions: fresh-process restore, two sessions with the same source asset/entity IDs, persistent
+entities plus a reloaded scene, missing/duplicate world rejection before mutation, and rollback after restore
+failure. The existing single-scene replay failure remains an immediate failing end-to-end gate.
+Physics workload audit: the existing eight-origin fixture settles one dynamic box for 240 ticks and checks a
+floor ray. It does not cover stack stability or CCD tunneling. PhysicsSystem maps Continuous to Jolt LinearCast,
+but the inspected physics test files have no continuous-body regression. JointComponents provides authoring,
+validation and serialization; searches of PhysicsSystem and SceneRuntime implementations found no Jolt constraint
+creation/registration. Verify and implement the runtime joint path before counting authoring round-trip tests as
+joint simulation evidence. Add baseline-versus-translated stack and thin-wall CCD scenarios in the next physics
+batch; retain runtime joints, region transfers and long-session timing as separate acceptance requirements.
+Precise contact validation completed: the 223-step DevDist KeireTests build succeeded
+(Build/Validation/physics-precise-contact-native-build.log). The actual Coral managed-runtime reload regression
+passed 1 case / 1,322 assertions, including all six collision/trigger phases with exact double contact points
+(Build/Validation/physics-precise-contact-native-tests.log). The focused physics/query/transform/presentation/replay
+selection passed 74 cases / 58,926 assertions (Build/Validation/physics-precise-contact-regressions.log). This
+supersedes the earlier pending native contact status. It does not validate solver-generated contacts in an
+automatically selected distant scene region, region transfers, stack/CCD stress, or planetary travel.
+Far-origin workload validation: added an eight-box stack simulated for 1,200 fixed ticks at 60 Hz at each of the
+eight origins, checking resting height, lateral drift, velocity, sleep and near-origin position parity. Added a
+600 m/s CCD sphere striking a 10 cm wall, checking every one of 30 ticks for tunneling and residual velocity.
+Both tests passed: 2 cases / 1,768 assertions (Build/Validation/physics-far-stack-ccd-tests.log). The incremental
+build and final include-hygiene rebuild passed; the final binary repeated all 1,768 assertions successfully (physics-far-stack-ccd-final-tests.log). These tests exercise real solver workloads in fixed
+regions, not automatic scene-region selection, moving frames, cross-region joints, soak/performance or travel.
+Legacy scene-query origin integration: RayCast, CastCapsule and OverlapSphere now convert their float world
+inputs into solver-local positions before synchronization; ray/capsule hits convert back to approximate float
+world positions. Existing body/entity filtering remains intact. Overflowing direction/displacement squared
+lengths are rejected before synchronization, with regression cases added to the query phase test. The native
+incremental build is running (physics-legacy-query-origin-build.log); tests are pending. Nonzero automatic scene
+origin selection remains disabled until animation grounding, VFX and managed precise-query integration agree.
+Legacy scene-query validation passed: four-step DevDist build and 76 focused cases / 60,696 assertions
+(physics-legacy-query-origin-build.log and physics-legacy-query-origin-tests.log). This includes the new stack/CCD
+cases and overflow-before-mutation checks; it does not yet prove legacy query behavior with a nonzero scene origin.
+Animation grounding migration started: animator/support matrices and pre-landing ray origins now subtract the
+physics origin before float operations. Foot probes, retained points and support anchors share that solver frame.
+This source batch is uncompiled; add distant-parent cancellation regression and review diagnostic coordinate
+semantics before enabling nonzero scene regions. Frame changes still require cache transfer/invalidation.
+Grounding regression added to FootSupportLifecycleTests: stabilize the real animator/physics fixture, reparent
+character and support under a 1e12-metre transform with cancelling local translations, preserve their precise
+world positions, then lift the support and verify the foot follows. DevDist build is active
+(Build/Validation/physics-grounding-origin-build.log); no passing result yet. The inspected grounding diagnostic
+positions are emitted as log fields from the same probe frame; no public debug overlay position was changed in
+this file. A future region transfer must translate/invalidate retained plant and smoothing caches coherently.
+Grounding batch validated: the four-step DevDist build succeeded (physics-grounding-origin-build.log). The new
+runtime distant-parent/support-motion regression passed 1 case / 287 assertions (physics-grounding-origin-tests.log).
+The complete selected foot-support lifecycle, grounding-space and animation-IK suites passed 66 cases / 148,199
+assertions (physics-grounding-origin-regressions.log). This proves the compiled batch and near-origin behavior
+with cancelling distant ancestry; an actual nonzero physics scene origin and moving-frame cache transfer remain
+unverified. VFX audit confirmed QueryVfxCollision forwards VFX simulation-local endpoints to physics unchanged,
+and returns solver-local hit points unchanged. Convert using the difference of simulation origins before adding
+local offsets, avoiding an intermediate huge absolute position, and return hits in the VFX simulation frame.
+VFX/physics origin conversion implemented in internal VfxPhysicsCollision helper and connected to the scene
+collision callback. It subtracts simulation origins before adding local endpoints, raycasts in the physics
+region and converts returned hits to the VFX frame; invalid and overflowing segments are rejected. Added real
+solver regression with a 128 m origin difference and 1/64 m local offsets at zero, +/-1e12 and 1e15 origins,
+plus miss/zero-length/overflow checks. Native build active (physics-vfx-origin-build.log); tests pending.
+Scene-origin selection audit: InitializePhysics still calls CreateWorld() without an origin. SceneRuntimeWorld::Add
+attaches every session to the spatial registry root frame; SceneRuntimeSpatialAccess exposes read-only frame
+lookup and no per-scene origin-selection policy. Physics initializes before VFX in both Play and runtime
+replacement, so VFX can adopt a selected physics origin at initialization. Selection must be deterministic and
+validated against all enabled body placements; a camera-only origin cannot define simulation ownership. Region
+migration must also handle retained animation contacts, VFX particles, queries, checkpoints and frame identity.
+VFX/physics batch validation completed: DevDist build passed all 12 native actions after regeneration
+(physics-vfx-origin-build.log). Scene VFX runtime and physics system selection passed 18 cases / 2,089 assertions
+(physics-vfx-origin-tests.log), including the differing-origin real raycast. No rendered VFX or automatic
+scene-origin selection result is implied. The fixed-region conversion boundary is now tested; scene selection,
+region migration, frame rotation and replay identity remain integration requirements.
+Initial scene-origin implementation: enabled collider/controller positions select a deterministic bounds center,
+snapped to a 1024 m grid. Scenes within 8192 m of zero retain the zero origin. Physics body construction retains
+its checked precision conversion, and VFX initialization adopts the selected physics origin. Added a normal
+SceneRuntimeSession startup/falling-body/precise-ray fixture at 1e7, +/-1e12 and 1e15 positions. Build active
+(physics-scene-origin-selection-build.log); tests pending. This is initial fixed-region selection, not dynamic
+migration or multiple simultaneous regions. Widely dispersed scenes still require region partitioning; no
+planetary travel claim follows from this step.
+Initial scene-origin build passed. The first distant-scene regression executed all four distances; 46/48
+assertions passed, with two exact post-collision X/Z comparisons failing at 1e7 (physics-scene-origin-selection-tests.log).
+The fixture now checks exact precise placement before simulation and a 1 mm lateral drift tolerance afterward,
+rather than requiring a resting dynamic body to remain bit-identical. Rebuild active
+(physics-scene-origin-selection-rebuild.log); corrected test and broad compatibility selection remain pending.
+Initial scene-origin validation passed after the fixture correction: the final rebuilt binary passed 44 physics,
+query-phase and scene-VFX cases / 60,273 assertions (physics-scene-origin-selection-regressions.log), including
+normal scene startup, dynamic falling bodies and precise queries at all four distant placements. Initial exact
+placement and post-collision sub-millimetre lateral drift checks pass. This establishes initial fixed-region
+scene integration, not character/grounding acceptance in a nonzero region, moving-region transfer, multiple
+regions, planetary gravity or rendered surface-to-space travel.
+Nonzero scene-region grounding validated: SupportFixture can now place its character/support before Play at a
+precise offset. A new runtime test at (1e12, 0, -1e12) verifies foot grounding and following a raised support.
+The character-controller carry fixture also runs in an actual distant region, preserving its local offset and
+remaining grounded as its support moves. DevDist build passed; targeted tests passed 2 cases / 232 assertions
+(physics-distant-grounding-tests.log). Full selected foot-support lifecycle and physics-component tests passed
+53 cases / 197,593 assertions (physics-distant-grounding-regressions.log). These validate fixed-region runtime
+behavior, not origin changes during motion, reference-frame rotation, planetary gravity or visual travel.
+Managed precise-query batch started: ScriptSystem.h now has separate double-position ray/capsule/overlap and hit
+value contracts, plus service hooks. Legacy structs and methods remain unchanged. Unsupported precise service
+hooks fail explicitly rather than reporting an ordinary miss. These additions are uncompiled and not yet exposed
+to C#: shared native query helpers, editor/player routing, versioned interop, managed validation and actual Coral
+regressions must land together before a build/acceptance claim. Do not start a broad header rebuild mid-batch.
+Precise managed-query native routing added: shared helpers invoke native precise ray/capsule/overlap APIs and
+validate that the context entity belongs to the supplied runtime world. Ignored entity IDs must resolve in that
+scene; layer filtering comes from the context. Overlap retains the existing 256-result limit. EditorWorkspaceLayer
+and ManagedWorldRuntimeServices now route all three precise hooks by SessionForWorld into those shared helpers.
+These edits are formatted but uncompiled. C# result/API definitions, versioned size-checked internal calls and
+managed/native regression fixtures are still required before building this coordinated header batch.
+Precise-query interop boundary added (uncompiled): PrecisePhysicsQueryV1Icall uses a 128-byte query and 56-byte hit,
+with native static assertions and matching explicit C# field offsets. Native validates sizes/kind/trigger flag,
+returns -1 for rejection, 0 for a miss and positive hit/result counts on success; overlap uses bounded two-pass
+copying like the legacy API. Registration is wired. Public C# entry points, wrappers and layout/round-trip tests
+are still pending, so no build or usability claim is made yet.
+Public C# precise query APIs added in PhysicsPrecise.cs: TryRaycastPrecise, TryCapsuleCastPrecise,
+OverlapSpherePrecise and RaycastHitPrecise. NativeRuntime wrappers use the versioned size-checked ABI, distinguish
+misses from native rejection, guard unavailable calls and bound overlap allocation to 256 results. Managed
+production API check is running (managed-precise-query-api-tests.log). Dedicated layout/stub round-trip and real
+Coral tests remain pending, as does native compilation of this coordinated batch; do not claim usable support yet.
+Initial public managed API/parity run passed (managed-precise-query-api-tests.log). Added managed unmanaged-call
+stub coverage in PrecisePositionTests for the 128/56-byte layouts and key offsets, exact 1e15 fractional query/hit
+coordinates, world/entity identity, ray/capsule/overlap results, miss/rejection separation, invalid coordinates,
+overflowing directions, cross-world ignores and unavailable binding. The focused contract is included in the full
+managed test runner now active (managed-precise-query-contract-tests.log). This stub validates managed marshaling
+and API behavior only; actual Coral/native scene execution and editor/player builds remain pending.
+Managed precise-query contract run passed, including the newly added unmanaged-call stub tests and design-time
+parity (managed-precise-query-contract-tests.log; 4,838 managed and 860 editor API records). Added native helper
+coverage to the real distant-scene fixture for precise ray/capsule/overlap hits, ignored-hit filtering, invalid world
+and missing ignored-entity rejection. Native fixture remains uncompiled. Actual Coral API invocation is the next
+required fixture before the coordinated native/editor/player build; managed stub success is not native proof.
+Actual Coral regression wired into the managed reload/runtime fixture: all six contact callbacks now invoke precise
+ray/capsule/overlap APIs; a scoped native service checks exact coordinates/context and returns known hits. Native
+call counts and C# returned identity/coordinates are checked. The separate distant-scene fixture exercises real
+solver helpers. Coordinated DevDist KeireTests build is active (managed-precise-query-native-build.log). No native
+pass yet; editor/player builds and production SDK checks remain required after this first compilation.
+Replay restore-order audit: ReplaySystem captures serializers from a name-sorted map and restores checkpoint entries
+in stored order. runtime.scene calls ReplaceRuntime, which clears animation/VFX/physics and destroys/recreates the
+SceneState and managed instances. Thus pointer identity can change even within one process during checkpoint
+restore. On failure the generic rollback invokes serializers in reverse order, restoring scripting/physics before
+replacing the scene last; that replacement can discard the dependent rollback state. A correct runtime replay fix
+needs dependency-aware transactional world restoration (or one coordinated runtime-world serializer), not only a
+pointer-to-scene-ID substitution. Add a failed-restore regression that verifies scene, scripts and physics together,
+plus successful same-process rewind and fresh-process verification. Generic independent-serializer rollback tests
+do not establish this dependent-world guarantee.
+### Precise Managed Query Integration — Native Validation
+
+The size-checked precise ray, capsule and sphere-overlap ABI now passes both native validation paths.
+`managed-precise-query-scene-tests.log` reports 1 case / 92 assertions with actual distant scene solvers at
+1e7, positive/negative 1e12, and 1e15 metres. `managed-precise-query-coral-tests.log` reports 1 case /
+1,325 assertions through the real Coral host, including exact double query inputs and returned hit points.
+The latter fixture uses a controlled runtime service; it complements rather than replaces solver validation.
+Managed API/design-time parity also passes with 4,838 runtime and 860 editor API records.
+
+Editor and standalone-player consumer builds are in progress. These results do not close dynamic region
+transfers, runtime constraints, replay identity/rollback, or interactive planetary travel acceptance.
+The support matrix now distinguishes joint authoring settings from pending solver integration. Documentation
+source validation passed for 117 guides after correcting shader generator/importer cache versions to match code.
+
+Follow-up physics regression run: `Build/Validation/managed-precise-query-physics-regressions.log`.
+[doctest] run with "--help" for options
+===============================================================================
+[doctest] test cases:   40 |   40 passed | 0 failed | 1707 skipped
+[doctest] assertions: 7046 | 7046 passed | 0 failed |
+[doctest] Status: SUCCESS!
+
+### Replay Recovery Audit — Additional Failure Propagation Gate
+
+`SceneRuntimeSession::ReplaceRuntime` currently clears the old physics, animation, VFX and scene before
+initializing the replacement. Its `Impl::Invoke` catches initialization failures and marks the session Faulted
+without throwing. The standalone `runtime.scene` replay restore callback does not inspect that status, so the
+replay coordinator can continue restoring dependent serializers after a failed replacement. Also, a session
+already marked Faulted is not returned to its previous playing/paused state by that replacement path.
+
+The coordinated recovery batch must cover replacement initialization failures, propagate failure to replay,
+and restore both session lifecycle state and dependent state. Add a failure-injection test whose first restore
+faults after scene replacement and whose rollback must recover a usable playing or paused session, with the
+original physics and managed state intact. Existing replay rollback tests only restore independent integers;
+they do not prove recovery when restoring a scene invalidates the other serializers' objects.
+
+Runtime-world entries already separate a handle, asset ID, persistent roots and spatial attachment. Preserve
+that distinction in checkpoint identity: two loaded instances of the same asset and retained persistent roots
+must not collapse into one asset-based identity. Avoid persisting SceneState addresses or treating entity IDs
+alone as unique across loaded worlds.
+
+Editor and standalone-player DevDist consumer builds passed (managed-precise-query-client-build.log and
+managed-precise-query-player-build.log). Added real-solver filter/trigger/ignored-entity coverage at four origins
+and a 260-body overlap fixture checking the 256-result managed bound and uniqueness. These new tests are awaiting
+the incremental native build; compilation success alone is not execution evidence.
+
+### Runtime Replacement Failure Recovery — Implementation Pending Validation
+
+The scene replacement path now reports initialization failure to its caller instead of returning successfully
+with a faulted session. The session remembers its last playing/paused state when a callback faults; a subsequent
+valid replacement restores that mode and clears the prior diagnostic. Physics, Awake/OnEnable, VFX and presentation
+initialization use the same failure propagation path. Added tests inject repeated Awake failures, retry from both
+playing and paused modes, verify that the old physics world closes and the replacement is usable, and recover a
+session faulted during ordinary paused stepping. Native build/execution is pending.
+
+This change does not make replacement atomic: once replacement starts, the previous scene and dependent systems
+have been destroyed. Replay still needs coordinated state restoration, stable logical world identities and
+correct dependency ordering. Do not treat successful retry as evidence of complete replay rollback.
+
+The final far-range query filter/limit build and rerun passed: 2 tests / 360 assertions in
+`Build/Validation/precise-query-filter-final-tests.log`.
+Runtime replacement recovery native build and focused tests passed; see
+`Build/Validation/runtime-replacement-recovery-tests.log`. Editor/player relinking and complete replay recovery
+remain pending. This result covers replacement error propagation and retry, not transactional state rollback.
+
+
+### Replay Restore Dependencies — Validation In Progress
+
+Added explicit serializer prerequisites and deterministic restore ordering. Recovery restores the old checkpoint
+in dependency order too, replacing the reverse-order rollback that erased dependent state. The player marks
+scene animation, physics, presentation, VFX and scripting as dependent on scene replacement. Tests model scene
+recreation clearing physics state and verify successful playback and rollback, plus missing/duplicate/cyclic
+dependency rejection before captures run. Build is active; runtime identity and additive-world restore remain open.
+
+### Managed Cross-World Reference Audit
+
+`KeireManaged/ManagedStateSerializer.cs` stores an Entity reference as its entity ID only. Its reader creates that
+reference in `s_restoreWorld`, which is the restoring behaviour's world. Component references reuse the same entity
+converter. This preserves same-world references across recreation but loses cross-world ownership: additive scenes
+with the same entity ID can silently retarget a reference to the behaviour's own scene instance.
+
+The replay identity batch must carry logical scene-instance identity inside managed entity/component reference
+payloads and remap it to the newly restored runtime instance. Keep ordinary same-world serialized data backward
+compatible. Tests must use two instances of one scene asset with equal entity IDs, references in both directions,
+a retained persistent root, and a fresh-process replay. Saving a raw world pointer or remapping only the outer
+ManagedBehaviourCheckpoint does not solve the nested-reference case. SceneHandle runtime generations must remain
+stale after replacement; persisted logical instance keys must not revive old runtime handles.
+Replay dependency native build and focused execution passed; see
+`Build/Validation/replay-restore-dependencies-tests.log`. The suite includes dependency-ordered playback/rollback,
+invalid-graph rejection, existing replay integrity/budget checks, and scene replacement recovery. Standalone-player
+consumer compilation is running; stable logical instance identities and additive recovery remain open.
+
+### Runtime Scene Instance Identity — Integration In Progress
+
+Added a distinct logical instance ID to each runtime-world entry. It survives SceneRuntimeSession replacement and
+retirement into persistent roots, while source asset IDs and live handles retain their separate meanings. The
+internal SceneRuntimeIdentityAccess captures the complete binding set and validates a complete restore binding
+before mutation: nonzero unique identities, unique existing handles, owner thread, and no processing/simulation
+callbacks. Duplicate adoption of the same runtime session is rejected to avoid double stepping one session under
+two identities. Tests cover equal-asset adopted sessions, replacement, persistent retirement, invalid-set atomicity,
+closed-world/thread access, and callback rejection. Build and execution are pending.
+
+These identities are not yet encoded in replay or consumed by managed reference restoration. Full world checkpoint
+reconstruction, lifecycle flags, nested cross-world references and fresh-process replay remain required. The ordinary
+additive Load path deduplicates an already-loaded asset; the relevant repeated-asset cases include explicit adopted
+instances and retained persistent roots followed by loading that source asset again.
+
+The replay dependency standalone-player build passed (`replay-restore-dependencies-player-build.log`).
+### Next Travel Batch: Translation Of A Live Physics Region
+
+Source audit identifies the coordinated boundary for live translation: PhysicsWorld native body poses and cached
+body definitions, ActiveContacts and queued Events, debug query traces, SceneRuntimeSession character support
+ReferenceWorld/ResolvedRiderPosition, MovementWorld and local body definitions, animation grounding anchors and
+cached model/support transforms. Retained debug snapshots already carry their own immutable origin. VFX may retain
+a different origin only while its checked conversion remains valid; long travel still needs VFX origin migration.
+
+Compute the old-origin minus new-origin delta before adding a local float position, so small local offsets at 1e15
+are not rounded through an absolute double intermediate. Prevalidate every affected conversion before mutation.
+Keep body IDs, velocities, sleeping state and contact pair identity stable. Do not change all body transforms and
+call that complete without checking queued contact points, resting stacks, CCD and character/foot support continuity.
+The installed Jolt PhysicsSystem headers expose body state setters and save/restore but no public ShiftOrigin method;
+the engine must validate its own translation procedure against actual solver behavior.
+
+This is the next movement integration batch after the active identity build. Multi-region ownership, rotated frames,
+local gravity, streamed planetary geometry and seamless player travel remain separate required acceptance gates.
+Runtime instance identity build and focused world/identity/spatial/persistence test selection passed; see
+`Build/Validation/runtime-instance-identity-tests.log`. Replay encoding and script-reference remapping are still
+not integrated. Next implementation batch is live physics-region translation and dependent-cache continuity.
+
+### Far-Range Physics Acceptance Matrix
+
+User-requested extensive physics validation is a required large-world travel gate, not an optional follow-up.
+Compare identical local scenes at the origin and positive/negative planetary and astronomical offsets, including
+1e7, 1e12 and 1e15 metres. Distinguish absolute double precision from local solver precision in every assertion.
+
+- Resting stacks and sleeping bodies: drift, penetration, wake state and stability across repeated origin changes.
+- Fast bodies and thin obstacles: continuous collision detection, impact response and tunnelling during travel.
+- Contacts and triggers: stable body identity, correct points and no artificial Enter/Exit events from rebasing.
+- Character grounding, moving platforms and animated foot support: continuity before, during and after rebasing.
+- Ray, capsule and overlap queries: filters, ignored bodies, triggers and precise hit positions across boundaries.
+- Spawn/despawn bursts and sustained simulation: bounded resources, invalid-input atomicity and measured frame costs.
+- Ground-to-space-to-ground traversal: gravity/reference-frame transitions, collision continuity and return landing.
+
+Fixed distant-origin tests already have recorded passing evidence above. New live-origin translation tests are
+currently implemented but unvalidated; moving-region, planetary-gravity, workload and end-to-end travel gates remain
+open. Record actual results and tolerances before declaring readiness; do not substitute a static far-away scene
+for a moving-world test. Batch implementation and focused headless checks before the next editor test.
+
+Live-origin batch now includes repeated translation of sleeping eight-body stacks at 0, 1e7, -1e12 and 1e15
+metres, plus rebasing before character platform carry and animated foot-support movement. Native build is running
+(`Build/Validation/physics-live-origin-build.log`); no passing execution result is claimed yet. Documentation
+validation passed (`physics-live-origin-docs-tests.log`: 117 canonical guides, 10 navigation groups, 29 Mermaid
+diagrams, 14 schema contracts, two graph-view contracts).
+
+Next migration audit: VfxWorldSimulation stores emitter Position and world-space particle Position/PreviousPosition;
+local-space particles must retain their local coordinates. VfxWorldSnapshots retains its own origin and serializes
+that origin in checkpoints. GPU particles persist separately and SimulationRevision requests a reset, so changing
+that revision alone would destroy particle continuity. A proper migration must preserve CPU/GPU history and handles,
+translate world-space state, leave local-space state intact and test trails/collisions across the boundary.
+
+### Live Physics Origin Translation — Focused Validation Passed
+
+DevDist native build completed successfully (`physics-live-origin-build.log`). The new live-origin selection passed
+five cases and 2,386 assertions (`physics-live-origin-tests.log`): local detail below absolute-double resolution,
+conversion-failure atomicity, retained debug snapshots, queued and continuing trigger contacts, repeated sleeping
+stack translations, character platform carry and animated foot support. The surrounding physics/grounding/replacement
+selection passed 66 cases and 13,793 assertions (`physics-live-origin-regressions.log`); these selections overlap.
+
+Remaining validation: CCD with translation during active flight, callback/thread rejection and unchanged-state
+coverage, consumer builds and applicable sanitizer checks. Automatic origin policy, VFX migration, rotated gravity
+frames, streaming, workload measurements and end-to-end planetary travel remain open. Passing this explicit
+translation primitive does not establish those features.
+
+### Live-Origin Flight And Lifecycle Edges — Passed
+
+The final DevDist edge batch passed 68 cases and 14,244 assertions (`physics-live-origin-edge-final-tests.log`).
+A projectile rebases every tick at origins 0, 1e7, -1e12 and 1e15 metres while flying into a thin wall. Its local
+trajectory and velocity are compared with an identical non-rebased control, including the collision. Callback and
+foreign-thread origin changes reject without changing the origin; safe-boundary rebasing and subsequent stepping
+still work. Earlier stack/contact/support tests remain included in this selection.
+
+The initial flight test incorrectly assumed a requested 600 m/s would be retained. The installed Jolt
+BodyCreationSettings defaults mMaxLinearVelocity to 500 m/s; observed velocity was approximately 499.6 m/s after
+one damped tick. The test now checks the real solver contract and control-world equivalence, rather than weakening
+position precision. Planetary travel still needs an explicit velocity/reference-frame policy, since an unexamined
+solver speed cap cannot serve as spacecraft travel behavior.
+
+Both incremental builds completed; focused formatting and diff whitespace checks pass. Consumer builds and
+sanitizer coverage remain pending. No editor travel test has been run for this batch.
+
+### VFX Live-Origin Migration — Implementation Under Validation
+
+Added VfxWorld::RebaseOrigin with preflight CPU emitter/world-particle current and previous positions, retaining
+local particle coordinates, handles, ages and spawn sequencing. GPU world resources retain the last applied
+simulation origin; world particles reuse CSTransform with identity rotation and origin delta, while local particles
+use their existing old/new emitter transform. A new snapshot revision publishes migration without advancing the
+simulation step or requesting a reset. Tests cover CPU world/local particles, history and immutable snapshots,
+GPU emitter progression, invalid-input rejection and continued updates.
+
+Build running: `Build/Validation/vfx-live-origin-build.log`. This batch is not yet validated. Actual GPU buffer
+continuity, skipped snapshots, precision-failure atomicity, shared scene migration transaction and consumer builds
+remain required. GPU per-particle precision cannot be preflighted from CPU emitter snapshots; document this honestly
+and validate the GPU translation at supported local ranges before enabling automatic travel migration.
+
+GPU migration validation audit: BuiltinVfx.hlsl CSTransform translates PositionAge.xyz and
+PreviousPositionStrip.xyz and rotates velocity/acceleration. Identity rotations therefore preserve world-particle
+velocity during origin-only translation. CSSimulate returns on DeltaSeconds <= 0 before replacing history or
+advancing age, so a migration-only snapshot should preserve both. This is source evidence, not a GPU execution pass.
+The existing KeireRenderTests/Source/VfxKillShapeRenderedOutputTests.cpp provides an offscreen view/readback harness.
+Extend rendered coverage for CPU/GPU world/local effects, repeated and skipped origin snapshots, stable screen
+position with a fixed absolute camera and unchanged spawn counts. Pixel checks establish rendered continuity;
+particle-history/trail assertions need appropriate rendered trail coverage or direct buffer readback as well.
+
+VFX migration DevDist build completed successfully. Focused migration/precise-transform/checkpoint-frame tests passed
+4 cases / 169 assertions (`vfx-live-origin-tests.log`). The VFX regression selection passed 109 cases / 4,944
+assertions (`vfx-live-origin-regressions.log`); selections overlap. These establish CPU behavior and GPU snapshot
+contracts, not rendered GPU-buffer continuity. The next batch must add real GPU migration readback coverage,
+precision-rejection atomicity and skipped-snapshot checks before automatic scene-wide migration is enabled.
+The VfxWorldSpecification origin comment still says immutable and should be corrected with the next source batch.
+
+### VFX Origin Migration — Direct3D 12 Render Readback Passed
+
+Precision-rejection coverage passed two origin cases / 110 assertions (`vfx-origin-atomic-tests.log`), including
+byte-identical checkpoints after an unrepresentable emitter translation on CPU and GPU backends.
+The hidden Direct3D 12 render test passed one case / 68 assertions (`vfx-origin-render-d3d12-final-tests.log`).
+It holds simulation time still at an origin of 1e12 metres, validates visible baseline particles, then compares pixels
+after repeated shifts, two shifts without an intermediate renderer snapshot, and return to the initial origin.
+Both World and Local simulation spaces are covered. This proves rendered position continuity on this backend;
+trail/history buffer contents, Vulkan and coordinated scene-wide migration remain unverified.
+
+The first run collected frames before asynchronous pipeline warmup completed and correctly failed its nonempty GPU
+world assertion. The harness now waits for a rendered GPU world with a bounded timeout before collecting migration
+frames. The rerun passed. Cold Direct3D 12 CSSimulate/CSSimulateOutput/CSSpawn creation took roughly 24–32 seconds per
+stage in this log; cached creation in the second application was tens of milliseconds. Add cold compute-pipeline
+startup to performance work; do not report this warm-cache result as solving startup latency.
+
+Vulkan passed the same hidden migration render-readback case and 68 assertions
+(`vfx-origin-render-vulkan-tests.log`). Direct3D 12 and Vulkan now have position-continuity evidence for World/Local
+particles, skipped snapshots and return rebasing. This does not establish trail/history-buffer correctness or
+long-duration workload performance.
+
+Next scene integration: retain the existing physics/support-cache preflight and add a VFX prepare/commit boundary.
+Prepare all VFX translations first, then execute the physics/cache transaction, then commit VFX using only already
+allocated values. Do not call the two public mutators in sequence and attempt allocating rollback after a failure.
+The scene entry point must enforce the owner thread and reject gameplay callbacks; test VFX failure before physics,
+physics failure after VFX preparation, paused operation and continued simulation. Automatic origin policy follows
+this shared transaction rather than directly calling subsystem rebases.
+
+### Coordinated Scene-Origin Transaction — Build In Progress
+
+Implemented SceneRuntimeSession::RebaseSimulationOrigin. VFX preflights all translated values before invoking the
+existing physics/support-cache migration; after that succeeds, VFX commits using preallocated values. The private
+VFX prerequisite hook is accessible only to the scene coordinator and must not mutate VFX. An already-aligned VFX
+origin still invokes the prerequisite, allowing physics to catch up. Owner-thread, active-state and callback guards
+run before preparation. Tests cover both precision-failure orders, unchanged VFX checkpoints/body positions,
+paused success, independently misaligned physics, continued stepping and stopped/callback/thread rejection.
+
+Build session is active with log `Build/Validation/scene-origin-transaction-build.log`; execution has not yet run.
+This explicit transaction does not choose an origin automatically or implement rotating frames/local gravity.
+
+### Newly Confirmed Precision Rejection Gap — Fix After Active Build
+
+A numeric reproduction confirms that delta=2^60 plus local offset=0.015625 rounds back to delta in double precision.
+The current migration helpers then see zero double-to-float narrowing error because 2^60 itself is representable.
+The recovered local offset is zero, losing 0.015625 metres despite the default 0.001-metre budget. This affects
+PhysicsOriginTranslation and the VFX preflight's delta-plus-position expression; nearby-origin tests do not cover it.
+After the active transaction build finishes, validate recovered local displacement as well as narrowing error,
+add 2^60 precision-rejection/unchanged-state regressions for both worlds and the scene transaction, and rerun the
+focused migration suites. Do not claim arbitrary-magnitude rebasing meets the precision budget until fixed.
+
+Precision-fix refinement: subtracting the delta back from the narrowed result is insufficient when the local value
+itself dominates a small translation. Numeric checks also reproduce delta=0.5 plus local=2^60 losing 0.5 metres.
+Use an error-free two-sum residual for the double addition, combine that residual with float narrowing error, and
+validate the total against the budget. Cover both operand orders and a normal exact case (128 + 0.015625) in the
+shared translation helper tests. Reuse the checked helper in physics and VFX rather than duplicating arithmetic.
+No fast-math flags were found in the searched Scripts/Config/premake configuration; retain strict arithmetic for
+this helper. Source changes are deferred until the active compilation is terminal.
+
+### Scene Transaction And Addition Precision — Focused Tests Passed
+
+The coordinated scene transaction build completed and its initial two cases / 60 assertions passed
+(`scene-origin-transaction-tests.log`). The subsequently confirmed double-addition precision loss is now fixed in
+shared RelativePositionTranslation: TwoSum retains the addition residual and combines it with float narrowing error.
+Physics and VFX use this helper. Regressions cover 2^60 plus a tiny local offset, a tiny delta plus a huge local
+position, exact nearby shifts, and unchanged physics/VFX/scene state after rejection.
+
+The incremental precision build completed. The combined migration/physics/VFX selection passed 131 cases / 9,615
+assertions (`origin-addition-precision-tests.log`). This validates the explicit transaction and resolves the recorded
+addition-loss gap. Automatic focus/origin policy, multiple regions, rotating frames/gravity, trails, consumer builds,
+sanitizer coverage and actual planetary travel acceptance remain open.
+
+### Explicit-Focus Origin Selection Policy — Focused Validation Passed
+
+Added internal SelectSimulationOrigin with a configurable positive threshold and grid (defaults 8192 m / 1024 m).
+It accepts an explicit double focus, stays put within the threshold, and snaps only after crossing it. Remainder-based
+snapping avoids division/multiplication overflow at large coordinates. Tests cover boundary jitter, negative travel,
+distant focus and invalid policies. DevDist build and three policy/precision/scene-transaction cases passed 60
+assertions (`simulation-origin-policy-tests.log`). This helper is not yet connected to automatic runtime travel.
+
+The runtime must own a deliberate focus (player, camera or server region), rather than silently choosing an arbitrary
+entity. Existing presentation camera selection uses priority with iteration-order ties. Automatic integration must
+address focus ownership, deterministic ties, focus destruction/switching, safe boundaries and distant content;
+initial collider-bounds centering alone cannot follow a traveler or represent an arbitrarily wide physics scene.
+
+### Runtime Focus Following — Integration Build In Progress
+
+SetSimulationFocus accepts an explicitly owned runtime entity and configurable threshold/grid. FixedUpdate and
+paused Step check before gameplay and again before physics. Inactive focus suspends following; deletion, scene
+replacement and Stop clear the weak entity handle. Foreign/edit-scene and stale handles reject. A failed rebase
+faults the step with the Simulation origin diagnostic instead of proceeding with a partially migrated frame.
+Tests cover movement during gameplay, inactive/reactivated focus, replacement/deletion and precision-failure state.
+
+The first build was deliberately stopped after spotting const entity handles used by mutating test calls. Those
+handles were corrected; replacement build is active in `simulation-focus-final-build.log`. No tests have executed
+for this integration yet. Follow-up coverage must include setter callback/thread rejection, focus switching/clearing,
+no-physics sessions and continuous travel. This is explicit focus following, not automatic player discovery,
+partitioning, rotating gravity or complete planetary travel.
+
+Focus integration build recovery: the deliberately stopped build left its project-command lock with owner PID 29060
+and token 818644ea83174ef48a8bedc8f35dce3e. Confirmed that PID absent and lock ownership unchanged, then removed only
+that lock's heartbeat/owner files and empty directory. The existing waiting build continued without restarting;
+`simulation-focus-final-build.log` now shows active native compilation. Documentation validation passed
+(`simulation-focus-docs-tests.log`). Focus runtime tests remain pending.
+
+Runtime focus DevDist build completed. Four focused focus/transaction/guard cases passed 91 assertions
+(`simulation-focus-tests.log`). The surrounding physics/VFX/grounding/stepping selection passed 178 cases and
+19,236 assertions (`simulation-focus-regressions.log`); selections overlap. Runtime tests verify focus motion
+inside FixedUpdate, inactive/reactivated behavior, foreign/edit-scene rejection, invalid-policy preservation,
+replacement/deletion ownership and failed migration stopping the step without committing either origin.
+Additional focus setter thread/callback, switch/clear, no-physics and long-travel coverage remains required, as do
+consumer builds and visual editor/player acceptance. Explicit focus following is now exercised; automatic player
+selection, distant-content partitioning and planetary reference-frame/gravity integration remain unfinished.
+
+### Repeated Runtime Travel Validation
+
+The focused simulation-focus selection passed four cases and 15,399 assertions
+(`simulation-focus-travel-tests.log`). A dynamic rigid body travels more than 60 km outward and returns,
+both near zero and at a 1e12 metre coordinate offset, over 2,560 fixed ticks per run. Checks cover repeated
+origin migrations, matching physics/VFX origins, bounded local focus coordinates and return error below 0.1 m.
+Additional checks cover callback/thread rejection without ownership changes, explicit focus switching/clearing,
+and VFX-only sessions. This closes those focused coverage gaps; it does not validate collision-rich travel,
+planetary streaming, rotating reference frames, local gravity or the complete editor/player journey.
+
+The scene-runtime floor/wall travel case also passes (one case, 3,004 assertions;
+`simulation-focus-contact-tests.log`, DevDist build `simulation-focus-contact-build.log`). At offsets zero and
+1e12 m, a dynamic box remains supported by a floor and stops at a wall while automatic focus following performs
+multiple origin shifts. Every tick verifies floor height, wall non-penetration and shared physics/VFX origin;
+the final position proves the body actually reached the barrier. The test uses an 8 m threshold and 4 m grid to
+exercise migration during a short collision-rich route. It does not cover streaming boundaries, rotating gravity,
+character-controller transitions, joints or high-speed planetary re-entry.
+
+### Region Gravity Integration In Progress
+
+Native PhysicsWorld now exposes uniform gravity acceleration in simulation axes, with finite-value validation,
+owner-thread access, closed-world rejection and wake-up of affected dynamic bodies when acceleration changes.
+Translation rebasing leaves the acceleration unchanged. Tests cover sideways acceleration at a 1e12 m origin,
+sleep preservation for unchanged gravity, gravity-disabled bodies, rebase preservation and access failures.
+Build/test execution is pending. Custom gravity still needs scene/checkpoint persistence, managed/authoring
+access, character local-up handling and radial/rotating-frame integration. SDK consumers and sanitizer validation
+are required for the public API addition; no packaged release has been rebuilt.
+
+Checkpoint integration audit: `SceneRuntimeSession::CapturePhysicsCheckpoint` returns bodies only, and
+`RuntimeApplication.cpp` registers `runtime.scene.physics` version 2 with a bodies-only CBOR envelope. Custom
+world gravity therefore cannot survive fresh-world replay restoration. Add world-level state even for an empty
+body list, validate before mutation, restore gravity before sleeping body state, and version the replay contract.
+Tests must include empty worlds, sleeping bodies, gravity-disabled bodies, invalid gravity rollback and fresh-world
+restore. Simulation focus identity/policy also requires explicit restoration; do not infer it from body ordering.
+
+The same audit found unchecked intermediate addition in `RestorePhysicsCheckpoint`: it computes origin delta plus
+local position before `Math::RelativeFloat`. This can lose a fractional local offset before the narrowing check.
+Use the existing checked relative-position translation helper and add a 2^60 origin/fractional-offset rejection
+case proving that every body remains unchanged. These source changes are queued after the active region-gravity
+native compilation to avoid changing inputs during the build.
+
+Region gravity DevDist build completed (`region-gravity-build.log`). The focused test passed 18 assertions
+(`region-gravity-tests.log`); the physics selection passed 20 cases / 4,624 assertions
+(`region-gravity-regressions.log`). These overlap. Gravity/checkpoint integration and sanitizer/SDK checks remain open.
+The checkpoint intermediate-addition fix now uses the shared checked translation helper, with a fractional-offset
+rejection regression at 2^60 and unchanged-body assertions. Its incremental build/test is pending.
+
+Checkpoint translation incremental build passed (`checkpoint-translation-build.log`). The checkpoint/gravity
+selection passed two cases / 51 assertions (`checkpoint-translation-tests.log`), including the new rejection
+case and unchanged-body checks. Formatting, scoped diff checks and documentation validation passed.
+
+### World Gravity Checkpoint Implementation
+
+Added ScenePhysicsWorldCheckpoint with optional gravity and bodies. Null gravity represents no physics world;
+zero acceleration represents an actual zero-gravity world, including when empty. The new restore API rejects world
+presence mismatches, validates all body conversions and gravity before mutation, applies gravity before sleep state,
+and rejects callback/foreign-thread restore. Existing bodies-only APIs keep their destination-gravity semantics.
+Runtime physics replay now encodes this state as serializer/schema 3. Existing strict version checks reject older
+physics recordings; no migration is claimed. Tests cover empty/absent worlds, sleeping-body restore, invalid gravity,
+invalid body data with changed gravity, foreign-thread rejection and stop/start fresh-world restore. Build and tests
+are pending. Standalone replay, SDK/consumer and sanitizer acceptance remain open, as does focus persistence.
+
+Validation boundary: the KeireTests project does not compile RuntimeApplication.cpp or RuntimeReplayCheckpoint.cpp.
+Passing its new world-checkpoint tests will validate the native scene boundary only. Build KeireRuntime separately
+before claiming the schema-3 registration compiles, and record/restore in fresh processes to verify the wire format.
+The previous standalone record report contains 60 recorded ticks and one checkpoint; playback failed with
+`Managed replay checkpoint is incompatible with the runtime behaviours`. Gravity persistence does not repair that
+world-identity failure. Keep those acceptance gates separate and preserve both findings until independently verified.
+
+World checkpoint DevDist build passed (`world-gravity-checkpoint-build.log`). Three focused cases / 71 assertions
+passed (`world-gravity-checkpoint-tests.log`), including empty/absent worlds, sleeping bodies, rejected malformed
+state, foreign-thread access and restoration after a new physics world is created. Player build is active in
+`world-gravity-runtime-build.log`; this does not establish standalone replay acceptance or callback rejection coverage.
+
+The player build also completed successfully (`world-gravity-runtime-build.log`), compiling the schema-3 registration.
+The combined physics/focus regression selection passed 27 cases / 23,076 assertions
+(`world-gravity-regressions.log`, overlapping the focused selections). Documentation validation and scoped diff checks
+passed. Fresh-process replay, callback-guard tests, sanitizer/SDK checks and focus checkpoint persistence remain open.
+
+Checkpoint callback guard now passes one case / 14 assertions (`checkpoint-callback-tests.log`, incremental build
+`checkpoint-callback-build.log`). Both legacy body-only and world-level restore reject during FixedUpdate, preserving
+gravity, body position and paused session state. Fresh-process replay, sanitizer/SDK checks and focus persistence remain open.
+
+Planetary character audit: SceneRuntimePhysics.cpp uses displacement.Y for upward intent/support eligibility,
+world-Y recovery and snap casts, normal.Y slope classification, and Y-only step-rise corrections. CharacterGrounding.h
+also classifies walkability with normal.Y. Replace these as one consistent local-up contract across capsule orientation,
+movement decomposition, step recovery, ground snapping, support carry and runtime ground state; changing only world
+gravity would leave character behavior inconsistent. Validate rotated equivalents of the existing floor/step/platform
+fixtures at distant origins, zero-gravity behavior and changing-up transitions before claiming planetary characters.
+
+### Character Local-Up Implementation In Progress
+
+Movement now derives up from the same decomposed world rotation used by the capsule query. World-space commands
+are decomposed into tangent and vertical components. Support eligibility, recovery, step casts and rise limits,
+snapping, slope classification and edge-normal recovery use this up vector. Grounding queries and fallback normals
+also follow capsule orientation. Existing world-Y callers retain their orientation; this does not automatically
+align actors to gravity. New tests rotate parented floor/player fixtures through identity, sideways, inverted,
+X-rotated and compound rotations at zero and 1e12 m offsets, checking landing, walking, jumping and ground normals.
+Build/test pending in `character-local-up-build.log`. Rotated steps/platform carry, changing-up transitions,
+radial gravity, animation grounding and player/UI acceptance still need validation and integration.
+
+Character local-up DevDist build passed after correcting a test CAPTURE macro invocation
+(`character-local-up-final-build.log`). The rotated landing/walking/jump case passed 700 assertions across ten
+orientation/origin combinations (`character-local-up-tests.log`). The broader character/grounding/support selection
+passed 162 cases / 114,849 assertions (`character-local-up-regressions.log`); selections overlap. Formatting and
+scoped diff checks passed. This validates rotated basic movement and existing support behavior, not rotated steps,
+rotated moving platforms, changing-up transitions, automatic gravity alignment or planetary travel acceptance.
+
+Rotated step/support validation now passes two cases / 149,140 assertions
+(`character-rotated-support-tests.log`, build `character-rotated-support-build.log`). The existing step matrix now
+includes world-Y/zero-origin plus sideways and compound-rotated frames at 1e12 m, preserving exact/lower/over-limit
+step and blocked-ceiling expectations across speeds and travel directions. Idle carry covers sideways, inverted and
+compound frames with script-moved static and kinematic supports at 1e12 m. All remain grounded during 240 ticks of
+translation/yaw and retain support-local rider position within 0.002 m. These are fixed-up frames; changing up during
+travel, radial gravity, rotated animation grounding and editor/player planetary acceptance remain required.
+Formatting and scoped diff checks passed. No engine source changes were needed for these added cases.
+
+### Changing-Up Support Validation
+
+Fixed stale-support retention when capsule up changes: carry/step/snap eligibility and grounded grace now require
+the previous ground normal to remain walkable under current capsule up. Without this check, a 90-degree turn could
+retain grounded state from a surface no longer beneath the capsule. The focused changing-up test passes one case /
+1,476 assertions (`character-changing-up-tests.log`, build `character-changing-up-build.log`): abrupt turn-away,
+turn-back reacquisition, and a full 360-degree authored parent-frame rotation at zero and 1e12 m offsets.
+This is authored coordinate-frame motion, not integration of centrifugal/Coriolis forces or a radial-gravity
+controller. Broad character/support regressions are pending; actual planetary travel and rendered acceptance remain open.
+
+The broad selection completed: 164 cases / 216,700 assertions passed (`character-changing-up-regressions.log`),
+overlapping the focused tests. Formatting, scoped diff checks and documentation validation passed. No visual editor
+or standalone planetary-travel acceptance is implied by these headless results.
+
+### Radial Gravity Integration In Progress
+
+PhysicsGravitySource defines a double world center, gravitational parameter (m^3/s^2) and positive radius.
+Outside the radius, acceleration follows the inverse-square model described by
+[NASA's gravity reference](https://science.nasa.gov/learn/basics-of-space-flight/chapter3-3/).
+Inside, this implementation deliberately models a uniform-density sphere: acceleration decreases linearly to zero
+at the center. This is an explicit model choice, not a claim to reproduce real planetary density profiles.
+Up to 64 sources add to uniform world gravity; pure planetary setups must set uniform acceleration to zero.
+Only active gravity-enabled dynamic bodies receive mass-scaled forces. Sleeping bodies are not awakened every tick;
+changing sources wakes eligible bodies. Forces are validated for all affected bodies before submission, with reused
+scratch capacity and no source loop when the list is empty. Source centers remain absolute through rebasing.
+
+Scene checkpoints store sources and validate them before mutation; physics replay source schema is now 4 with strict
+older-version rejection. Tests cover analytic exterior/interior samples, solver mass independence, rebased equivalence,
+disabled gravity, invalid sources and checkpoint source restoration. Build/tests are pending. Full orbital integration,
+multi-source performance, sleeping/contact stress, gravity-frame/character alignment, authored planetary geometry and
+fresh-process replay remain acceptance gates. The force field is sampled once per external fixed step; no adaptive
+orbital integration or per-internal-substep gravity evaluation is claimed.
+
+Orbital solver audit: the installed Jolt BodyCreationSettings defaults to linear/angular damping 0.05 and a
+maximum linear speed of 500 m/s. PhysicsWorld::CreateBody does not override these, and PhysicsBodyDefinition /
+RigidBodyComponent expose no damping or speed-limit controls. Radial acceleration therefore does not establish
+orbital fidelity: bodies lose energy and high velocities are clamped. Add validated authored/native controls,
+preserve ordinary-project defaults, propagate through component registration/managed APIs and live synchronization,
+and verify undamped/coasting behavior plus high-speed CCD before orbit acceptance. Use explicit orbital fixtures
+with appropriate limits; do not silently disable safety limits for all existing projects. Source gravity is sampled
+once per external step, so convergence across timestep sizes and large-delta behavior also remain required gates.
+
+Live-body synchronization audit: SamePhysicsDefinition compares LinearVelocity and UseGravity, and a mismatch
+recreates the native body. RuntimeAddRigidBodyForce implements managed Force/Acceleration/Impulse/VelocityChange
+by updating the component velocity. Therefore gameplay force commands can recreate bodies each tick rather than
+preserving native angular velocity, contact identity and support bindings. Solver writeback updates the cached
+velocity, so ordinary untouched gravity motion is not itself a mismatch. Fix authored velocity/gravity updates in
+place, with tests that record body IDs, angular velocity, contact continuity and gravity toggles. Keep shape/mass/
+filter replacement semantics separate. Queue this source change after the active radial-gravity build.
+
+Radial-gravity DevDist build completed (`radial-gravity-build.log`). The focused radial/world-checkpoint selection
+passed four cases / 85 assertions (`radial-gravity-tests.log`), covering analytic falloff/interior values, mass-independent
+solver acceleration, translation rebase equivalence, disabled-body exclusion and source checkpoint validation/restoration.
+This is not orbit/soak/performance acceptance, and the schema-4 player build remains pending.
+
+Live-body motion fix is now implemented: definition comparisons no longer recreate bodies for velocity/gravity flag
+changes. Synchronization updates velocity using the retained native pose/angular velocity and applies gravity flags
+in place. A repeated command/toggle test checks stable body ID, preserved spin and actual acceleration changes.
+Build/test pending in `live-body-motion-build.log`; contact continuity and managed integration remain validation gates.
+
+Live-body motion DevDist build passed. The combined authored-motion/radial/focus selection passed eight cases /
+18,543 assertions (`live-body-motion-tests.log`), including repeated velocity/gravity changes with stable native body
+identity and preserved spin. Wider physics/character/support regressions are running in `live-body-motion-regressions.log`.
+Schema-4 player build is active in `radial-gravity-runtime-build.log`. Orbital and complete planetary-travel acceptance
+remain open; these focused results must not be treated as an end-to-end travel pass.
+
+The broad selection passed 180 cases / 220,649 assertions (`live-body-motion-regressions.log`, overlapping focused
+coverage), and the schema-4 standalone player build completed (`radial-gravity-runtime-build.log`). Documentation
+validation passed. Fresh-process replay, orbital accuracy and rendered planetary travel remain unverified.
+
+Gravity composition validation (2026-10-29): the incremental DevDist test build passed
+(`gravity-composition-build.log`). All four radial-gravity cases passed, 58 assertions
+(`gravity-composition-tests.log`). New coverage checks opposing planetary sources cancel
+while another source adds to uniform gravity, at both zero and 1e12-metre origins. An
+unrepresentable force rejects the step before position/velocity changes; removing the
+source permits the next step without leftover queued force. These checks do not establish
+orbit convergence, collision safety at orbital speed, or full planetary travel.
+
+Next movement-control batch: expose linear/angular damping and linear/angular speed limits
+through native body definitions, serialized rigid-body authoring, and managed runtime and
+design-time APIs. Preserve current backend defaults for legacy scenes. Validate finite
+nonnegative damping and finite positive limits, update live bodies without losing spin or
+identity, and test serialization defaults, rejected values, coasting and configured caps.
+Keep existing managed call signatures compatible by adding a separate motion-settings
+entry point. Only then use drag-free bodies for orbit convergence and travel tests; do not
+mistake the current backend damping or 500 m/s default cap for planetary simulation results.
+
+Native motion-settings implementation (2026-10-29, validation pending): PhysicsMotionSettings
+adds damping and linear/angular speed limits to PhysicsBodyDefinition. Defaults preserve
+existing backend settings. PhysicsWorld::SetMotionSettings updates the retained native body
+under a write lock and clamps velocity when limits decrease, without changing its pose or
+recreating it. Invalid/nonfinite settings are rejected before mutation. DevDist validation
+is running in `motion-settings-build.log`; new tests exercise 1000 m/s drag-free coasting,
+spin preservation, live caps, damping, rejected values and closed-world rejection. Inspector,
+component serialization, managed access, replay restoration and SDK validation still need
+integration. Do not present this native-only stage as a finished user workflow.
+
+Motion-settings integration audit: the design-time assembly compiles the same
+`KeireManaged/**/*.cs` sources (`Scripts/ManagedDesignTime/Keire.Managed.DesignTime.csproj`),
+so new runtime API declarations should automatically reach IDE completion; validate with the
+managed API/parity harness rather than introducing duplicate stubs. Rigid-body Inspector
+fields come from CreateRigidBodyComponentRegistration property metadata. Add grouped motion
+fields there and serialize them with missing-field defaults. Deserialize into validated
+locals before assigning any component state (the current body deserializer writes fields
+before its final validation). SceneRuntimePhysics must copy settings during definition
+creation and update them in place before applying authored velocities, especially when
+raising a speed cap and changing velocity in the same tick. Test that ordering explicitly.
+
+Motion-settings replay audit: ScenePhysicsCheckpointBody currently stores pose, velocities,
+sleep and origin only; runtime.scene.physics schema 4 encodes those same fields. It cannot
+restore a native SetMotionSettings override. Before declaring motion controls complete,
+capture installed settings, validate all restored settings before mutating any body, apply
+limits before checkpoint velocities, and update runtime caches/components consistently so
+the next synchronization cannot undo restoration. Test restore after lowering a cap and
+changing drag, including invalid settings leaving all bodies unchanged. Coordinate the
+serializer schema change with the standalone player and scene serializer; component
+serialization alone does not cover native-only overrides.
+
+Native motion validation completed: `motion-settings-build.log` exited successfully. The
+focused motion/radial selection passed six cases / 97 assertions (`motion-settings-tests.log`),
+including drag-free 1000 m/s travel, retained angular velocity, in-place speed caps, damping
+and invalid-value rejection. Component/managed/replay integration remains pending.
+
+Desktop QA on 2026-10-29: opened the existing DevDist KeireClient.exe (timestamp 00:07:16,
+not rebuilt with the new motion settings) maximized in CloudIsolation20261026, CloudHdrShowcase.
+Fog toggle and Height/Visibility section worked; fog visibly affected sky and geometry in
+edit mode and Play Mode. Stopped simulation using Discard and Stop, and restored fog to its
+initial disabled state. Left editor open in edit mode, Environment/Fog visible, FPS enabled.
+Spot readings: one viewport without fog about 10–13 ms; with fog about 15 ms; Scene and Game
+both visible with fog about 29–30 ms. Compilation was concurrent, so these are not controlled
+performance benchmarks. Repeat after compilation with fixed camera/settings and one/two
+viewport comparisons. Play Mode change review shows position Before/After as only 'Changed',
+while rotation displays values: record as a usability issue for precise-position review.
+No far-coordinate or planetary-travel acceptance was performed in this material showcase.
+
+Far-coordinate desktop authoring smoke: in the existing DevDist editor, changed Showcase
+Plinth Position X from 0 to 1000000000000.125 using the Inspector. The complete decimal,
+including .125, remained displayed after focus left the field. With Scene tab focused, F
+framed the distant plinth and rendered its geometry/gizmo/grid without a visible failure.
+Ctrl+Z restored X=0 and cleared the scene dirty marker; F then returned to the near-origin
+object. No scene save was performed. This validates one static authoring/frame/undo path,
+not continuous planetary travel, collision behavior, persistence or fractional error bounds.
+The unchanged Y field displays -0.80000001192092896 from its prior float-authored value;
+track precision-aware numeric display UX without silently rounding stored doubles. F while
+Hierarchy has focus did not frame; it worked after focusing Scene (matches current routing).
+After compilation ended, stationary one-viewport fog-off reading was about 10 ms before
+interaction, 11–13 ms during selection/editing; these remain spot readings, not percentile
+performance measurements. Editor remains open, plinth selected, camera framed near origin.
+
+Authored motion integration implemented (not yet rebuilt): RigidBodyComponent now exposes
+MotionSettings with validated assignment, four grouped Inspector fields with units, and
+schema-1 additive serialization with historical defaults for missing fields. Deserialization
+now validates locals before assigning component state, so invalid settings/type errors cannot
+partially change mass or motion. Scene runtime copies authored settings into body creation
+and applies live changes before authored velocity, preserving the body. Validation helper is
+shared between native world and component. Added serialization/legacy-default/atomic-rejection
+test and extended live-body identity/spin test to raise speed caps and velocities together
+above 500 m/s. Formatting and scoped diff checks pass. Batch remains uncompiled while C# and
+checkpoint integration are prepared; previous six-case pass covers only the native stage.
+
+Managed motion integration is now implemented in source: RigidBody.MotionSettings uses
+RigidBodyMotionSettings (damping in inverse seconds; limits in m/s and rad/s). Default
+preserves legacy values; space coasting can explicitly use new(0, 0, 20000, 100). Added
+separate getter/setter internal calls without changing existing property-call signatures.
+The managed bridge test passed, including world/entity identity, round trip, validation
+before native submission and native rejection. Full managed API/design-time parity harness
+is still running in motion-settings-managed-tests.log. Native component/bridge changes
+remain unbuilt; checkpoint integration is next before the combined native build.
+
+Combined motion batch: managed API suite and design-time parity passed (4865 core and 860
+editor public/protected API records; motion-settings-managed-tests.log). Checkpoints now
+capture installed native motion settings (including direct native overrides), validate them
+before mutation, restore limits before velocity and synchronize component/cache settings.
+Legacy native callers omitting the optional settings preserve the destination configuration.
+Player serializer advances to schema 5, with required four-scalar motion settings per body.
+Added restoration/invalid-checkpoint regression. Combined native build is active in
+motion-settings-integration-build.log; player/SDK builds and editor UI acceptance remain
+pending. Do not edit native source while this compilation is active.
+
+Orbital acceptance audit while integration compiles: radial force is sampled once before
+Native.Update, which receives ceil(dt*60) collision steps; those internal steps do not
+resample the source field. Compare fixed timestep sizes with drag disabled and caps above
+the orbit speed, measure radius/energy/phase drift over multiple revolutions, and compare
+near-origin versus translated/rebased trajectories. Also test slow free-flight under weak
+radial acceleration: backend AllowSleeping defaults true and sleeping bodies skip radial
+force. This is a test hypothesis, not a confirmed defect; resting-contact sleep behavior
+must remain efficient if a free-flight sleeping policy is added.
+
+User-authored far-physics fixture (2026-10-29): user reports successful Play Mode collisions
+in FarTestWithPhysics in the current CloudHdrShowcase scene. Read-only inspection of the
+saved scene confirms parent ID 4d69aab1-2bf9-42fd-b26e-d61e1bd137f8 at X=10,000,000,000 m,
+identity rotation/unit scale. Showcase Plinth Copy has an enabled box collider, local
+position (0,-0.800000011920929,2), scale (20,0.3499999940395355,15). Studio Paint Copy has
+an enabled box collider plus dynamic mass-1 gravity-enabled rigid body, zero initial
+velocity, continuous collision disabled; local position approximately (1.02377,6.06636,2.62108)
+and scale 1.55. Preserve these user-authored entities and the current scene. This is a
+user-reported real-editor success corroborated by saved configuration, not an independently
+measured stability/soak or continuous planetary-travel pass. Next checks: resting height,
+repeat Play/Stop, contact stability and controlled origin shifts without changing this baseline.
+
+Project default gravity authoring (2026-10-29, requested; implementation pending):
+The Physics tab exposes collision layers/matrix but ProjectAuthoringSettings has no gravity
+field. PhysicsWorld supports SetGravity/Gravity; PhysicsSystemSpecification and CreateWorld
+currently provide no project default. Add finite XYZ acceleration in m/s², preserving
+(0,-9.81,0) for existing projects. Carry it through authoring serialization, editor project
+load/settings application, player manifest export/import and new physics worlds. Follow
+existing settings lifecycle rules; do not silently overwrite per-world radial sources or
+checkpoint-restored gravity. Include zero gravity for space projects, non-Y gravity,
+legacy settings fallback, invalid-value rejection, save/reload, player parity and
+UseGravity=false coverage. UI acceptance uses the user's CloudHdrShowcase fixture without
+altering its authored entities. Batch implementation after the active native build finishes.
+Gravity integration audit: player physics JSON is emitted in AssetTool/Source/Main.cpp,
+not the build scripts, and parsed in KeireRuntime/Source/RuntimeApplication.cpp. Editor
+startup applies settings in EditorWorkspaceLayer.cpp; settings application is in
+EditorWorkspaceInspector.cpp. ProjectSettingsPanel currently gates service application on
+a frame-local matrixChanged flag. A numeric gravity edit must retain pending application
+through deactivation/tab changes and save failures; do not reuse that transient flag as
+its only trigger. PhysicsSystem collision matrix rejects active worlds, so distinguish
+project-default updates for future worlds from intentional live PhysicsWorld overrides.
+
+Motion-settings integration validation (2026-10-29): DevDist KeireTests build completed successfully (motion-settings-integration-build.log). Focused motion-settings plus authored velocity/gravity selection passed 5 cases / 165 assertions, including checkpoint restoration and component serialization (motion-settings-integration-tests.log). Editor/player targets and UI acceptance remain pending; project default gravity remains unimplemented.
+
+Project gravity implementation checkpoint (2026-10-29): added PhysicsGravity authoring persistence with legacy fallback and finite validation; PhysicsSystem default gravity initializes new worlds without mutating existing overrides. Editor startup, explicit/automatic settings saves and Play entry apply defaults; Audio / Physics UI exposes XYZ, Earth and Zero presets. AssetTool exports gravity and runtime consumes it. Added settings round-trip/invalid/legacy and distant-body/default-lifecycle tests. Build session runs KeireTests, KeireClient, KeireRuntime and AssetTool sequentially; project-gravity-<target>-build.log files are the evidence. Tests and UI acceptance are pending. Preserve CloudHdrShowcase and FarTestWithPhysics. User closed editor and authorized reopening the new build when ready.
+
+Gravity export follow-up found during compilation: emitted runtime manifest still uses EnvironmentRuntimeManifest schema 10. Older players can accept that schema and ignore gravity. Before acceptance, advance the manifest contract with compatibility tests so old players reject gravity-aware exports rather than silently simulating Earth gravity. Preserve explicit legacy import fallback for older manifests. Current build may finish, but this follow-up must be applied before claiming player parity.
+
+Gravity native validation (2026-10-29): KeireTests DevDist build passed. project-gravity-focused-tests.log reports 10 cases / 194 assertions passed, covering project gravity, authoring settings and motion settings/checkpoints. Editor build is active; player/export builds, manifest-version follow-up and real-editor acceptance are still pending.
+
+Gravity regression follow-up: project-gravity-physics-regression.log passed 30 cases / 4,879 assertions using the physics* and project collision matrix* selection. This covers the existing distant stacks, continuous collisions and origin-shift physics tests, not orbital travel or UI acceptance. Editor compilation remains active.
+
+Gravity integration checkpoint (2026-10-29): the follow-up DevDist build completed successfully for
+KeireRuntime, KeireAssetTool and KeireTests (gravity-manifest-<target>-build.log). The player replay motion
+decode compilation defect is corrected. Runtime manifest schema is now 11; gravity is required for schema 11,
+with Earth gravity fallback retained for older manifests. The focused manifest/project-gravity/authoring/motion
+selection passed 41 cases and 595 assertions (gravity-manifest-focused-tests.log). These checks do not prove
+an exported player consumes custom gravity: actual export/player parity and real-editor control acceptance
+remain outstanding, followed by orbital convergence and continuous ground-space-ground validation.
+The current editor process was observed running after the successful editor build; process presence is not
+UI acceptance. Repository hygiene inspection also found an already-staged vc140.pdb generated artifact;
+it must be excluded from any eventual commit, without changing the index during this uncommitted work pass.
+
+Player parser validation (2026-10-29): ran the actual rebuilt KeireRuntime headlessly against
+isolated schema-11 manifest fixtures under Build/Validation/GravityManifestParser. Missing gravity
+and a two-element gravity array exit 2 with the expected gravity-specific diagnostics; a string
+acceleration exits 1 with a JSON type diagnostic. Initial fixture attempts failed earlier environment
+validation and were not counted. Corrected fixtures retain cooked numeric rendering enums and a
+current fog record. This proves rejection at the player boundary only, not custom-gravity simulation
+or export parity. Wrong-type diagnostics could be improved to name the gravity setting explicitly.
+
+Gravity UI preset acceptance (2026-10-29): in the maximized DevDist editor, opened Edit > Project Settings > Audio / Physics. XYZ fields displayed (0,-9.81,0). Zero Gravity displayed and persisted (0,0,0); Earth Gravity restored the displayed and saved Earth default. Settings reported all saved. Read-back confirms unrelated authoring settings unchanged and CloudHdrShowcase scene SHA256 remains 4B1E0527BEA32379D3D86EBDED39DBACF2D503551B291741B7CA6C5E2D5366FF. Closed the settings panel. Numeric edits, Undo/Redo, next-Play behavior and player parity remain to validate; preset persistence alone is not full acceptance.
+
+FarTestWithPhysics UI follow-up (2026-10-29): real-editor Play observation found the copied
+Studio Paint body retains enabled ShowcaseOrbit (component 73616e64-626f-4078-8000-000000000060).
+Its script writes LocalRotation and LocalPosition every Update (Assets/Scripts/Runtime/Examples/ShowcaseOrbit.cs,
+lines 37-38). Inspector samples remained near initial Y=6.06636 (6.13838 then 5.99748) while rotating.
+Therefore this authored fixture does not isolate gravity/free-fall or resting-contact behavior; do not count
+it as an independent gravity acceptance pass. Preserve the user's scene and add a separate controlled
+fixture without transform-writing animation for subsequent Earth/zero-gravity and distant-contact tests.
+Stopped Play with Discard and Stop to retain the authored baseline.
+
+Controlled far-gravity fixture (2026-10-29): created Assets/GravityAcceptanceQA.keirescene in the
+QA project by copying the saved showcase and disabling only the copied body's ShowcaseOrbit.
+Editor imported it as asset 200d16bc-6971-4c20-82e0-fb405a17c25a. Real-editor Play showed the body
+falling from Y=6.0663646 to Y=0.1499963 at parent X=1e10. Expected rest center is approximately
+-0.8 + 0.35/2 + 1.55/2 = 0.15 m. This is a controlled Earth-gravity contact observation, not an
+orbital, zero-gravity, long-soak, or continuous travel acceptance result. Original showcase is preserved.
+
+Orbital validation implementation (2026-10-29, pending execution): added a three-revolution
+circular-orbit test at radius 100 m, mu=10000 m^3/s^2, initial speed 10 m/s and zero damping.
+Covers origins 0 and 1e12 m, stationary origins and alternating rebases every simulated second,
+60/120 Hz integration. Measures maximum relative radius/energy errors and final phase; requires
+smaller-step radius-error convergence. Only KeireTests is being built. This is a solver validation
+fixture, not proof of Earth-scale geometry, atmospheric transitions or player travel integration.
+
+Orbital convergence result (2026-10-29): orbital-convergence-tests.log passed one case / 271460
+assertions across eight configurations. Three revolutions at 60 and 120 Hz, origins 0/1e12 and
+stationary/alternating rebases satisfied relative radius error <0.002, relative energy error <0.0001,
+final phase error <0.01 rad, and at least 25% radius-error reduction at 120 Hz. Actual maxima were
+not printed on success, so these are verified bounds, not exact measured values. Added an explicit
+<algorithm> include afterward; the subsequent weak-field build includes that header cleanup.
+Weak-field regression now checks an unsupported body at radius 10 m, mu=0.001 over 10 simulated
+seconds, with zero damping. This targets unintended free-flight sleep; result pending.
+
+Confirmed weak-field defect (2026-10-29): weak-gravity-build.log succeeds; weak-gravity-tests.log
+fails three assertions. After 600 steps at 60 Hz the unsupported body is sleeping, velocity X=0,
+position X=10 rather than continuing weak radial acceleration. PhysicsWorld::Step skips radial
+forces for inactive bodies, and backend sleep can activate in this free-flight case. Fix must prevent
+unsupported bodies under nonzero gravity from sleeping, without repeatedly waking grounded stacks,
+without treating trigger overlaps as support, and without weakening force-overflow transactional checks.
+The new regression intentionally remains failing until that implementation is verified. Batch the
+sleep-policy fix and its support/zero-field regressions before the next native build.
+
+Weak-field implementation checkpoint (2026-10-29): radial force preflight now includes sleeping
+bodies. After all forces validate, nonzero-acceleration bodies without opposing solid contact are
+activated and have the sleep timer reset. Trigger contacts do not count as support. Added grounded
+sleep and trigger-overlap regressions alongside weak free-flight and existing overflow checks.
+Build/test session is active; do not claim the defect fixed until these pass. Current support lookup
+scans contacts per gravity body; assess batching this into a single contact pass before broad workloads.
+The policy currently runs when radial sources exist; weak uniform-only gravity needs separate coverage.
+
+Support-policy follow-up (2026-10-29): first implementation passed free-flight, trigger and overflow
+checks but failed grounded sleep (42/43 assertions). Inspection found QueryContact negated Jolt's
+penetration axis while ContactManifold used that same direction without negation. Corrected fallback
+normals to the body-2 separation convention; added a sleeping-contact normal assertion. Expanded
+sleep protection to uniform-only gravity and replaced per-body contact scans with one contact pass
+using the existing body map and reusable per-body scratch fields. Native build and targeted regressions
+are active in gravity-support-batch logs; all results remain pending for this revised implementation.
+
+Gravity-support batch passed 5 cases / 2166 assertions (gravity-support-batch-tests.log), including weak uniform/radial acceleration, grounded sleeping, trigger exclusion, sleeping normal direction, overflow rejection and sleeping-stack origin translations. Broader physics/radial regression is running, including orbital convergence. Editor/player binaries have not yet been relinked with this native fix.
+
+Gravity support regression passed 37 cases / 276416 assertions (gravity-support-regression-tests.log), including the full orbital case and physics selection. These overlap prior counts. Formatter and diff checks pass. Updated native library is validated; player relink follows, editor still uses its previous binary. No planetary visual or standalone acceptance is implied.
+
+Minimal standalone gravity export (2026-10-29): created Build/Validation/GravityPlayerQA with
+only the distant parent and dynamic collider body, no mesh/material/managed components, and project
+gravity (6,0,0). KeireAssetTool cook succeeds (one asset/one pack); emitted manifest schema 11
+contains that exact gravity. Rebuilt KeireRuntime recorded 120 ticks and one checkpoint successfully
+(record.json). A fresh-process strict --verify failed with canonical state hash divergence at tick 1
+(verify.json), not the former managed-checkpoint incompatibility. This script-free reproduction proves
+that replay needs additional native/runtime-state investigation; it does not establish custom-gravity
+trajectory parity. Keep the fixture and logs for diagnosis. Original QA project was not changed.
+
+Standalone replay isolation (2026-10-29): a second independent 120-tick recording succeeds.
+Validated replay chunk boundaries and uncompressed SHA-256 digests: both initial checkpoint digests
+are identical (b773aeedda9e1bf758ffa6de082993ce815315bc1efe47dbf61c1007b3fb63e9), but none
+of the 120 recorded canonical state hashes match. Evidence: GravityPlayerQA/recording-comparison.json
+and repeat.keirereplay under Build/Validation. This rules out checkpoint restoration as the sole cause;
+investigate fixed-step versus presentation-frame state before changing replay validation. No new build
+was needed. Planetary travel acceptance remains pending.
+
+Replay subsystem isolation: two independent 300-tick recordings (long-a/long-b.keirereplay)
+complete successfully. Python 3.14 stdlib compression.zstd decoded the checkpoint chunks; lengths
+and SHA-256 digests were verified before comparing every serializer. All five serializers match at
+tick zero. At tick 300, runtime.scene, animation, physics, and presentation match byte-for-byte;
+only runtime.scene.vfx differs (105-byte payloads, no emitters in this fixture). The runtime currently
+calls SynchronizeVfx(deltaSeconds) from AdvanceFrame even with DeterministicSimulation enabled.
+Investigate and regression-test fixed-tick VFX advancement for strict sessions; do not remove VFX
+from verification. Matching physics at tick 300 is useful evidence, not full planetary acceptance.
+
+Strict VFX timing fix implemented: deterministic SceneRuntimeSession advances VFX on FixedUpdate
+and paused Step; render-frame AdvanceFrame retains VFX updates only for ordinary sessions. Added
+an empty-world and active-effect regression comparing 60 fixed ticks with different render cadences,
+plus paused-step equivalence. Formatting and scoped diff checks passed. Targeted DevDist KeireTests
+build started (vfx-fixed-timing-build.log); tests and fresh standalone replay still pending. No shared
+header changes were needed for this correction.
+
+Strict replay timing acceptance: targeted DevDist test build compiled two files and linked; 9 selected
+scene VFX cases / 422 assertions pass (vfx-fixed-regression-tests.log). Player relink completed.
+A fresh 300-tick custom-gravity recording and separate-process strict verification both exit zero;
+fixed-verify.json reports completed, currentTick 300, tickCount 300, checkpointCount 2. This closes
+the minimal native gravity replay divergence; managed replay and planetary journeys remain separate
+acceptance requirements. VFX timing contract and changelog updated.
+
+Distant environment report (2026-10-29): user screenshot of GravityAcceptanceQA shows distant
+Scene view and near-origin Game view with substantially different clouds/lighting. User closed the
+editor and authorized reopening the new build for comparison. Preserve the user's scene edits.
+Source-confirmed constraints: CloudObserverWithinLocalDomain rejects any anchor-relative component
+above 1e9 metres; CaptureCloudVolume returns disabled uniforms outside that domain. EvaluateCloudPhase
+and MakeVolumetricCloudUniforms independently enforce 1e9. FarTestWithPhysics at X=1e10 exceeds it.
+Atmosphere uniforms subtract the configured planet centre and EnvironmentAnchor from camera origin;
+no editor assignment to EnvironmentAnchor was found in the audited source paths. This is not evidence
+that simply increasing the cutoff fixes sky, solar lighting or planetary placement.
+Next integration requirements: persistent environment/world anchoring, consistent cloud/fog/atmosphere
+frame selection in Scene and Game cameras, periodic phase precision across origin shifts, and a
+near-origin versus translated-world comparison at identical local altitude/orientation/time. Also test
+physical travel away from a planet separately: leaving its atmosphere must not drag the planet or clouds
+with the camera. Native radial-source and simulation-focus authoring remain missing in the inspected
+editor/managed paths; implement through shared runtime configuration rather than a test-only override.
+
+Distant planar cloud correction implemented: horizontal periodic coordinates now accept +/-1e12 m,
+where double spacing remains sub-millimetre; vertical displacement retains the existing +/-1e9 m bound.
+One shared coordinate policy drives layered phase evaluation, packet domain checks and volumetric
+packing. Added positive/negative 1e10 and near-1e12 comparisons against independently reduced local
+periods, including fractional offsets and vertical rejection. This preserves stable world patterns;
+it does not move the environment anchor with the camera or implement planetary cloud shells.
+DevDist KeireTests build is active (distant-cloud-domain-build.log); regression and visual validation
+remain pending. Atmosphere placement and day/night lighting still need separate integration.
+
+QA atmosphere configuration verified read-only: Rendering.keiresettings has atmosphere.enabled=true,
+planetCenter=(0,-6360000,0), radius=6360000 m, height=100000 m. The copied showcase at X=1e10
+is physically outside that configured spherical atmosphere; identical sky to the origin is not an
+appropriate expected result unless the entire environment is translated with the test. Initial time
+is day 1234567890123456789, fraction .375, paused, rate -.5, day length 2400 seconds. Do not overwrite
+these user settings. Separate acceptance scenes should compare (a) equally translated surface,
+atmosphere and gravity with identical local camera coordinates, and (b) actual departure from the
+fixed planet, where atmosphere disappearance is expected. This corrects the earlier broad inference
+that every visible difference in the screenshot was necessarily a rendering error.
+
+
+Distant planar cloud validation completed: DevDist KeireTests build exited zero (71 build steps,
+including regeneration after the added internal header). Cloud/atmosphere selection passes 127 cases /
+177943 assertions in distant-cloud-domain-tests.log. New positive/negative distant phase tests and
+existing invalid-domain tests passed. Formatting and scoped staged/unstaged whitespace checks pass.
+This evidence covers CPU evaluation and uniform packing, not rendered distant worlds or planetary
+shell clouds. Editor has not yet been relinked or reopened for this change.
+
+Editor visual checkpoint: KeireClient DevDist build exited zero after two compile/link steps, launched
+PID 4464 with the existing QA project maximized. Fresh Windows capture shows GravityAcceptanceQA
+(29 entities), distant Scene view with clouds now present above FarTestWithPhysics, and the original
+near-origin Game view. Pink background and different environment appearance remain; this confirms
+cloud presence only, not matching planetary lighting or travel acceptance. Startup assets were still
+refreshing in the capture, so the displayed frame time is not a performance measurement. No UI edits
+were made, and existing user scene/settings were preserved.
+
+User follow-up confirms distant clouds look improved, but void appearance is unacceptable; include
+void/horizon/lighting/atmosphere together in the next batch. Source finding: BuiltinSky.hlsl applies
+SkyHorizonWeight whenever the observer is outside the opaque planet and its ray does not hit ground.
+There is no outer-atmosphere/altitude attenuation, so an authored surface sky gradient paints empty
+space pink even when the atmosphere transport has no intersection. Correct the surface-gradient to
+space transition without altering solar-disc radiance or forcing the planet to follow the camera.
+The beige near-origin lower hemisphere comes from AtmosphereGroundRadiance's synthetic reference
+sphere, driven by GroundReflectance and GroundIntensity; distinguish its artistic controls from
+space background. Recheck below/at/above atmosphere, limb rays, translated planets and night.
+Desktop inspection was deferred when the user was actively taking screenshots; no UI input was sent.
+
+
+Planet-relative sky transition implemented: shared shader kernel smoothly attenuates only authored
+sky-gradient weight from planet surface to outer atmosphere. BuiltinSky uses the already planet-relative
+ObserverRadius, preserving physical scattering and separate sun/stars. Added the actual shared-kernel
+test plus CPU uniform integration comparing translated camera/planet pairs at 0, +/-1e10 and +/-1e12 m,
+with surface, 2 km, 50 km, 100 km and 400 km altitude. Surface weight must remain one at every global
+placement; above-atmosphere weight must be zero. Test build active (sky-space-gradient-build.log).
+This does not supply authored multi-planet ownership or spherical cloud shells; those remain required.
+
+Build latency finding verified in both Windows and Unix builtin-shaders scripts: one aggregate fingerprint
+contains every rendering source/include. Any sky-gradient include change causes all source/variant pairs
+to invoke the shader compiler before rebuilding the combined header. This explains additional shader-only
+iteration latency beyond native shared-header fan-out. Next build-efficiency batch should cache variants
+per source plus recursively resolved includes/compiler/options, retain output-integrity checking and
+atomic aggregate publication, and cover Windows/Unix warm cache, touched-independent include, transitive
+include mutation, missing/corrupt output and failed-compiler recovery. Do not edit generation scripts
+while the current build is using them. Full aggregate regeneration remains appropriate when compiler
+or output ABI changes; never reuse stale bytecode to shorten a build.
+
+
+Sky-gradient validation: shader generation and DevDist KeireTests build completed successfully
+(sky-space-gradient-build.log, 11 native steps after shader generation). The selected actual-kernel,
+planet-translation and atmosphere regressions pass 25 cases / 684 assertions in
+sky-space-gradient-tests.log. At equal local altitude, translated planets/cameras preserve the gradient;
+outside the planet's atmosphere its artistic gradient contribution is zero. Formatting and docs validation
+passed. The open editor still uses the preceding cloud-domain build; rendered transition acceptance,
+reference-ground appearance and full planetary environment ownership remain pending.
+
+Authored placement audit correction: the atmosphere alone already persists a double PlanetCenter in
+Rendering.keiresettings (AtmosphereRecord schema 3) and exposes XYZ controls bounded to +/-1e15 m.
+The missing authoring integration is a shared planet/environment placement and ownership contract,
+not absence of all atmosphere placement controls. RenderCamera.EnvironmentAnchor exists but no editor
+assignment was found; cloud/fog records are independently positioned. Preserve existing atmosphere
+centres when adding shared placement, migrate legacy zero-anchor records without moving their worlds,
+and do not silently reinterpret existing centres as relative offsets. Reset Earth-like Atmosphere
+currently resets centre too; any new planet-owned reset must preserve explicit planet placement.
+
+Distant-planet authoring safeguard implemented: Reset Atmosphere Appearance preserves centre, radius,
+atmosphere thickness and enabled state; resets only optical/appearance/quality values and clamps default
+density/absorption heights to the preserved thickness. Replaces misleading Earth-like reset that moved
+all planets back to the origin. Added editor regression for enabled/disabled distant planets with 100 m
+and 100 km atmospheres. KeireEditorTests DevDist build completed successfully (229 steps;
+atmosphere-placement-reset-build.log). All five selected atmosphere cases passed, with 89 assertions
+(atmosphere-placement-reset-tests.log). Formatting checks passed; interactive UI acceptance is pending.
+Ground/void help now explicitly
+states it does not color the space background. Shared planet ownership remains a separate required task.
+
+Appearance-reset persistence follow-up: six atmosphere editor cases / 102 assertions pass after a two-step
+incremental build (atmosphere-reset-history-build.log, atmosphere-reset-history-tests.log). The added case
+exercises the panel's Update/CommitEdit sequence, Undo/Redo and save/reload, preserving distant placement
+and unrelated cloud/star values. Its first run omitted CommitEdit and failed; correcting the fixture to
+match the panel resolved that test error. This is document-lifecycle coverage, not interactive UI acceptance.
+
+Interactive checkpoint: rebuilt KeireClient and tested maximized GravityAcceptanceQA. The initial link was
+blocked by the old running executable (LNK1104); after graceful closure, the one-step relink succeeded.
+At the saved distant Scene camera, the revised gradient no longer colors space, while the near-origin
+Game view retains its sky. Flat clouds still extend into the distant space view: planetary integration
+remains incomplete. Temporarily entering planet-centre X = 10000000000 restored the ground-level sky and
+reference ground at the far sample. Reset Atmosphere Appearance retained that X, radius 6360000 and
+thickness 100000. Undo reset, Undo placement and Save Environment restored the original rendering file
+byte-for-byte; GravityAcceptanceQA scene hash also remained unchanged (baseline hashes in
+sky-gradient-reset-qa-baseline.json). This verifies the reset interaction and a translated-atmosphere
+diagnostic, not shared environment ownership, planetary cloud shells or end-to-end travel.
+
+Radial fog batch in progress (not built or exposed in UI): FogSettings now has an explicit PlanetaryHeight
+mode. The native density evaluator accepts the existing atmosphere planet descriptor, subtracts its
+centre before measuring radial altitude, and retains the capped density below the base. Fog records
+preserve this mode; missing fields migrate to flat height and non-boolean values are rejected. Added
+opposite-axis surface tests at zero and +/-1e12 translations and record migration tests. Formatting and
+diff checks pass, but execution is pending. Finish GPU view packing, radial segment integration, uniform
+ABI compatibility, editor controls and export/round-trip coverage before building the complete batch.
+Do not treat the new native setting as a functioning rendered feature yet. Local boxes remain in the
+selected environment frame; rotating planet ownership remains required separately.
+
+Radial fog GPU draft (still unbuilt): view preparation computes observer altitude in double precision
+using the existing atmosphere descriptor; Controls.x = 2 selects radial height. The shader calculates
+local altitude changes with a difference-of-squares quotient instead of subtracting planet-sized float
+radii. Radial segments use bounded eight-point Gauss quadrature; flat segments retain their analytic
+integral, and exclusion weighting uses the same radial samples. Environment controls expose the mode.
+New generated volume shader ABI 11/12 retains the 1520-byte layout and distinguishes texture/buffer
+noise bindings through shared predicates. Outstanding before acceptance: legacy shader handling,
+radial quadrature accuracy tests including steep/tangent cases, GPU numerical/visual validation, export
+coverage and the complete batch build. Do not publish or describe this draft as ready.
+
+Radial-fog checkpoint: the production FogDensity.hlsli probe passes on Direct3D 12 and Vulkan
+(384000 output samples per backend, zero failure pixels; radial-fog-gpu-d3d12.log and
+radial-fog-gpu-vulkan.log). Coverage includes legacy local-box density, disabled density,
+125-metre observer altitude, opposite surface directions, and a steep radial segment
+(falloff 10/m across 100 m). Locally linear radial segments now use the analytic exponential
+average; this avoids losing thin endpoint layers to quadrature. Tangential curved segments
+still require numerical error coverage; these probes do not validate full rendered fog.
+
+The DevDist KeireTests batch is building (radial-fog-build.log). Before an editor launch, update
+Keire.ShaderGraph importer version 52 for regenerated ABI 11/12 artifacts and test both texture
+and buffer resource limits. Shared shader-library pins and source-less cooked legacy artifacts
+need an explicit compatibility policy; do not silently treat old shaders as radial-aware.
+Keep current editor/player acceptance pending until these checks and the native build pass.
+
+Tangent integration regression reproduced during the native build: a 10 km symmetric tangent segment,
+observer radius 6360125 m and height falloff 10/m has reference mean extinction
+0.00039980917645360286 (4096-panel CPU Simpson integration with cancellation-safe radial height).
+The production eight-point shader fails the 1% tolerance on Direct3D 12. An isolated four-subdivision,
+eight-point-per-subdivision draft passes the same GPU test. The first draft invocation accidentally
+used the production include directory and still failed; explicitly using Build/Validation/FogDensity
+as the sole include directory passes (radial-fog-tangent-isolated-d3d12.log). The draft is saved only in
+Build/Validation/FogDensity/FogDensity.hlsli; do not lose this fix before the next build. Fold it into
+production after the live native build finishes, format the radial block, and add the tangent test to
+Scripts/Tests/FogDensityProbe.hlsl. Further extreme-length/thin-layer tests remain necessary; four
+subdivisions are evidence for this case, not a universal integration error bound.
+
+Superseding the four-subdivision proposal: a double-precision range audit against 16384-panel Simpson
+integration finds relative errors of 2.3e-9 at 10 km, 6.0% at 100 km and effectively 100% at 1000 km
+for falloff 10/m (FogDensity/tangent-range-audit.json). Do NOT promote fixed four-way subdivision as
+the final correction. The maximum authored fog range is 1000000 m, so this is within the supported
+settings domain. Next integration design: clip the segment to the radial layer with meaningful density,
+split at closest approach and constant-density base crossings, integrate the capped core analytically,
+and quadrature only the remaining shell intervals. Keep stable radial-height differences rather than
+subtracting planet-sized squared radii. Validate surface, opposite surface, grazing, base-crossing,
+small-planet, translated-planet and space-to-surface rays before acceptance. Account for actual marcher
+segment lengths and view-step budgets rather than assuming every ray is subdivided enough.
+
+Documentation source validation passed (radial-fog-docs-check.log): 117 canonical guides, 10 navigation
+groups, 29 Mermaid diagrams, local links, 14 schema contracts and two graph-view contracts. This checks
+source integrity, not implementation completeness or visual planetary acceptance.
+
+Layer-clipped integration prototype now passes the 1000 km thin tangent case on both Direct3D 12 and
+Vulkan (radial-fog-tangent-clipped-d3d12.log, radial-fog-tangent-clipped-vulkan.log), and compiles to Metal.
+The draft at Build/Validation/FogDensity/FogDensity.hlsli clips at 24 scale heights, splits at closest
+approach and the constant-density core, integrates the core exactly and uses eight quadrature points
+per shell side. It preserves the analytic locally linear fast path. Production source remains unchanged
+until the current native build terminates. Remaining before promotion: full range matrix, asymmetric
+base-crossing and tiny-planet tests, source formatting, persistent GPU regression, importer bump and
+resource-limit contract tests. Metal runtime execution remains unavailable on this Windows machine.
+
+The corrected eight-case radial integration matrix passes on Direct3D 12 (radial-fog-matrix-d3d12.log).
+Scripts/Tests/PlanetaryFogIntegrationProbe.hlsl now preserves these cases as a permanent regression.
+Its first reference generator used Math.Max(0, height), selecting an integer overload in PowerShell;
+that rounded sub-metre heights and caused five false failures. Replacing it with an explicit floating
+height clamp corrected the references; all eight pass against the isolated clipped kernel. The new
+probe will fail against the still-unmodified production kernel until the draft is integrated after
+the active build. Cases: 1/10/100/1000 km tangent segments, capped-density base, asymmetric tangent,
+1000 m planet radius, and oblique descent. Re-run the permanent probe on both GPU backends after promotion.
+
+The permanent eight-case PlanetaryFogIntegrationProbe also passes on Vulkan against the isolated clipped draft (radial-fog-matrix-vulkan.log, 384000 samples, zero failure output). Renderer enabled checks use nonzero Fog.Controls.x, so mode 2 remains enabled in view preparation and volume composition. Production integration and native regression execution are still pending the active build.
+
+Orientation follow-up: the probe supports PROBE_ORIENTATION 0..5 for axis permutations and sign reversal.
+Orientation 4 (mirrored, rotated surface) passes on Direct3D 12 with the clipped draft. Selecting orientation
+per pixel triggered a DXC invalid SPIR-V OpSelect error even after simplifying the helper; selecting it at
+compile time avoids that compiler failure. Only orientations 0 and 4 have execution evidence so far; do not
+claim all six have run. No vendor/compiler code was modified. The persistent probe now defaults to orientation 0.
+
+All six compile-time orientations now pass the eight-case clipped-kernel regression on Direct3D 12 (orientation 0 matrix log, orientation 4 rotated-matrix log, and radial-fog-orientation-1/2/3/5.log). This covers 48 case/orientation combinations. Vulkan has the eight default-orientation cases; Metal has compilation evidence only. Production integration remains pending the native link.
+
+Production integration checkpoint: the first DevDist KeireTests build completed successfully (316 steps,
+radial-fog-build.log). Focused native execution passed 26/27 cases and 336/337 assertions; the failure
+was a stale negative fixture still rejecting ABI 11 after explicitly accepting it earlier in the same
+test. Corrected the unsupported boundary to 13 and added ABI 11 texture / ABI 12 buffer capacity tests.
+The clipped integrator is now in KeireCore/Shaders/FogDensity.hlsli; the permanent default-orientation
+probe passes against that production source on Direct3D 12 (radial-fog-production-matrix-d3d12.log).
+ShaderGraph importer advances 52 -> 53 to rebuild generated volume shaders; pinned shared-library
+contracts retain their explicit reviewed update requirement. Source-less legacy cooked shader handling
+is still unresolved and documented as unsupported for radial mode pending a deliberate compatibility policy.
+The next DevDist KeireTests build is active (radial-fog-clipped-build.log). Run focused regressions after
+it finishes, then build/test editor integration. Do not edit native inputs during the active build.
+
+New blocking radial exclusion finding: production radial-fog-exclusion-thin-d3d12.log fails. Reproduction
+is Build/Validation/FogDensity/exclusion-thin.hlsl: 1000 m radius, 10/m falloff, symmetric 1000 km tangent,
+soft exclusion centered at X=500000 with 1000000 m half extents and full soft edge. Symmetry requires
+retaining exactly half the unexcluded integral. Base clipped integration is nonzero, but the old uniform
+exclusion quadrature misses the layer and reference==0 returns zero fog. Fix by sampling exclusion
+retention inside the same layer-aware radial integral; retain separate handling of local-box density
+and the constant-density core. Do not accept radial mode until this interaction is covered. Current
+radial-fog-clipped-build remains active; avoid changing native inputs during it.
+
+The exclusion correction is prototyped in Build/Validation/FogDensity/FogDensity.hlsli while the native
+build remains active. SampleExcludedRadialHeight clips and splits the radial layer, then integrates
+retention at those samples. Local-box density keeps its separate path so boxes outside the radial layer
+are not discarded. The thin-layer reproduction passes Direct3D 12. New persistent
+Scripts/Tests/PlanetaryFogExclusionProbe.hlsl covers thin height alone, height plus a local box,
+zero-falloff height, and local-only density; all four pass on Vulkan against the draft
+(radial-fog-exclusion-matrix-vulkan.log). Integrate after the active build terminates, rerun both probes
+against production and both backends, and measure the bounded extra sampling cost before acceptance.
+The new draft currently adds weighted interval helpers ahead of SampleUnexcludedFogSegmentDensity and
+changes SampleFogSegmentDensity; the already-promoted unexcluded integrator itself is unchanged.
+
+Clipped native checkpoint: radial-fog-clipped-build.log completed successfully (14 native steps), and
+radial-fog-native-tests.log passes all 28 cases / 345 assertions after correcting the stale ABI fixture.
+The exclusion draft is now integrated into production FogDensity.hlsli. Both permanent probes pass
+against production on Direct3D 12 and Vulkan (PlanetaryFogIntegrationProbe-*.log and
+PlanetaryFogExclusionProbe-*.log). Added player-manifest radial mode round-trip and editor document
+Undo/Redo/save coverage preserving atmosphere placement and cloud settings.
+
+A combined DevDist batch is active: KeireTests, KeireEditorTests, then KeireClient, followed by focused
+native and editor test execution. Logs are radial-fog-final-<target>-build.log,
+radial-fog-final-native-tests.log and radial-fog-editor-tests.log. Do not change native inputs until
+that batch terminates. Editor is still closed. GPU probes establish numerical behavior only; visual
+and performance acceptance, source-less legacy cooked shaders, and complete planetary integration remain open.
+
+Cache-contract audit found an additional required change before editor launch: MaterialGraph.cpp derives
+its importer version from ShaderGraphGeneratedShaderVersion + 4. ShaderGraph importer 53 alone does not
+invalidate that legacy material path. After the current combined build finishes, bump
+ShaderGraphGeneratedShaderVersion 37 -> 38, update the docs schema-contract sentence, and rebuild affected
+consumers. Do not modify this public header during the running build. Source-less old compiled artifacts
+still need a separate explicit radial-mode compatibility policy. Production Metal compilation passes for
+both permanent probes; docs source validation passes after importer and ABI documentation corrections.
+
+Legacy production transport regression passes on Direct3D 12 after the exclusion integration (radial-fog-legacy-transport-d3d12.log, FogTransportProbe.hlsl, 384000 samples, zero failure alpha). It covers flat height profiles across step budgets, thin/soft local boxes, cloud overlap and oblique exclusions. This complements the new radial probes; it does not validate old compiled material binaries under radial mode.
+
+User steering: finish the current test checkpoint, then use maximum agents on master for a large code
+batch before returning to editor testing. This supersedes the earlier no-subagents preference. Three
+read-only planning agents were started (planet_ownership, planet_clouds, planet_daynight); no agent has
+edit authorization yet. Proposed split: ownership/runtime frames and transactional attachment; cloud
+shell geometry/weather/uniforms; celestial orientation and planet-aware navigation. Coordinator owns
+integration, project/editor/export and shared shader conflict resolution. Preserve the 12% remaining
+usage stop (11% finishing allowance). Latest usage check was 23% remaining.
+
+Build scheduling correction: deliberately terminated the earlier batch process tree at editor-test
+compilation after KeireTests had succeeded. Reason: known generator-version change would invalidate
+many of the 231 editor-test steps. Confirmed session 26544 terminal. Advanced generated shader version
+37 -> 38, updated its explicit fixtures and docs; importer remains 53, legacy material importer derives
+38+4. Documentation source validation passed. Resumed checkpoint build under session 55283 in order
+KeireEditorTests, KeireClient, KeireTests, then focused tests. Logs radial-fog-contract-<target>-build.log.
+Separate pre-version-bump material contract test session 77215 remains active (confirmed compiler child);
+its evidence describes the prior compiled generator version, not the pending version-38 build.
+
+Material contract run session 77215 is terminal: 57 cases, 51 passed / 6 failed, 2215/2219 assertions
+passed (radial-fog-material-contract-tests.log). This binary predates generator 38. Stale fixtures remain
+in ShaderGraphTests.cpp: importer expectation 48 must match ShaderGraph importer 53; code-shader
+importer expectation 11 must match 12; seven-texture material ABI expectation 10 must match 12.
+Correct after the current build or when its target is safely idle, then rebuild that test object.
+Four production-shader compile cases also exceeded their explicit 30000 ms timeout under concurrent
+native compilation. Do not simply increase the production timeout; rerun these cases without build
+contention and investigate compile complexity if they still fail. Candidate follow-up is explicit
+bounded loop control in weighted fog quadrature if inlining/unrolling is responsible; not yet measured.
+
+The resumed build recovered the expired PID-9252 workspace lock automatically; no manual lock removal
+was performed. Owner PID 25712 is the verified new batch, which is compiling editor tests (286 steps
+including the generator-header rebuild). Latest usage check: 22% remaining. Agents remain read-only/waiting
+until the user's requested current editor checkpoint is finished.
+
+Corrected the three stale ShaderGraphTests.cpp fixtures (Shader Graph importer 53, code-shader importer 12, buffer volume ABI 12). Verified the active EditorTests Premake sources do not include this KeireTests-only translation unit; no active editor-build input was changed. The queued KeireTests phase will compile it later. Formatting and scoped diff checks pass. Material compiler timeout cases still require an uncontended rerun.

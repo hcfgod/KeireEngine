@@ -2,6 +2,7 @@
 #include "KeireTests/TestSupport.h"
 
 #include "KeireInternal/Environment/SceneRuntimeEnvironmentAccess.h"
+#include "KeireInternal/Scenes/SceneRuntimeIdentityAccess.h"
 #include "KeireInternal/Spatial/FrameRegistry.h"
 #include "KeireInternal/Spatial/SceneRuntimeSpatialAccess.h"
 
@@ -13,6 +14,7 @@
 #include <string>
 #include <thread>
 #include <utility>
+#include <vector>
 
 namespace
 {
@@ -33,6 +35,7 @@ namespace
         bool RecursiveFixedRejected = false;
         bool ClockRestoreRejected = false;
         bool LightingRestoreRejected = false;
+        bool IdentityRestoreRejected = false;
         Keire::WeakRef<Keire::SceneRuntimeWorld> RecursiveWorld;
 
       protected:
@@ -74,6 +77,15 @@ namespace
                 catch (const std::logic_error&)
                 {
                     LightingRestoreRejected = true;
+                }
+                try
+                {
+                    using Identity = Keire::Detail::SceneRuntimeIdentityAccess;
+                    Identity::Rebind(*world, Identity::Capture(*world));
+                }
+                catch (const std::logic_error&)
+                {
+                    IdentityRestoreRejected = true;
                 }
             }
             if (ThrowOnFixed)
@@ -134,6 +146,100 @@ namespace
         Keire::Ref<Keire::SceneRuntimeWorld> World;
     };
 } // namespace
+
+TEST_CASE("Runtime instance identities distinguish equal scene assets and survive replacement and retirement")
+{
+    using Identity = Keire::Detail::SceneRuntimeIdentityAccess;
+    RuntimeWorldFixture fixture;
+    Keire::EntityId root;
+    const auto first = fixture.Session("Identity", &root);
+    const auto firstHandle = fixture.World->Adopt(first);
+    const auto second = Keire::CreateRef<Keire::SceneRuntimeSession>(first->EditScene(), fixture.Assets);
+    second->Play();
+    const auto secondHandle = fixture.World->Adopt(second);
+    REQUIRE(firstHandle != secondHandle);
+    CHECK(fixture.World->Asset(firstHandle) == fixture.World->Asset(secondHandle));
+    const auto original = Identity::Capture(*fixture.World);
+    REQUIRE(original.size() == 2);
+    CHECK(original[0].Instance);
+    CHECK(original[1].Instance);
+    CHECK(original[0].Instance != original[1].Instance);
+    CHECK_THROWS_AS((void)fixture.World->Adopt(first), std::invalid_argument);
+    CHECK(Identity::Capture(*fixture.World) == original);
+
+    const auto previousEntity = first->RuntimeScene()->FindEntity(root);
+    first->ReplaceRuntime(first->RuntimeScene()->Snapshot());
+    CHECK_FALSE(previousEntity);
+    CHECK(Identity::Capture(*fixture.World) == original);
+    REQUIRE(fixture.World->MakePersistent(first->RuntimeScene()->FindEntity(root)));
+    REQUIRE(fixture.World->SetActive(secondHandle));
+    fixture.World->Process();
+    REQUIRE(fixture.World->Unload(firstHandle));
+    fixture.World->Process();
+    CHECK_FALSE(fixture.World->IsLoaded(firstHandle));
+    CHECK(Identity::Capture(*fixture.World) == original);
+}
+
+TEST_CASE("Runtime instance identity rebinding validates the complete set before mutation")
+{
+    using Identity = Keire::Detail::SceneRuntimeIdentityAccess;
+    RuntimeWorldFixture fixture;
+    REQUIRE(fixture.World->Adopt(fixture.Session("First")));
+    REQUIRE(fixture.World->Adopt(fixture.Session("Second")));
+    const auto original = Identity::Capture(*fixture.World);
+    auto replacement = original;
+    for (auto& binding : replacement)
+    {
+        binding.Instance = Keire::AssetId::Generate();
+    }
+    REQUIRE_NOTHROW(Identity::Rebind(*fixture.World, replacement));
+    CHECK(Identity::Capture(*fixture.World) == replacement);
+    for (int invalidCase = 0; invalidCase < 5; ++invalidCase)
+    {
+        CAPTURE(invalidCase);
+        auto invalid = original;
+        if (invalidCase == 0)
+        {
+            invalid.pop_back();
+        }
+        else if (invalidCase == 1)
+        {
+            invalid.back().Instance = invalid.front().Instance;
+        }
+        else if (invalidCase == 2)
+        {
+            invalid.back().Handle = invalid.front().Handle;
+        }
+        else if (invalidCase == 3)
+        {
+            invalid.back().Handle = {};
+        }
+        else
+        {
+            invalid.back().Instance = {};
+        }
+        CHECK_THROWS_AS(Identity::Rebind(*fixture.World, invalid), std::invalid_argument);
+        CHECK(Identity::Capture(*fixture.World) == replacement);
+    }
+    bool ownerRejected = false;
+    std::thread other(
+        [&]
+        {
+            try
+            {
+                Identity::Rebind(*fixture.World, original);
+            }
+            catch (const std::logic_error&)
+            {
+                ownerRejected = true;
+            }
+        });
+    other.join();
+    CHECK(ownerRejected);
+    CHECK(Identity::Capture(*fixture.World) == replacement);
+    fixture.World->Close();
+    CHECK_THROWS_AS((void)Identity::Capture(*fixture.World), std::logic_error);
+}
 
 TEST_CASE("Runtime world pause lighting restore is isolated atomic and owner-thread bound")
 {
@@ -355,6 +461,7 @@ TEST_CASE("Runtime world pause and step invoke every scene exactly once")
     CHECK(probes.front()->RecursiveFixedRejected);
     CHECK(probes.front()->ClockRestoreRejected);
     CHECK(probes.front()->LightingRestoreRejected);
+    CHECK(probes.front()->IdentityRestoreRejected);
     for (const auto& probe : probes)
     {
         CHECK(probe->FixedCalls == 3);

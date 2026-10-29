@@ -3,6 +3,7 @@
 #include "KeireInternal/Environment/EnvironmentTimeSettingsStore.h"
 #include "KeireInternal/ProjectFileTransaction.h"
 #include "KeireInternal/ProjectSettingsSerialization.h"
+#include "KeireInternal/Spatial/PlanetProjectSettingsStore.h"
 
 #include <array>
 #include <cmath>
@@ -20,7 +21,8 @@ namespace KeireEditor
     {
         constexpr std::size_t MaximumOriginalSettingsBytes = 1024U * 1024U;
         constexpr std::array SettingsNames{"Rendering.keiresettings", "Authoring.keiresettings",
-                                           "EnvironmentTime.keiresettings", "EnvironmentLighting.keiresettings"};
+                                           "EnvironmentTime.keiresettings", "EnvironmentLighting.keiresettings",
+                                           "Planets.keiresettings"};
 
         void Validate(const Keire::RenderEnvironmentSettings& settings)
         {
@@ -113,7 +115,8 @@ namespace KeireEditor
         Keire::ValidateProjectAuthoringSettings(authoringSettings);
         const auto environmentTime = Keire::Detail::EnvironmentTimeSettingsStore::Load(projectRoot);
         auto environmentLighting = Keire::Detail::EnvironmentLightingSettingsStore::Load(projectRoot);
-        auto saved = Snapshot{settings, authoringSettings, environmentTime, environmentLighting};
+        auto planets = Keire::Detail::PlanetProjectSettingsStore::Load(projectRoot);
+        auto saved = Snapshot{settings, authoringSettings, environmentTime, environmentLighting, planets};
         if (CaptureFiles(projectRoot) != baseline)
         {
             throw std::runtime_error("Project settings changed while opening. Retry opening the project.");
@@ -124,6 +127,7 @@ namespace KeireEditor
         m_AuthoringSettings = std::move(authoringSettings);
         m_EnvironmentTime = environmentTime;
         m_EnvironmentLighting = std::move(environmentLighting);
+        m_Planets = std::move(planets);
         m_Undo = std::move(undo);
         m_SavedState = std::move(saved);
         m_FileBaseline = std::move(baseline);
@@ -136,6 +140,7 @@ namespace KeireEditor
         m_AuthoringSettings = Keire::DefaultProjectAuthoringSettings();
         m_EnvironmentTime = {};
         m_EnvironmentLighting = Keire::Detail::EnvironmentLightingProfile{};
+        m_Planets = {};
         m_EditBaseline.reset();
         m_SavedState.reset();
         m_FileBaseline = {};
@@ -208,6 +213,25 @@ namespace KeireEditor
         RefreshDirty();
     }
 
+    void ProjectSettingsDocument::UpdatePlanets(Keire::Detail::PlanetProjectSettings settings)
+    {
+        if (!Opened())
+        {
+            throw std::logic_error("ProjectSettingsDocument is closed.");
+        }
+        Keire::Detail::ValidatePlanetProjectSettings(settings);
+        if (settings == m_Planets)
+        {
+            return;
+        }
+        if (!m_EditBaseline)
+        {
+            m_EditBaseline = Current();
+        }
+        m_Planets = std::move(settings);
+        RefreshDirty();
+    }
+
     void ProjectSettingsDocument::CommitEdit(const std::string_view name)
     {
         if (!m_EditBaseline)
@@ -256,6 +280,12 @@ namespace KeireEditor
         CommitEdit("Reset Environment Lighting");
     }
 
+    void ProjectSettingsDocument::ResetPlanets()
+    {
+        UpdatePlanets({});
+        CommitEdit("Reset Planet Settings");
+    }
+
     void ProjectSettingsDocument::Save()
     {
         if (!Opened())
@@ -265,7 +295,8 @@ namespace KeireEditor
         const std::array contents{Keire::Detail::SerializeRenderEnvironmentSettings(m_Settings),
                                   Keire::Detail::SerializeProjectAuthoringSettings(m_AuthoringSettings),
                                   Keire::Detail::EnvironmentTimeSettingsStore::Serialize(m_EnvironmentTime),
-                                  Keire::Detail::EnvironmentLightingSettingsStore::Serialize(m_EnvironmentLighting)};
+                                  Keire::Detail::EnvironmentLightingSettingsStore::Serialize(m_EnvironmentLighting),
+                                  Keire::Detail::PlanetProjectSettingsStore::Serialize(m_Planets)};
         std::filesystem::create_directories(m_ProjectRoot);
         // Recover an interrupted publication before comparing files with the last accepted baseline.
         // The document keeps the user's pending values while recovery restores the on-disk baseline.
@@ -328,10 +359,12 @@ namespace KeireEditor
         static_assert(std::is_nothrow_move_constructible_v<Snapshot>);
         static_assert(std::is_nothrow_move_assignable_v<Keire::ProjectAuthoringSettings>);
         static_assert(std::is_nothrow_move_assignable_v<Keire::Detail::EnvironmentLightingProfile>);
+        static_assert(std::is_nothrow_move_assignable_v<Keire::Detail::PlanetProjectSettings>);
         m_Settings = settings.Rendering;
         m_AuthoringSettings = std::move(settings.Authoring);
         m_EnvironmentTime = settings.EnvironmentTime;
         m_EnvironmentLighting = std::move(settings.EnvironmentLighting);
+        m_Planets = std::move(settings.Planets);
         m_EditBaseline.reset();
         RefreshDirty();
     }
@@ -341,6 +374,6 @@ namespace KeireEditor
         m_Dirty = !m_SavedState || m_Settings != m_SavedState->Rendering ||
                   m_AuthoringSettings != m_SavedState->Authoring ||
                   m_EnvironmentTime != m_SavedState->EnvironmentTime ||
-                  m_EnvironmentLighting != m_SavedState->EnvironmentLighting;
+                  m_EnvironmentLighting != m_SavedState->EnvironmentLighting || m_Planets != m_SavedState->Planets;
     }
 } // namespace KeireEditor

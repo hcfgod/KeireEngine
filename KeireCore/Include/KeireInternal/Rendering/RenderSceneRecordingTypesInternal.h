@@ -9,6 +9,7 @@
 #include "Keire/Rendering/RenderSystem.h"
 #include "Keire/Scenes/Scene.h"
 #include "KeireInternal/Rendering/GpuVisibilityCandidateInternal.h"
+#include "KeireInternal/Rendering/PlanetEnvironmentHistory.h"
 #include "KeireInternal/Rendering/SpatialLightingInternal.h"
 
 #include <SDL3/SDL.h>
@@ -161,13 +162,17 @@ namespace Keire::RenderBackend
         BloomSettings Bloom;
         StarFieldSettings Stars;
         std::optional<double> EnvironmentSecondsPerDay;
+        Vector3d WorldOrigin;
+        Vector3d EnvironmentAnchor;
+        std::optional<PlanetEnvironmentHistoryKey> PlanetEnvironment;
 
         [[nodiscard]] bool HasContinuousEnvironment(const CameraMotionHistoryEntry& next) const noexcept
         {
             return EnvironmentSource == next.EnvironmentSource && EnvironmentRevision == next.EnvironmentRevision &&
                    EnvironmentDirectional == next.EnvironmentDirectional && Atmosphere == next.Atmosphere &&
                    Clouds == next.Clouds && Bloom == next.Bloom && Stars == next.Stars &&
-                   EnvironmentSecondsPerDay == next.EnvironmentSecondsPerDay;
+                   EnvironmentSecondsPerDay == next.EnvironmentSecondsPerDay &&
+                   EnvironmentAnchor == next.EnvironmentAnchor && PlanetEnvironment == next.PlanetEnvironment;
         }
     };
 

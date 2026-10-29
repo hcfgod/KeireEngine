@@ -1189,9 +1189,17 @@ VertexOutput VSMain(VertexInput input, const uint instanceId : SV_InstanceID)
     InstanceData instance;
     instance.Model = float4x4(1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1);
     instance.NormalMatrix = instance.Model;
+#if defined(KEIRE_PASS_VFX_BILLBOARD) || defined(KEIRE_PASS_VFX_RIBBON)
+    instance.Model = Model;
+#endif
     instance.Tint = 1.0F.xxxx;
 #else
-    const InstanceData instance = Instances[InstanceParameters.x + instanceId];
+    InstanceData instance = Instances[InstanceParameters.x + instanceId];
+    if (InstanceParameters.y != 0U)
+    {
+        // GPU VFX instances retain simulation coordinates; Model supplies only the render-frame translation.
+        instance.Model = mul(Model, instance.Model);
+    }
 #endif
     float4 world = mul(instance.Model, float4(input.Position, 1.0F));
 )HLSL";

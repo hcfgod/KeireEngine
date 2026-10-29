@@ -53,6 +53,12 @@ namespace Keire::Detail
         {
             throw std::invalid_argument("Environment lighting requires a live source and nonzero revision.");
         }
+        if (snapshot->DirectionFrame != EnvironmentDirectionalFrame::LegacyWorld &&
+            snapshot->DirectionFrame != EnvironmentDirectionalFrame::PlanetFixed &&
+            snapshot->DirectionFrame != EnvironmentDirectionalFrame::InertialRoot)
+        {
+            throw std::invalid_argument("Unknown environment directional reference frame.");
+        }
         if (snapshot->Ambient)
         {
             ValidateEnvironmentAmbient(*snapshot->Ambient);

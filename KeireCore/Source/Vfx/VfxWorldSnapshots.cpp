@@ -70,6 +70,7 @@ namespace Keire
         if (maximumParticles > VfxRenderSnapshot::MaximumParticles)
             throw std::invalid_argument("VFX render snapshot exceeds the supported particle bound.");
         VfxRenderSnapshot result;
+        result.m_WorldOrigin = m_Impl->Specification.WorldOrigin;
         result.m_Revision = m_Impl->SnapshotRevision;
         result.m_WorldId = m_Impl->WorldId;
         result.m_ResetRevision = m_Impl->ResetRevision;
@@ -221,6 +222,9 @@ namespace Keire
         writer.Unsigned(static_cast<std::uint8_t>(m_Impl->Specification.Backend));
         writer.Unsigned(static_cast<std::uint32_t>(m_Impl->Effects.size()));
         writer.Unsigned(static_cast<std::uint32_t>(m_Impl->Particles.size()));
+        writer.Double(m_Impl->Specification.WorldOrigin.X);
+        writer.Double(m_Impl->Specification.WorldOrigin.Y);
+        writer.Double(m_Impl->Specification.WorldOrigin.Z);
         writer.Unsigned(m_Impl->SnapshotRevision);
         writer.Unsigned(m_Impl->SimulationStepRevision);
         writer.Unsigned(m_Impl->ResetRevision);
@@ -307,7 +311,8 @@ namespace Keire
         for (const auto expected : VfxCheckpointMagic)
             if (reader.Unsigned<std::uint8_t>() != static_cast<std::uint8_t>(expected))
                 throw std::runtime_error("VFX checkpoint signature is invalid.");
-        if (reader.Unsigned<std::uint32_t>() != VfxCheckpointVersion)
+        const auto version = reader.Unsigned<std::uint32_t>();
+        if (version != 1U && version != VfxCheckpointVersion)
             throw std::runtime_error("VFX checkpoint version is unsupported.");
         const auto backend = static_cast<VfxBackend>(reader.Unsigned<std::uint8_t>());
         if (backend != m_Impl->Specification.Backend || reader.Unsigned<std::uint32_t>() != m_Impl->Effects.size() ||
@@ -316,6 +321,12 @@ namespace Keire
             throw std::runtime_error("VFX checkpoint does not match the active world configuration.");
         }
 
+        const Vector3d origin =
+            version >= 2U ? Vector3d{reader.Double(), reader.Double(), reader.Double()} : Vector3d{};
+        if (!Math::IsFinite(origin) || origin != m_Impl->Specification.WorldOrigin)
+        {
+            throw std::runtime_error("VFX checkpoint origin does not match the active simulation frame.");
+        }
         const auto snapshotRevision = reader.Unsigned<std::uint64_t>();
         const auto simulationStepRevision = reader.Unsigned<std::uint64_t>();
         const auto resetRevision = reader.Unsigned<std::uint64_t>();

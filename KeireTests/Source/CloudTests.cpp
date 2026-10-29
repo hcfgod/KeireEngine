@@ -2,12 +2,42 @@
 #include "KeireInternal/Environment/CloudEvaluation.h"
 #include "KeireInternal/Environment/CloudRecord.h"
 #include "KeireInternal/Rendering/CloudUniforms.h"
+#include "KeireInternal/Rendering/CloudVolumePacket.h"
 
 #include <doctest/doctest.h>
 
 #include <cmath>
 #include <cstddef>
 #include <limits>
+#include <stdexcept>
+
+TEST_CASE("Cloud capture preserves weather coordinates across render origin changes")
+{
+    Keire::VolumetricCloudSettings settings;
+    settings.Enabled = true;
+    Keire::RenderCamera absoluteCamera;
+    absoluteCamera.View =
+        Keire::Math::Inverse(Keire::Math::ComposeTransform({1024.25F, 128.5F, -512.0F}, {}, {1.0F, 1.0F, 1.0F}));
+    const auto expected = Keire::RenderBackend::CaptureCloudVolume(absoluteCamera, settings, {});
+    Keire::RenderCamera rebasedCamera;
+    rebasedCamera.View =
+        Keire::Math::Inverse(Keire::Math::ComposeTransform({0.25F, 0.5F, 0.0F}, {}, {1.0F, 1.0F, 1.0F}));
+    for (const double distance : {0.0, 1e15})
+    {
+        const Keire::Vector3d anchor{distance, distance, distance};
+        const Keire::Vector3d origin{distance + 1024.0, distance + 128.0, distance - 512.0};
+        const auto actual =
+            Keire::RenderBackend::CaptureCloudVolume(rebasedCamera, settings, {}, false, origin, anchor);
+        CHECK(actual.Geometry == expected.Geometry);
+        CHECK(actual.PatternOrigin == expected.PatternOrigin);
+        CHECK(actual.Quality == expected.Quality);
+        const auto atBase = Keire::RenderBackend::CaptureCloudVolume(rebasedCamera, settings, {}, true, origin, anchor);
+        CHECK(atBase.Geometry[0] == 0.0F);
+    }
+    CHECK_THROWS_AS(Keire::RenderBackend::CaptureCloudVolume(rebasedCamera, settings, {}, false,
+                                                             {std::numeric_limits<double>::infinity(), 0.0, 0.0}),
+                    std::invalid_argument);
+}
 
 TEST_CASE("Cloud sheets default disabled and pack a bounded explicit GPU contract")
 {
@@ -90,7 +120,7 @@ TEST_CASE("Cloud evaluation rejects invalid disabled layers and unsupported coor
     {
         CHECK_THROWS_AS((void)Keire::RenderBackend::BuildCloudUniforms(settings, {0.0, 0.0, 0.0}, invalid),
                         std::invalid_argument);
-        CHECK_THROWS_AS((void)Keire::RenderBackend::BuildCloudUniforms(settings, {invalid, 0.0, 0.0}, 0.0),
+        CHECK_THROWS_AS((void)Keire::RenderBackend::BuildCloudUniforms(settings, {invalid * 1000.0, 0.0, 0.0}, 0.0),
                         std::invalid_argument);
         CHECK_THROWS_AS((void)Keire::RenderBackend::BuildCloudUniforms(settings, {0.0, invalid, 0.0}, 0.0),
                         std::invalid_argument);
@@ -184,7 +214,7 @@ TEST_CASE("Cloud artistic pattern is bounded and repeats across both seams")
 TEST_CASE("Cloud owner-provided wrapped displacement matches bounded elapsed evaluation")
 {
     CHECK(Keire::RenderBackend::CloudObserverWithinLocalDomain({1.0e9, -1.0e9, 0.0}));
-    CHECK_FALSE(Keire::RenderBackend::CloudObserverWithinLocalDomain({1.0e9 + 1.0, 0.0, 0.0}));
+    CHECK_FALSE(Keire::RenderBackend::CloudObserverWithinLocalDomain({1.0e12 + 1.0, 0.0, 0.0}));
     CHECK_FALSE(
         Keire::RenderBackend::CloudObserverWithinLocalDomain({0.0, std::numeric_limits<double>::quiet_NaN(), 0.0}));
     Keire::CloudSettings settings;
@@ -201,4 +231,24 @@ TEST_CASE("Cloud owner-provided wrapped displacement matches bounded elapsed eva
         CHECK_THROWS_AS((void)Keire::RenderBackend::BuildCloudUniforms(settings, {0.0, 0.0, 0.0}, displacement),
                         std::invalid_argument);
     }
+}
+
+TEST_CASE("Layered clouds preserve wrapped phases at distant horizontal coordinates")
+{
+    Keire::CloudSettings settings;
+    settings.Layers[0].PatternSizeMeters = 1000.0;
+    settings.Layers[0].WindMetersPerSecond = {};
+    for (const double distance : {1.0e10, -1.0e10, 1.0e12 - 1.0, -1.0e12 + 1.0})
+    {
+        CAPTURE(distance);
+        const double x = distance + 0.125;
+        const double z = distance - 0.25;
+        REQUIRE(Keire::RenderBackend::CloudObserverWithinLocalDomain({x, 100.0, z}));
+        const auto distant = Keire::RenderBackend::BuildCloudUniforms(settings, {x, 100.0, z}, 0.0);
+        const auto local = Keire::RenderBackend::BuildCloudUniforms(
+            settings, {std::fmod(x, 1000.0), 100.0, std::fmod(z, 1000.0)}, 0.0);
+        CHECK(distant.Layers[0].Pattern == local.Layers[0].Pattern);
+        CHECK(distant.Layers[0].Geometry == local.Layers[0].Geometry);
+    }
+    CHECK_FALSE(Keire::RenderBackend::CloudObserverWithinLocalDomain({0.0, 1.0e9 + 1.0, 0.0}));
 }

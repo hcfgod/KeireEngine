@@ -107,7 +107,7 @@ namespace Keire
         if (!entity)
             return false;
         const auto component = entity.GetComponent<TransformComponent>();
-        component->SetLocalPosition(transform.Position);
+        component->SetLocalPositionPrecise(transform.Position);
         component->SetLocalRotation(transform.Rotation);
         component->SetLocalScale(transform.Scale);
         return true;

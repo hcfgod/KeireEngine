@@ -151,7 +151,7 @@ TEST_CASE("scene document multi-edit applies common component changes atomically
     document.SetComponentsProperties(selection, Keire::PointLightComponent::StaticType(),
                                      {{"intensity", 19.0}, {"range", 23.0}});
     document.SetComponentsEnabled(selection, Keire::PointLightComponent::StaticType(), false);
-    document.SetTransforms(selection, {.Position = Keire::Vector3{4.0F, 5.0F, 6.0F}});
+    document.SetTransforms(selection, {.Position = Keire::Vector3d{4.0, 5.0, 6.0}});
     document.SetEntitiesActive(selection, false);
 
     for (const auto id : selection)
@@ -166,6 +166,19 @@ TEST_CASE("scene document multi-edit applies common component changes atomically
         CHECK_FALSE(entity.ActiveSelf());
         CHECK(entity.GetComponent<Keire::TransformComponent>()->LocalPosition() == Keire::Vector3{4.0F, 5.0F, 6.0F});
     }
+
+    const Keire::Vector3d distant{1e15 + 0.125, -1e15 - 0.25, 6371000.001};
+    document.SetTransforms(selection, {.Position = distant});
+    for (const auto id : selection)
+    {
+        CHECK(
+            scene->FindEntity(Keire::EntityId(id)).GetComponent<Keire::TransformComponent>()->LocalPositionPrecise() ==
+            distant);
+    }
+    CHECK_THROWS_AS(
+        document.SetTransforms(std::array{first.Value(), Keire::AssetId::Generate()}, {.Position = Keire::Vector3d{}}),
+        std::invalid_argument);
+    CHECK(scene->FindEntity(first).GetComponent<Keire::TransformComponent>()->LocalPositionPrecise() == distant);
 
     CHECK_THROWS_AS(document.SetComponentsProperty(std::array{first.Value(), withoutLight.Value()},
                                                    Keire::PointLightComponent::StaticType(), "intensity", 3.0),
@@ -244,5 +257,27 @@ TEST_CASE("scene document multi-edit applies common component changes atomically
         CHECK(scene->FindEntity(Keire::EntityId(id)).GetComponent<Keire::PointLightComponent>()->Intensity() ==
               doctest::Approx(1.0F));
     }
+    document.Close();
+}
+
+TEST_CASE("asset creation preserves distant placement through scene serialization")
+{
+    KeireEditor::SceneDocument document;
+    auto scene = Keire::CreateRef<Keire::Scene>(Keire::AssetId::Generate(),
+                                                Keire::SceneAsset::EmptyDefinition("Distant placement"));
+    document.Open(scene);
+    const Keire::Vector3d position{1.0e15 + 0.25, 17.5, -1.0e15 + 0.5};
+    const auto mesh =
+        KeireEditor::CreateImportedModel(document, "Distant mesh", Keire::AssetId::Generate(), position, {});
+    const auto emitter =
+        KeireEditor::CreateDroppedVfxEmitter(document, "Distant emitter", Keire::AssetId::Generate(), position);
+    auto restored = Keire::CreateRef<Keire::Scene>(Keire::AssetId::Generate(), scene->Snapshot());
+    for (const auto id : {mesh, emitter})
+    {
+        const auto transform = restored->FindEntity(id).GetComponent<Keire::TransformComponent>();
+        REQUIRE(transform);
+        CHECK(transform->WorldPositionPrecise() == position);
+    }
+    restored->Close();
     document.Close();
 }

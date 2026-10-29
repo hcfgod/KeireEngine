@@ -46,7 +46,8 @@ namespace
                                 Keire::Ref<Keire::SkeletonAsset> sourceSkeleton = {},
                                 Keire::Ref<Keire::AnimationClipAsset> sourceClip = {},
                                 Keire::Ref<Keire::SkinnedMeshAsset> sourceSkin = {},
-                                Keire::Ref<Keire::MeshAsset> sourceMesh = {}, const float sourceSpeed = 1.0F)
+                                Keire::Ref<Keire::MeshAsset> sourceMesh = {}, const float sourceSpeed = 1.0F,
+                                const Keire::Vector3d worldOffset = {})
             : SourceSkeleton(std::move(sourceSkeleton)), SourceClip(std::move(sourceClip)),
               SourceSkin(std::move(sourceSkin)), SourceMesh(std::move(sourceMesh)), SourceSpeed(sourceSpeed)
         {
@@ -57,6 +58,13 @@ namespace
                 {0, (airborneRight ? -.7F : -.45F) + supportElevation, 0});
             Floor.AddComponent<Keire::ColliderComponent>()->SetHalfExtent({5, .5F, 5});
             AddAnimation(airborneRight);
+            for (const auto& entity : {Character, Floor})
+            {
+                const auto transform = entity.GetComponent<Keire::TransformComponent>();
+                const auto position = transform->WorldPositionPrecise();
+                transform->SetWorldPositionPrecise(
+                    {position.X + worldOffset.X, position.Y + worldOffset.Y, position.Z + worldOffset.Z});
+            }
             Keire::PhysicsSystemSpecification physics;
             physics.Mode = Keire::PhysicsMode::Enabled;
             if (restrictLayers)
@@ -1917,4 +1925,68 @@ TEST_CASE("Swing penetration preserves clearance without reacquiring a fading fo
         AwaitLog(logs.Directory / logs.Config.CoreLogFile, "swing-replant-end", replantStart).substr(replantStart);
     CHECK(replanted.find("planted forced=") != std::string::npos);
     CHECK(fixture.FootY() >= .15F - .000001F);
+}
+
+TEST_CASE("Foot grounding preserves support when distant parent translations cancel")
+{
+    SupportFixture fixture;
+    for (int tick = 0; tick < 90; ++tick)
+    {
+        fixture.Tick();
+    }
+    const float baselineFootY = fixture.FootY();
+    auto scene = fixture.Session->RuntimeScene();
+    auto parent = scene->CreateEntity("Distant grounding parent");
+    parent.GetComponent<Keire::TransformComponent>()->SetLocalPositionPrecise({1.0e12, 0.0, -1.0e12});
+    for (const auto entityId : {fixture.Character.Id(), fixture.Floor.Id()})
+    {
+        auto entity = scene->FindEntity(entityId);
+        const auto transform = entity.GetComponent<Keire::TransformComponent>();
+        const auto originalPosition = transform->WorldPositionPrecise();
+        entity.SetParent(parent, false);
+        transform->SetWorldPositionPrecise(originalPosition);
+        CHECK(transform->WorldPositionPrecise() == originalPosition);
+    }
+    for (int tick = 0; tick < 90; ++tick)
+    {
+        fixture.Tick();
+    }
+    INFO(fixture.Animator->RuntimeDiagnostic());
+    CHECK(fixture.Animator->RuntimeDiagnostic().empty());
+    CHECK(fixture.FootY() == doctest::Approx(baselineFootY).epsilon(0.001));
+    const auto floor = scene->FindEntity(fixture.Floor.Id());
+    floor.GetComponent<Keire::TransformComponent>()->SetWorldPositionPrecise({0.0, -0.35, 0.0});
+    for (int tick = 0; tick < 90; ++tick)
+    {
+        fixture.Tick();
+    }
+    CHECK(fixture.Animator->RuntimeDiagnostic().empty());
+    CHECK(fixture.FootY() > baselineFootY + 0.05F);
+}
+
+TEST_CASE("Foot grounding follows moving support in a distant physics region")
+{
+    const Keire::Vector3d offset{1.0e12, 0.0, -1.0e12};
+    SupportFixture fixture(false, false, 0.0F, {}, {}, {}, {}, 1.0F, offset);
+    REQUIRE(fixture.Session->Physics()->WorldOrigin() != Keire::Vector3d{});
+    for (int tick = 0; tick < 90; ++tick)
+    {
+        fixture.Tick();
+    }
+    INFO(fixture.Animator->RuntimeDiagnostic());
+    REQUIRE(fixture.Animator->RuntimeDiagnostic().empty());
+    const float initialFootY = fixture.FootY();
+    CHECK(initialFootY >= 0.049F);
+    fixture.Session->RebasePhysicsOrigin({offset.X + 128.0, 64.0, offset.Z - 128.0});
+    fixture.Tick();
+    CHECK(fixture.FootY() == doctest::Approx(initialFootY).epsilon(0.001));
+    const auto support =
+        fixture.Session->RuntimeScene()->FindEntity(fixture.Floor.Id()).GetComponent<Keire::TransformComponent>();
+    support->SetWorldPositionPrecise({offset.X, -0.35, offset.Z});
+    for (int tick = 0; tick < 90; ++tick)
+    {
+        fixture.Tick();
+    }
+    CHECK(fixture.Animator->RuntimeDiagnostic().empty());
+    CHECK(fixture.FootY() > initialFootY + 0.05F);
 }

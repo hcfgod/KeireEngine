@@ -256,11 +256,12 @@ namespace Keire::RenderBackend
                          definition.UserResourceSlots + (definition.ReceivesShadows ? 2U : 0U) +
                          (definition.UsesImageBasedLighting ? 2U : 0U) +
                          (definition.SpatialLightingAbiVersion >= 2U ? 5U : 0U) +
-                         (definition.VolumeLightingAbiVersion >= 2U ? 1U : 0U);
-        information.num_storage_buffers = !vertex ? (definition.UsesForwardPlus ? 3U : 0U) +
-                                                        (definition.SpatialLightingAbiVersion == 3U ? 1U : 0U) +
-                                                        definition.UserReadOnlyBuffers
-                                                  : 0U;
+                         (VolumeLightingUsesNoiseTexture(definition.VolumeLightingAbiVersion) ? 1U : 0U);
+        information.num_storage_buffers =
+            !vertex ? (definition.UsesForwardPlus ? 3U : 0U) + (definition.SpatialLightingAbiVersion == 3U ? 1U : 0U) +
+                          (VolumeLightingUsesNoiseBuffer(definition.VolumeLightingAbiVersion) ? 1U : 0U) +
+                          definition.UserReadOnlyBuffers
+                    : 0U;
         if (vertex && definition.UsesInstancing)
             information.num_storage_buffers = 1U;
         if (vertex && (passRole == "vfxBillboard" || passRole == "vfxRibbon"))

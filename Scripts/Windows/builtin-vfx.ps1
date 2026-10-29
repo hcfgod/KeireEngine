@@ -4,7 +4,8 @@ $Root = (Resolve-Path (Join-Path $PSScriptRoot "../..")).Path
 $Compiler = Join-Path $Root "Build/Tools/ShaderCompiler/KeireShaderCompiler.exe"
 $Source = Join-Path $Root "KeireCore/Shaders/BuiltinVfx.hlsl"
 $VisibilitySource = Join-Path $Root "KeireCore/Shaders/BuiltinVfxVisibility.hlsl"
-$Includes = @("CloudVolumeView.hlsli", "CloudVolume.hlsli", "AtmosphereMedium.hlsli", "CloudVolumeGeometry.hlsli", "CloudVolumeLighting.hlsli",
+$Includes = @("CloudVolumeView.hlsli", "CloudVolume.hlsli", "CloudNoiseBuffer.hlsli", "AtmosphereMedium.hlsli", "CloudVolumeGeometry.hlsli", "CloudVolumeLighting.hlsli",
+              "PlanetaryCloudIntersections.hlsli", "PlanetaryCloudGeometry.hlsli", "PlanetaryCloudWeather.hlsli",
               "CloudVolumeDensity.hlsli", "CloudWeather.hlsli", "FogDensity.hlsli", "FogExclusion.hlsli", "FogRayIntervals.hlsli", "VolumeSurfaceComposition.hlsli", "VolumeTransport.hlsli") |
     ForEach-Object { Join-Path $Root "KeireCore/Shaders/$_" }
 $GeneratedDirectory = Join-Path $Root "Build/Generated/Keire"

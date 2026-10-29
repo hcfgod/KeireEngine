@@ -30,7 +30,7 @@ namespace Keire
     {
         AssetImporterRegistration result;
         result.Name = "Keire.ShaderGraph";
-        result.Version = 52; // Rebuild embedded atmosphere transport with stable distant sphere intersections.
+        result.Version = 54; // Rebuild volume ABI 13/14 shaders with planet-fixed cloud shell coordinates.
         result.Type = ShaderGraphAsset::StaticType();
         result.Extensions = {".keireshadergraph"};
         result.ContextualImport = [](const AssetImportContext& context, const std::span<const std::byte> bytes)

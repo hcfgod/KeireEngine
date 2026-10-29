@@ -855,7 +855,7 @@ TEST_CASE("Projects create isolated starter assets and hold exclusive editor loc
     const auto starterWorldUi =
         std::ranges::find(starterScene->Definition().Objects, "Starter World UI", &Keire::SceneObjectDefinition::Name);
     REQUIRE(starterWorldUi != starterScene->Definition().Objects.end());
-    CHECK(starterWorldUi->Transform.Position == Keire::Vector3{0.0F, 2.0F, 3.0F});
+    CHECK(starterWorldUi->Transform.Position == Keire::Vector3d{0.0F, 2.0F, 3.0F});
     CHECK(std::ranges::count(starterWorldUi->Components, Keire::UiDocumentComponent::StaticType(),
                              &Keire::SceneComponentDefinition::Type) == 1);
     CHECK(std::ranges::count(starterWorldUi->Components,

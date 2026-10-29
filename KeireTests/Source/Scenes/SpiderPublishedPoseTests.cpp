@@ -661,7 +661,8 @@ static void CheckSpiderPublishedPose(const bool insetStance, const bool helperTa
     auto actor = fixture.Scene->CreateEntity("Scout Spider pose fixture");
     actor.GetComponent<Keire::TransformComponent>()->SetLocalScale(authoredSpider->Transform.Scale);
     // Normalize authored X/Z to a flat infinite fixture plane; preserve the authored root height.
-    actor.GetComponent<Keire::TransformComponent>()->SetLocalPosition({0, authoredSpider->Transform.Position.Y, 0});
+    actor.GetComponent<Keire::TransformComponent>()->SetLocalPositionPrecise(
+        {0, authoredSpider->Transform.Position.Y, 0});
     auto animator = actor.AddComponent<Keire::AnimatorComponent>();
     animator->SetSkeleton(rig->Id);
     animator->SetSkinnedMesh(fixture.Database->Find("Skin.spiderskin")->Id);

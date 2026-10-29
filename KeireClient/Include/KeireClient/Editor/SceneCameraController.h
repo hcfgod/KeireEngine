@@ -20,7 +20,11 @@ namespace KeireEditor
     {
       public:
         [[nodiscard]] const Keire::Detail::EditorCameraState& State() const noexcept { return m_Camera.State(); }
-        void SetState(const Keire::Detail::EditorCameraState& state) { m_Camera.SetState(state); }
+        void SetState(const Keire::Detail::EditorCameraState& state)
+        {
+            m_Camera.SetState(state);
+            m_Dirty = true;
+        }
         [[nodiscard]] Keire::Matrix4 ViewMatrix() const noexcept { return m_Camera.ViewMatrix(); }
         [[nodiscard]] Keire::Matrix4 ProjectionMatrix(float aspect) const;
         [[nodiscard]] Keire::RenderCamera RenderCamera(float aspect) const;
@@ -28,6 +32,30 @@ namespace KeireEditor
         void ToggleProjection() noexcept { m_Camera.ToggleProjection(); }
         void Snap(Keire::Detail::EditorCameraAxis axis) noexcept { m_Camera.Snap(axis); }
         void SetFocus(Keire::Vector3 focus) { m_Camera.SetFocus(focus); }
+        void SetFocusPrecise(Keire::Vector3d focus) { m_Camera.SetFocusPrecise(focus); }
+        void SetSurfaceNavigation(bool enabled)
+        {
+            m_Camera.SetSurfaceNavigation(enabled);
+            m_Dirty = true;
+        }
+
+        void FollowSurfaceUp(Keire::Vector3 up)
+        {
+            m_Camera.FollowSurfaceUp(up);
+            m_Dirty = m_Dirty || m_Camera.State().SurfaceNavigation;
+        }
+
+        void ReexpressReferenceFrame(Keire::Vector3d focusInTarget, const Keire::Detail::FrameRotation& sourceToTarget)
+        {
+            m_Camera.ReexpressReferenceFrame(focusInTarget, sourceToTarget);
+            m_Dirty = true;
+        }
+        [[nodiscard]] Keire::Vector3d PreciseFocus() const noexcept { return m_Camera.State().Focus; }
+        void FramePrecise(Keire::Vector3d center, float radius, float aspectRatio = 1.0F)
+        {
+            m_Camera.FramePrecise(center, radius, 60.0F, aspectRatio);
+        }
+        void FollowFramePrecise(Keire::Vector3d center, float radius, float aspectRatio, float deltaSeconds);
         void Frame(Keire::Vector3 center, float radius, float aspectRatio = 1.0F)
         {
             m_Camera.Frame(center, radius, 60.0F, aspectRatio);

@@ -6,6 +6,7 @@
 #include "Keire/ECS/Component.h"
 #include "Keire/ECS/EntityLayer.h"
 #include "Keire/Math/Math.h"
+#include "Keire/Math/Vector3d.h"
 #include "Keire/Rendering/Lighting.h"
 
 #include <compare>
@@ -28,7 +29,7 @@ namespace Keire
 
     struct SceneTransform
     {
-        SceneVector3 Position;
+        Vector3d Position;
         SceneQuaternion Rotation;
         SceneVector3 Scale{1.0F, 1.0F, 1.0F};
         auto operator<=>(const SceneTransform&) const noexcept = default;

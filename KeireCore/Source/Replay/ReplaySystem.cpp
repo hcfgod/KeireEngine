@@ -17,6 +17,7 @@
 #include <iterator>
 #include <limits>
 #include <map>
+#include <set>
 #include <stdexcept>
 #include <thread>
 #include <utility>
@@ -320,6 +321,39 @@ namespace Keire
             }
         }
 
+        void PrepareRestoreOrder()
+        {
+            RestoreRanks.clear();
+            for (const auto& [id, serializer] : Serializers)
+            {
+                std::set<std::string, std::less<>> dependencies;
+                for (const auto& dependency : serializer.RestoreAfter)
+                {
+                    if (!Serializers.contains(dependency) || !dependencies.insert(dependency).second)
+                    {
+                        throw std::invalid_argument("Replay restore dependency is missing or duplicated: " + id);
+                    }
+                }
+            }
+            while (RestoreRanks.size() < Serializers.size())
+            {
+                const auto previousCount = RestoreRanks.size();
+                for (const auto& [id, serializer] : Serializers)
+                {
+                    if (!RestoreRanks.contains(id) &&
+                        std::ranges::all_of(serializer.RestoreAfter,
+                                            [&](const auto& dependency) { return RestoreRanks.contains(dependency); }))
+                    {
+                        RestoreRanks.emplace(id, RestoreRanks.size());
+                    }
+                }
+                if (RestoreRanks.size() == previousCount)
+                {
+                    throw std::invalid_argument("Replay restore dependencies contain a cycle.");
+                }
+            }
+        }
+
         [[nodiscard]] std::vector<std::byte> CaptureCheckpoint() const
         {
             if (Serializers.size() > std::numeric_limits<std::uint32_t>::max())
@@ -381,6 +415,9 @@ namespace Keire
             if (entries.size() != Serializers.size())
                 throw std::runtime_error("Replay checkpoint does not contain every registered serializer.");
 
+            std::ranges::sort(entries, [&](const RestoreEntry& left, const RestoreEntry& right)
+                              { return RestoreRanks.at(left.Serializer->Id) < RestoreRanks.at(right.Serializer->Id); });
+
             std::vector<std::vector<std::byte>> rollback;
             rollback.reserve(entries.size());
             for (const auto& entry : entries)
@@ -393,11 +430,13 @@ namespace Keire
             catch (...)
             {
                 const auto failure = std::current_exception();
-                for (std::size_t index = entries.size(); index > 0; --index)
+                // Restoring the old checkpoint has the same dependencies as restoring the new one.
+                // For example, rebuilding a scene after its physics state would discard that restored state.
+                for (std::size_t index = 0; index < entries.size(); ++index)
                 {
                     try
                     {
-                        entries[index - 1U].Serializer->Restore(rollback[index - 1U]);
+                        entries[index].Serializer->Restore(rollback[index]);
                     }
                     catch (...)
                     {
@@ -667,6 +706,7 @@ namespace Keire
         Keire::MemoryDomain MemoryDomain;
         std::thread::id Owner;
         std::map<std::string, ReplaySerializerRegistration, std::less<>> Serializers;
+        std::map<std::string, std::size_t, std::less<>> RestoreRanks;
         std::vector<TickRecord> Ticks;
         std::vector<Checkpoint> Checkpoints;
         ReplayFingerprints Fingerprints;
@@ -713,6 +753,7 @@ namespace Keire
             throw std::logic_error("Strict replay recording requires deterministic serializers for every subsystem.");
         try
         {
+            m_Impl->PrepareRestoreOrder();
             m_Impl->Ticks.clear();
             m_Impl->Checkpoints.clear();
             m_Impl->RewindBytes = 0;
@@ -749,6 +790,7 @@ namespace Keire
             throw std::logic_error("Replay playback cannot start in the current state.");
         try
         {
+            m_Impl->PrepareRestoreOrder();
             m_Impl->Ticks.clear();
             m_Impl->Checkpoints.clear();
             m_Impl->RewindBytes = 0;

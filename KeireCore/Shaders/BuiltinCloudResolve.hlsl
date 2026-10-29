@@ -33,6 +33,9 @@ cbuffer ReprojectionConstants : register(b2, space3)
     float4 ScenePositionOffset;
     // History weight, absolute cloud depth tolerance, relative depth tolerance, reserved.
     float4 HistoryControls;
+    float4 CloudRotationX;
+    float4 CloudRotationY;
+    float4 CloudRotationZ;
 };
 
 struct VertexOutput
@@ -79,8 +82,9 @@ ResolveOutput PSMain(VertexOutput input)
         return output;
     }
     const CloudVolumeViewRay currentRay = MakeCloudVolumeViewRay(input.UV, 1.0F, CurrentView);
-    const float3 previousCloudPosition = currentRay.Origin + currentRay.Direction * cloudDistance +
-        CloudPositionOffset.xyz;
+    const float3 currentCloudPosition = currentRay.Origin + currentRay.Direction * cloudDistance;
+    const float3 previousCloudPosition = float3(dot(CloudRotationX.xyz, currentCloudPosition),
+        dot(CloudRotationY.xyz, currentCloudPosition), dot(CloudRotationZ.xyz, currentCloudPosition)) + CloudPositionOffset.xyz;
     float2 previousUv;
     if (!PreviousUv(previousCloudPosition, previousUv))
     {

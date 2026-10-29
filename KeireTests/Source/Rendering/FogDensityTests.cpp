@@ -4,7 +4,72 @@
 
 #include <doctest/doctest.h>
 
+#include <cmath>
+#include <initializer_list>
 #include <limits>
+
+TEST_CASE("Planetary fog density follows altitude on translated opposite planet surfaces")
+{
+    Keire::FogSettings settings;
+    settings.Enabled = true;
+    settings.PlanetaryHeight = true;
+    Keire::AtmosphereSettings planet;
+    planet.PlanetRadius = 6'360'000.0;
+    constexpr double altitude = 125.0;
+    const double expected = settings.ExtinctionPerMeter * std::exp(-altitude * settings.HeightFalloffPerMeter);
+    for (const double translation : {0.0, 1.0e12, -1.0e12})
+    {
+        planet.PlanetCenter = {translation, -translation, translation};
+        for (std::size_t axis = 0; axis < 3; ++axis)
+        {
+            for (const double sign : {-1.0, 1.0})
+            {
+                auto position = planet.PlanetCenter;
+                position[axis] += sign * (planet.PlanetRadius + altitude);
+                CHECK(Keire::Detail::SampleFogExtinction(settings, position, &planet) == doctest::Approx(expected));
+                position[axis] = planet.PlanetCenter[axis] + sign * (planet.PlanetRadius - 1.0);
+                CHECK(Keire::Detail::SampleFogExtinction(settings, position, &planet) ==
+                      doctest::Approx(settings.ExtinctionPerMeter));
+            }
+        }
+    }
+    CHECK_THROWS_AS(Keire::Detail::SampleFogExtinction(settings, {0.0, 0.0, 0.0}), std::invalid_argument);
+    planet.PlanetRadius = 0.0;
+    CHECK_THROWS_AS(Keire::Detail::SampleFogExtinction(settings, {0.0, 0.0, 0.0}, &planet), std::invalid_argument);
+}
+
+TEST_CASE("Planetary fog records preserve explicit mode and migrate legacy records to flat height")
+{
+    Keire::FogSettings settings;
+    settings.PlanetaryHeight = true;
+    auto record = Keire::Detail::EncodeFogDensity(settings);
+    CHECK(Keire::Detail::DecodeFogDensity(record).PlanetaryHeight);
+    record["planetaryHeight"] = 1;
+    CHECK_THROWS_AS(Keire::Detail::DecodeFogDensity(record), std::invalid_argument);
+    record.erase("planetaryHeight");
+    CHECK_FALSE(Keire::Detail::DecodeFogDensity(record).PlanetaryHeight);
+}
+
+TEST_CASE("Planetary fog view preparation preserves local altitude at distant origins")
+{
+    Keire::FogSettings settings;
+    settings.Enabled = true;
+    settings.PlanetaryHeight = true;
+    settings.BaseHeightMeters = 10.0;
+    Keire::AtmosphereSettings planet;
+    planet.PlanetCenter = {1.0e12, -1.0e12, 1.0e12};
+    for (std::size_t axis = 0; axis < 3; ++axis)
+    {
+        auto observer = planet.PlanetCenter;
+        observer[axis] += planet.PlanetRadius + 0.125;
+        const auto packed = Keire::RenderBackend::MakeFogViewUniforms(settings, observer, &planet);
+        CHECK(packed.Controls[0] == 2U);
+        CHECK(packed.HeightDensity[0] == 9.875F);
+    }
+    CHECK_THROWS_AS(Keire::RenderBackend::MakeFogViewUniforms(settings, {}), std::invalid_argument);
+    settings.Enabled = false;
+    CHECK(Keire::RenderBackend::MakeFogViewUniforms(settings, {}) == Keire::RenderBackend::FogViewUniforms{});
+}
 
 TEST_CASE("Fog GPU preparation subtracts origin before narrowing and culls unreachable volumes")
 {

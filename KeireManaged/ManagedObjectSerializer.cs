@@ -580,7 +580,7 @@ internal static class ManagedObjectSerializer
         type == typeof(uint) || type == typeof(long) || type == typeof(ulong) ||
         type == typeof(char) || type == typeof(float) || type == typeof(double) ||
         type == typeof(decimal) || type == typeof(string) || type == typeof(Guid) ||
-        type == typeof(Vector2) || type == typeof(Vector3) || type == typeof(Vector4) ||
+        type == typeof(Vector2) || type == typeof(Vector3) || type == typeof(Vector3d) || type == typeof(Vector4) ||
         type == typeof(Quaternion) || type == typeof(Color);
 
     private static ManagedSerializationException Unsupported(Type type, string path, string reason) =>

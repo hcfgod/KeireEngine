@@ -21,11 +21,70 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <stdexcept>
 #include <string>
 #include <thread>
+#include <utility>
 
 namespace
 {
+    class PrecisePhysicsTestServices final : public Keire::IScriptRuntimeServices
+    {
+      public:
+        void WriteManagedLog(Keire::ManagedLogLevel, std::string_view) noexcept override {}
+        float ManagedDeltaTime() const noexcept override { return 1.0F / 60.0F; }
+        Keire::Vector2 ReadManagedInput(std::string_view) noexcept override { return {}; }
+
+        std::optional<Keire::ManagedRaycastHitPrecise>
+        RaycastManagedPrecise(const Keire::ManagedRaycastQueryPrecise& query) override
+        {
+            ++RayCalls;
+            return Hit(query.World, query.ContextEntity, query.Origin);
+        }
+
+        std::optional<Keire::ManagedRaycastHitPrecise>
+        CapsuleCastManagedPrecise(const Keire::ManagedCapsuleCastQueryPrecise& query) override
+        {
+            ++CapsuleCalls;
+            return Hit(query.World, query.ContextEntity, query.Origin);
+        }
+
+        std::vector<Keire::AssetId>
+        OverlapSphereManagedPrecise(const Keire::ManagedSphereOverlapQueryPrecise& query) override
+        {
+            ++OverlapCalls;
+            (void)Hit(query.World, query.ContextEntity, query.Center);
+            return {query.ContextEntity};
+        }
+
+        int RayCalls = 0;
+        int CapsuleCalls = 0;
+        int OverlapCalls = 0;
+
+      private:
+        static Keire::ManagedRaycastHitPrecise Hit(const std::uint64_t world, const Keire::AssetId context,
+                                                   const Keire::Vector3d position)
+        {
+            if (world == 0 || !context || position != Keire::Vector3d{1e15 + 0.125, -1e15 + 0.25, 3})
+            {
+                throw std::invalid_argument("Precise query marshaling lost its context or coordinates.");
+            }
+            return {context, position, {0.0F, 1.0F, 0.0F}, 2.0F};
+        }
+    };
+
+    struct ScopedPrecisePhysicsServices final
+    {
+        Keire::Ref<Keire::ScriptSystem> Scripts;
+        PrecisePhysicsTestServices Services;
+
+        explicit ScopedPrecisePhysicsServices(Keire::Ref<Keire::ScriptSystem> scripts) : Scripts(std::move(scripts))
+        {
+            Scripts->SetRuntimeServices(&Services);
+        }
+
+        ~ScopedPrecisePhysicsServices() { Scripts->SetRuntimeServices(nullptr); }
+    };
     [[nodiscard]] Keire::AssetId TestAsset(const std::uint64_t value)
     {
         return Keire::AssetId(0x4b45495245544553ULL, value);
@@ -901,6 +960,9 @@ TEST_CASE("Managed runtime reload is transactional and preserves retained state"
                "Tooltip(\"Maximum movement speed in metres per second.\")] "
                "public float Speed = 7.5f; "
                "[SerializeField] public float ConsumedSpeed = -1.0f; "
+               "[SerializeField] public bool PreciseTransformObserved = false; "
+               "[SerializeField] public int PreciseContactCount = 0; "
+               "[SerializeField] public Vector3d CapturedPrecisePosition; "
                "[SerializeField] public bool SeekFailureObserved = false; "
                "[SerializeField] public bool ClipFailureObserved = false; "
                "[SerializeField] public bool ClipDidNotAddSource = false; "
@@ -945,7 +1007,26 @@ TEST_CASE("Managed runtime reload is transactional and preserves retained state"
                "public IPlayerOperation[] OperationArray = []; "
                "[SerializeReference, StableFieldId(\"73616e64-626f-4078-8000-00000000009e\")] "
                "public Dictionary<string, IPlayerOperation> OperationMap = new(); "
-               "protected override void Awake() { Speed += ReloadBonus; } "
+               "protected override void Awake() { Speed += ReloadBonus; ValidatePrecisePositions(); } "
+               // Replay-only instances below deliberately have no scene entity or Transform to exercise.
+               "private void ValidatePrecisePositions() { if (!Entity.IsValid) { return; } "
+               "var original = Transform.LocalPositionPrecise; "
+               "try { var local = new Vector3d(1000000000000000.125, -1000000000000000.25, 6371000.001); "
+               "Transform.LocalPositionPrecise = local; var localValid = Transform.LocalPositionPrecise == local; "
+               "var world = new Vector3d(1000000000000000.5, -1000000000000000.75, 6471000.001); "
+               "Transform.PositionPrecise = world; CapturedPrecisePosition = Transform.PositionPrecise; "
+               "var rejected = false; try { Transform.PositionPrecise = new Vector3d(double.NaN, 0, 0); } "
+               "catch (System.ArgumentException) { rejected = true; } "
+               "PreciseTransformObserved = localValid && rejected && CapturedPrecisePosition == world && "
+               "Transform.PositionPrecise == world; "
+               "Transform.LocalPositionPrecise = new Vector3d(1e40, 0, 0); "
+               "Transform.ResetPresentationInterpolation(); var legacyFailures = 0; "
+               "try { _ = Transform.LocalPosition; } catch (System.InvalidOperationException) { legacyFailures++; } "
+               "try { _ = Transform.Position; } catch (System.InvalidOperationException) { legacyFailures++; } "
+               "try { _ = Transform.PresentationPosition; } catch (System.InvalidOperationException) { "
+               "legacyFailures++; } "
+               "PreciseTransformObserved &= legacyFailures == 3 && Transform.LocalPositionPrecise.X == 1e40; "
+               "} finally { Transform.LocalPositionPrecise = original; } } "
                "protected override void FixedUpdate() { ConsumedSpeed = Speed; "
                "if (DisableThroughProperty) { DisableThroughProperty = false; Enabled = false; } "
                "try { var source = Entity.GetComponent<AudioSource>() ?? "
@@ -1025,6 +1106,27 @@ TEST_CASE("Managed runtime reload is transactional and preserves retained state"
                "protected override void OnAnimationEvent(AnimationEvent animationEvent) { "
                "AnimationEventObserved = true; AnimationEventName = animationEvent.Name; "
                "AnimationEventText = animationEvent.Text; } "
+               "private void CaptureContact(CollisionContact contact) { "
+               "if (contact.PointPrecise != new Vector3d(1e15 + 0.125, -1e15 + 0.25, 3) || "
+               "contact.Point != new Vector3(1, 2, 3)) { "
+               "throw new System.InvalidOperationException(\"Precise contact marshaling lost coordinates.\"); } "
+               "var p = contact.PointPrecise; "
+               "if (!Physics.TryRaycastPrecise(Entity, p, new Vector3(0,-1,0), out var ray) || ray.Point != p || "
+               "ray.Entity.Id != Entity.Id) "
+               "throw new System.InvalidOperationException(\"Precise native ray mismatch.\"); "
+               "if (!Physics.TryCapsuleCastPrecise(Entity, p, new Quaternion(0,0,0,1), 0.5f, 1, new Vector3(0,-2,0), "
+               "out var capsule) || capsule.Point != p) "
+               "throw new System.InvalidOperationException(\"Precise native capsule mismatch.\"); "
+               "var overlap = Physics.OverlapSpherePrecise(Entity, p, 1); "
+               "if (overlap.Count != 1 || overlap[0].Id != Entity.Id) throw new "
+               "System.InvalidOperationException(\"Precise native overlap mismatch.\"); "
+               "PreciseContactCount++; } "
+               "protected override void OnCollisionEnter(CollisionContact contact) { CaptureContact(contact); } "
+               "protected override void OnCollisionStay(CollisionContact contact) { CaptureContact(contact); } "
+               "protected override void OnCollisionExit(CollisionContact contact) { CaptureContact(contact); } "
+               "protected override void OnTriggerEnter(CollisionContact contact) { CaptureContact(contact); } "
+               "protected override void OnTriggerStay(CollisionContact contact) { CaptureContact(contact); } "
+               "protected override void OnTriggerExit(CollisionContact contact) { CaptureContact(contact); } "
                "protected override void OnProceduralMotionEvent(ProceduralMotionEvent motionEvent) { "
                "ProceduralMotionEventObserved = true; ProceduralMotionEventState = (byte)motionEvent.State; } "
                "protected override void OnBeforeReload() { Speed += 1.0f; } "
@@ -1491,6 +1593,11 @@ TEST_CASE("Managed runtime reload is transactional and preserves retained state"
     REQUIRE(consumedValues.contains("Utf8BusBoundaryAccepted"));
     CHECK(std::get<double>(consumedValues.at("Speed")) == doctest::Approx(12.25));
     CHECK(std::get<double>(consumedValues.at("ConsumedSpeed")) == doctest::Approx(12.25));
+    REQUIRE(consumedValues.contains("PreciseTransformObserved"));
+    CHECK(std::get<bool>(consumedValues.at("PreciseTransformObserved")));
+    REQUIRE(consumedValues.contains("CapturedPrecisePosition"));
+    CHECK(std::get<Keire::Vector3d>(consumedValues.at("CapturedPrecisePosition")) ==
+          Keire::Vector3d{1e15 + 0.5, -1e15 - 0.75, 6471000.001});
     CHECK(std::get<bool>(consumedValues.at("SeekFailureObserved")));
     CHECK(std::get<bool>(consumedValues.at("ClipFailureObserved")));
     CHECK(std::get<bool>(consumedValues.at("ClipDidNotAddSource")));
@@ -1601,6 +1708,30 @@ TEST_CASE("Managed runtime reload is transactional and preserves retained state"
     CHECK(std::get<bool>(animationEventResults.at("AnimationEventObserved")));
     CHECK(std::get<std::string>(animationEventResults.at("AnimationEventName")) == "Procedural.StateChanged");
     CHECK(std::get<std::string>(animationEventResults.at("AnimationEventText")) == "Turn In Place");
+
+    {
+        ScopedPrecisePhysicsServices preciseServices(scripts);
+        for (const bool trigger : {false, true})
+        {
+            for (const auto phase : {Keire::PhysicsContactPhase::Enter, Keire::PhysicsContactPhase::Stay,
+                                     Keire::PhysicsContactPhase::Exit})
+            {
+                CHECK_NOTHROW(play->RuntimeScene()->DispatchPhysicsContact(scriptedEntity.Id(), phase,
+                                                                           {scriptedEntity.Id(),
+                                                                            {1.0F, 2.0F, 3.0F},
+                                                                            {0.0F, 1.0F, 0.0F},
+                                                                            4.0F,
+                                                                            trigger,
+                                                                            {1e15 + 0.125, -1e15 + 0.25, 3.0}}));
+            }
+        }
+        CHECK(preciseServices.Services.RayCalls == 6);
+        CHECK(preciseServices.Services.CapsuleCalls == 6);
+        CHECK(preciseServices.Services.OverlapCalls == 12);
+    }
+    const auto contactResults = registration->Serialize(*runtimeComponent);
+    REQUIRE(contactResults.contains("PreciseContactCount"));
+    CHECK(std::get<std::int64_t>(contactResults.at("PreciseContactCount")) == 6);
 
     CHECK_NOTHROW(play->RuntimeScene()->DispatchProceduralMotionEvent(
         scriptedEntity.Id(), {Keire::ProceduralMotionEventType::StateChanged, Keire::ProceduralFootSide::None,

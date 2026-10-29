@@ -761,6 +761,6 @@ internal static class ManagedSerializationCallbacks
 
     private static bool IsAtomic(Type type) =>
         type.IsPrimitive || type.IsEnum || type == typeof(string) || type == typeof(decimal) ||
-        type == typeof(Guid) || type == typeof(Vector2) || type == typeof(Vector3) ||
+        type == typeof(Guid) || type == typeof(Vector2) || type == typeof(Vector3) || type == typeof(Vector3d) ||
         type == typeof(Vector4) || type == typeof(Quaternion) || type == typeof(Color);
 }

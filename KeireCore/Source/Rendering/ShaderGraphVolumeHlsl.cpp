@@ -44,8 +44,18 @@ namespace Keire::Detail
 
     std::string ShaderGraphVolumeHlsl(const bool unlit, const std::uint32_t noiseSlot)
     {
-        std::string source = "#define KEIRE_CLOUD_NOISE_TEXTURE t" + std::to_string(noiseSlot) +
-                             "\n#define KEIRE_CLOUD_NOISE_SAMPLER s" + std::to_string(noiseSlot) + "\n";
+        // SDL's portable graphics contract allows sixteen sampled textures. Preserve material channels
+        // by placing cloud noise in read-only storage only when its sampler would exceed that budget.
+        std::string source;
+        if (noiseSlot >= 16U)
+        {
+            source = "#define KEIRE_CLOUD_NOISE_BUFFER t" + std::to_string(noiseSlot) + "\n";
+        }
+        else
+        {
+            source = "#define KEIRE_CLOUD_NOISE_TEXTURE t" + std::to_string(noiseSlot) +
+                     "\n#define KEIRE_CLOUD_NOISE_SAMPLER s" + std::to_string(noiseSlot) + "\n";
+        }
         source += CloudVolumeShaderSource;
         if (unlit)
         {

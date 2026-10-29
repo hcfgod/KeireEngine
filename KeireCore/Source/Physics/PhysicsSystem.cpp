@@ -1,6 +1,9 @@
 #include "Keire/Physics/PhysicsSystem.h"
 
 #include "Keire/Jobs/JobSystem.h"
+#include "KeireInternal/Physics/GravityField.h"
+#include "KeireInternal/Physics/MotionSettings.h"
+#include "KeireInternal/Physics/PhysicsOriginTranslation.h"
 
 #include <Jolt/Jolt.h>
 
@@ -9,6 +12,7 @@
 #include <Jolt/Core/TempAllocator.h>
 #include <Jolt/Physics/Body/BodyCreationSettings.h>
 #include <Jolt/Physics/Body/BodyLock.h>
+#include <Jolt/Physics/Body/MotionProperties.h>
 #include <Jolt/Physics/Collision/CastResult.h>
 #include <Jolt/Physics/Collision/CollideShape.h>
 #include <Jolt/Physics/Collision/CollisionCollectorImpl.h>
@@ -38,6 +42,7 @@
 #include <stdexcept>
 #include <thread>
 #include <utility>
+#include <vector>
 
 namespace Keire
 {
@@ -167,6 +172,7 @@ namespace Keire
             std::atomic<std::uint32_t> Worlds{0};
             std::uint32_t MaximumWorlds = 0;
             std::array<std::uint32_t, 32> CollisionMatrix;
+            Vector3 DefaultGravity{0.0F, -9.81F, 0.0F};
             std::shared_ptr<JoltRuntimeLease> Runtime = std::make_shared<JoltRuntimeLease>();
             Ref<JobSystem> Scheduler;
             std::shared_ptr<JoltJobSystemAdapter> Jobs;
@@ -223,11 +229,12 @@ namespace Keire
 
         [[nodiscard]] bool ValidBody(const PhysicsBodyDefinition& body) noexcept
         {
-            if (!Math::IsFinite(body.Position) || !Math::IsFinite(body.Rotation) ||
-                !Math::IsFinite(body.LinearVelocity) || !Math::IsFinite(body.HalfExtent) ||
-                !std::isfinite(body.Radius) || !std::isfinite(body.Height) || !std::isfinite(body.Mass) ||
-                !std::isfinite(body.Friction) || !std::isfinite(body.Restitution) || !std::has_single_bit(body.Layer) ||
-                body.Friction < 0.0F || body.Friction > 100.0F || body.Restitution < 0.0F || body.Restitution > 1.0F ||
+            if (!Detail::ValidMotionSettings(body.MotionSettings) || !Math::IsFinite(body.Position) ||
+                !Math::IsFinite(body.Rotation) || !Math::IsFinite(body.LinearVelocity) ||
+                !Math::IsFinite(body.HalfExtent) || !std::isfinite(body.Radius) || !std::isfinite(body.Height) ||
+                !std::isfinite(body.Mass) || !std::isfinite(body.Friction) || !std::isfinite(body.Restitution) ||
+                !std::has_single_bit(body.Layer) || body.Friction < 0.0F || body.Friction > 100.0F ||
+                body.Restitution < 0.0F || body.Restitution > 1.0F ||
                 body.FrictionCombine > PhysicsMaterialCombineMode::Maximum ||
                 body.RestitutionCombine > PhysicsMaterialCombineMode::Maximum)
                 return false;
@@ -467,6 +474,8 @@ namespace Keire
         {
             PhysicsBodyDefinition Definition;
             JPH::BodyID Native;
+            Vector3 PendingGravityAcceleration;
+            bool GravitySupported = false;
         };
 
         struct ContactData final
@@ -602,11 +611,13 @@ namespace Keire
             std::map<BodyPair, ContactData> m_Samples;
         };
 
-        explicit Impl(std::shared_ptr<PhysicsServiceState> service)
-            : Service(std::move(service)), Owner(std::this_thread::get_id()), ContactListener(*this)
+        explicit Impl(std::shared_ptr<PhysicsServiceState> service, const Vector3d worldOrigin)
+            : Service(std::move(service)), Owner(std::this_thread::get_id()), WorldOrigin(worldOrigin),
+              ContactListener(*this)
         {
             Native.Init(65'536, 0, 65'536, 10'240, BroadPhaseLayers, BroadPhaseFilter, LayerFilter);
             Native.SetContactListener(&ContactListener);
+            Native.SetGravity(ToJolt(Service->DefaultGravity));
         }
 
         ~Impl()
@@ -660,7 +671,8 @@ namespace Keire
             ContactData result;
             result.Point =
                 Multiply(Add(FromJoltVector(best->mContactPointOn1), FromJoltVector(best->mContactPointOn2)), 0.5F);
-            result.Normal = Normalize(Multiply(FromJoltVector(best->mPenetrationAxis), -1.0F));
+            // Match ContactManifold: the normal points in the direction that separates body 2.
+            result.Normal = Normalize(FromJoltVector(best->mPenetrationAxis));
             result.Penetration = best->mPenetrationDepth;
             result.Trigger = first.Definition.Trigger || second.Definition.Trigger;
             if (!result.Trigger)
@@ -759,6 +771,9 @@ namespace Keire
 
         std::shared_ptr<PhysicsServiceState> Service;
         std::thread::id Owner;
+        Vector3d WorldOrigin;
+        std::vector<PhysicsGravitySource> GravitySources;
+        std::vector<std::pair<JPH::BodyID, Vector3>> GravityForces;
         bool Open = true;
         bool NativeOpen = true;
         std::uint64_t NextBody = 1;
@@ -784,6 +799,106 @@ namespace Keire
     bool PhysicsWorld::IsOpen() const noexcept
     {
         return m_Impl->Open && m_Impl->Service->Open.load(std::memory_order_acquire);
+    }
+
+    Vector3d PhysicsWorld::WorldOrigin() const
+    {
+        m_Impl->RequireOwner("WorldOrigin");
+        return m_Impl->WorldOrigin;
+    }
+
+    void PhysicsWorld::RebaseOrigin(const Vector3d origin, const double maximumError)
+    {
+        m_Impl->RequireOwner("RebaseOrigin");
+        if (!Math::IsFinite(origin) || !std::isfinite(maximumError) || maximumError < 0.0)
+        {
+            throw std::invalid_argument("Physics origin and precision budget must be finite and valid.");
+        }
+        if (origin == m_Impl->WorldOrigin)
+        {
+            return;
+        }
+        const Vector3d delta{m_Impl->WorldOrigin.X - origin.X, m_Impl->WorldOrigin.Y - origin.Y,
+                             m_Impl->WorldOrigin.Z - origin.Z};
+        if (!Math::IsFinite(delta))
+        {
+            throw std::out_of_range("Physics origin translation exceeds the coordinate range.");
+        }
+        const auto translate = [&](const Vector3 point)
+        { return Detail::TranslatePhysicsPosition(point, delta, maximumError); };
+        auto& bodyInterface = m_Impl->Native.GetBodyInterface();
+        std::vector<std::pair<Impl::Body*, Vector3>> positions;
+        positions.reserve(m_Impl->Bodies.size());
+        for (auto& [id, body] : m_Impl->Bodies)
+        {
+            (void)id;
+            positions.emplace_back(&body, translate(FromJoltPosition(bodyInterface.GetPosition(body.Native))));
+        }
+        auto contacts = m_Impl->ActiveContacts;
+        for (auto& [pair, contact] : contacts)
+        {
+            (void)pair;
+            contact.Point = translate(contact.Point);
+        }
+        auto events = m_Impl->Events;
+        for (auto& event : events)
+        {
+            event.Point = translate(event.Point);
+        }
+        auto traces = m_Impl->QueryTraces;
+        for (auto& trace : traces)
+        {
+            switch (trace.Kind)
+            {
+            case PhysicsDebugQueryKind::RayCast:
+                trace.Ray.Origin = translate(trace.Ray.Origin);
+                break;
+            case PhysicsDebugQueryKind::CapsuleCast:
+                trace.Capsule.Origin = translate(trace.Capsule.Origin);
+                break;
+            case PhysicsDebugQueryKind::SphereOverlap:
+                trace.SphereCenter = translate(trace.SphereCenter);
+                break;
+            }
+            for (auto& hit : trace.Hits)
+            {
+                hit.Position = translate(hit.Position);
+            }
+        }
+
+        // All allocations and representability checks precede mutation. Body IDs and activation are retained.
+        for (const auto& [body, position] : positions)
+        {
+            bodyInterface.SetPosition(body->Native, ToJolt(position), JPH::EActivation::DontActivate);
+            body->Definition.Position = position;
+        }
+        m_Impl->ActiveContacts.swap(contacts);
+        m_Impl->Events.swap(events);
+        m_Impl->QueryTraces.swap(traces);
+        m_Impl->WorldOrigin = origin;
+        ++m_Impl->Revision;
+    }
+
+    Vector3 PhysicsWorld::ToLocalPosition(const Vector3d worldPosition, const double maximumError) const
+    {
+        m_Impl->RequireOwner("ToLocalPosition");
+        return Math::RelativeFloat(worldPosition, m_Impl->WorldOrigin, maximumError);
+    }
+
+    Vector3d PhysicsWorld::ToWorldPosition(const Vector3 localPosition) const
+    {
+        m_Impl->RequireOwner("ToWorldPosition");
+        if (!Math::IsFinite(localPosition))
+        {
+            throw std::invalid_argument("Physics local position must be finite.");
+        }
+        const Vector3d result{m_Impl->WorldOrigin.X + localPosition.X, m_Impl->WorldOrigin.Y + localPosition.Y,
+                              m_Impl->WorldOrigin.Z + localPosition.Z};
+        if (!Math::IsFinite(result))
+        {
+            throw std::out_of_range("Physics world position exceeds the double range.");
+        }
+        return result;
     }
 
     PhysicsBodyId PhysicsWorld::CreateBody(const PhysicsBodyDefinition& definition)
@@ -842,6 +957,10 @@ namespace Keire
         settings.mFriction = definition.Friction;
         settings.mRestitution = definition.Restitution;
         settings.mGravityFactor = definition.UseGravity ? 1.0F : 0.0F;
+        settings.mLinearDamping = definition.MotionSettings.LinearDamping;
+        settings.mAngularDamping = definition.MotionSettings.AngularDamping;
+        settings.mMaxLinearVelocity = definition.MotionSettings.MaximumLinearSpeed;
+        settings.mMaxAngularVelocity = definition.MotionSettings.MaximumAngularSpeed;
         if (definition.Motion == PhysicsMotionType::Dynamic)
         {
             settings.mOverrideMassProperties = JPH::EOverrideMassProperties::CalculateInertia;
@@ -896,6 +1015,67 @@ namespace Keire
                                                                  JPH::EActivation::Activate);
     }
 
+    std::vector<PhysicsGravitySource> PhysicsWorld::GravitySources() const
+    {
+        m_Impl->RequireOwner("GravitySources");
+        return m_Impl->GravitySources;
+    }
+
+    void PhysicsWorld::SetGravitySources(std::vector<PhysicsGravitySource> sources)
+    {
+        m_Impl->RequireOwner("SetGravitySources");
+        constexpr std::size_t maximumSources = 64;
+        if (sources.size() > maximumSources)
+        {
+            throw std::invalid_argument("A physics world supports at most 64 gravity sources.");
+        }
+        for (const auto& source : sources)
+        {
+            Detail::ValidateGravitySource(source);
+        }
+        if (sources == m_Impl->GravitySources)
+        {
+            return;
+        }
+        m_Impl->GravitySources.swap(sources);
+        auto& bodyInterface = m_Impl->Native.GetBodyInterface();
+        for (const auto& [id, body] : m_Impl->Bodies)
+        {
+            if (body.Definition.Motion == PhysicsMotionType::Dynamic && body.Definition.UseGravity)
+            {
+                bodyInterface.ActivateBody(body.Native);
+            }
+        }
+    }
+
+    Vector3 PhysicsWorld::Gravity() const
+    {
+        m_Impl->RequireOwner("Gravity");
+        return FromJoltVector(m_Impl->Native.GetGravity());
+    }
+
+    void PhysicsWorld::SetGravity(const Vector3 acceleration)
+    {
+        m_Impl->RequireOwner("SetGravity");
+        if (!Math::IsFinite(acceleration))
+        {
+            throw std::invalid_argument("Physics gravity must be finite.");
+        }
+        if (acceleration == FromJoltVector(m_Impl->Native.GetGravity()))
+        {
+            return;
+        }
+        m_Impl->Native.SetGravity(ToJolt(acceleration));
+        auto& bodyInterface = m_Impl->Native.GetBodyInterface();
+        for (const auto& [id, body] : m_Impl->Bodies)
+        {
+            if (body.Definition.Motion == PhysicsMotionType::Dynamic && body.Definition.UseGravity)
+            {
+                bodyInterface.ActivateBody(body.Native);
+            }
+        }
+    }
+
     void PhysicsWorld::SetGravityEnabled(const PhysicsBodyId body, const bool enabled)
     {
         m_Impl->RequireOwner("SetGravityEnabled");
@@ -910,6 +1090,48 @@ namespace Keire
             if (enabled)
                 bodyInterface.ActivateBody(found->second.Native);
         }
+    }
+
+    PhysicsMotionSettings PhysicsWorld::GetMotionSettings(const PhysicsBodyId body) const
+    {
+        m_Impl->RequireOwner("GetMotionSettings");
+        const auto found = m_Impl->Bodies.find(body.m_Value);
+        if (!body || found == m_Impl->Bodies.end())
+        {
+            throw std::invalid_argument("Physics body is unavailable.");
+        }
+        return found->second.Definition.MotionSettings;
+    }
+
+    void PhysicsWorld::SetMotionSettings(const PhysicsBodyId body, const PhysicsMotionSettings& settings)
+    {
+        m_Impl->RequireOwner("SetMotionSettings");
+        const auto found = m_Impl->Bodies.find(body.m_Value);
+        if (!body || found == m_Impl->Bodies.end() || !Detail::ValidMotionSettings(settings))
+        {
+            throw std::invalid_argument("Physics motion settings are invalid or the body is unavailable.");
+        }
+        if (found->second.Definition.MotionSettings == settings)
+        {
+            return;
+        }
+        JPH::BodyLockWrite lock(m_Impl->Native.GetBodyLockInterface(), found->second.Native);
+        if (!lock.Succeeded())
+        {
+            throw std::runtime_error("Physics body motion settings could not be locked.");
+        }
+        auto& native = lock.GetBody();
+        if (!native.IsStatic())
+        {
+            auto* motion = native.GetMotionProperties();
+            motion->SetLinearDamping(settings.LinearDamping);
+            motion->SetAngularDamping(settings.AngularDamping);
+            motion->SetMaxLinearVelocity(settings.MaximumLinearSpeed);
+            motion->SetMaxAngularVelocity(settings.MaximumAngularSpeed);
+            motion->ClampLinearVelocity();
+            motion->ClampAngularVelocity();
+        }
+        found->second.Definition.MotionSettings = settings;
     }
 
     void PhysicsWorld::SetBodyState(const PhysicsBodyId body, const PhysicsBodyState& state)
@@ -1098,6 +1320,78 @@ namespace Keire
             m_Impl->Events.clear();
             return;
         }
+        const auto uniformGravity = FromJoltVector(m_Impl->Native.GetGravity());
+        if (!m_Impl->GravitySources.empty() || uniformGravity != Vector3{})
+        {
+            auto& bodies = m_Impl->Native.GetBodyInterface();
+            auto& forces = m_Impl->GravityForces;
+            forces.clear();
+            forces.reserve(m_Impl->Bodies.size());
+            for (auto& [id, body] : m_Impl->Bodies)
+            {
+                body.PendingGravityAcceleration = {};
+                body.GravitySupported = false;
+                if (body.Definition.Motion != PhysicsMotionType::Dynamic || !body.Definition.UseGravity)
+                {
+                    continue;
+                }
+                const auto position = FromJoltPosition(bodies.GetCenterOfMassPosition(body.Native));
+                Vector3d acceleration;
+                for (const auto& source : m_Impl->GravitySources)
+                {
+                    const auto contribution = Detail::EvaluateGravitySource(source, m_Impl->WorldOrigin, position);
+                    acceleration.X += contribution.X;
+                    acceleration.Y += contribution.Y;
+                    acceleration.Z += contribution.Z;
+                }
+                const Vector3d force{acceleration.X * body.Definition.Mass, acceleration.Y * body.Definition.Mass,
+                                     acceleration.Z * body.Definition.Mass};
+                forces.emplace_back(body.Native, Math::RelativeFloat(force, {}, std::numeric_limits<float>::max()));
+                body.PendingGravityAcceleration = {static_cast<float>(acceleration.X + uniformGravity.X),
+                                                   static_cast<float>(acceleration.Y + uniformGravity.Y),
+                                                   static_cast<float>(acceleration.Z + uniformGravity.Z)};
+            }
+            // Validate every force before touching native state. Unsupported bodies must keep integrating even
+            // when their acceleration is below the backend's sleep threshold.
+            for (const auto& [pair, data] : m_Impl->ActiveContacts)
+            {
+                if (data.Trigger)
+                {
+                    continue;
+                }
+                const auto first = m_Impl->Bodies.find(pair.first);
+                const auto second = m_Impl->Bodies.find(pair.second);
+                if (first != m_Impl->Bodies.end() && Dot(first->second.PendingGravityAcceleration, data.Normal) > 0.0F)
+                {
+                    first->second.GravitySupported = true;
+                }
+                if (second != m_Impl->Bodies.end() &&
+                    Dot(second->second.PendingGravityAcceleration, data.Normal) < 0.0F)
+                {
+                    second->second.GravitySupported = true;
+                }
+            }
+            for (const auto& [id, body] : m_Impl->Bodies)
+            {
+                if (body.Definition.Motion != PhysicsMotionType::Dynamic || !body.Definition.UseGravity)
+                {
+                    continue;
+                }
+                if (body.PendingGravityAcceleration == Vector3{})
+                {
+                    continue;
+                }
+                if (!body.GravitySupported)
+                {
+                    bodies.ActivateBody(body.Native);
+                    bodies.ResetSleepTimer(body.Native);
+                }
+            }
+            for (const auto& [body, force] : forces)
+            {
+                bodies.AddForce(body, ToJolt(force), JPH::EActivation::DontActivate);
+            }
+        }
         m_Impl->ContactListener.Clear();
         const auto collisionSteps = std::max(1, static_cast<int>(std::ceil(deltaSeconds * 60.0F)));
         const auto error =
@@ -1199,6 +1493,7 @@ namespace Keire
             return {};
 
         auto result = std::make_shared<PhysicsDebugSnapshot>();
+        result->WorldOrigin = m_Impl->WorldOrigin;
         result->Revision = m_Impl->Revision;
         result->DroppedBodies = m_Impl->Bodies.size() > m_Impl->DebugCapture.MaximumBodies
                                     ? m_Impl->Bodies.size() - m_Impl->DebugCapture.MaximumBodies
@@ -1277,6 +1572,7 @@ namespace Keire
         : m_Impl(std::make_unique<Impl>(specification.MaximumWorlds, specification.CollisionMatrix, std::move(jobs)))
     {
         ValidateCollisionMatrix(specification.CollisionMatrix);
+        ConfigureDefaultGravity(specification.DefaultGravity);
         if (specification.Mode == PhysicsMode::Disabled || specification.MaximumWorlds == 0 ||
             specification.MaximumWorlds > 4096)
             throw std::invalid_argument("PhysicsSystem specification is invalid.");
@@ -1285,12 +1581,18 @@ namespace Keire
     PhysicsSystem::~PhysicsSystem() = default;
     bool PhysicsSystem::IsOpen() const noexcept { return m_Impl->Service->Open.load(std::memory_order_acquire); }
 
-    Ref<PhysicsWorld> PhysicsSystem::CreateWorld()
+    Ref<PhysicsWorld> PhysicsSystem::CreateWorld() { return CreateWorld({}); }
+
+    Ref<PhysicsWorld> PhysicsSystem::CreateWorld(const Vector3d worldOrigin)
     {
         if (std::this_thread::get_id() != m_Impl->Owner)
             throw std::logic_error("PhysicsSystem::CreateWorld must run on the owner thread.");
         if (!IsOpen())
             throw std::logic_error("PhysicsSystem is closed.");
+        if (!Math::IsFinite(worldOrigin))
+        {
+            throw std::invalid_argument("Physics world origin must be finite.");
+        }
         const auto count = m_Impl->Service->Worlds.fetch_add(1, std::memory_order_relaxed) + 1;
         if (count > m_Impl->Service->MaximumWorlds)
         {
@@ -1299,7 +1601,7 @@ namespace Keire
         }
         try
         {
-            return CreateRef<PhysicsWorld>(std::make_unique<PhysicsWorld::Impl>(m_Impl->Service));
+            return CreateRef<PhysicsWorld>(std::make_unique<PhysicsWorld::Impl>(m_Impl->Service, worldOrigin));
         }
         catch (...)
         {
@@ -1318,6 +1620,36 @@ namespace Keire
             throw std::logic_error("Physics collision matrix cannot change while a physics world is active.");
         ValidateCollisionMatrix(matrix);
         m_Impl->Service->CollisionMatrix = matrix;
+    }
+
+    void PhysicsSystem::ConfigureDefaultGravity(const Vector3 acceleration)
+    {
+        if (std::this_thread::get_id() != m_Impl->Owner)
+        {
+            throw std::logic_error("PhysicsSystem::ConfigureDefaultGravity must run on the owner thread.");
+        }
+        if (!IsOpen())
+        {
+            throw std::logic_error("PhysicsSystem is closed.");
+        }
+        if (!Math::IsFinite(acceleration))
+        {
+            throw std::invalid_argument("Default gravity must contain finite acceleration values.");
+        }
+        m_Impl->Service->DefaultGravity = acceleration;
+    }
+
+    Vector3 PhysicsSystem::DefaultGravity() const
+    {
+        if (std::this_thread::get_id() != m_Impl->Owner)
+        {
+            throw std::logic_error("PhysicsSystem::DefaultGravity must run on the owner thread.");
+        }
+        if (!IsOpen())
+        {
+            throw std::logic_error("PhysicsSystem is closed.");
+        }
+        return m_Impl->Service->DefaultGravity;
     }
 
     std::array<std::uint32_t, 32> PhysicsSystem::CollisionMatrix() const

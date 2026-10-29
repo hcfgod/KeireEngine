@@ -164,6 +164,11 @@ namespace KeireEditor
         return Track(m_Ui.DragVector3(label, value, static_cast<float>(step)));
     }
 
+    bool InspectorPropertyEditor::EditVector3d(const std::string_view label, Keire::Vector3d& value, const double step)
+    {
+        return Track(m_Ui.DragVector3d(label, value, static_cast<float>(step)));
+    }
+
     bool InspectorPropertyEditor::EditVector4(const std::string_view label, Keire::Vector4& value, const double step)
     {
         return Track(m_Ui.DragVector4(PrepareFieldControl(label), value, static_cast<float>(step)));

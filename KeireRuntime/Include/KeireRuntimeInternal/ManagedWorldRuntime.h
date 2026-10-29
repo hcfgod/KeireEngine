@@ -163,6 +163,15 @@ namespace KeireRuntime
         CapsuleCastManaged(const Keire::ManagedCapsuleCastQuery& query) noexcept final;
         [[nodiscard]] std::vector<Keire::AssetId>
         OverlapSphereManaged(const Keire::ManagedSphereOverlapQuery& query) final;
+        [[nodiscard]] std::optional<Keire::ManagedRaycastHitPrecise>
+        RaycastManagedPrecise(const Keire::ManagedRaycastQueryPrecise& query) final;
+
+        [[nodiscard]] std::optional<Keire::ManagedRaycastHitPrecise>
+        CapsuleCastManagedPrecise(const Keire::ManagedCapsuleCastQueryPrecise& query) final;
+
+        [[nodiscard]] std::vector<Keire::AssetId>
+        OverlapSphereManagedPrecise(const Keire::ManagedSphereOverlapQueryPrecise& query) final;
+
         [[nodiscard]] Keire::Ref<Keire::AssetSystem> ManagedRuntimeAssets() const noexcept final;
 
         ManagedWorldRuntime m_ManagedWorld;

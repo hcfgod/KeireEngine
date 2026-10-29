@@ -115,6 +115,14 @@ namespace KeireEditor
                     { return editor.EditVector3(property.DisplayName, typed, property.Step); });
             });
         Register(
+            Keire::ComponentPropertyKind::Vector3d,
+            [](IPropertyEditor& editor, const Keire::ComponentProperty& property, Keire::ComponentPropertyValue& value)
+            {
+                return DrawValue<Keire::Vector3d>(
+                    value, [&](Keire::Vector3d& typed)
+                    { return editor.EditVector3d(property.DisplayName, typed, property.Step); });
+            });
+        Register(
             Keire::ComponentPropertyKind::Vector4,
             [](IPropertyEditor& editor, const Keire::ComponentProperty& property, Keire::ComponentPropertyValue& value)
             {

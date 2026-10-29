@@ -456,8 +456,11 @@ namespace Keire
                             }
                             const auto& source = *owner;
                             const auto* importer = m_Impl->FindImporter(source);
-                            const bool requiresMigration = importer && importer->Version > source.ImporterVersion;
-                            if (availableAssets.contains(dependency) && !requiresMigration)
+                            const auto importState = ImportStatus(source.Id).State;
+                            const bool requiresRefresh = (importer && importer->Version != source.ImporterVersion) ||
+                                                         (importState != AssetImportState::Imported &&
+                                                          importState != AssetImportState::CacheHit);
+                            if (availableAssets.contains(dependency) && !requiresRefresh)
                             {
                                 pending.insert(pending.end(), source.Dependencies.begin(), source.Dependencies.end());
                                 continue;
@@ -538,6 +541,23 @@ namespace Keire
             m_Impl->StoreCookInput(upgraded, std::move(*imported));
             m_Impl->PublishRecord(std::move(upgraded), m_Impl->ReadSignature(source, metadata));
         }
+        const auto publicationFailed = [&](const std::string& diagnostic)
+        {
+            // Import preparation can upgrade metadata before publication. Persist the failed publication
+            // alongside it so a restarted editor cannot mistake old catalog bytes for the upgraded artifacts.
+            result.CatalogPath.clear();
+            std::scoped_lock lock(m_Impl->Mutex);
+            for (auto& status : result.Statuses)
+            {
+                if (status.State == AssetImportState::Imported || status.State == AssetImportState::CacheHit)
+                {
+                    status.State = AssetImportState::Failed;
+                    status.Diagnostics.push_back(
+                        {AssetDiagnosticSeverity::Error, {}, 0, 0, "Asset catalog publication failed: " + diagnostic});
+                    m_Impl->ImportStatuses[status.Id] = status;
+                }
+            }
+        };
         if (failed)
         {
             const auto previous = m_Impl->CacheRoot / "Runtime" / "catalog.json";
@@ -562,6 +582,7 @@ namespace Keire
             {
                 KEIRE_CORE_ERROR("Successful best-effort imports could not be merged into the last-good catalog: {}",
                                  error.what());
+                publicationFailed(error.what());
             }
             return result;
         }
@@ -580,12 +601,10 @@ namespace Keire
         }
         catch (const std::exception& error)
         {
+            publicationFailed(error.what());
             if (policy == AssetImportPolicy::FailFast)
                 throw;
             KEIRE_CORE_ERROR("Asset catalog validation failed; retaining the last-good catalog: {}", error.what());
-            const auto previous = m_Impl->CacheRoot / "Runtime" / "catalog.json";
-            if (std::filesystem::is_regular_file(previous))
-                result.CatalogPath = previous;
         }
         ReportOperationProgress(progress, AssetOperationPhase::Completed, records.size(), records.size());
         KEIRE_CORE_INFO("Asset import completed (assets={}, imported={}, cache_hits={}, elapsed_ms={:.3f}).",

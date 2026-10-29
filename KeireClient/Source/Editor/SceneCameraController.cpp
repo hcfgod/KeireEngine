@@ -6,6 +6,7 @@
 #include <array>
 #include <cmath>
 #include <fstream>
+#include <limits>
 #include <ranges>
 #include <sstream>
 #include <string>
@@ -22,6 +23,7 @@ namespace KeireEditor
     Keire::RenderCamera SceneCameraController::RenderCamera(const float aspect) const
     {
         Keire::RenderCamera camera;
+        camera.WorldOrigin = PreciseFocus();
         camera.View = ViewMatrix();
         camera.Projection = ProjectionMatrix(aspect);
         return camera;
@@ -87,8 +89,14 @@ namespace KeireEditor
     void SceneCameraController::FollowFrame(const Keire::Vector3 center, const float radius, const float aspectRatio,
                                             const float deltaSeconds)
     {
+        FollowFramePrecise(Keire::Math::Widen(center), radius, aspectRatio, deltaSeconds);
+    }
+
+    void SceneCameraController::FollowFramePrecise(const Keire::Vector3d center, const float radius,
+                                                   const float aspectRatio, const float deltaSeconds)
+    {
         const auto original = m_Camera.State();
-        m_Camera.Frame(center, radius, 60.0F, aspectRatio);
+        m_Camera.FramePrecise(center, radius, 60.0F, aspectRatio);
         const auto target = m_Camera.State();
         auto state = original;
         const float blend = 1.0F - std::exp(-10.0F * std::clamp(deltaSeconds, 0.0F, 0.25F));
@@ -110,7 +118,7 @@ namespace KeireEditor
             Keire::Detail::EditorCameraState state;
             if (!(input >> version >> state.Focus.X >> state.Focus.Y >> state.Focus.Z >> state.YawDegrees >>
                   state.PitchDegrees >> state.Distance) ||
-                (version < 1 || version > 3))
+                (version < 1 || version > 5))
                 return false;
             std::vector<Keire::EntityId> locked;
             if (version >= 2)
@@ -141,6 +149,18 @@ namespace KeireEditor
                     }
                 }
             }
+            if (version >= 5)
+            {
+                std::array<double, 4> rotation{};
+                unsigned surface = 0;
+                if (!(input >> rotation[0] >> rotation[1] >> rotation[2] >> rotation[3] >> surface) || surface > 1)
+                {
+                    return false;
+                }
+                state.NavigationToWorld =
+                    Keire::Detail::FrameRotation::Normalize(rotation[0], rotation[1], rotation[2], rotation[3]);
+                state.SurfaceNavigation = surface != 0;
+            }
             m_Camera.SetState(state);
             m_LockedEntities = std::move(locked);
             m_Dirty = false;
@@ -148,7 +168,6 @@ namespace KeireEditor
         }
         catch (...)
         {
-            m_LockedEntities.clear();
             return false;
         }
     }
@@ -160,15 +179,18 @@ namespace KeireEditor
         try
         {
             std::ostringstream output;
-            output.precision(9);
+            output.precision(std::numeric_limits<double>::max_digits10);
             const auto& state = m_Camera.State();
-            output << "3\n"
+            output << "5\n"
                    << state.Focus.X << ' ' << state.Focus.Y << ' ' << state.Focus.Z << '\n'
                    << state.YawDegrees << ' ' << state.PitchDegrees << ' ' << state.Distance << '\n'
                    << state.OrthographicSize << ' ' << state.MoveSpeed << ' '
                    << static_cast<std::uint32_t>(state.Projection) << ' ' << m_LockedEntities.size() << '\n';
             for (const auto entity : m_LockedEntities)
                 output << entity.ToString() << '\n';
+            const auto& rotation = state.NavigationToWorld.Components();
+            output << rotation[0] << ' ' << rotation[1] << ' ' << rotation[2] << ' ' << rotation[3] << ' '
+                   << (state.SurfaceNavigation ? 1 : 0) << '\n';
             std::filesystem::create_directories(path.parent_path());
             Keire::Detail::WriteTextFileAtomically(path, output.str());
             m_Dirty = false;

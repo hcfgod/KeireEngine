@@ -27,3 +27,22 @@ TEST_CASE("viewport asset placement projects the mouse onto the ground with a fi
     CHECK(horizon.Y == doctest::Approx(2.0F));
     CHECK(horizon.Z == doctest::Approx(-5.0F));
 }
+
+TEST_CASE("precise viewport placement retains distant offsets and the absolute ground plane")
+{
+    Keire::RenderCamera camera;
+    camera.WorldOrigin = {1.0e15, 5.0, -1.0e15};
+    camera.View = Keire::Math::LookAt({0.25F, 0.0F, 5.0F}, {0.25F, -5.0F, 0.0F}, {0.0F, 1.0F, 0.0F});
+    camera.Projection = Keire::Math::Perspective(60.0F, 1.0F, 0.1F, 100.0F);
+    const Keire::UiItemRect viewport{{0.0F, 0.0F}, {200.0F, 200.0F}};
+    const auto ground = KeireEditor::ResolveSceneDropPositionPrecise(viewport, {100.0F, 100.0F}, camera);
+    CHECK(ground.X - camera.WorldOrigin.X == 0.25);
+    CHECK(ground.Y == doctest::Approx(0.0).epsilon(0.001));
+    CHECK(ground.Z - camera.WorldOrigin.Z == 0.0);
+
+    camera.View = Keire::Math::LookAt({0.25F, 0.0F, 5.0F}, {0.25F, 0.0F, 0.0F}, {0.0F, 1.0F, 0.0F});
+    const auto horizon = KeireEditor::ResolveSceneDropPositionPrecise(viewport, {100.0F, 100.0F}, camera);
+    CHECK(horizon.X - camera.WorldOrigin.X == 0.25);
+    CHECK(horizon.Y == 5.0);
+    CHECK(horizon.Z - camera.WorldOrigin.Z == -5.0);
+}

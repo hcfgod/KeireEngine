@@ -3,35 +3,107 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <numeric>
+#include <optional>
 
 namespace Keire
 {
     namespace
     {
+        constexpr double MaximumPhysicsPositionErrorMetres = 0.001;
+
+        [[nodiscard]] float CharacterDot(const Vector3 left, const Vector3 right) noexcept
+        {
+            return left.X * right.X + left.Y * right.Y + left.Z * right.Z;
+        }
+
+        [[nodiscard]] Vector3 CharacterUp(const Quaternion rotation)
+        {
+            return Math::TransformDirection(Math::ComposeTransform({}, rotation, {1.0F, 1.0F, 1.0F}),
+                                            {0.0F, 1.0F, 0.0F});
+        }
+
+        [[nodiscard]] Vector3d InitialPhysicsOrigin(const Scene& scene)
+        {
+            std::optional<Vector3d> minimum;
+            Vector3d maximum;
+            for (const auto& entity : scene.Entities())
+            {
+                const auto collider = entity.GetComponent<ColliderComponent>();
+                const auto character = entity.GetComponent<CharacterControllerComponent>();
+                const auto transform = entity.GetComponent<TransformComponent>();
+                if (!entity.ActiveInHierarchy() || !transform ||
+                    !((collider && collider->Enabled()) || (character && character->Enabled())))
+                {
+                    continue;
+                }
+                const auto position = transform->WorldPositionPrecise();
+                if (!minimum)
+                {
+                    minimum = position;
+                    maximum = position;
+                    continue;
+                }
+                minimum->X = std::min(minimum->X, position.X);
+                minimum->Y = std::min(minimum->Y, position.Y);
+                minimum->Z = std::min(minimum->Z, position.Z);
+                maximum.X = std::max(maximum.X, position.X);
+                maximum.Y = std::max(maximum.Y, position.Y);
+                maximum.Z = std::max(maximum.Z, position.Z);
+            }
+            if (!minimum)
+            {
+                return {};
+            }
+            constexpr double defaultRegionRadiusMetres = 8192.0;
+            if (std::max({std::abs(minimum->X), std::abs(minimum->Y), std::abs(minimum->Z), std::abs(maximum.X),
+                          std::abs(maximum.Y), std::abs(maximum.Z)}) <= defaultRegionRadiusMetres)
+            {
+                return {};
+            }
+            // Stable bounds-based selection is independent of entity iteration order. Keeping the origin on
+            // a power-of-two grid avoids introducing fractional offsets into ordinary local coordinates.
+            constexpr double originGridMetres = 1024.0;
+            const auto center = [](const double low, const double high)
+            { return std::round(std::midpoint(low, high) / originGridMetres) * originGridMetres; };
+            return {center(minimum->X, maximum.X), center(minimum->Y, maximum.Y), center(minimum->Z, maximum.Z)};
+        }
+
+        [[nodiscard]] Matrix4 PhysicsRelativeTransform(const TransformComponent& transform, const PhysicsWorld& world)
+        {
+            return transform.WorldRelativeMatrix(world.WorldOrigin(), MaximumPhysicsPositionErrorMetres);
+        }
+
         // A capsule's rounded bottom reports a contact normal across a box edge, not the top face normal.
         // Only recover the face normal when a tiny local probe confirms the SAME body's surface at that edge.
         [[nodiscard]] Vector3 CharacterSupportNormal(PhysicsWorld& world, const PhysicsQueryHit& hit,
                                                      const float minimumNormal, const std::uint32_t mask,
-                                                     const std::uint32_t layer)
+                                                     const std::uint32_t layer, const Vector3 up)
         {
-            if (hit.Normal.Y >= minimumNormal)
+            const auto vertical = CharacterDot(hit.Normal, up);
+            if (vertical >= minimumNormal)
                 return hit.Normal;
-            const auto planar = std::sqrt(hit.Normal.X * hit.Normal.X + hit.Normal.Z * hit.Normal.Z);
+            const Vector3 tangent{hit.Normal.X - up.X * vertical, hit.Normal.Y - up.Y * vertical,
+                                  hit.Normal.Z - up.Z * vertical};
+            const auto planar = std::sqrt(CharacterDot(tangent, tangent));
             if (planar <= 0.000001F)
                 return hit.Normal;
             constexpr float inset = 0.001F;
-            const Vector3 probe{hit.Position.X - hit.Normal.X / planar * inset, hit.Position.Y + 0.01F,
-                                hit.Position.Z - hit.Normal.Z / planar * inset};
+            const Vector3 probe{hit.Position.X - tangent.X / planar * inset + up.X * 0.01F,
+                                hit.Position.Y - tangent.Y / planar * inset + up.Y * 0.01F,
+                                hit.Position.Z - tangent.Z / planar * inset + up.Z * 0.01F};
             const auto surfaces = world.RayCast({.Origin = probe,
-                                                 .Direction = {0.0F, -1.0F, 0.0F},
+                                                 .Direction = {-up.X, -up.Y, -up.Z},
                                                  .MaximumDistance = 0.02F,
                                                  .Mask = mask,
                                                  .IncludeTriggers = false,
                                                  .Layer = layer});
             for (const auto& surface : surfaces)
             {
-                if (surface.Body == hit.Body && surface.Normal.Y >= minimumNormal &&
-                    std::abs(surface.Position.Y - hit.Position.Y) <= 0.002F)
+                const Vector3 difference{surface.Position.X - hit.Position.X, surface.Position.Y - hit.Position.Y,
+                                         surface.Position.Z - hit.Position.Z};
+                if (surface.Body == hit.Body && CharacterDot(surface.Normal, up) >= minimumNormal &&
+                    std::abs(CharacterDot(difference, up)) <= 0.002F)
                     return surface.Normal;
             }
             return hit.Normal;
@@ -61,10 +133,9 @@ namespace Keire
                                       sameDimension(first.HalfExtent.Z, second.HalfExtent.Z) &&
                                       sameDimension(first.Radius, second.Radius) &&
                                       sameDimension(first.Height, second.Height);
-        return first.Motion == second.Motion && first.Shape == second.Shape &&
-               first.LinearVelocity == second.LinearVelocity && shapeSizeMatches && first.Mass == second.Mass &&
-               first.Layer == second.Layer && first.Mask == second.Mask && first.Trigger == second.Trigger &&
-               first.Continuous == second.Continuous && first.UseGravity == second.UseGravity &&
+        return first.Motion == second.Motion && first.Shape == second.Shape && shapeSizeMatches &&
+               first.Mass == second.Mass && first.Layer == second.Layer && first.Mask == second.Mask &&
+               first.Trigger == second.Trigger && first.Continuous == second.Continuous &&
                first.Friction == second.Friction && first.Restitution == second.Restitution &&
                first.FrictionCombine == second.FrictionCombine &&
                first.RestitutionCombine == second.RestitutionCombine &&
@@ -88,7 +159,10 @@ namespace Keire
         Vector3 worldPosition;
         Quaternion worldRotation;
         Vector3 worldScale;
-        if (!Math::DecomposeTransform(transform->WorldMatrix(), worldPosition, worldRotation, worldScale))
+        // Keep shape orientation independent of absolute translation, including distant parent cancellation.
+        const auto precisePosition = transform->WorldPositionPrecise();
+        const auto linear = transform->WorldRelativeMatrix(precisePosition, 0.0);
+        if (!Math::DecomposeTransform(linear, worldPosition, worldRotation, worldScale))
             throw std::runtime_error("Physics body Transform cannot be decomposed.");
         const Vector3 absoluteScale{std::abs(worldScale.X), std::abs(worldScale.Y), std::abs(worldScale.Z)};
 
@@ -96,8 +170,11 @@ namespace Keire
         definition.Motion =
             useCharacter ? PhysicsMotionType::Kinematic : (rigidBody ? rigidBody->Motion() : PhysicsMotionType::Static);
         definition.Shape = useCharacter ? ColliderShape::Capsule : collider->Shape();
-        definition.Position =
-            useCharacter ? worldPosition : Math::TransformPoint(transform->WorldMatrix(), collider->Center());
+        const auto centerOffset = useCharacter ? Vector3{} : Math::TransformDirection(linear, collider->Center());
+        definition.Position = PhysicsWorldService->ToLocalPosition({precisePosition.X + centerOffset.X,
+                                                                    precisePosition.Y + centerOffset.Y,
+                                                                    precisePosition.Z + centerOffset.Z},
+                                                                   MaximumPhysicsPositionErrorMetres);
         definition.Rotation = worldRotation;
         definition.LinearVelocity = rigidBody ? rigidBody->LinearVelocity() : Vector3{};
         definition.HalfExtent =
@@ -116,6 +193,7 @@ namespace Keire
         definition.Trigger = !useCharacter && collider->Trigger();
         definition.Continuous = !useCharacter && rigidBody && rigidBody->Continuous();
         definition.UseGravity = !useCharacter && rigidBody && rigidBody->UseGravity();
+        definition.MotionSettings = !useCharacter && rigidBody ? rigidBody->MotionSettings() : PhysicsMotionSettings{};
 
         if (useCharacter)
         {
@@ -197,7 +275,7 @@ namespace Keire
         ClearPhysics();
         if (!PhysicsService || !Runtime)
             return;
-        PhysicsWorldService = PhysicsService->CreateWorld();
+        PhysicsWorldService = PhysicsService->CreateWorld(InitialPhysicsOrigin(*Runtime));
         SynchronizePhysicsBodies();
         CapturePhysicsPresentationSamples();
     }
@@ -285,8 +363,6 @@ namespace Keire
                 if (state.Definition.Position != definition->Position ||
                     state.Definition.Rotation != definition->Rotation)
                     PhysicsWorldService->SetKinematicTarget(state.Body, definition->Position, definition->Rotation);
-                if (definition->UseGravity != state.Definition.UseGravity)
-                    PhysicsWorldService->SetGravityEnabled(state.Body, definition->UseGravity);
             }
             else if (definition->Motion == PhysicsMotionType::Static &&
                      (state.Definition.Position != definition->Position ||
@@ -299,6 +375,29 @@ namespace Keire
                 pose->Rotation = definition->Rotation;
                 PhysicsWorldService->SetBodyState(state.Body, *pose);
             }
+            if (state.Definition.MotionSettings != definition->MotionSettings)
+            {
+                PhysicsWorldService->SetMotionSettings(state.Body, definition->MotionSettings);
+                state.Definition.MotionSettings = definition->MotionSettings;
+            }
+            if (definition->Motion != PhysicsMotionType::Static &&
+                state.Definition.LinearVelocity != definition->LinearVelocity)
+            {
+                auto pose = PhysicsWorldService->TryGetBody(state.Body);
+                if (!pose)
+                {
+                    throw std::runtime_error("Authored physics velocity targets an unavailable body.");
+                }
+                pose->LinearVelocity = definition->LinearVelocity;
+                pose->Sleeping = false;
+                PhysicsWorldService->SetBodyState(state.Body, *pose);
+            }
+            if (state.Definition.UseGravity != definition->UseGravity)
+            {
+                PhysicsWorldService->SetGravityEnabled(state.Body, definition->UseGravity);
+            }
+            state.Definition.LinearVelocity = definition->LinearVelocity;
+            state.Definition.UseGravity = definition->UseGravity;
             // Keep the installed shape dimensions as the comparison baseline. Tiny authored scale increments
             // must eventually rebuild once their cumulative change exceeds the round-off tolerance.
             state.Definition.Position = definition->Position;
@@ -319,28 +418,11 @@ namespace Keire
         PhysicsQueryRevision = revision;
     }
 
-    void SceneRuntimeSession::Impl::MoveTransformInWorld(const Entity& entity, TransformComponent& transform,
-                                                         const Vector3 displacement)
+    void SceneRuntimeSession::Impl::MoveTransformInWorld(TransformComponent& transform, const Vector3 displacement)
     {
-        Vector3 worldPosition;
-        Quaternion worldRotation;
-        Vector3 worldScale;
-        if (!Math::DecomposeTransform(transform.WorldMatrix(), worldPosition, worldRotation, worldScale))
-            throw std::runtime_error("Character Controller Transform cannot be decomposed.");
-        worldPosition = {worldPosition.X + displacement.X, worldPosition.Y + displacement.Y,
-                         worldPosition.Z + displacement.Z};
-        auto local = Math::ComposeTransform(worldPosition, worldRotation, worldScale);
-        if (const auto parent = entity.Parent())
-        {
-            if (const auto parentTransform = parent.GetComponent<TransformComponent>())
-                local = Math::Multiply(Math::Inverse(parentTransform->WorldMatrix()), local);
-        }
-        Vector3 localPosition;
-        Quaternion localRotation;
-        Vector3 localScale;
-        if (!Math::DecomposeTransform(local, localPosition, localRotation, localScale))
-            throw std::runtime_error("Character Controller produced a non-decomposable local Transform.");
-        transform.SetLocalPosition(localPosition);
+        const auto position = transform.WorldPositionPrecise();
+        transform.SetWorldPositionPrecise(
+            {position.X + displacement.X, position.Y + displacement.Y, position.Z + displacement.Z});
     }
 
     void SceneRuntimeSession::Impl::ApplyCharacterMovement(const float deltaSeconds)
@@ -359,12 +441,15 @@ namespace Keire
                 continue;
             }
             auto& state = runtimeState->second;
-            state.CharacterRequestedVerticalDisplacement = displacement.Y;
             Vector3 start;
             Quaternion rotation;
             Vector3 scale;
-            if (!Math::DecomposeTransform(transform->WorldMatrix(), start, rotation, scale))
+            if (!Math::DecomposeTransform(PhysicsRelativeTransform(*transform, *PhysicsWorldService), start, rotation,
+                                          scale))
                 throw std::runtime_error("Character Controller Transform cannot be decomposed.");
+            const auto up = CharacterUp(rotation);
+            const auto verticalDisplacement = CharacterDot(displacement, up);
+            state.CharacterRequestedVerticalDisplacement = verticalDisplacement;
 
             const auto add = [](const Vector3 left, const Vector3 right) noexcept
             { return Vector3{left.X + right.X, left.Y + right.Y, left.Z + right.Z}; };
@@ -378,6 +463,9 @@ namespace Keire
             const auto hasResolvableDisplacement = [&](const Vector3 value) noexcept
             { return dot(value, value) > std::numeric_limits<float>::epsilon(); };
 
+            const auto slopeNormal = std::cos(character->MaximumSlopeDegrees() * 3.14159265358979323846F / 180.0F);
+            const bool wasGrounded =
+                character->Grounded() && dot(character->RuntimeState().GroundNormal, up) >= slopeNormal;
             std::optional<Vector3> carryTarget;
             auto& carried = state.CharacterSupport;
             if (carried.Entity)
@@ -387,8 +475,8 @@ namespace Keire
                 const auto supportTransform =
                     support ? support.GetComponent<TransformComponent>() : Ref<TransformComponent>{};
                 const auto supportState = PhysicsBodies.find(carried.Entity);
-                bool eligible = character->Grounded() && displacement.Y <= 0.0F &&
-                                carried.Controller.Lock() == character && entity.Parent().Id() == carried.RiderParent &&
+                bool eligible = wasGrounded && verticalDisplacement <= 0.0F && carried.Controller.Lock() == character &&
+                                entity.Parent().Id() == carried.RiderParent &&
                                 transform->PresentationResetRevision() == carried.RiderResetRevision &&
                                 length(subtract(start, carried.ResolvedRiderPosition)) < 0.00001F && support &&
                                 support.ActiveInHierarchy() && collider && collider->Enabled() &&
@@ -407,7 +495,10 @@ namespace Keire
                     previousDefinition.Rotation = currentDefinition.Rotation;
                     eligible = SamePhysicsDefinition(previousDefinition, currentDefinition);
                     if (eligible)
-                        carryTarget = Math::TransformPoint(supportTransform->WorldMatrix(), carried.LocalAnchor);
+                    {
+                        carryTarget = Math::TransformPoint(
+                            PhysicsRelativeTransform(*supportTransform, *PhysicsWorldService), carried.LocalAnchor);
+                    }
                 }
                 if (!eligible)
                     carried = {};
@@ -415,7 +506,6 @@ namespace Keire
             const auto padding = std::min(character->SkinWidth(), state.Definition.Radius * 0.5F);
             const auto castRadius = state.Definition.Radius - padding;
             const auto castHeight = state.Definition.Height - padding * 2.0F;
-            const auto slopeNormal = std::cos(character->MaximumSlopeDegrees() * 3.14159265358979323846F / 180.0F);
             Vector3 current = start;
             const auto cast = [&](const Vector3 origin, const Vector3 movement) -> std::optional<PhysicsQueryHit>
             {
@@ -441,19 +531,19 @@ namespace Keire
             // walkable contact, with an unobstructed upward path and a bounded
             // downward probe; this must not become an extra step or ceiling bypass.
             const auto recoveryHeight = std::max(0.002F, padding * 2.0F);
-            if (const auto support = cast(current, {0.0F, -recoveryHeight, 0.0F});
-                support && support->Distance < padding - 0.0001F && support->Normal.Y >= slopeNormal)
+            if (const auto support = cast(current, multiply(up, -recoveryHeight));
+                support && support->Distance < padding - 0.0001F && dot(support->Normal, up) >= slopeNormal)
             {
-                const Vector3 upward{0.0F, recoveryHeight, 0.0F};
+                const auto upward = multiply(up, recoveryHeight);
                 if (!cast(current, upward))
                 {
                     const auto elevated = add(current, upward);
-                    if (const auto landing = cast(elevated, {0.0F, -recoveryHeight, 0.0F});
-                        landing && landing->Normal.Y >= slopeNormal && landing->Distance >= padding)
+                    if (const auto landing = cast(elevated, multiply(up, -recoveryHeight));
+                        landing && dot(landing->Normal, up) >= slopeNormal && landing->Distance >= padding)
                     {
                         const auto correction = recoveryHeight - (landing->Distance - padding);
                         if (correction > 0.0001F && correction <= recoveryHeight)
-                            current.Y += correction;
+                            current = add(current, multiply(up, correction));
                     }
                 }
             }
@@ -482,34 +572,34 @@ namespace Keire
             // supplied upward support motion, so sweep toward the anchor rather than adding it twice.
             if (carryTarget)
                 moveAndSlide(subtract(*carryTarget, current), true);
-            const Vector3 horizontal{displacement.X, 0.0F, displacement.Z};
+            const auto horizontal = subtract(displacement, multiply(up, verticalDisplacement));
             bool stepped = false;
-            if (character->Grounded() && character->StepHeight() > 0.0F && hasResolvableDisplacement(horizontal))
+            if (wasGrounded && character->StepHeight() > 0.0F && hasResolvableDisplacement(horizontal))
             {
                 const auto obstruction = cast(current, horizontal);
-                if (obstruction && obstruction->Normal.Y < slopeNormal)
+                if (obstruction && dot(obstruction->Normal, up) < slopeNormal)
                 {
                     const auto upwardDistance = character->StepHeight() + padding;
-                    const Vector3 upward{0.0F, upwardDistance, 0.0F};
+                    const auto upward = multiply(up, upwardDistance);
                     if (!cast(current, upward))
                     {
                         const auto elevated = add(current, upward);
                         if (!cast(elevated, horizontal))
                         {
                             const auto forward = add(elevated, horizontal);
-                            const Vector3 downward{0.0F, -(upwardDistance + padding + 0.05F), 0.0F};
+                            const auto downward = multiply(up, -(upwardDistance + padding + 0.05F));
                             const auto landing = cast(forward, downward);
                             if (landing)
                             {
                                 const auto normal = CharacterSupportNormal(*PhysicsWorldService, *landing, slopeNormal,
-                                                                           character->Mask(), character->Layer());
-                                const auto footHeight = current.Y - state.Definition.Height * 0.5F;
-                                const auto rise = landing->Position.Y - footHeight;
-                                if (normal.Y >= slopeNormal && rise >= -0.0001F &&
+                                                                           character->Mask(), character->Layer(), up);
+                                const auto foot = subtract(current, multiply(up, state.Definition.Height * 0.5F));
+                                const auto rise = dot(subtract(landing->Position, foot), up);
+                                if (dot(normal, up) >= slopeNormal && rise >= -0.0001F &&
                                     rise <= character->StepHeight() + 0.0001F)
                                 {
                                     const auto downDistance = std::max(0.0F, landing->Distance - padding);
-                                    current = add(forward, {0.0F, -downDistance, 0.0F});
+                                    current = add(forward, multiply(up, -downDistance));
                                     stepped = true;
                                 }
                             }
@@ -519,16 +609,17 @@ namespace Keire
             }
             if (!stepped)
                 moveAndSlide(horizontal, true);
-            moveAndSlide({0.0F, displacement.Y, 0.0F}, false);
+            moveAndSlide(multiply(up, verticalDisplacement), false);
 
-            if (character->Grounded() && displacement.Y <= 0.0F)
+            if (wasGrounded && verticalDisplacement <= 0.0F)
             {
                 const auto snapDistance = character->StepHeight() + padding + 0.05F;
-                const auto landing = cast(current, {0.0F, -snapDistance, 0.0F});
-                if (landing && Detail::ShouldSnapCharacterToGround(true, displacement.Y, landing->Normal, slopeNormal))
+                const auto landing = cast(current, multiply(up, -snapDistance));
+                if (landing &&
+                    Detail::ShouldSnapCharacterToGround(true, verticalDisplacement, landing->Normal, slopeNormal, up))
                 {
                     const auto downDistance = std::max(0.0F, landing->Distance - padding);
-                    current = add(current, {0.0F, -downDistance, 0.0F});
+                    current = add(current, multiply(up, -downDistance));
                 }
             }
 
@@ -536,7 +627,7 @@ namespace Keire
             state.CharacterVelocity = deltaSeconds > 0.0F ? multiply(applied, 1.0F / deltaSeconds) : Vector3{};
             if (applied != Vector3{})
             {
-                MoveTransformInWorld(entity, *transform, applied);
+                MoveTransformInWorld(*transform, applied);
                 PhysicsWorldService->SetKinematicTarget(state.Body, current, rotation);
                 state.Definition.Position = current;
                 state.Definition.Rotation = rotation;
@@ -561,10 +652,12 @@ namespace Keire
             Vector3 worldPosition;
             Quaternion worldRotation;
             Vector3 worldScale;
-            if (!Math::DecomposeTransform(transform->WorldMatrix(), worldPosition, worldRotation, worldScale))
+            if (!Math::DecomposeTransform(PhysicsRelativeTransform(*transform, *PhysicsWorldService), worldPosition,
+                                          worldRotation, worldScale))
                 continue;
             bool hasWalkableHit = false;
-            Vector3 normal{0.0F, 1.0F, 0.0F};
+            const auto up = CharacterUp(worldRotation);
+            Vector3 normal = up;
             const auto minimumNormal = std::cos(character->MaximumSlopeDegrees() * Pi / 180.0F);
             const auto& definition = state->second.Definition;
             const auto padding = std::min(character->SkinWidth(), definition.Radius * 0.5F);
@@ -574,7 +667,7 @@ namespace Keire
                  .Radius = definition.Radius - padding,
                  .Height = definition.Height - padding * 2.0F,
                  // Step following is handled by movement; airborne characters must reach contact first.
-                 .Displacement = {0.0F, -(padding + 0.002F), 0.0F},
+                 .Displacement = {-up.X * (padding + 0.002F), -up.Y * (padding + 0.002F), -up.Z * (padding + 0.002F)},
                  .Mask = character->Mask(),
                  .IncludeTriggers = false,
                  .Layer = character->Layer(),
@@ -582,11 +675,13 @@ namespace Keire
             if (hit)
             {
                 normal = CharacterSupportNormal(*PhysicsWorldService, *hit, minimumNormal, character->Mask(),
-                                                character->Layer());
-                hasWalkableHit = normal.Y >= minimumNormal;
+                                                character->Layer(), up);
+                hasWalkableHit = CharacterDot(normal, up) >= minimumNormal;
             }
             const auto previous = character->RuntimeState();
-            const bool grounded = Detail::ResolveCharacterGrounded(hasWalkableHit, previous.Grounded,
+            const bool previousSupportWalkable =
+                previous.Grounded && CharacterDot(previous.GroundNormal, up) >= minimumNormal;
+            const bool grounded = Detail::ResolveCharacterGrounded(hasWalkableHit, previousSupportWalkable,
                                                                    state->second.CharacterRequestedVerticalDisplacement,
                                                                    state->second.CharacterMissedWalkableFrames);
             if (grounded && !hasWalkableHit)
@@ -644,19 +739,24 @@ namespace Keire
             const auto centerOffset = Math::TransformDirection(centerTransform, runtime.ColliderCenter);
             const Vector3 origin{body->Position.X - centerOffset.X, body->Position.Y - centerOffset.Y,
                                  body->Position.Z - centerOffset.Z};
-            const auto world = Math::ComposeTransform(origin, body->Rotation, runtime.WorldScale);
+            const auto worldPosition = PhysicsWorldService->ToWorldPosition(origin);
+            const auto world = Math::ComposeTransform({}, body->Rotation, runtime.WorldScale);
             Matrix4 local = world;
             if (const auto parent = entity.Parent())
             {
                 if (const auto parentTransform = parent.GetComponent<TransformComponent>())
-                    local = Math::Multiply(Math::Inverse(parentTransform->WorldMatrix()), world);
+                {
+                    const auto parentLinear =
+                        parentTransform->WorldRelativeMatrix(parentTransform->WorldPositionPrecise(), 0.0);
+                    local = Math::Multiply(Math::Inverse(parentLinear), world);
+                }
             }
             Vector3 localPosition;
             Quaternion localRotation;
             Vector3 localScale;
             if (!Math::DecomposeTransform(local, localPosition, localRotation, localScale))
                 throw std::runtime_error("Dynamic physics body produced a non-decomposable Transform.");
-            transform->SetLocalPosition(localPosition);
+            transform->SetWorldPositionPrecise(worldPosition);
             transform->SetLocalRotation(localRotation);
             if (const auto rigidBody = entity.GetComponent<RigidBodyComponent>();
                 rigidBody && rigidBody->LinearVelocity() != body->LinearVelocity)
@@ -680,14 +780,17 @@ namespace Keire
             const auto phase = event.Phase == ContactPhase::Enter  ? PhysicsContactPhase::Enter
                                : event.Phase == ContactPhase::Stay ? PhysicsContactPhase::Stay
                                                                    : PhysicsContactPhase::Exit;
-            Runtime->DispatchPhysicsContact(*first, phase,
-                                            {*second, event.Point, event.Normal, event.Impulse, event.Trigger});
+            const auto precisePoint = PhysicsWorldService->ToWorldPosition(event.Point);
+            const auto legacyPoint = Math::RelativeFloat(precisePoint, {}, std::numeric_limits<double>::max());
+            Runtime->DispatchPhysicsContact(
+                *first, phase, {*second, legacyPoint, event.Normal, event.Impulse, event.Trigger, precisePoint});
             Runtime->DispatchPhysicsContact(*second, phase,
                                             {*first,
-                                             event.Point,
+                                             legacyPoint,
                                              {-event.Normal.X, -event.Normal.Y, -event.Normal.Z},
                                              event.Impulse,
-                                             event.Trigger});
+                                             event.Trigger,
+                                             precisePoint});
         }
     }
 
@@ -703,7 +806,7 @@ namespace Keire
             const auto entity = Runtime->FindEntity(id);
             const auto transform = entity ? entity.GetComponent<TransformComponent>() : Ref<TransformComponent>{};
             if (transform)
-                state.MovementWorld = transform->WorldMatrix();
+                state.MovementWorld = PhysicsRelativeTransform(*transform, *PhysicsWorldService);
             const auto character =
                 entity ? entity.GetComponent<CharacterControllerComponent>() : Ref<CharacterControllerComponent>{};
             if (!character || !character->Enabled())
@@ -730,12 +833,15 @@ namespace Keire
             const auto transform = entity ? entity.GetComponent<TransformComponent>() : Ref<TransformComponent>{};
             if (!transform)
                 continue;
-            const auto current = transform->WorldMatrix();
+            const auto position = transform->WorldPositionPrecise();
+            const auto current = transform->WorldRelativeMatrix(position, 0.0);
             const auto resetRevision = transform->PresentationResetRevision();
             if (!state.HasPresentationSamples || state.PresentationResetRevision != resetRevision)
             {
                 state.PreviousPresentationWorld = current;
                 state.CurrentPresentationWorld = current;
+                state.PreviousPresentationPosition = position;
+                state.CurrentPresentationPosition = position;
                 state.PresentationResetRevision = resetRevision;
                 state.HasPresentationSamples = true;
             }
@@ -743,6 +849,8 @@ namespace Keire
             {
                 state.PreviousPresentationWorld = state.CurrentPresentationWorld;
                 state.CurrentPresentationWorld = current;
+                state.PreviousPresentationPosition = state.CurrentPresentationPosition;
+                state.CurrentPresentationPosition = position;
             }
         }
     }
@@ -767,13 +875,14 @@ namespace Keire
             // A teleport must remain immediate even if no fixed tick has captured it yet.
             if (state.PresentationResetRevision != transform->PresentationResetRevision())
                 continue;
+            const auto previous = state.PreviousPresentationPosition;
+            const auto current = state.CurrentPresentationPosition;
+            const Vector3d position{previous.X + (current.X - previous.X) * amount,
+                                    previous.Y + (current.Y - previous.Y) * amount,
+                                    previous.Z + (current.Z - previous.Z) * amount};
             if (character)
             {
-                const auto& previous = state.PreviousPresentationWorld.Elements;
-                const auto& current = state.CurrentPresentationWorld.Elements;
-                transform->SetRuntimePresentationWorldPosition({previous[12] + (current[12] - previous[12]) * amount,
-                                                                previous[13] + (current[13] - previous[13]) * amount,
-                                                                previous[14] + (current[14] - previous[14]) * amount});
+                transform->SetRuntimePresentationWorldPositionPrecise(position);
                 continue;
             }
             Vector3 previousPosition;
@@ -787,17 +896,16 @@ namespace Keire
                 !Math::DecomposeTransform(state.CurrentPresentationWorld, currentPosition, currentRotation,
                                           currentScale))
             {
-                transform->SetRuntimePresentationWorldMatrix(state.CurrentPresentationWorld);
+                transform->SetRuntimePresentationWorldMatrix(state.CurrentPresentationWorld,
+                                                             state.CurrentPresentationPosition);
                 continue;
             }
-            const Vector3 position{previousPosition.X + (currentPosition.X - previousPosition.X) * amount,
-                                   previousPosition.Y + (currentPosition.Y - previousPosition.Y) * amount,
-                                   previousPosition.Z + (currentPosition.Z - previousPosition.Z) * amount};
             const Vector3 scale{previousScale.X + (currentScale.X - previousScale.X) * amount,
                                 previousScale.Y + (currentScale.Y - previousScale.Y) * amount,
                                 previousScale.Z + (currentScale.Z - previousScale.Z) * amount};
-            transform->SetRuntimePresentationWorldMatrix(Math::ComposeTransform(
-                position, RiggingDetail::Nlerp(previousRotation, currentRotation, amount), scale));
+            transform->SetRuntimePresentationWorldMatrix(
+                Math::ComposeTransform({}, RiggingDetail::Nlerp(previousRotation, currentRotation, amount), scale),
+                position);
         }
     }
 

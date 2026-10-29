@@ -78,6 +78,10 @@ namespace Keire
 
     void ValidateProjectAuthoringSettings(const ProjectAuthoringSettings& settings)
     {
+        if (!Math::IsFinite(settings.PhysicsGravity))
+        {
+            throw std::invalid_argument("Project gravity must contain finite acceleration values.");
+        }
         if (settings.SchemaVersion != ProjectAuthoringSettingsSchemaVersion)
             throw std::invalid_argument("Project authoring settings use an unsupported schema.");
         if (settings.ExternalEditorId.empty() || settings.ExternalEditorId.size() > 64 ||
@@ -132,6 +136,15 @@ namespace Keire
             throw std::runtime_error("Project authoring settings use an unsupported schema.");
 
         auto result = DefaultProjectAuthoringSettings();
+        if (const auto gravity = document.find("physicsGravity"); gravity != document.end())
+        {
+            if (!gravity->is_array() || gravity->size() != 3)
+            {
+                throw std::runtime_error("Project gravity must contain exactly three acceleration values.");
+            }
+            result.PhysicsGravity = {gravity->at(0).get<float>(), gravity->at(1).get<float>(),
+                                     gravity->at(2).get<float>()};
+        }
         if (const auto mixer = document.find("defaultMixer"); mixer != document.end() && !mixer->is_null())
             result.DefaultMixer = AssetId::Parse(mixer->get<std::string>());
         result.ExternalEditorId = document.value("externalEditorId", "system");
@@ -178,6 +191,7 @@ namespace Keire
         }
         const nlohmann::json document{
             {"schemaVersion", settings.SchemaVersion},
+            {"physicsGravity", {settings.PhysicsGravity.X, settings.PhysicsGravity.Y, settings.PhysicsGravity.Z}},
             {"defaultMixer",
              settings.DefaultMixer ? nlohmann::json(settings.DefaultMixer.ToString()) : nlohmann::json(nullptr)},
             {"audio",

@@ -1,3 +1,4 @@
+#include "KeireInternal/Math/RelativePositionTranslation.h"
 #include "KeireInternal/Vfx/VfxWorldInternal.h"
 
 #include "Keire/Vfx/VfxSubgraph.h"
@@ -7,6 +8,7 @@
 #include <set>
 #include <stdexcept>
 #include <utility>
+#include <vector>
 
 namespace Keire
 {
@@ -19,6 +21,75 @@ namespace Keire
     {
     }
     VfxWorld::~VfxWorld() = default;
+
+    Vector3d VfxWorld::WorldOrigin() const noexcept { return m_Impl->Specification.WorldOrigin; }
+
+    void VfxWorld::RebaseOrigin(const Vector3d origin, const double maximumError)
+    {
+        RebaseOriginAfter(origin, maximumError, {});
+    }
+
+    void VfxWorld::RebaseOriginAfter(const Vector3d origin, const double maximumError,
+                                     const std::function<void()>& prerequisite)
+    {
+        if (!Math::IsFinite(origin) || !std::isfinite(maximumError) || maximumError < 0.0)
+        {
+            throw std::invalid_argument("VFX origin and precision budget must be finite and valid.");
+        }
+        const auto previous = WorldOrigin();
+        if (previous == origin)
+        {
+            if (prerequisite)
+            {
+                prerequisite();
+            }
+            return;
+        }
+        const Vector3d delta{previous.X - origin.X, previous.Y - origin.Y, previous.Z - origin.Z};
+        // Validate the GPU translation too, even when there are no live CPU particles.
+        (void)Math::RelativeFloat(delta, {}, maximumError);
+        std::vector<std::pair<Vector3*, Vector3>> translated;
+        const auto prepare = [&](Vector3& position)
+        {
+            const auto value = Detail::TranslateRelativePosition(position, delta, maximumError);
+            translated.emplace_back(&position, value);
+        };
+        for (auto& effect : m_Impl->Effects)
+        {
+            if (effect.Active)
+            {
+                prepare(effect.Position);
+            }
+        }
+        for (auto& particle : m_Impl->Particles)
+        {
+            if (particle.Active &&
+                m_Impl->Effects[particle.EffectIndex].RuntimeDefinition.Space == VfxSimulationSpace::World)
+            {
+                prepare(particle.Position);
+                prepare(particle.PreviousPosition);
+            }
+        }
+        if (prerequisite)
+        {
+            prerequisite();
+        }
+        for (const auto& [destination, value] : translated)
+        {
+            *destination = value;
+        }
+        m_Impl->Specification.WorldOrigin = origin;
+        ++m_Impl->SnapshotRevision;
+    }
+
+    VfxHandle VfxWorld::ActivatePrecise(const VfxActivation& activation, const Vector3d position,
+                                        const double maximumError)
+    {
+        auto relative = activation;
+        relative.Position = Math::RelativeFloat(position, WorldOrigin(), maximumError);
+        return Activate(relative);
+    }
+
     VfxHandle VfxWorld::Activate(const VfxActivation& activation)
     {
         if (!activation.Effect || activation.Revision == 0 || !Math::IsFinite(activation.Position) ||
@@ -110,6 +181,13 @@ namespace Keire
                                   slot.Rotation = normalized;
                               });
         ++m_Impl->SnapshotRevision;
+    }
+
+    void VfxWorld::SetTransformPrecise(const VfxHandle handle, const Vector3d position, const Quaternion rotation,
+                                       const double maximumError)
+    {
+        const auto relative = Math::RelativeFloat(position, WorldOrigin(), maximumError);
+        SetTransform(handle, relative, rotation);
     }
 
     void VfxWorld::SetSimulationSpeed(const VfxHandle handle, const float speed)

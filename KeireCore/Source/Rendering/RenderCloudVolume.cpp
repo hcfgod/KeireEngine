@@ -4,6 +4,9 @@
 #include "KeireInternal/Rendering/AtmosphereUniforms.h"
 #include "KeireInternal/Rendering/CloudLightingUniforms.h"
 #include "KeireInternal/Rendering/CloudTemporalRendering.h"
+#include "KeireInternal/Rendering/EnvironmentViewCoordinates.h"
+#include "KeireInternal/Rendering/PlanetAtmosphereUniforms.h"
+#include "KeireInternal/Rendering/PlanetFogViewUniforms.h"
 #include "KeireInternal/Rendering/VolumeShadowUniforms.h"
 
 #include <array>
@@ -23,9 +26,15 @@ namespace Keire::RenderBackend
         }
         const auto& camera = packet.Camera;
         const auto observer = Math::TransformPoint(Math::Inverse(camera.View), {});
-        const auto atmosphere = MakeAtmosphereUniforms(
-            packet.Environment.Atmosphere, observer,
-            {packet.Lighting.Direction.X, packet.Lighting.Direction.Y, packet.Lighting.Direction.Z});
+        const Vector3 lightDirection{packet.Lighting.Direction.X, packet.Lighting.Direction.Y,
+                                     packet.Lighting.Direction.Z};
+        const auto atmosphere =
+            packet.PlanetFrame
+                ? MakePlanetAtmosphereUniforms(packet.Environment.Atmosphere, lightDirection, *packet.PlanetFrame)
+                : MakeAtmosphereUniforms(
+                      packet.Environment.Atmosphere, observer,
+                      {packet.Lighting.Direction.X, packet.Lighting.Direction.Y, packet.Lighting.Direction.Z},
+                      camera.WorldOrigin, camera.EnvironmentAnchor);
         const auto light =
             MakeCloudLightingUniforms(packet.Environment.AmbientColor, packet.Environment.AmbientIntensity,
                                       packet.Lighting.ColorAndIntensity, packet.Lighting.Enabled, atmosphere.SunHeight);
@@ -54,7 +63,17 @@ namespace Keire::RenderBackend
                  static_cast<float>(packet.Environment.Clouds.Volume.CloudType),
                  static_cast<float>(packet.Environment.Clouds.Volume.TypeVariation),
                  static_cast<float>(packet.Environment.Clouds.Volume.BaseHeightVariationMeters)},
-                MakeFogViewUniforms(packet.Environment.Fog, {observer.X, observer.Y, observer.Z})};
+                packet.PlanetFrame ? MakePlanetFogViewUniforms(packet.Environment.Fog,
+                                                               EnvironmentRelativeObserver(observer, camera.WorldOrigin,
+                                                                                           camera.EnvironmentAnchor),
+                                                               *packet.PlanetFrame)
+                                   : MakeFogViewUniforms(packet.Environment.Fog,
+                                                         EnvironmentRelativeObserver(observer, camera.WorldOrigin,
+                                                                                     camera.EnvironmentAnchor),
+                                                         &packet.Environment.Atmosphere),
+                packet.PlanetFrame
+                    ? MakePlanetaryCloudUniforms(*packet.PlanetFrame, packet.Environment.Clouds.Volume.BaseHeightMeters)
+                    : PlanetaryCloudUniforms{}};
     }
 
     void RenderSharedState::RecordCloudVolume(SDL_GPUCommandBuffer* commands, RenderSurfaceState& surface,
@@ -78,8 +97,9 @@ namespace Keire::RenderBackend
                                                     TextureAddressMode::Clamp, TextureAddressMode::Clamp};
         auto* sampler = ResolveSampler(samplerDescription);
         const auto& noise = EnsureCloudNoiseTexture();
-        const auto cacheUniforms = RecordCloudLightCache(Device, commands, workset.CloudLightCache, uniforms, noise,
-                                                         packet.CloudBasePatternPhase);
+        const auto cacheUniforms =
+            RecordCloudLightCache(Device, commands, workset.CloudLightCache, uniforms, noise,
+                                  packet.CloudBasePatternPhase, packet.PlanetFrame ? &*packet.PlanetFrame : nullptr);
         if (workset.CloudLightCache.Validity->RecordedKey)
         {
             ++Statistics.CloudLightCacheBuilds;

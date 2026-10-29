@@ -37,6 +37,7 @@
 #include "KeireInternal/Rendering/SpatialLightingInternal.h"
 #include "KeireInternal/Rendering/VfxVisibilityPlanInternal.h"
 #include "KeireInternal/Rendering/VolumetricCloudUniforms.h"
+#include "KeireInternal/Spatial/PlanetFrameResolution.h"
 #include "KeireInternal/Ui/RuntimeUiTextInternal.h"
 #include <SDL3/SDL.h>
 #include <algorithm>
@@ -282,6 +283,7 @@ namespace Keire::RenderBackend
         std::uint8_t SpatialLightingAbiVersion = 0;
         std::uint32_t VolumeLightingAbiVersion = 0;
         std::uint8_t InstanceAddressingAbiVersion = 0;
+        std::uint8_t VfxRenderOriginAbiVersion = 0;
 
         [[nodiscard]] SDL_GPUGraphicsPipeline* PassPipeline(const RuntimeMaterialPassRole role) const noexcept
         {
@@ -522,7 +524,9 @@ namespace Keire::RenderBackend
         RenderCamera Camera;
         Matrix4 UnjitteredProjection;
         Matrix4 PreviousViewProjection;
+        Vector3d PreviousWorldOrigin;
         RenderEnvironmentSettings Environment;
+        std::optional<Detail::ResolvedPlanetFrame> PlanetFrame;
         std::array<std::array<double, 2>, MaximumCloudLayers> CloudAdvectionPhase{};
         double StarTwinklePhase = 0.0;
         SkyColorUniforms SkyColors;
@@ -561,7 +565,9 @@ namespace Keire::RenderBackend
                 continue;
             selected = entity;
             result.Entity = entity.Id();
-            const auto direction = Normalize(Math::TransformDirection(transform->WorldMatrix(), {0.0F, 0.0F, 1.0F}));
+            const auto orientation =
+                transform->PresentationRelativeMatrix(transform->PresentationWorldPositionPrecise(), 0.0);
+            const auto direction = Normalize(Math::TransformDirection(orientation, {0.0F, 0.0F, 1.0F}));
             const auto temperature =
                 light->UseColorTemperature() ? TemperatureColor(light->ColorTemperatureKelvin()) : Color{};
             const auto color = light->LightColor();
@@ -582,7 +588,8 @@ namespace Keire::RenderBackend
         return result;
     }
 
-    [[nodiscard]] inline std::vector<SceneLocalLight> ResolveLocalLights(const Ref<Scene>& scene)
+    [[nodiscard]] inline std::vector<SceneLocalLight> ResolveLocalLights(const Ref<Scene>& scene,
+                                                                         const Vector3d origin = {})
     {
         std::vector<SceneLocalLight> result;
         result.reserve(std::min<std::size_t>(scene->ObjectCount(), 4096U));
@@ -597,7 +604,8 @@ namespace Keire::RenderBackend
                 continue;
             result.push_back({entity.Id(),
                               SceneLocalLightType::Point,
-                              Math::TransformPoint(transform->WorldMatrix(), {}),
+                              Math::RelativeFloat(transform->PresentationWorldPositionPrecise(), origin,
+                                                  std::numeric_limits<double>::max()),
                               light->Range(),
                               {},
                               -1.0F,
@@ -621,14 +629,15 @@ namespace Keire::RenderBackend
             if (!light || !transform || !light->Enabled() || !entity.ActiveInHierarchy() ||
                 light->BakeMode() == LightBakeMode::Baked)
                 continue;
-            result.push_back(
-                {entity.Id(), SceneLocalLightType::Spot, Math::TransformPoint(transform->WorldMatrix(), {}),
-                 light->Range(), Normalize(Math::TransformDirection(transform->WorldMatrix(), {0.0F, 0.0F, 1.0F})),
-                 std::cos(light->OuterAngleDegrees() * degreesToRadians),
-                 addColor(light->LightColor(), light->Intensity()),
-                 std::cos(light->InnerAngleDegrees() * degreesToRadians), light->Shadows(), light->ShadowResolution(),
-                 light->ShadowStrength(), light->ShadowBias(), light->Cookie(), light->CookieScale(),
-                 light->CookieOffset(), light->CookieRotationDegrees(), light->ContactShadows()});
+            const auto relative = transform->PresentationRelativeMatrix(origin, std::numeric_limits<double>::max());
+            result.push_back({entity.Id(), SceneLocalLightType::Spot, Math::TransformPoint(relative, {}),
+                              light->Range(), Normalize(Math::TransformDirection(relative, {0.0F, 0.0F, 1.0F})),
+                              std::cos(light->OuterAngleDegrees() * degreesToRadians),
+                              addColor(light->LightColor(), light->Intensity()),
+                              std::cos(light->InnerAngleDegrees() * degreesToRadians), light->Shadows(),
+                              light->ShadowResolution(), light->ShadowStrength(), light->ShadowBias(), light->Cookie(),
+                              light->CookieScale(), light->CookieOffset(), light->CookieRotationDegrees(),
+                              light->ContactShadows()});
         }
         std::ranges::sort(result, {}, &SceneLocalLight::Entity);
         if (result.size() > 4096U)
@@ -636,7 +645,8 @@ namespace Keire::RenderBackend
         return result;
     }
 
-    [[nodiscard]] inline std::vector<Detail::SpatialReflectionProbe> ResolveReflectionProbes(const Ref<Scene>& scene)
+    [[nodiscard]] inline std::vector<Detail::SpatialReflectionProbe> ResolveReflectionProbes(const Ref<Scene>& scene,
+                                                                                             const Vector3d origin = {})
     {
         std::vector<Detail::SpatialReflectionProbe> result;
         for (const auto& entity : scene->Query<ReflectionProbeComponent>())
@@ -645,7 +655,7 @@ namespace Keire::RenderBackend
             const auto transform = entity.GetComponent<TransformComponent>();
             if (!probe || !transform || !probe->Enabled() || !entity.ActiveInHierarchy())
                 continue;
-            const auto world = transform->WorldMatrix();
+            const auto world = transform->PresentationRelativeMatrix(origin, std::numeric_limits<double>::max());
             result.push_back({entity.Id().Value(), world, Math::Inverse(world), probe->BoxExtents(),
                               probe->BlendDistance(), probe->Importance(), 0, probe->Intensity(),
                               probe->BoxProjection()});
@@ -654,7 +664,8 @@ namespace Keire::RenderBackend
         return result;
     }
 
-    [[nodiscard]] inline std::vector<SceneLightProbeVolume> ResolveLightProbeVolumes(const Ref<Scene>& scene)
+    [[nodiscard]] inline std::vector<SceneLightProbeVolume> ResolveLightProbeVolumes(const Ref<Scene>& scene,
+                                                                                     const Vector3d origin = {})
     {
         std::vector<SceneLightProbeVolume> result;
         for (const auto& entity : scene->Query<LightProbeVolumeComponent>())
@@ -663,7 +674,7 @@ namespace Keire::RenderBackend
             const auto transform = entity.GetComponent<TransformComponent>();
             if (!volume || !transform || !volume->Enabled() || !entity.ActiveInHierarchy())
                 continue;
-            const auto world = transform->WorldMatrix();
+            const auto world = transform->PresentationRelativeMatrix(origin, std::numeric_limits<double>::max());
             result.push_back({entity.Id(), world, Math::Inverse(world), volume->BoxExtents(), volume->Spacing(),
                               volume->Priority(), volume->NormalBias(), volume->ViewBias()});
         }
@@ -875,6 +886,7 @@ namespace Keire::RenderBackend
         std::uint64_t LastPreparedFrame = 0;
         std::uint64_t LastAppliedSnapshotRevision = 0;
         std::uint64_t LastConsumedSimulationStepRevision = 0;
+        Vector3d SimulationOrigin;
         bool HasAppliedSnapshot = false;
         bool HasConsumedSimulationStep = false;
 
@@ -905,6 +917,7 @@ namespace Keire::RenderBackend
             LastPreparedFrame = 0;
             LastAppliedSnapshotRevision = 0;
             LastConsumedSimulationStepRevision = 0;
+            SimulationOrigin = {};
             HasAppliedSnapshot = false;
             HasConsumedSimulationStep = false;
         }
@@ -1046,6 +1059,7 @@ namespace Keire::RenderBackend
         [[nodiscard]] SDL_GPUGraphicsPipeline* EnsureCloudVolumePipeline(SDL_GPUSampleCount samples,
                                                                          CloudVolumePass pass);
         [[nodiscard]] const GpuTextureResources& EnsureCloudNoiseTexture();
+        [[nodiscard]] SDL_GPUBuffer* EnsureCloudNoiseBuffer();
         void RecordCloudVolume(SDL_GPUCommandBuffer* commands, RenderSurfaceState& surface,
                                const SceneRenderPacket& packet, const ShadowFrameData& shadows);
         SDL_GPUShader* CreateCloudVolumeShader(bool vertex) const;
@@ -1166,7 +1180,8 @@ namespace Keire::RenderBackend
                      const PreparedCpuVfx& preparedCpu);
         void BindVfxMaterial(SDL_GPUCommandBuffer* commands, SDL_GPURenderPass* pass, RenderSurfaceState& surface,
                              const SceneRenderPacket& packet, const ShadowFrameData& shadows,
-                             const ResolvedAssetMaterial* material, AssetId bakedLighting);
+                             const ResolvedAssetMaterial* material, AssetId bakedLighting,
+                             Matrix4 simulationToRender = {});
         [[nodiscard]] ShadowFrameData RecordShadows(SDL_GPUCommandBuffer* commands, RenderSurfaceState& surface,
                                                     const SceneRenderPacket& packet);
         void RecordSampledDepth(SDL_GPUCommandBuffer* commands, RenderSurfaceState& surface,
@@ -1368,6 +1383,7 @@ namespace Keire::RenderBackend
         GpuTextureResources CheckerboardTexture;
         GpuTextureResources DefaultSkyTexture;
         GpuTextureResources CloudNoiseTexture;
+        SDL_GPUBuffer* CloudNoiseBuffer = nullptr;
         GpuTextureResources BrdfIntegrationLut;
         GpuTextureResources WhiteTexture;
         GpuTextureResources FlatNormalTexture;

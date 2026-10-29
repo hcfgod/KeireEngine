@@ -1,4 +1,5 @@
 #include "Keire/Rendering/ShaderGraph.h"
+#include "KeireInternal/Rendering/GridOriginUniforms.h"
 #include "KeireInternal/Rendering/RenderBackendInternal.h"
 
 #include <doctest/doctest.h>
@@ -14,6 +15,28 @@
 #include <string>
 #include <string_view>
 #include <vector>
+
+TEST_CASE("Grid origins preserve ground height and periodic phase across distant rebases")
+{
+    using Keire::RenderBackend::MakeGridOriginUniforms;
+    const auto origin = MakeGridOriginUniforms({1e15 + 0.125, 100.0, -1e15 - 0.25}, {}, 1000.0F, 10.0F);
+    REQUIRE(origin);
+    CHECK(origin->PhaseAndPlane.X == 0.125F);
+    CHECK(origin->PhaseAndPlane.Z == -0.25F);
+    CHECK(origin->PhaseAndPlane.Y == -100.0F);
+    const auto rebased =
+        MakeGridOriginUniforms({1e15 + 10.125, 120.0, -1e15 - 20.25}, {-10.0F, -20.0F, 20.0F}, 1000.0F, 10.0F);
+    REQUIRE(rebased);
+    CHECK(rebased->PhaseAndPlane.X == origin->PhaseAndPlane.X);
+    CHECK(rebased->PhaseAndPlane.Z == origin->PhaseAndPlane.Z);
+    CHECK(rebased->PhaseAndPlane.Y + 20.0F == origin->PhaseAndPlane.Y);
+    const auto axes = MakeGridOriginUniforms({2.0, 0.0, -3.0}, {}, 1000.0F, 10.0F);
+    REQUIRE(axes);
+    CHECK(axes->Axes == Keire::Vector4{-2.0F, 3.0F, 1.0F, 1.0F});
+    CHECK_FALSE(MakeGridOriginUniforms({0.0, 2000.0, 0.0}, {}, 1000.0F, 10.0F));
+    CHECK_FALSE(MakeGridOriginUniforms({}, {}, 1000.0F, 0.0F));
+    CHECK_FALSE(MakeGridOriginUniforms({std::numeric_limits<double>::infinity(), 0.0, 0.0}, {}, 1000.0F, 10.0F));
+}
 
 TEST_CASE("GPU skinning vertex storage uses explicit 16-byte lanes")
 {
@@ -49,7 +72,7 @@ TEST_CASE("built-in surface shaders preserve asset UVs and consume baked lightma
     CHECK(forwardShader.find("Texture2D<float4> EnvironmentTexture : register(t4, space2)") != std::string::npos);
     CHECK(forwardShader.find("CameraPositionExposure.w") != std::string::npos);
     CHECK(forwardShader.find("return float4(saturate(") == std::string::npos);
-    CHECK(sizeof(Keire::RenderBackend::BuiltInSpatialLightingUniforms) == sizeof(float) * 28U + 1520U);
+    CHECK(sizeof(Keire::RenderBackend::BuiltInSpatialLightingUniforms) == sizeof(float) * 28U + 1616U);
     CHECK(offsetof(Keire::RenderBackend::BuiltInSpatialLightingUniforms, CloudVolume) == sizeof(float) * 28U);
     CHECK(offsetof(Keire::RenderBackend::BuiltInSpatialLightingUniforms, CameraPositionExposure) ==
           sizeof(float) * 12U);
@@ -69,14 +92,14 @@ TEST_CASE("built-in surface shaders preserve asset UVs and consume baked lightma
 
 TEST_CASE("Editor grid shader reconstructs an infinite plane and writes scene depth")
 {
-    CHECK(sizeof(Keire::RenderBackend::GridUniforms) == sizeof(float) * 56);
+    CHECK(sizeof(Keire::RenderBackend::GridUniforms) == sizeof(float) * 64);
 
     std::ifstream stream("KeireCore/Shaders/BuiltinGrid.hlsl", std::ios::binary);
     REQUIRE(stream.good());
     const std::string shader{std::istreambuf_iterator<char>(stream), std::istreambuf_iterator<char>()};
     CHECK(shader.find("SV_Depth") != std::string::npos);
     CHECK(shader.find("cameraWorld.xyz + rayDirection * rayDistance") != std::string::npos);
-    CHECK(shader.find("GridLine(worldPosition.xz") != std::string::npos);
+    CHECK(shader.find("GridLine(gridPosition") != std::string::npos);
 }
 
 TEST_CASE("GPU skinning shader storage matches the mesh vertex lane layout")

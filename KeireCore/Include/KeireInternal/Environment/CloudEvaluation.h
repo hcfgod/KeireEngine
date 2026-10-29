@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Keire/Rendering/Cloud.h"
+#include "KeireInternal/Environment/CloudCoordinateDomain.h"
 #include "KeireInternal/Environment/VolumetricCloudValidation.h"
 
 #include <algorithm>
@@ -62,7 +63,7 @@ namespace Keire::Detail
         std::array<double, 2> result;
         for (std::size_t axis = 0; axis < result.size(); ++axis)
         {
-            if (!std::isfinite(observerFromAnchor[axis]) || std::abs(observerFromAnchor[axis]) > 1.0e9)
+            if (!ValidCloudHorizontalCoordinate(observerFromAnchor[axis]))
             {
                 throw std::invalid_argument("Cloud anchor-relative displacement exceeds the local evaluation domain.");
             }

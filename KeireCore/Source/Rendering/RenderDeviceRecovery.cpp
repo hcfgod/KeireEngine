@@ -303,6 +303,7 @@ namespace Keire::RenderBackend
         CheckerboardTexture = {};
         DefaultSkyTexture = {};
         CloudNoiseTexture = {};
+        CloudNoiseBuffer = nullptr;
         BrdfIntegrationLut = {};
         WhiteTexture = {};
         FlatNormalTexture = {};

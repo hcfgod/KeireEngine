@@ -1,3 +1,4 @@
+#include "KeireInternal/Environment/PlanetCelestialEvaluation.h"
 #include "KeireInternal/Rendering/RenderBackendInternal.h"
 
 #include <array>
@@ -11,8 +12,10 @@
 #include "KeireInternal/Rendering/EnvironmentLightingApplication.h"
 #include "KeireInternal/Rendering/EnvironmentLightingValidation.h"
 #include "KeireInternal/Rendering/MaterialPropertyValidation.h"
+#include "KeireInternal/Rendering/PlanetEnvironmentCapture.h"
 #include "KeireInternal/Rendering/RenderGeometryMathInternal.h"
 #include "KeireInternal/Rendering/TemporalAntiAliasingInternal.h"
+#include "KeireInternal/Rendering/VfxRenderCoordinates.h"
 
 #include <algorithm>
 #include <bit>
@@ -496,6 +499,12 @@ namespace Keire::RenderBackend
 #endif
         const auto preparationStarted = std::chrono::steady_clock::now();
         auto request = std::move(pending.Request);
+        if (request.PlanetEnvironment && request.EvaluatedEnvironment)
+        {
+            const auto planet = Detail::CapturePlanetEnvironment(*request.PlanetEnvironment);
+            request.EvaluatedEnvironment = Detail::ResolvePlanetCelestialLighting(
+                *request.EvaluatedEnvironment, planet.PlanetToObserver, planet.RootToObserver);
+        }
         const auto originalPrimary = request.PrimaryContributionIndex;
         std::vector<std::pair<std::size_t, SceneRenderContribution>> liveContributions;
         liveContributions.reserve(request.AdditionalScenes.size() + 1U);
@@ -536,7 +545,8 @@ namespace Keire::RenderBackend
         if (Specification.Mode == RenderMode::Rendered && (!surface.Specification.Depth || !DepthFormat))
             throw std::logic_error("Scene rendering requires a depth-enabled render surface.");
         const auto camera = request.View->Camera();
-        if (!Math::IsFinite(camera.View) || !Math::IsFinite(camera.Projection) || !ValidColor(camera.ClearColor))
+        if (!Math::IsFinite(camera.View) || !Math::IsFinite(camera.Projection) || !ValidColor(camera.ClearColor) ||
+            !Math::IsFinite(camera.WorldOrigin) || !Math::IsFinite(camera.EnvironmentAnchor))
             throw std::invalid_argument("SceneRenderRequest camera contains invalid values.");
         ValidateRenderEnvironmentSettings(request.Environment);
         Keire::Detail::ValidateEnvironmentLighting(request.EvaluatedEnvironment);
@@ -644,8 +654,11 @@ namespace Keire::RenderBackend
         const auto viewProjection = Math::Multiply(packet.Camera.Projection, packet.Camera.View);
         const MotionHistoryKey cameraHistoryKey{{}, {}, surfaceToken.Id, surfaceToken.Epoch};
         const auto previousCamera = CameraMotionHistory.find(cameraHistoryKey);
-        const auto cameraHistory = MakeCameraMotionHistory(unjitteredViewProjection, acceptedFrameId,
-                                                           request.Environment, request.EvaluatedEnvironment);
+        auto cameraHistory = MakeCameraMotionHistory(unjitteredViewProjection, acceptedFrameId, request.Environment,
+                                                     request.EvaluatedEnvironment);
+        cameraHistory.WorldOrigin = camera.WorldOrigin;
+        cameraHistory.EnvironmentAnchor = camera.EnvironmentAnchor;
+        cameraHistory.PlanetEnvironment = MakePlanetEnvironmentHistoryKey(request.PlanetEnvironment);
         const bool environmentDirectional = request.EvaluatedEnvironment && request.EvaluatedEnvironment->Directional;
         packet.TemporalHistoryContinuous = previousCamera != CameraMotionHistory.end() && acceptedFrameId != 0U &&
                                            previousCamera->second.Frame == acceptedFrameId - 1U &&
@@ -654,14 +667,23 @@ namespace Keire::RenderBackend
                                             ? TemporalAntiAliasing::ApplyTemporalProjectionJitter(
                                                   previousCamera->second.Transform, temporalJitterNdc)
                                             : viewProjection;
+        packet.PreviousWorldOrigin =
+            packet.TemporalHistoryContinuous ? previousCamera->second.WorldOrigin : camera.WorldOrigin;
         packet.Environment = request.Environment;
+        if (request.PlanetEnvironment)
+        {
+            packet.PlanetFrame = Detail::CapturePlanetEnvironment(*request.PlanetEnvironment);
+        }
         packet.SkyColors = CaptureSkyColors(request.EvaluatedEnvironment);
         Detail::ApplyEnvironment(packet.Environment, packet.CloudAdvectionPhase, packet.StarTwinklePhase,
                                  request.EvaluatedEnvironment);
-        packet.CloudVolume =
-            CaptureCloudVolume(packet.Camera, packet.Environment.Clouds.Volume, request.EvaluatedEnvironment);
+        packet.CloudVolume = CaptureCloudVolume(
+            packet.Camera, packet.Environment.Clouds.Volume, request.EvaluatedEnvironment, false, camera.WorldOrigin,
+            camera.EnvironmentAnchor, packet.PlanetFrame ? &*packet.PlanetFrame : nullptr);
         packet.CloudBasePatternPhase =
-            CaptureCloudVolume(packet.Camera, packet.Environment.Clouds.Volume, request.EvaluatedEnvironment, true)
+            CaptureCloudVolume(packet.Camera, packet.Environment.Clouds.Volume, request.EvaluatedEnvironment, true,
+                               camera.WorldOrigin, camera.EnvironmentAnchor,
+                               packet.PlanetFrame ? &*packet.PlanetFrame : nullptr)
                 .PatternOrigin[1];
         packet.GlobalMaterialProperties = std::move(request.GlobalMaterialProperties);
         if (request.DrawSceneContributions)
@@ -712,13 +734,13 @@ namespace Keire::RenderBackend
         const auto appendContribution = [&](const Ref<Scene>& scene, VfxRenderSnapshot vfx)
         {
             const auto contributionOrder = static_cast<std::uint32_t>(packet.VfxSnapshots.size());
-            auto localLights = ResolveLocalLights(scene);
+            auto localLights = ResolveLocalLights(scene, camera.WorldOrigin);
             for (auto& light : localLights)
                 light.ContributionOrder = contributionOrder;
             packet.LocalLights.insert(packet.LocalLights.end(), std::make_move_iterator(localLights.begin()),
                                       std::make_move_iterator(localLights.end()));
-            auto reflectionProbes = ResolveReflectionProbes(scene);
-            auto lightProbeVolumes = ResolveLightProbeVolumes(scene);
+            auto reflectionProbes = ResolveReflectionProbes(scene, camera.WorldOrigin);
+            auto lightProbeVolumes = ResolveLightProbeVolumes(scene, camera.WorldOrigin);
             packet.SpatialContributions.push_back(
                 {scene->Asset(), scene->BakedLighting(), reflectionProbes, lightProbeVolumes});
             packet.ReflectionProbes.insert(packet.ReflectionProbes.end(),
@@ -749,13 +771,18 @@ namespace Keire::RenderBackend
                     skinSkeleton = animator->Skeleton();
                     poseGeneration = animator->PoseGeneration();
                 }
-                const auto world = transform->PresentationWorldMatrix();
+                const auto world =
+                    transform->PresentationRelativeMatrix(camera.WorldOrigin, std::numeric_limits<double>::max());
                 const MotionHistoryKey historyKey{sceneAsset, entity.Id(), surfaceToken.Id, surfaceToken.Epoch};
                 const auto previous = MotionHistory.find(historyKey);
-                const auto previousWorld = previous != MotionHistory.end() && acceptedFrameId != 0U &&
-                                                   previous->second.Frame == acceptedFrameId - 1U
-                                               ? previous->second.Transform
-                                               : world;
+                const auto previousWorld =
+                    packet.TemporalHistoryContinuous && previous != MotionHistory.end() && acceptedFrameId != 0U &&
+                            previous->second.Frame == acceptedFrameId - 1U
+                        ? previous->second.Transform
+                    : packet.TemporalHistoryContinuous
+                        ? transform->PresentationRelativeMatrix(previousCamera->second.WorldOrigin,
+                                                                std::numeric_limits<double>::max())
+                        : world;
                 packet.DrawItems.push_back({renderer->Mesh(),
                                             {renderer->Materials().begin(), renderer->Materials().end()},
                                             renderer->MaterialProperties(),
@@ -796,7 +823,9 @@ namespace Keire::RenderBackend
                     ++CaptureStatistics.VfxRibbonParticles;
                 else
                     ++CaptureStatistics.VfxVolumetricParticles;
-                if (auto item = VfxMeshDrawItem(particle))
+                const auto renderParticle = VfxParticleInRenderFrame(particle, vfx.WorldOrigin(), camera.WorldOrigin,
+                                                                     packet.PreviousWorldOrigin);
+                if (auto item = VfxMeshDrawItem(renderParticle))
                 {
                     item->Scene = sceneAsset;
                     item->ContributionOrder = contributionOrder;
@@ -1418,6 +1447,7 @@ namespace Keire::RenderBackend
             result.SpatialLightingAbiVersion = definition.SpatialLightingAbiVersion;
             result.VolumeLightingAbiVersion = definition.VolumeLightingAbiVersion;
             result.InstanceAddressingAbiVersion = definition.InstanceAddressingAbiVersion;
+            result.VfxRenderOriginAbiVersion = definition.VfxRenderOriginAbiVersion;
             for (const auto& property : shader->LastGood->Definition().Properties)
             {
                 const auto found = properties.find(property.Name);

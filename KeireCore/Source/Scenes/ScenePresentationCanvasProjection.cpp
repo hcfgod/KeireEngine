@@ -5,6 +5,7 @@
 #include "Keire/Rendering/RenderSystem.h"
 #include "Keire/Scenes/Scene.h"
 #include "Keire/Ui.h"
+#include "KeireInternal/Rendering/PresentationCameraFrame.h"
 #include "KeireInternal/Ui/RuntimeUiStyleInternal.h"
 
 #include <algorithm>
@@ -215,7 +216,9 @@ namespace Keire::Detail
             if (!camera || !transform)
                 return std::nullopt;
             RenderCamera result;
-            result.View = Math::Inverse(transform->PresentationWorldMatrix());
+            const auto frame = Internal::BuildPresentationCameraFrame(*transform);
+            result.View = frame.View;
+            result.WorldOrigin = frame.Origin;
             result.Projection = camera->ProjectionMatrix(viewportWidth / viewportHeight);
             result.ClearColor = camera->ClearColor();
             result.NearPlane = camera->NearPlane();
@@ -266,7 +269,10 @@ namespace Keire::Detail
                 const auto camera = resolveCamera(EntityId(document.Settings.Camera));
                 state.Geometry.Visible = camera.has_value();
                 if (camera)
+                {
                     state.ViewProjection = Math::Multiply(camera->Projection, camera->View);
+                    state.WorldOrigin = camera->WorldOrigin;
+                }
                 state.Geometry.ViewportCorners = {Vector2{0.0F, 0.0F}, Vector2{viewportWidth, 0.0F},
                                                   Vector2{viewportWidth, viewportHeight},
                                                   Vector2{0.0F, viewportHeight}};
@@ -288,7 +294,9 @@ namespace Keire::Detail
                 const auto transform = entity ? entity.GetComponent<TransformComponent>() : Ref<TransformComponent>{};
                 if (!camera || !transform)
                     break;
-                state.World = transform->PresentationWorldMatrix();
+                state.WorldOrigin = camera->WorldOrigin;
+                state.World =
+                    transform->PresentationRelativeMatrix(state.WorldOrigin, std::numeric_limits<double>::max());
                 state.ViewProjection = Math::Multiply(camera->Projection, camera->View);
                 try
                 {
@@ -456,6 +464,7 @@ namespace Keire::Detail
                     continue;
                 const auto camera = view->Camera();
                 if (!Math::IsFinite(camera.View) || !Math::IsFinite(camera.Projection) ||
+                    camera.WorldOrigin != canvas.WorldOrigin ||
                     !MatricesApproximatelyEqual(canvas.ViewProjection, Math::Multiply(camera.Projection, camera.View)))
                 {
                     continue;
@@ -473,7 +482,8 @@ namespace Keire::Detail
                               .RenderTexture = canvas.RenderTexture,
                               .SortingOrder = canvas.SortingOrder,
                               .DepthTest = canvas.DepthTest,
-                              .Material = canvas.Material});
+                              .Material = canvas.Material,
+                              .WorldOrigin = canvas.WorldOrigin});
         }
         return result;
     }
@@ -503,6 +513,7 @@ namespace Keire::Detail
             {
                 const auto camera = overlayView->Camera();
                 if (!Math::IsFinite(camera.View) || !Math::IsFinite(camera.Projection) ||
+                    camera.WorldOrigin != projection->WorldOrigin ||
                     !MatricesApproximatelyEqual(projection->ViewProjection,
                                                 Math::Multiply(camera.Projection, camera.View)))
                 {

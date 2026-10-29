@@ -28,6 +28,14 @@ namespace Keire
                     using T = std::remove_cvref_t<decltype(current)>;
                     if constexpr (std::same_as<T, Vector2>)
                         return Json::array({current.X, current.Y});
+                    else if constexpr (std::same_as<T, Vector3d>)
+                    {
+                        if (!Math::IsFinite(current))
+                        {
+                            throw std::invalid_argument("Precise vector property must be finite.");
+                        }
+                        return Json::array({current.X, current.Y, current.Z});
+                    }
                     else if constexpr (std::same_as<T, Vector3>)
                         return Json::array({current.X, current.Y, current.Z});
                     else if constexpr (std::same_as<T, Vector4> || std::same_as<T, Quaternion>)

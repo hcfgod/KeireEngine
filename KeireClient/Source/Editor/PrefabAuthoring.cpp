@@ -89,6 +89,15 @@ namespace KeireEditor
                                                       const Keire::AssetId parent,
                                                       const std::optional<Keire::Vector3> position)
     {
+        const auto precisePosition = position ? std::optional{Keire::Math::Widen(*position)} : std::nullopt;
+        return InstantiatePrefabPrecise(scene, prefab, composed, parent, precisePosition);
+    }
+
+    Keire::PrefabInstanceDefinition InstantiatePrefabPrecise(Keire::SceneDefinition& scene, const Keire::AssetId prefab,
+                                                             const Keire::SceneDefinition& composed,
+                                                             const Keire::AssetId parent,
+                                                             const std::optional<Keire::Vector3d> position)
+    {
         Keire::SceneAsset::Validate(scene);
         Keire::SceneAsset::Validate(composed);
         if (!prefab || !composed.PrefabInstances.empty() || !composed.PrefabOverrides.empty())
@@ -100,10 +109,6 @@ namespace KeireEditor
         const auto root = std::ranges::find(composed.Objects, Keire::AssetId{}, &Keire::SceneObjectDefinition::Parent);
         if (root == composed.Objects.end())
             throw std::invalid_argument("Prefab instantiation requires at least one root object.");
-        const auto offset = position ? Keire::Vector3{position->X - root->Transform.Position.X,
-                                                      position->Y - root->Transform.Position.Y,
-                                                      position->Z - root->Transform.Position.Z}
-                                     : Keire::Vector3{};
         std::unordered_map<Keire::AssetId, Keire::AssetId> remapped;
         for (const auto& object : composed.Objects)
             remapped.emplace(object.Id, Keire::AssetId::Generate());
@@ -119,8 +124,10 @@ namespace KeireEditor
 
             if (!object.Parent && position)
             {
-                copy.Transform.Position = {copy.Transform.Position.X + offset.X, copy.Transform.Position.Y + offset.Y,
-                                           copy.Transform.Position.Z + offset.Z};
+                // Subtract source coordinates first, so a distant source does not erase a small destination.
+                copy.Transform.Position = {(copy.Transform.Position.X - root->Transform.Position.X) + position->X,
+                                           (copy.Transform.Position.Y - root->Transform.Position.Y) + position->Y,
+                                           (copy.Transform.Position.Z - root->Transform.Position.Z) + position->Z};
                 instance.Overrides.push_back({.Kind = Keire::PrefabOverrideKind::SetObjectTransform,
                                               .Object = object.Id,
                                               .Transform = copy.Transform});
@@ -557,7 +564,7 @@ namespace KeireEditor
             add({}, "Active", original->Active, object.Active);
             add({}, "Layer", original->Layer, object.Layer);
             add({}, "Tags", original->Tags, object.Tags);
-            const auto vectorValue = [](const Keire::Vector3& value)
+            const auto vectorValue = [](const auto& value)
             { return nlohmann::json::array({value.X, value.Y, value.Z}); };
             const auto rotationValue = [](const Keire::Quaternion& value)
             { return nlohmann::json::array({value.X, value.Y, value.Z, value.W}); };

@@ -369,7 +369,7 @@ TEST_CASE("editor camera framing projection and orientation are deterministic")
 {
     Keire::Detail::EditorCameraController camera;
     camera.Frame({4.0F, 2.0F, -3.0F}, 2.0F);
-    CHECK(camera.State().Focus == (Keire::Vector3{4.0F, 2.0F, -3.0F}));
+    CHECK(camera.State().Focus == (Keire::Vector3d{4.0, 2.0, -3.0}));
     CHECK(camera.State().Distance == doctest::Approx(5.0F));
     CHECK(camera.State().OrthographicSize == doctest::Approx(5.0F));
 
@@ -499,7 +499,7 @@ TEST_CASE("shader assets preserve deterministic variants and target cooking")
     CHECK(decodedLegacyManifest.OcclusionSupport == Keire::ShaderOcclusionSupport::None);
 
     const auto importer = Keire::CreateShaderAssetImporter();
-    CHECK(importer.Version == 11U);
+    CHECK(importer.Version == 12U);
     REQUIRE(importer.Cook);
     Keire::ShaderImporterSpecification missingReflection;
     missingReflection.Formats = {Keire::ShaderBinaryFormat::Dxil};
@@ -2002,4 +2002,79 @@ TEST_CASE("camera fullscreen effect stages persist reset and reject invalid slot
     CHECK(restored->FullscreenEffects() == std::array<Keire::AssetId, 3>{});
     registration.Deserialize(*restored, {}, 1);
     CHECK(restored->FullscreenEffects() == std::array<Keire::AssetId, 3>{});
+}
+
+TEST_CASE("shader VFX render-origin capabilities round trip and reject malformed contracts")
+{
+    Keire::ShaderAssetDefinition definition;
+    definition.Source = "Assets/Shaders/OriginAware.hlsl";
+    definition.VertexLayoutVersion = 3U;
+    definition.UsesInstancing = true;
+    definition.InstanceAddressingAbiVersion = 2U;
+    definition.VfxRenderOriginAbiVersion = 1U;
+    for (const auto format :
+         {Keire::ShaderBinaryFormat::Dxil, Keire::ShaderBinaryFormat::SpirV, Keire::ShaderBinaryFormat::Msl})
+    {
+        definition.Variants.push_back({format, {std::byte{1}}, {std::byte{2}}});
+    }
+    const auto encoded = Keire::ShaderAsset::Encode(definition);
+    const auto decoded = Keire::ShaderAsset::Decode(encoded);
+    CHECK(decoded->Definition().VfxRenderOriginAbiVersion == 1U);
+    CHECK(Keire::ShaderAsset::Encode(decoded->Definition()) == encoded);
+
+    std::vector<std::uint8_t> unsignedBytes(encoded.size());
+    std::ranges::transform(encoded, unsignedBytes.begin(),
+                           [](const std::byte value) { return std::to_integer<std::uint8_t>(value); });
+    const auto canonical = nlohmann::json::from_cbor(unsignedBytes);
+    const auto canonicalBytes = [](const nlohmann::json& document)
+    {
+        const auto data = nlohmann::json::to_cbor(document);
+        std::vector<std::byte> bytes(data.size());
+        std::ranges::transform(data, bytes.begin(), [](const std::uint8_t value) { return std::byte(value); });
+        return bytes;
+    };
+    auto legacy = canonical;
+    legacy.erase("vfxRenderOriginAbiVersion");
+    CHECK(Keire::ShaderAsset::Decode(canonicalBytes(legacy))->Definition().VfxRenderOriginAbiVersion == 0U);
+    legacy["vfxRenderOriginAbiVersion"] = 0U;
+    CHECK(Keire::ShaderAsset::Decode(canonicalBytes(legacy))->Definition().VfxRenderOriginAbiVersion == 0U);
+
+    for (const auto& unsupported : {nlohmann::json(2U), nlohmann::json(256U), nlohmann::json(-1), nlohmann::json(1.5),
+                                    nlohmann::json(true), nlohmann::json("1")})
+    {
+        auto invalid = canonical;
+        invalid["vfxRenderOriginAbiVersion"] = unsupported;
+        CHECK_THROWS_AS((void)Keire::ShaderAsset::Decode(canonicalBytes(invalid)), std::invalid_argument);
+    }
+    auto invalid = definition;
+    invalid.VfxRenderOriginAbiVersion = 2U;
+    CHECK_THROWS_AS((void)Keire::ShaderAsset::Encode(invalid), std::invalid_argument);
+    invalid = definition;
+    invalid.UsesInstancing = false;
+    CHECK_THROWS_AS((void)Keire::ShaderAsset::Encode(invalid), std::invalid_argument);
+    invalid = definition;
+    invalid.InstanceAddressingAbiVersion = 0U;
+    CHECK_THROWS_AS((void)Keire::ShaderAsset::Encode(invalid), std::invalid_argument);
+    invalid = definition;
+    invalid.VertexLayoutVersion = 2U;
+    CHECK_THROWS_AS((void)Keire::ShaderAsset::Encode(invalid), std::invalid_argument);
+}
+
+TEST_CASE("editor camera precise focus keeps navigation and view local at distant origins")
+{
+    Keire::Detail::EditorCameraController camera;
+    const auto nearView = camera.ViewMatrix();
+    camera.SetFocusPrecise({1.0e15 + 0.25, -1.0e15 + 0.5, 1.0e15 + 0.75});
+    CHECK(camera.ViewMatrix() == nearView);
+    const auto before = camera.State().Focus;
+    Keire::Detail::EditorCameraInput move;
+    move.MoveUp = 1.0F;
+    move.DeltaSeconds = 0.125F;
+    REQUIRE(camera.Update(move));
+    CHECK(camera.State().Focus.X == before.X);
+    CHECK(camera.State().Focus.Y == before.Y + 1.0);
+    CHECK(camera.State().Focus.Z == before.Z);
+    CHECK(camera.ViewMatrix() == nearView);
+    CHECK_THROWS_AS(camera.SetFocusPrecise({std::numeric_limits<double>::infinity(), 0.0, 0.0}), std::invalid_argument);
+    CHECK(camera.State().Focus.Y == before.Y + 1.0);
 }

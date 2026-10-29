@@ -3,6 +3,30 @@
 Input is polled during variable updates, physics advances on fixed simulation ticks, and audio is controlled through
 scene components plus asset references. Author the data first, then keep frame and fixed-step responsibilities clear.
 
+## Project Gravity (Development)
+
+Open **Project Settings > Audio / Physics > Default Gravity** to set XYZ acceleration in
+metres per second squared. **Earth Gravity** restores `(0, -9.81, 0)`; **Zero Gravity**
+removes uniform acceleration for space scenes. Existing projects retain Earth gravity.
+
+The saved default initializes new physics worlds, including the next Play session and
+exported players. Changing it during Play does not replace the current world's gravity;
+stop and start Play to test the new default. Bodies with **Use Gravity** disabled remain
+unaffected. Per-world gravity overrides and checkpoint-restored gravity stay independent.
+After Undo/Redo, use **Save Settings** to persist the restored setting before exporting.
+
+This setting supplies uniform acceleration, not a planet's inverse-square gravity field.
+Use zero uniform gravity when a separately configured planetary field should be the only
+gravity source. Non-finite values are rejected. Native tests and editor preset persistence
+have passed; numeric-entry/Undo acceptance and exported-player parity remain under validation.
+
+When testing a falling body, disable scripts or animation that write its transform every frame.
+A copied showcase object can retain bobbing or rotation behavior that masks its physics motion.
+Use a separate test scene, start the body above a solid collider, and check its resting height.
+Native gravity tests also cover weak fields: unsupported bodies keep accelerating, while opposing
+solid contacts allow sleeping. Trigger overlaps do not provide physical support. These checks do
+not establish a complete planetary-travel workflow.
+
 ## Input Actions
 
 Create an Input Action asset in the Project panel and open it in the Input Actions editor. Organize actions into maps,
@@ -52,9 +76,66 @@ The direction must be finite and non-zero. Masks filter layers. `TryCapsuleCast`
 `OverlapSphere` returns bounded matching entities. Collision and trigger callbacks deliver `CollisionContact` records
 to the involved Behaviours in fixed-step order.
 
-Use Collider, Rigid Body, Character Controller, and Joint components in the Inspector for authored physics state.
+Use Collider, Rigid Body, and Character Controller components in the Inspector for authored physics state.
+
+In the current development implementation, a Character Controller uses its capsule's world rotation to determine
+up. Movement commands remain world-space displacements; climbing, slope checks and floor snapping follow the
+rotated capsule. Rotating a parent also rotates this frame. Gravity does not automatically orient the controller,
+and the controller still needs gameplay code to supply falling/jumping movement. Full planetary travel and
+changing-gravity transitions remain in development; this is not a released planetary-controller workflow.
+Joint components currently expose authoring settings; runtime solver constraints remain an implementation gap.
 Changing transforms every frame is not a substitute for fixed-step rigid-body control. Test collision layers and
 trigger flags with the real Play Mode scene.
+
+### Rigid-Body Drag And Speed Limits (Development)
+
+The current development source adds a **Motion** group to the Rigid Body Inspector:
+linear and angular damping in inverse seconds, maximum linear speed in metres per second,
+and maximum angular speed in radians per second. Older scenes retain their defaults:
+0.05 damping on both axes, a 500 m/s linear limit, and about 47.124 rad/s angular limit.
+Zero damping allows a freely moving body to coast when no forces or collisions act on it.
+
+Scripts configure all four values together through `RigidBody.MotionSettings`:
+
+```csharp
+private static void ConfigureCoasting(RigidBody body)
+{
+    body.MotionSettings = new RigidBodyMotionSettings(
+        LinearDamping: 0.0f,
+        AngularDamping: 0.0f,
+        MaximumLinearSpeed: 20000.0f,
+        MaximumAngularSpeed: 100.0f);
+}
+```
+
+The limits above are example choices, not a planetary preset. Damping must be finite and
+nonnegative; speed limits must be finite and positive. Invalid assignments throw before
+submission. Use `RigidBodyMotionSettings.Default` to restore the historical values; a
+zero-initialized settings struct has invalid zero speed limits. Changes reach the native
+body during scene physics synchronization, without recreating the body. Lowering a limit
+clamps the corresponding velocity. Set velocity during fixed-step gameplay, and validate
+collision behavior at the actual speed and timestep your game uses.
+
+This controls drag and caps only. It does not enable gravity sources, orient a character,
+stream a planet, or establish stable orbital motion. Managed bridge and IDE API-parity tests
+pass; the combined native integration and editor acceptance checks are still pending.
+
+### Queries In Distant Worlds
+
+The in-development large-world API provides `Physics.TryRaycastPrecise`, `Physics.TryCapsuleCastPrecise`, and
+`Physics.OverlapSpherePrecise`. Pass a `Vector3d` world position, such as `Transform.PositionPrecise`, directly.
+Do not convert a distant position to `Vector3` first: widening it afterward cannot recover the lost detail.
+Directions, local displacements, radii and distances remain floats. `RaycastHitPrecise.Point` retains the double
+world position; collision callbacks expose the corresponding `CollisionContact.PointPrecise` field.
+
+The context entity selects the runtime world and query layer. An ignored entity must belong to that same world.
+A cast returning `false` means no hit; invalid inputs or an unavailable precise native binding produce an exception.
+Sphere overlaps are bounded to 256 matching entities, so use spatially smaller queries when that bound matters.
+Do not rely on the returned order to select the nearest overlap.
+
+Fixed distant simulation regions have automated coverage. Dynamic region transfers and complete planetary travel
+are still under development; these API additions are not evidence that seamless surface-to-space physics is ready.
+See the [large-world implementation and acceptance plan](../LargeWorldAndEnvironmentPlan.md) for the current gates.
 
 ## Audio Sources And One-Shots
 

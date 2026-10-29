@@ -202,6 +202,7 @@ namespace Keire
     {
         std::size_t Imported = 0;
         std::size_t CacheHits = 0;
+        /// Empty when catalog publication fails. Last-good files remain on disk; affected statuses are Failed.
         std::filesystem::path CatalogPath;
         std::vector<AssetImportStatus> Statuses;
     };

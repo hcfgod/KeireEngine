@@ -95,7 +95,7 @@ namespace KeireEditor
             return defaultMeshBounds;
         }
 
-        void IncludePoint(SceneEntityBounds& bounds, const Keire::Vector3 point) noexcept
+        void IncludePoint(SceneEntityBounds& bounds, const Keire::Vector3d point) noexcept
         {
             if (!bounds.Valid)
             {
@@ -120,13 +120,20 @@ namespace KeireEditor
             if (const auto transform = entity.GetComponent<Keire::TransformComponent>())
             {
                 const auto local = BoundsForEntity(entity, resolveMeshBounds, resolvePoseBounds);
-                const auto world = transform->WorldMatrix();
+                const auto entityOrigin = transform->PresentationWorldPositionPrecise();
+                const auto world = transform->PresentationRelativeMatrix(entityOrigin, 0.0);
+                const Keire::Vector3d displacement{entityOrigin.X - bounds.WorldOrigin.X,
+                                                   entityOrigin.Y - bounds.WorldOrigin.Y,
+                                                   entityOrigin.Z - bounds.WorldOrigin.Z};
                 for (int corner = 0; corner < 8; ++corner)
                 {
                     const Keire::Vector3 point{corner & 1 ? local.Maximum.X : local.Minimum.X,
                                                corner & 2 ? local.Maximum.Y : local.Minimum.Y,
                                                corner & 4 ? local.Maximum.Z : local.Minimum.Z};
-                    IncludePoint(bounds, Keire::Math::TransformPoint(world, point));
+                    // Keep distant translation out of the float rotation/scale matrix.
+                    const auto localCorner = Keire::Math::TransformPoint(world, point);
+                    IncludePoint(bounds, {displacement.X + localCorner.X, displacement.Y + localCorner.Y,
+                                          displacement.Z + localCorner.Z});
                 }
             }
             for (const auto& child : entity.Children())
@@ -134,8 +141,8 @@ namespace KeireEditor
         }
     } // namespace
 
-    Keire::Vector3 ResolveSceneDropPosition(const Keire::UiItemRect viewport, const Keire::UiPosition pointer,
-                                            const Keire::RenderCamera& camera)
+    Keire::Vector3d ResolveSceneDropPositionPrecise(const Keire::UiItemRect viewport, const Keire::UiPosition pointer,
+                                                    const Keire::RenderCamera& camera)
     {
         const auto size = viewport.Size();
         if (!std::isfinite(size.Width) || !std::isfinite(size.Height) || size.Width <= 1.0F || size.Height <= 1.0F ||
@@ -146,53 +153,77 @@ namespace KeireEditor
         const auto inverse = Keire::Math::Inverse(Keire::Math::Multiply(camera.Projection, camera.View));
         const auto origin = Unproject(inverse, x, y, 0.0F);
         const auto direction = NormalizedDirection(origin, Unproject(inverse, x, y, 1.0F));
-        float distance = -1.0F;
+        double distance = -1.0;
         if (std::abs(direction.Y) > 0.000001F)
-            distance = -origin.Y / direction.Y;
+        {
+            distance = -(camera.WorldOrigin.Y + origin.Y) / direction.Y;
+        }
         if (!std::isfinite(distance) || distance < 0.0F)
         {
             const auto viewOrigin = Keire::Math::TransformPoint(camera.View, origin);
             const auto viewDirection = Keire::Math::TransformDirection(camera.View, direction);
             distance = (10.0F - viewOrigin.Z) / viewDirection.Z;
         }
-        const Keire::Vector3 result{origin.X + direction.X * distance, origin.Y + direction.Y * distance,
-                                    origin.Z + direction.Z * distance};
+        const Keire::Vector3d result{camera.WorldOrigin.X + (origin.X + direction.X * distance),
+                                     camera.WorldOrigin.Y + (origin.Y + direction.Y * distance),
+                                     camera.WorldOrigin.Z + (origin.Z + direction.Z * distance)};
         if (distance < 0.0F || !std::isfinite(result.X) || !std::isfinite(result.Y) || !std::isfinite(result.Z))
             throw std::invalid_argument("Scene camera cannot resolve asset placement.");
         return result;
     }
 
+    Keire::Vector3 ResolveSceneDropPosition(const Keire::UiItemRect viewport, const Keire::UiPosition pointer,
+                                            const Keire::RenderCamera& camera)
+    {
+        return Keire::Math::RelativeFloat(ResolveSceneDropPositionPrecise(viewport, pointer, camera), {},
+                                          std::numeric_limits<double>::max());
+    }
+
     Keire::Vector3 SceneEntityBounds::Center() const noexcept
     {
-        return {(Minimum.X + Maximum.X) * 0.5F, (Minimum.Y + Maximum.Y) * 0.5F, (Minimum.Z + Maximum.Z) * 0.5F};
+        return {static_cast<float>(Minimum.X * 0.5 + Maximum.X * 0.5),
+                static_cast<float>(Minimum.Y * 0.5 + Maximum.Y * 0.5),
+                static_cast<float>(Minimum.Z * 0.5 + Maximum.Z * 0.5)};
+    }
+
+    Keire::Vector3d SceneEntityBounds::CenterPrecise() const noexcept
+    {
+        return {WorldOrigin.X + (Minimum.X * 0.5 + Maximum.X * 0.5),
+                WorldOrigin.Y + (Minimum.Y * 0.5 + Maximum.Y * 0.5),
+                WorldOrigin.Z + (Minimum.Z * 0.5 + Maximum.Z * 0.5)};
     }
 
     float SceneEntityBounds::Radius() const noexcept
     {
         if (!Valid)
             return 0.0F;
-        const auto center = Center();
-        const float x = Maximum.X - center.X;
-        const float y = Maximum.Y - center.Y;
-        const float z = Maximum.Z - center.Z;
-        const float radius = std::sqrt(x * x + y * y + z * z);
-        return radius > 0.0F ? radius : 0.25F;
+        const double x = Maximum.X * 0.5 - Minimum.X * 0.5;
+        const double y = Maximum.Y * 0.5 - Minimum.Y * 0.5;
+        const double z = Maximum.Z * 0.5 - Minimum.Z * 0.5;
+        const double radius = std::hypot(x, y, z);
+        return radius > 0.0
+                   ? static_cast<float>(std::min(radius, static_cast<double>(std::numeric_limits<float>::max())))
+                   : 0.25F;
     }
 
     SceneEntityBounds CalculateSceneEntityBounds(const Keire::Entity& entity,
                                                  const MeshBoundsResolver& resolveMeshBounds,
-                                                 const PoseBoundsResolver& resolvePoseBounds)
+                                                 const PoseBoundsResolver& resolvePoseBounds,
+                                                 const Keire::Vector3d worldOrigin)
     {
         SceneEntityBounds bounds;
+        bounds.WorldOrigin = worldOrigin;
         IncludeEntity(bounds, entity, resolveMeshBounds, resolvePoseBounds);
         return bounds;
     }
 
     SceneEntityBounds CalculateSceneEntityBounds(const std::span<const Keire::Entity> entities,
                                                  const MeshBoundsResolver& resolveMeshBounds,
-                                                 const PoseBoundsResolver& resolvePoseBounds)
+                                                 const PoseBoundsResolver& resolvePoseBounds,
+                                                 const Keire::Vector3d worldOrigin)
     {
         SceneEntityBounds bounds;
+        bounds.WorldOrigin = worldOrigin;
         for (const auto& entity : entities)
             IncludeEntity(bounds, entity, resolveMeshBounds, resolvePoseBounds);
         return bounds;
@@ -228,7 +259,9 @@ namespace KeireEditor
             const auto renderer = entity.GetComponent<Keire::MeshRendererComponent>();
             const bool hasMesh = renderer && renderer->Enabled() && renderer->Visible();
             const auto bounds = BoundsForEntity(entity, resolveMeshBounds, resolvePoseBounds);
-            const auto distance = IntersectBounds(transform->WorldMatrix(), bounds, nearPoint, direction);
+            const auto relativeWorld =
+                transform->PresentationRelativeMatrix(camera.WorldOrigin, std::numeric_limits<double>::max());
+            const auto distance = IntersectBounds(relativeWorld, bounds, nearPoint, direction);
             if (!distance)
                 continue;
             constexpr float tieTolerance = 0.0001F;
@@ -267,13 +300,15 @@ namespace KeireEditor
             Keire::UiItemRect projected{{std::numeric_limits<float>::max(), std::numeric_limits<float>::max()},
                                         {std::numeric_limits<float>::lowest(), std::numeric_limits<float>::lowest()}};
             bool visible = false;
+            const auto relativeWorld =
+                transform->PresentationRelativeMatrix(camera.WorldOrigin, std::numeric_limits<double>::max());
             for (int corner = 0; corner < 8; ++corner)
             {
                 const Keire::Vector3 local{corner & 1 ? bounds.Maximum.X : bounds.Minimum.X,
                                            corner & 2 ? bounds.Maximum.Y : bounds.Minimum.Y,
                                            corner & 4 ? bounds.Maximum.Z : bounds.Minimum.Z};
-                const auto screen = ProjectToViewport(Keire::Math::TransformPoint(transform->WorldMatrix(), local),
-                                                      viewProjection, viewport);
+                const auto screen =
+                    ProjectToViewport(Keire::Math::TransformPoint(relativeWorld, local), viewProjection, viewport);
                 if (!screen)
                     continue;
                 visible = true;

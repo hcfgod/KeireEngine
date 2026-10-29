@@ -5,6 +5,9 @@
 #include "Keire/Rendering/RenderSystem.h"
 #include "Keire/Scenes/SceneRuntimeWorld.h"
 #include "KeireInternal/Environment/SceneRuntimeEnvironmentAccess.h"
+#include "KeireInternal/Rendering/PlanetEnvironmentCapture.h"
+#include "KeireInternal/Rendering/PresentationCameraFrame.h"
+#include "KeireInternal/Spatial/SceneRuntimePlanetAccess.h"
 
 #include <cstddef>
 #include <functional>
@@ -15,11 +18,24 @@
 
 namespace Keire::Internal
 {
+    [[nodiscard]] inline std::optional<PlanetEnvironmentView>
+    CaptureRuntimePlanetEnvironment(SceneRuntimeWorld& world, const RenderCamera& camera)
+    {
+        const auto localObserver = Math::TransformPoint(Math::Inverse(camera.View), {});
+        const Detail::SectorPosition origin({1, 1}, {},
+                                            {camera.WorldOrigin.X, camera.WorldOrigin.Y, camera.WorldOrigin.Z});
+        const auto observer = origin.Translated({localObserver.X, localObserver.Y, localObserver.Z});
+        const auto resolved = Detail::SceneRuntimePlanetAccess::ResolveSelected(world, observer);
+        return resolved ? std::optional{Detail::ToPlanetEnvironmentView(*resolved)} : std::nullopt;
+    }
+
     [[nodiscard]] inline RenderCamera BuildPresentedSceneCamera(const CameraComponent& camera,
                                                                 const TransformComponent& transform, float aspect)
     {
         RenderCamera result;
-        result.View = Math::Inverse(transform.PresentationWorldMatrix());
+        const auto frame = BuildPresentationCameraFrame(transform);
+        result.View = frame.View;
+        result.WorldOrigin = frame.Origin;
         result.Projection = camera.ProjectionMatrix(aspect);
         result.ClearColor = camera.ClearColor();
         result.NearPlane = camera.NearPlane();
@@ -153,6 +169,7 @@ namespace Keire::Internal
         {
             request->DrawSceneContributions = drawSceneContributions;
             request->EvaluatedEnvironment = Detail::SceneRuntimeEnvironmentAccess::CaptureLighting(*world);
+            request->PlanetEnvironment = CaptureRuntimePlanetEnvironment(*world, view->Camera());
         }
         return request;
     }

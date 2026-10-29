@@ -5,6 +5,7 @@
 
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <string>
 
 namespace
@@ -43,6 +44,7 @@ TEST_CASE("Project authoring settings round trip default mixer and a symmetric 3
     settings.Audio.MaximumVoices = 512;
     settings.Audio.MaximumVirtualVoices = 2048;
     settings.Audio.PlaybackDeviceId = "a0b1c2d3";
+    settings.PhysicsGravity = {2.0F, -1.62F, 3.0F};
 
     Keire::SaveProjectAuthoringSettings(directory.Path, settings);
     CHECK(Keire::LoadProjectAuthoringSettings(directory.Path) == settings);
@@ -84,6 +86,7 @@ TEST_CASE("Project authoring settings migrate schema one projects to safe audio 
     auto document = nlohmann::json::parse(input);
     document["schemaVersion"] = 1;
     document.erase("audio");
+    document.erase("physicsGravity");
     input.close();
     std::ofstream output(path, std::ios::trunc);
     REQUIRE(output);
@@ -94,4 +97,28 @@ TEST_CASE("Project authoring settings migrate schema one projects to safe audio 
     CHECK(migrated.SchemaVersion == Keire::ProjectAuthoringSettingsSchemaVersion);
     CHECK(migrated.DefaultMixer == settings.DefaultMixer);
     CHECK(migrated.Audio == Keire::AudioProjectSettings{});
+    CHECK(migrated.PhysicsGravity == Keire::Vector3{0.0F, -9.81F, 0.0F});
+}
+
+TEST_CASE("Project gravity supports zero and rejects invalid persisted acceleration")
+{
+    TemporaryDirectory directory;
+    auto settings = Keire::DefaultProjectAuthoringSettings();
+    settings.PhysicsGravity = {};
+    Keire::SaveProjectAuthoringSettings(directory.Path, settings);
+    CHECK(Keire::LoadProjectAuthoringSettings(directory.Path).PhysicsGravity == Keire::Vector3{});
+
+    settings.PhysicsGravity.X = std::numeric_limits<float>::infinity();
+    CHECK_THROWS_AS(Keire::SaveProjectAuthoringSettings(directory.Path, settings), std::invalid_argument);
+    CHECK(Keire::LoadProjectAuthoringSettings(directory.Path).PhysicsGravity == Keire::Vector3{});
+
+    const auto path = directory.Path / "ProjectSettings" / "Authoring.keiresettings";
+    std::ifstream input(path);
+    auto document = nlohmann::json::parse(input);
+    input.close();
+    document["physicsGravity"] = nlohmann::json::array({0.0, -9.81});
+    std::ofstream output(path, std::ios::trunc);
+    output << document.dump();
+    output.close();
+    CHECK_THROWS(Keire::LoadProjectAuthoringSettings(directory.Path));
 }

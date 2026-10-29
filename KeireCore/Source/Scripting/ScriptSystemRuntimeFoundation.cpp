@@ -2,6 +2,7 @@
 #include "KeireInternal/Scripting/ScriptSystemInternal.h"
 
 #include <algorithm>
+#include <limits>
 
 namespace Keire
 {
@@ -387,9 +388,18 @@ namespace Keire
                                                                       const std::uint64_t high,
                                                                       const std::uint64_t low) noexcept
     {
-        const auto entity = ResolveRuntimeEntity(world, high, low);
-        const auto transform = entity ? entity.GetComponent<TransformComponent>() : Ref<TransformComponent>{};
-        return transform ? transform->LocalPosition() : Vector3{};
+        try
+        {
+            const auto entity = ResolveRuntimeEntity(world, high, low);
+            const auto transform = entity ? entity.GetComponent<TransformComponent>() : Ref<TransformComponent>{};
+            return transform ? transform->LocalPosition() : Vector3{};
+        }
+        catch (...)
+        {
+            // The legacy ABI has no status field; managed wrappers reject this nonfinite sentinel.
+            const auto invalid = std::numeric_limits<float>::quiet_NaN();
+            return {invalid, invalid, invalid};
+        }
     }
 
     void ScriptSystem::Impl::RuntimeSetLocalPosition(const std::uint64_t world, const std::uint64_t high,
@@ -530,6 +540,45 @@ namespace Keire
         *continuous = body->Continuous() ? 1 : 0;
         *gravity = body->UseGravity() ? 1 : 0;
         return 1;
+    }
+
+    std::uint8_t ScriptSystem::Impl::RuntimeGetRigidBodyMotionSettings(const std::uint64_t world,
+                                                                       const std::uint64_t high,
+                                                                       const std::uint64_t low, float* linearDamping,
+                                                                       float* angularDamping, float* linearSpeed,
+                                                                       float* angularSpeed) noexcept
+    {
+        const auto body = RuntimeRigidBody(world, high, low);
+        if (!body || !linearDamping || !angularDamping || !linearSpeed || !angularSpeed)
+        {
+            return 0;
+        }
+        const auto settings = body->MotionSettings();
+        *linearDamping = settings.LinearDamping;
+        *angularDamping = settings.AngularDamping;
+        *linearSpeed = settings.MaximumLinearSpeed;
+        *angularSpeed = settings.MaximumAngularSpeed;
+        return 1;
+    }
+
+    std::uint8_t ScriptSystem::Impl::RuntimeSetRigidBodyMotionSettings(
+        const std::uint64_t world, const std::uint64_t high, const std::uint64_t low, const float linearDamping,
+        const float angularDamping, const float linearSpeed, const float angularSpeed) noexcept
+    {
+        try
+        {
+            const auto body = RuntimeRigidBody(world, high, low);
+            if (!body)
+            {
+                return 0;
+            }
+            body->SetMotionSettings({linearDamping, angularDamping, linearSpeed, angularSpeed});
+            return 1;
+        }
+        catch (...)
+        {
+            return 0;
+        }
     }
 
     [[nodiscard]] std::uint8_t ScriptSystem::Impl::RuntimeSetRigidBodyMotion(const std::uint64_t world,

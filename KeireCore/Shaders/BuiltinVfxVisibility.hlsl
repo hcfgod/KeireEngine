@@ -48,6 +48,7 @@ cbuffer VfxVisibilityDispatch : register(b0, space2)
     uint4 VisibilityExecution;
     float4 VisibilityBoundsMinimum;
     float4 VisibilityBoundsMaximum;
+    float4 VisibilitySimulationToRender;
 };
 
 static const uint VfxRendererSprite = 0U;
@@ -93,6 +94,9 @@ void StoreVfxVisibilityCandidate(uint localIndex, float3 boundsMinimum, float3 b
     if (localIndex >= VisibilityMetadata.z)
         return;
     const uint candidateIndex = VisibilityMetadata.x + localIndex;
+    boundsMinimum += VisibilitySimulationToRender.xyz;
+    boundsMaximum += VisibilitySimulationToRender.xyz;
+    forceVisible = forceVisible || !IsFiniteVfxFloat3(boundsMinimum) || !IsFiniteVfxFloat3(boundsMaximum);
     VfxOcclusionCandidate candidate;
     candidate.BoundsMinimum = float4(boundsMinimum, maximumWorldPositionDisplacementRadius);
     candidate.BoundsMaximum = float4(boundsMaximum, maximumWorldPositionDisplacementRadius);

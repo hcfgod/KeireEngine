@@ -219,7 +219,14 @@ void EditorWorkspaceLayer::ApplyInspectorTransformEdit(KeireEditor::InspectorTra
         switch (property)
         {
         case KeireEditor::InspectorTransformProperty::Position:
-            transform->SetLocalPosition(std::get<Keire::Vector3>(value));
+            if (const auto* precise = std::get_if<Keire::Vector3d>(&value))
+            {
+                transform->SetLocalPositionPrecise(*precise);
+            }
+            else
+            {
+                transform->SetLocalPosition(std::get<Keire::Vector3>(value));
+            }
             break;
         case KeireEditor::InspectorTransformProperty::Rotation:
             transform->SetLocalRotation(std::get<Keire::Quaternion>(value));
@@ -646,5 +653,11 @@ void EditorWorkspaceLayer::ApplyProjectAuthoringSettings(const Keire::ProjectAut
 {
     Keire::ValidateProjectAuthoringSettings(settings);
     if (const auto physics = Owner().Physics())
-        physics->ConfigureCollisionMatrix(settings.PhysicsCollisionMatrix);
+    {
+        if (physics->CollisionMatrix() != settings.PhysicsCollisionMatrix)
+        {
+            physics->ConfigureCollisionMatrix(settings.PhysicsCollisionMatrix);
+        }
+        physics->ConfigureDefaultGravity(settings.PhysicsGravity);
+    }
 }

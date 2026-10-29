@@ -120,7 +120,7 @@ namespace Keire
                 if (component->Type() == TransformComponent::StaticType())
                 {
                     const auto transform = DynamicRefCast<TransformComponent>(component);
-                    object.Transform = {transform->LocalPosition(), transform->LocalRotation(),
+                    object.Transform = {transform->LocalPositionPrecise(), transform->LocalRotation(),
                                         transform->LocalScale()};
                 }
             }
@@ -818,16 +818,26 @@ namespace Keire
                 throw std::invalid_argument("An entity cannot be parented to itself or one of its descendants.");
             if (record->Parent == parent)
                 return;
-            Vector3 position;
+            Vector3d position;
             Quaternion rotation;
             Vector3 scale;
             if (preserveWorldTransform)
             {
-                const auto previousWorld = WorldMatrix(id);
-                const auto local =
-                    parent ? Math::Multiply(Math::Inverse(WorldMatrix(parent)), previousWorld) : previousWorld;
-                if (!Math::DecomposeTransform(local, position, rotation, scale) || !Math::IsFinite(position) ||
-                    !TransformComponent::IsValidLocalScale(scale))
+                const auto previousPosition = m_Impl->Transform(id)->WorldPositionPrecise();
+                position = parent ? m_Impl->Transform(parent)->InverseTransformPointPrecise(previousPosition)
+                                  : previousPosition;
+                auto previousWorld = WorldMatrix(id);
+                previousWorld.Elements[12] = 0.0F;
+                previousWorld.Elements[13] = 0.0F;
+                previousWorld.Elements[14] = 0.0F;
+                auto parentWorld = parent ? WorldMatrix(parent) : Matrix4{};
+                parentWorld.Elements[12] = 0.0F;
+                parentWorld.Elements[13] = 0.0F;
+                parentWorld.Elements[14] = 0.0F;
+                const auto local = parent ? Math::Multiply(Math::Inverse(parentWorld), previousWorld) : previousWorld;
+                Vector3 ignoredTranslation;
+                if (!Math::DecomposeTransform(local, ignoredTranslation, rotation, scale) ||
+                    !Math::IsFinite(position) || !TransformComponent::IsValidLocalScale(scale))
                 {
                     throw std::invalid_argument("Reparenting would produce an unsupported local transform.");
                 }
@@ -841,7 +851,7 @@ namespace Keire
             if (preserveWorldTransform)
             {
                 const auto transform = m_Impl->Transform(id);
-                transform->SetLocalPosition(position);
+                transform->SetLocalPositionPrecise(position);
                 transform->SetLocalRotation(rotation);
                 transform->SetLocalScale(scale);
             }

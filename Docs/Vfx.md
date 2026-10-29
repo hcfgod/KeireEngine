@@ -1,5 +1,10 @@
 # VFX Authoring And Runtime
 
+Deterministic scene sessions use CPU VFX and advance effects on fixed simulation ticks, including a paused
+Play Mode step. Render-frame updates do not advance their VFX clocks. Ordinary sessions continue to advance
+effects on render frames. This timing contract supports strict replay; it does not make variable-frame
+gameplay callbacks or asynchronously loaded effect dependencies deterministic.
+
 Sprite and Ribbon outputs execute assigned VFX Shader Graph materials on CPU and GPU simulation paths. Create a VFX
 Shader Graph, create a Material from that shader, and assign it to the output's Material field. Use material texture
 properties for authored sampling; the separate Sprite texture belongs to the built-in fallback. Particle color is

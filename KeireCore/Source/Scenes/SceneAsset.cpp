@@ -413,6 +413,20 @@ namespace Keire
             return {value[0].get<float>(), value[1].get<float>(), value[2].get<float>()};
         }
 
+        [[nodiscard]] Vector3d ParsePosition(const Json& value)
+        {
+            if (!value.is_array() || value.size() != 3)
+            {
+                throw std::runtime_error("Scene position must contain exactly three numbers.");
+            }
+            const Vector3d position{value[0].get<double>(), value[1].get<double>(), value[2].get<double>()};
+            if (!Math::IsFinite(position))
+            {
+                throw std::runtime_error("Scene position must contain finite coordinates.");
+            }
+            return position;
+        }
+
         [[nodiscard]] SceneQuaternion ParseQuaternion(const Json& value)
         {
             if (!value.is_array() || value.size() != 4)
@@ -429,7 +443,7 @@ namespace Keire
 
         [[nodiscard]] Json TransformData(const SceneTransform& transform)
         {
-            return {{"position", EncodeVector3(transform.Position)},
+            return {{"position", Json::array({transform.Position.X, transform.Position.Y, transform.Position.Z})},
                     {"rotation", EncodeQuaternion(transform.Rotation)},
                     {"scale", EncodeVector3(transform.Scale)}};
         }
@@ -438,13 +452,13 @@ namespace Keire
         {
             if (!data.is_object())
                 throw std::runtime_error("Transform component data must be an object.");
-            return {ParseVector3(data.at("position")), ParseQuaternion(data.at("rotation")),
+            return {ParsePosition(data.at("position")), ParseQuaternion(data.at("rotation")),
                     ParseVector3(data.at("scale"))};
         }
 
         [[nodiscard]] SceneComponentDefinition MakeTransformDefinition(const SceneTransform& transform)
         {
-            return {TransformComponent::StaticType(), 1, true, TransformData(transform).dump()};
+            return {TransformComponent::StaticType(), 2, true, TransformData(transform).dump()};
         }
 
         [[nodiscard]] std::size_t ApproximateResidentBytes(const SceneDefinition& definition) noexcept
@@ -517,6 +531,14 @@ namespace Keire
                     using T = std::remove_cvref_t<decltype(current)>;
                     if constexpr (std::same_as<T, Vector2>)
                         return Json::array({current.X, current.Y});
+                    else if constexpr (std::same_as<T, Vector3d>)
+                    {
+                        if (!Math::IsFinite(current))
+                        {
+                            throw std::invalid_argument("Precise vector property must be finite.");
+                        }
+                        return Json::array({current.X, current.Y, current.Z});
+                    }
                     else if constexpr (std::same_as<T, Vector3>)
                         return Json::array({current.X, current.Y, current.Z});
                     else if constexpr (std::same_as<T, Vector4> || std::same_as<T, Quaternion>)
@@ -683,6 +705,19 @@ namespace Keire
                          {color[0].get<float>(), color[1].get<float>(), color[2].get<float>(), color[3].get<float>()}});
                 }
                 return ColorGradient(std::move(keys), static_cast<GradientInterpolation>(interpolation));
+            }
+            case 15:
+            {
+                if (!value.is_array() || value.size() != 3)
+                {
+                    throw std::runtime_error("Precise prefab vector must contain three channels.");
+                }
+                const Vector3d result{value[0].get<double>(), value[1].get<double>(), value[2].get<double>()};
+                if (!Math::IsFinite(result))
+                {
+                    throw std::runtime_error("Precise prefab vector must be finite.");
+                }
+                return result;
             }
             case 14:
             {
@@ -869,7 +904,7 @@ namespace Keire
                 object.Name = value.at("name").get<std::string>();
                 object.Active = value.value("active", true);
                 const auto& transform = value.at("transform");
-                object.Transform = {ParseVector3(transform.at("position")), ParseQuaternion(transform.at("rotation")),
+                object.Transform = {ParsePosition(transform.at("position")), ParseQuaternion(transform.at("rotation")),
                                     ParseVector3(transform.at("scale"))};
                 object.Components.push_back(MakeTransformDefinition(object.Transform));
                 definition.Objects.push_back(std::move(object));

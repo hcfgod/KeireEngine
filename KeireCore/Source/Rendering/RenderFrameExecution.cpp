@@ -1,6 +1,7 @@
 #include "KeireInternal/Rendering/RenderBackendInternal.h"
 
 #include "KeireInternal/Diagnostics/TelemetryInternal.h"
+#include "KeireInternal/Rendering/RuntimeUiWorldCoordinates.h"
 #include "KeireInternal/UiContextAccessInternal.h"
 
 #include <algorithm>
@@ -210,7 +211,8 @@ namespace Keire::RenderBackend
                             frame->RuntimeUiWorldPanels.push_back(
                                 {.Commands = std::move(commands),
                                  .Surface = pending.Surface,
-                                 .World = submission.World,
+                                 .World = Internal::RuntimeUiWorldInCameraFrame(
+                                     submission.World, submission.WorldOrigin, camera.WorldOrigin),
                                  .ViewProjection = Math::Multiply(camera.Projection, camera.View),
                                  .Viewport = submission.Viewport,
                                  .ReferenceResolution = submission.ReferenceResolution,

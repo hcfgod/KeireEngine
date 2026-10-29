@@ -1426,3 +1426,27 @@ void EditorWorkspaceLayer::ReportInputActionsError(std::string message) noexcept
 {
     ReportError("Input", std::move(message));
 }
+
+std::optional<Keire::ManagedRaycastHitPrecise>
+EditorWorkspaceLayer::RaycastManagedPrecise(const Keire::ManagedRaycastQueryPrecise& query)
+{
+    const auto runtime = m_PlayRuntimeWorld ? m_PlayRuntimeWorld->SessionForWorld(query.World)
+                                            : Keire::Ref<Keire::SceneRuntimeSession>{};
+    return Keire::Detail::QueryManagedRayPrecise(runtime, query);
+}
+
+std::optional<Keire::ManagedRaycastHitPrecise>
+EditorWorkspaceLayer::CapsuleCastManagedPrecise(const Keire::ManagedCapsuleCastQueryPrecise& query)
+{
+    const auto runtime = m_PlayRuntimeWorld ? m_PlayRuntimeWorld->SessionForWorld(query.World)
+                                            : Keire::Ref<Keire::SceneRuntimeSession>{};
+    return Keire::Detail::QueryManagedCapsulePrecise(runtime, query);
+}
+
+std::vector<Keire::AssetId>
+EditorWorkspaceLayer::OverlapSphereManagedPrecise(const Keire::ManagedSphereOverlapQueryPrecise& query)
+{
+    const auto runtime = m_PlayRuntimeWorld ? m_PlayRuntimeWorld->SessionForWorld(query.World)
+                                            : Keire::Ref<Keire::SceneRuntimeSession>{};
+    return Keire::Detail::QueryManagedSphereOverlapPrecise(runtime, query);
+}

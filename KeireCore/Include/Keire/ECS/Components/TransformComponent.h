@@ -21,7 +21,13 @@ namespace Keire
 
         [[nodiscard]] static bool IsValidLocalScale(Vector3 value) noexcept;
 
-        [[nodiscard]] Vector3 LocalPosition() const noexcept { return m_LocalPosition; }
+        // Legacy float accessors are approximate. Large-world consumers must use the precise position API.
+        [[nodiscard]] Vector3 LocalPosition() const;
+        [[nodiscard]] Vector3d LocalPositionPrecise() const noexcept { return m_LocalPosition; }
+        void SetLocalPositionPrecise(Vector3d value);
+        [[nodiscard]] Vector3d WorldPositionPrecise() const;
+        [[nodiscard]] Vector3d InverseTransformPointPrecise(Vector3d value) const;
+        void SetWorldPositionPrecise(Vector3d value);
         [[nodiscard]] Quaternion LocalRotation() const noexcept { return m_LocalRotation; }
         [[nodiscard]] Vector3 LocalEulerAngles() const;
         [[nodiscard]] Vector3 LocalScale() const noexcept { return m_LocalScale; }
@@ -32,7 +38,12 @@ namespace Keire
 
         [[nodiscard]] Matrix4 LocalMatrix() const;
         [[nodiscard]] Matrix4 WorldMatrix() const;
+        // Authoritative simulation pose, independent of presentation interpolation.
+        [[nodiscard]] Matrix4 WorldRelativeMatrix(Vector3d origin, double maximumError) const;
         [[nodiscard]] Matrix4 PresentationWorldMatrix() const;
+        [[nodiscard]] Vector3d PresentationWorldPositionPrecise() const;
+        // Origin must be in the same coordinate frame. Narrow only after subtracting it in double precision.
+        [[nodiscard]] Matrix4 PresentationRelativeMatrix(Vector3d origin, double maximumError) const;
         [[nodiscard]] Vector3 WorldPosition() const;
         [[nodiscard]] Quaternion WorldRotation() const;
         [[nodiscard]] Vector3 PresentationWorldPosition() const;
@@ -44,8 +55,11 @@ namespace Keire
         [[nodiscard]] std::vector<Entity> Children() const;
         void SetParent(Entity parent = {}, bool preserveWorldTransform = true);
         void SetRuntimePresentationWorldMatrix(Matrix4 value);
+        // The explicit precise position replaces the matrix translation.
+        void SetRuntimePresentationWorldMatrix(Matrix4 value, Vector3d position);
         // Interpolate character translation while retaining current gameplay rotation and scale.
         void SetRuntimePresentationWorldPosition(Vector3 value);
+        void SetRuntimePresentationWorldPositionPrecise(Vector3d value);
         // Runtime-only opt-in for transforms authored at fixed simulation boundaries.
         // Physics-owned character/dynamic presentation retains precedence.
         [[nodiscard]] bool FixedPresentationInterpolation() const noexcept { return m_FixedPresentationInterpolation; }
@@ -62,10 +76,19 @@ namespace Keire
 
       private:
         friend ComponentRegistration CreateTransformComponentRegistration();
-        Vector3 m_LocalPosition;
+
+        struct PrecisePresentationTransform
+        {
+            Matrix4 Linear;
+            Vector3d Position;
+        };
+
+        [[nodiscard]] PrecisePresentationTransform BuildPresentationTransform() const;
+        Vector3d m_LocalPosition;
         Quaternion m_LocalRotation;
         Vector3 m_LocalScale{1.0F, 1.0F, 1.0F};
         Matrix4 m_PresentationWorldMatrix;
+        Vector3d m_PresentationWorldPosition;
         bool m_HasPresentationWorldMatrix = false;
         bool m_PresentationPositionOnly = false;
         std::uint64_t m_PresentationResetRevision = 0;
@@ -73,11 +96,12 @@ namespace Keire
         bool m_HasFixedSamples = false;
         bool m_HasFixedPresentation = false;
         EntityId m_FixedParent;
-        Vector3 m_PreviousFixedPosition;
-        Vector3 m_CurrentFixedPosition;
+        Vector3d m_PreviousFixedPosition;
+        Vector3d m_CurrentFixedPosition;
         Quaternion m_PreviousFixedRotation;
         Quaternion m_CurrentFixedRotation;
         Matrix4 m_FixedPresentationLocal;
+        Vector3d m_FixedPresentationPosition;
     };
 
     [[nodiscard]] KEIRE_API ComponentRegistration CreateTransformComponentRegistration();

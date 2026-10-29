@@ -219,6 +219,7 @@ This is a generated declaration catalog, not a replacement for the workflow guid
 - [`Keire.Quaternion`](#keirequaternion)
 - [`Keire.RangeAttribute`](#keirerangeattribute)
 - [`Keire.RaycastHit`](#keireraycasthit)
+- [`Keire.RaycastHitPrecise`](#keireraycasthitprecise)
 - [`Keire.ReadOnlyInInspectorAttribute`](#keirereadonlyininspectorattribute)
 - [`Keire.ReflectionProbe`](#keirereflectionprobe)
 - [`Keire.ReflectionProbeCaptureMode`](#keirereflectionprobecapturemode)
@@ -344,6 +345,7 @@ This is a generated declaration catalog, not a replacement for the workflow guid
 - [`Keire.Vector2`](#keirevector2)
 - [`Keire.Vector2Control`](#keirevector2control)
 - [`Keire.Vector3`](#keirevector3)
+- [`Keire.Vector3d`](#keirevector3d)
 - [`Keire.Vector4`](#keirevector4)
 - [`Keire.Vfx`](#keirevfx)
 - [`Keire.VfxEffect`](#keirevfxeffect)
@@ -868,6 +870,7 @@ public abstract class Behaviour : Component
     public void RuntimeAnimatorIkEvaluation(float layerWeight, float interpolationAlpha, byte isFixedUpdate);
     public void RuntimeProceduralMotionEvent(byte type, byte foot, byte state, float phase, float intensity, Vector3 contactPosition, Vector3 contactNormal, ulong supportHigh, ulong supportLow, ulong materialHigh, ulong materialLow);
     public void RuntimePhysicsContact(byte phase, byte trigger, ulong otherHigh, ulong otherLow, Vector3 point, Vector3 normal, float impulse);
+    public void RuntimePhysicsContactPrecise(byte phase, byte trigger, ulong otherHigh, ulong otherLow, Vector3 point, Vector3 normal, float impulse, Vector3d pointPrecise);
     public void RuntimeDisable();
     public void RuntimeDestroy();
     public void RuntimeBeforeReload();
@@ -1022,6 +1025,7 @@ Sources: [Behaviour.cs](../../KeireManaged/Behaviour.cs)
 ```csharp
 public readonly record struct CollisionContact(Entity Other, Vector3 Point, Vector3 Normal, float Impulse, bool Trigger)
 {
+    public Vector3d PointPrecise { get; init; }
 }
 ```
 
@@ -3479,10 +3483,16 @@ public sealed class PersistentEventCall
 
 ## Keire.Physics
 
-Sources: [RuntimeApi.cs](../../KeireManaged/RuntimeApi.cs)
+Sources: [PhysicsPrecise.cs](../../KeireManaged/PhysicsPrecise.cs), [RuntimeApi.cs](../../KeireManaged/RuntimeApi.cs)
 
 ```csharp
-public static class Physics
+public static partial class Physics
+{
+    public static bool TryRaycastPrecise(Entity context, Vector3d origin, Vector3 direction, out RaycastHitPrecise hit, float maximumDistance = 1000.0f, uint mask = uint.MaxValue, bool includeTriggers = false, Entity? ignoredEntity = null);
+    public static bool TryCapsuleCastPrecise(Entity context, Vector3d origin, Quaternion rotation, float radius, float height, Vector3 displacement, out RaycastHitPrecise hit, uint mask = uint.MaxValue, bool includeTriggers = false, Entity? ignoredEntity = null);
+    public static IReadOnlyList<Entity> OverlapSpherePrecise(Entity context, Vector3d center, float radius, uint mask = uint.MaxValue, bool includeTriggers = true, Entity? ignoredEntity = null);
+}
+public static partial class Physics
 {
     public static bool TryRaycast(Entity context, Vector3 origin, Vector3 direction, out RaycastHit hit, float maximumDistance = 1000.0f, uint mask = uint.MaxValue, Entity? ignoredEntity = null);
     public static IReadOnlyList<RaycastHit> Raycast(Entity context, Vector3 origin, Vector3 direction, float maximumDistance = 1000.0f, uint mask = uint.MaxValue);
@@ -3732,6 +3742,16 @@ Sources: [RuntimeApi.cs](../../KeireManaged/RuntimeApi.cs)
 
 ```csharp
 public readonly record struct RaycastHit(Entity Entity, Vector3 Point, Vector3 Normal, float Distance)
+{
+}
+```
+
+## Keire.RaycastHitPrecise
+
+Sources: [PhysicsPrecise.cs](../../KeireManaged/PhysicsPrecise.cs)
+
+```csharp
+public readonly record struct RaycastHitPrecise(Entity Entity, Vector3d Point, Vector3 Normal, float Distance)
 {
 }
 ```
@@ -4492,6 +4512,8 @@ Sources: [Handles.cs](../../KeireManaged/Handles.cs)
 public sealed class Transform : Component
 {
     public Vector3 LocalPosition { get; set; }
+    public Vector3d LocalPositionPrecise { get; set; }
+    public Vector3d PositionPrecise { get; set; }
     public Quaternion LocalRotation { get; set; }
     public Vector3 LocalScale { get; set; }
     public Vector3 Position { get; set; }
@@ -5592,6 +5614,21 @@ public readonly record struct Vector3(float X, float Y, float Z)
     public static Vector3 operator *(Vector3 value, float scale);
     public static Vector3 operator *(float scale, Vector3 value);
     public static Vector3 operator /(Vector3 value, float scale);
+    public override string ToString();
+}
+```
+
+## Keire.Vector3d
+
+Sources: [Vector3d.cs](../../KeireManaged/Vector3d.cs)
+
+```csharp
+[StructLayout(LayoutKind.Sequential)]
+public readonly record struct Vector3d(double X, double Y, double Z)
+{
+    public bool IsFinite { get; }
+    public static Vector3d Widen(Vector3 value);
+    public Vector3 RelativeFloat(Vector3d origin, double maximumError);
     public override string ToString();
 }
 ```

@@ -50,6 +50,8 @@ namespace Keire::RenderBackend
         CloudTemporalView current;
         current.Volume = uniforms;
         current.FrameId = packet.AcceptedFrameId;
+        current.WorldOrigin = packet.Camera.WorldOrigin;
+        current.PlanetFrame = packet.PlanetFrame;
         current.UnjitteredProjection = packet.UnjitteredProjection;
         auto rotationView = packet.Camera.View;
         rotationView.Elements[12] = 0.0F;

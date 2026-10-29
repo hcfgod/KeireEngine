@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Keire/Rendering/Atmosphere.h"
 #include "Keire/Rendering/Fog.h"
 #include "KeireInternal/Environment/FogExclusion.h"
 
@@ -53,8 +54,44 @@ namespace Keire::Detail
         }
     }
 
+    [[nodiscard]] inline double FogAltitude(const FogSettings& settings, const std::array<double, 3>& position,
+                                            const AtmosphereSettings* planet)
+    {
+        for (const double coordinate : position)
+        {
+            if (!std::isfinite(coordinate))
+            {
+                throw std::invalid_argument("Fog sample position must be finite.");
+            }
+        }
+        double altitude = position[1];
+        if (settings.PlanetaryHeight)
+        {
+            if (planet == nullptr || !std::isfinite(planet->PlanetRadius) || planet->PlanetRadius <= 0.0)
+            {
+                throw std::invalid_argument("Planetary fog requires a finite positive planet radius.");
+            }
+            std::array<double, 3> relative{};
+            for (std::size_t axis = 0; axis < relative.size(); ++axis)
+            {
+                relative[axis] = position[axis] - planet->PlanetCenter[axis];
+                if (!std::isfinite(relative[axis]))
+                {
+                    throw std::invalid_argument("Planetary fog requires finite planet-relative coordinates.");
+                }
+            }
+            altitude = std::hypot(relative[0], relative[1], relative[2]) - planet->PlanetRadius;
+            if (!std::isfinite(altitude))
+            {
+                throw std::invalid_argument("Planetary fog altitude exceeds the supported numeric domain.");
+            }
+        }
+        return altitude;
+    }
+
     // Call after validating the settings once; avoid repeated validation in sampling loops.
-    [[nodiscard]] inline double SampleFogExtinction(const FogSettings& settings, const std::array<double, 3>& position)
+    [[nodiscard]] inline double SampleFogExtinction(const FogSettings& settings, const std::array<double, 3>& position,
+                                                    const AtmosphereSettings* planet = nullptr)
     {
         for (const double coordinate : position)
         {
@@ -68,7 +105,7 @@ namespace Keire::Detail
             return 0.0;
         }
         // Below the reference height density is capped, rather than growing exponentially underground.
-        const double height = std::max(0.0, position[1] - settings.BaseHeightMeters);
+        const double height = std::max(0.0, FogAltitude(settings, position, planet) - settings.BaseHeightMeters);
         double extinction = settings.ExtinctionPerMeter * std::exp(-height * settings.HeightFalloffPerMeter);
         for (const auto& volume : settings.LocalVolumes)
         {

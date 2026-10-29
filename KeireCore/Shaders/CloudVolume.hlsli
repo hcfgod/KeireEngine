@@ -5,7 +5,10 @@
 #include "CloudVolumeLighting.hlsli"
 #include "CloudVolumeDensity.hlsli"
 #include "CloudWeather.hlsli"
+#include "PlanetaryCloudGeometry.hlsli"
+#include "PlanetaryCloudWeather.hlsli"
 #include "FogRayIntervals.hlsli"
+#include "CloudNoiseBuffer.hlsli"
 
 #ifndef KEIRE_FOG_TERRAIN_VISIBILITY
 #define KEIRE_FOG_TERRAIN_VISIBILITY(position) 1.0F
@@ -14,8 +17,19 @@
 #ifndef KEIRE_CLOUD_NOISE_SPACE
 #define KEIRE_CLOUD_NOISE_SPACE space2
 #endif
+#ifndef KEIRE_CLOUD_NOISE_BUFFER
 Texture3D<float4> VolumeCloudNoiseTexture : register(KEIRE_CLOUD_NOISE_TEXTURE, KEIRE_CLOUD_NOISE_SPACE);
 SamplerState VolumeCloudNoiseSampler : register(KEIRE_CLOUD_NOISE_SAMPLER, KEIRE_CLOUD_NOISE_SPACE);
+#endif
+
+float4 SampleVolumeCloudNoise(float3 position, float level)
+{
+#ifdef KEIRE_CLOUD_NOISE_BUFFER
+    return SampleVolumeCloudNoiseBuffer(position, level);
+#else
+    return VolumeCloudNoiseTexture.SampleLevel(VolumeCloudNoiseSampler, position, level);
+#endif
+}
 
 // Local-frame, metre-valued volume kernel. The host must clip the ray to opaque scene depth and the planet.
 // The background and volume-aware surface shaders share this kernel; layered clouds are a separate fallback.
@@ -44,6 +58,7 @@ struct CloudVolumeParameters
     float4 WeatherControls;
     // Zero retains deterministic midpoint integration. Positive values require temporal reconstruction.
     float RaySamplePhase;
+    PlanetaryCloudGeometry PlanetaryCloud;
 };
 
 uint VolumeCloudHash(uint3 cell, uint seed)
@@ -64,16 +79,21 @@ float VolumeCloudBaseHeightVariation(CloudVolumeParameters parameters)
 float VolumeCloudDensityPoint(float3 position, float sampleSpacing, CloudVolumeParameters parameters)
 {
     const float heightVariation = VolumeCloudBaseHeightVariation(parameters);
-    if (position.y <= parameters.BaseHeight - heightVariation ||
-        position.y >= parameters.BaseHeight + parameters.Thickness + heightVariation)
+    const bool planetary = parameters.PlanetaryCloud.Controls.x != 0U;
+    const float altitude = planetary ? PlanetaryCloudAltitude(position, parameters.PlanetaryCloud) : position.y;
+    const float3 weatherPosition = planetary ? PlanetaryCloudToPlanet(position, parameters.PlanetaryCloud) : position;
+    const float3 weatherCoordinate = (weatherPosition + parameters.WindOffset) / parameters.PatternSize;
+    if (altitude <= parameters.BaseHeight - heightVariation ||
+        altitude >= parameters.BaseHeight + parameters.Thickness + heightVariation)
     {
         return 0.0F;
     }
-    const float localBaseOffset = VolumeCloudWeatherBaseOffset(
+    const float localBaseOffset = planetary ?
+        (2.0F * PlanetaryCloudWeather(weatherCoordinate, parameters.RegionalControls.y, parameters.Seed ^ 0x3912a51U) - 1.0F) * heightVariation : VolumeCloudWeatherBaseOffset(
         (position.x + parameters.WindOffset.x) / parameters.PatternSize,
         (position.z + parameters.WindOffset.z) / parameters.PatternSize,
         parameters.RegionalControls.y, parameters.Seed, heightVariation);
-    const float height = (position.y - parameters.BaseHeight - localBaseOffset) / parameters.Thickness;
+    const float height = (altitude - parameters.BaseHeight - localBaseOffset) / parameters.Thickness;
     if (height <= 0.0F || height >= 1.0F)
     {
         return 0.0F;
@@ -83,7 +103,7 @@ float VolumeCloudDensityPoint(float3 position, float sampleSpacing, CloudVolumeP
     const float3 seedOffset = float3(VolumeCloudHash(uint3(0U, 0U, 0U), parameters.Seed) >> 8U,
         VolumeCloudHash(uint3(1U, 0U, 0U), parameters.Seed) >> 8U,
         VolumeCloudHash(uint3(0U, 1U, 0U), parameters.Seed) >> 8U) / 16777216.0F;
-    const float3 pattern = (position + parameters.WindOffset) / (parameters.PatternSize * 4.0F) + seedOffset;
+    const float3 pattern = weatherCoordinate / 4.0F + seedOffset;
     // Explicit LOD follows the ray interval; Sample derivatives are undefined inside divergent ray marches.
     const float footprint = max(sampleSpacing, 0.0F) * 16.0F / max(parameters.PatternSize, 0.0001F);
     float regionalCoverage = parameters.Coverage;
@@ -94,11 +114,13 @@ float VolumeCloudDensityPoint(float3 position, float sampleSpacing, CloudVolumeP
         const float weatherZ = (position.z + parameters.WindOffset.z) / parameters.PatternSize;
         const float weatherSpacing = sampleSpacing / parameters.PatternSize;
         const float weather = parameters.RegionalControls.x > 0.0F ?
+            (planetary ? PlanetaryCloudWeather(weatherCoordinate, parameters.RegionalControls.y, parameters.Seed) :
             VolumeCloudWeatherField(weatherX, weatherZ, weatherSpacing,
-                parameters.RegionalControls.y, parameters.Seed) : 0.5F;
+                parameters.RegionalControls.y, parameters.Seed)) : 0.5F;
         const float typeWeather = parameters.WeatherControls.z > 0.0F ?
-            VolumeCloudWeatherField(weatherX, weatherZ, weatherSpacing,
-                parameters.RegionalControls.y, parameters.Seed ^ 0xa511e9b3U) : 0.5F;
+            (planetary ? PlanetaryCloudWeather(weatherCoordinate, parameters.RegionalControls.y,
+                parameters.Seed ^ 0xa511e9b3U) : VolumeCloudWeatherField(weatherX, weatherZ, weatherSpacing,
+                parameters.RegionalControls.y, parameters.Seed ^ 0xa511e9b3U)) : 0.5F;
         regionalCoverage = VolumeCloudWeatherCoverage(parameters.Coverage, weather, parameters.RegionalControls.x);
         cloudType = saturate(parameters.WeatherControls.y +
             (2.0F * typeWeather - 1.0F) * parameters.WeatherControls.z);
@@ -107,7 +129,7 @@ float VolumeCloudDensityPoint(float3 position, float sampleSpacing, CloudVolumeP
     {
         const float regionalPeriod = clamp(parameters.RegionalControls.y, 1.0F, 64.0F);
         const float regionalMip = clamp(log2(max(footprint / regionalPeriod, 1.0F)), 0.0F, 6.0F);
-        const float weather = VolumeCloudNoiseTexture.SampleLevel(VolumeCloudNoiseSampler,
+        const float weather = SampleVolumeCloudNoise(planetary ? pattern / regionalPeriod :
             float3(pattern.x / regionalPeriod, 0.5F, pattern.z / regionalPeriod), regionalMip).r;
         regionalCoverage = VolumeCloudRegionalCoverage(parameters.Coverage, weather, parameters.RegionalControls.x);
     }
@@ -139,12 +161,11 @@ float VolumeCloudDensityPoint(float3 position, float sampleSpacing, CloudVolumeP
     if (variationStrength > 0.0F)
     {
         const float macroMip = clamp(log2(max(footprint / variationPeriod, 1.0F)), 0.0F, 6.0F);
-        const float3 macroNoise = VolumeCloudNoiseTexture.SampleLevel(
-            VolumeCloudNoiseSampler, pattern / variationPeriod, macroMip).gba;
+        const float3 macroNoise = SampleVolumeCloudNoise(pattern / variationPeriod, macroMip).gba;
         warpedPattern += float3(VolumeCloudWarpOffset(macroNoise.x),
             VolumeCloudWarpOffset(macroNoise.y), VolumeCloudWarpOffset(macroNoise.z)) * (variationStrength / 0.75F);
     }
-    const float4 noise = VolumeCloudNoiseTexture.SampleLevel(VolumeCloudNoiseSampler, warpedPattern, mip);
+    const float4 noise = SampleVolumeCloudNoise(warpedPattern, mip);
     const float coarseErosion = 1.0F - dot(noise.gba, float3(0.625F, 0.25F, 0.125F));
     float erosion = coarseErosion;
     float shapeDetail = 0.5F;
@@ -153,8 +174,7 @@ float VolumeCloudDensityPoint(float3 position, float sampleSpacing, CloudVolumeP
     {
         // Erode the body at a distinct scale. Increase LOD with frequency so the extra sample does not alias.
         const float detailMip = clamp(log2(max(warpedFootprint * detailFrequency, 1.0F)), 0.0F, 6.0F);
-        const float4 detailNoise = VolumeCloudNoiseTexture.SampleLevel(
-            VolumeCloudNoiseSampler, warpedPattern * detailFrequency, detailMip);
+        const float4 detailNoise = SampleVolumeCloudNoise(warpedPattern * detailFrequency, detailMip);
         shapeDetail = detailNoise.r;
         const float detailErosion = 1.0F - dot(detailNoise.gba, float3(0.625F, 0.25F, 0.125F));
         erosion = VolumeCloudErosion(coarseErosion, detailErosion, warpedSpacing,
@@ -188,6 +208,33 @@ float VolumeCloudLightOpticalDepth(float3 position, float3 sunDirection,
     CloudVolumeParameters parameters, uint shadowSteps)
 {
     const float heightVariation = VolumeCloudBaseHeightVariation(parameters);
+    if (parameters.PlanetaryCloud.Controls.x != 0U)
+    {
+        const float altitude = PlanetaryCloudAltitude(position, parameters.PlanetaryCloud);
+        const float3 radial = normalize(PlanetaryCloudRadialVector(position, parameters.PlanetaryCloud));
+        const PlanetaryCloudRoots ground = PlanetaryCloudSphereRoots(parameters.PlanetaryCloud.RadiusGeometry.x,
+            altitude, dot(radial, sunDirection), 0.0F);
+        if (ground.Hit && ground.Near >= 0.0F && ground.Far > 0.0F)
+        {
+            return 80.0F;
+        }
+        const float reach = 2.0F * (parameters.PlanetaryCloud.RadiusGeometry.x +
+            parameters.BaseHeight + parameters.Thickness + heightVariation);
+        const PlanetaryCloudIntervals intervals = LimitPlanetaryCloudTravel(PlanetaryCloudRayIntervals(
+            position, sunDirection, parameters.PlanetaryCloud, parameters.BaseHeight - heightVariation,
+            parameters.Thickness + 2.0F * heightVariation, reach), parameters.MaximumDistance);
+        const uint count = intervals.SecondExit > intervals.SecondEntry ? max(shadowSteps, 2U) : shadowSteps;
+        float depth = 0.0F;
+        [loop]
+        for (uint index = 0U; index < count; ++index)
+        {
+            const PlanetaryCloudSampleInterval interval = PlanetaryCloudSample(intervals, count, index);
+            const float spacing = interval.Exit - interval.Entry;
+            depth += VolumeCloudDensity(position + sunDirection * (0.5F * (interval.Entry + interval.Exit)),
+                sunDirection, spacing, parameters) * parameters.Extinction * spacing;
+        }
+        return depth;
+    }
     const float shadowDistance = CloudVolumeShadowDistance(position.y, sunDirection.y,
         parameters.BaseHeight - heightVariation, parameters.Thickness + 2.0F * heightVariation,
         parameters.MaximumDistance);
@@ -216,7 +263,14 @@ float VolumeCloudAmbientTransmission(float3 position, CloudVolumeParameters para
     for (uint azimuth = 0U; azimuth < 4U; ++azimuth)
     {
         const float angle = (float(azimuth) + 0.5F) * 1.57079632679F;
-        const float3 direction = float3(cos(angle) * 0.86602540378F, 0.5F, sin(angle) * 0.86602540378F);
+        float3 direction = float3(cos(angle) * 0.86602540378F, 0.5F, sin(angle) * 0.86602540378F);
+        if (parameters.PlanetaryCloud.Controls.x != 0U)
+        {
+            const float3 up = normalize(PlanetaryCloudRadialVector(position, parameters.PlanetaryCloud));
+            const float3 reference = abs(up.y) < 0.9F ? float3(0.0F, 1.0F, 0.0F) : float3(1.0F, 0.0F, 0.0F);
+            const float3 tangent = normalize(cross(reference, up));
+            direction = tangent * direction.x + up * direction.y + cross(tangent, up) * direction.z;
+        }
         transmission += exp(-VolumeCloudLightOpticalDepth(position, direction, parameters, 4U));
     }
     return transmission * 0.25F;
@@ -229,7 +283,9 @@ float4 VolumeCloudCachedTransmission(float3 position, float3 sunDirection,
     CloudVolumeParameters parameters, uint shadowSteps, bool sunlightEnabled)
 {
     float cacheWeight;
-    const float4 cached = SampleCloudLightCache(CloudLightTransmissionCache, position, CloudCacheOrigin.xyz,
+    const float3 cachePosition = parameters.PlanetaryCloud.Controls.x != 0U ?
+        PlanetaryCloudToPlanet(position, parameters.PlanetaryCloud) : position;
+    const float4 cached = SampleCloudLightCache(CloudLightTransmissionCache, cachePosition, CloudCacheOrigin.xyz,
         CloudCacheCellSize.xyz, CloudCacheDimensions.xyz, cacheWeight);
     if (cacheWeight >= 1.0F)
     {
@@ -282,19 +338,43 @@ float4 IntegrateCloudVolumeWithDepth(float3 origin, float3 direction, float entr
         }
     }
     const float heightVariation = VolumeCloudBaseHeightVariation(parameters);
-    const CloudVolumeInterval slab = IntersectCloudVolumeSlab(
+    const bool planetary = parameters.PlanetaryCloud.Controls.x != 0U;
+    CloudVolumeInterval slab = IntersectCloudVolumeSlab(
         origin.y, direction.y, parameters.BaseHeight - heightVariation,
         parameters.Thickness + 2.0F * heightVariation,
         fogEnabled ? min(exitDistance, parameters.MaximumDistance) : exitDistance);
+    PlanetaryCloudIntervals shell = (PlanetaryCloudIntervals)0;
+    CloudVolumeInterval secondSlab = (CloudVolumeInterval)0;
+    if (planetary)
+    {
+        shell = LimitPlanetaryCloudTravel(PlanetaryCloudRayIntervals(origin, direction, parameters.PlanetaryCloud,
+            parameters.BaseHeight - heightVariation, parameters.Thickness + 2.0F * heightVariation,
+            exitDistance), parameters.MaximumDistance);
+        shell.FirstEntry = max(shell.FirstEntry, entryDistance);
+        shell.FirstExit = max(shell.FirstEntry, shell.FirstExit);
+        shell.SecondEntry = max(shell.SecondEntry, entryDistance);
+        shell.SecondExit = max(shell.SecondEntry, shell.SecondExit);
+        if (shell.FirstExit <= shell.FirstEntry)
+        {
+            shell.FirstEntry = shell.SecondEntry;
+            shell.FirstExit = shell.SecondExit;
+            shell.SecondEntry = 0.0F;
+            shell.SecondExit = 0.0F;
+        }
+        slab.Entry = shell.FirstEntry;
+        slab.Exit = shell.FirstExit;
+        secondSlab.Entry = shell.SecondEntry;
+        secondSlab.Exit = shell.SecondExit;
+    }
     if (!fogEnabled)
     {
         entryDistance = max(entryDistance, slab.Entry);
-        exitDistance = min(exitDistance, slab.Exit);
+        exitDistance = min(exitDistance, max(slab.Exit, secondSlab.Exit));
     }
     else
     {
         // Fog starts at the camera, including rays which never enter a cloud slab.
-        const float cloudExit = cloudEnabled ? slab.Exit : 0.0F;
+        const float cloudExit = cloudEnabled ? max(slab.Exit, secondSlab.Exit) : 0.0F;
         exitDistance = min(exitDistance, max(cloudExit, fog.HeightDensity.w));
     }
     [branch]
@@ -304,15 +384,15 @@ float4 IntegrateCloudVolumeWithDepth(float3 origin, float3 direction, float entr
     }
 
     const uint steps = clamp(max(cloudEnabled ? parameters.ViewSteps : 1U,
-        fogEnabled ? fog.Controls.y : 1U), 1U, 128U);
+        fogEnabled ? fog.Controls.y : 1U), secondSlab.Exit > secondSlab.Entry ? 2U : 1U, 128U);
     const uint shadowSteps = clamp(parameters.ShadowSteps, 1U, 16U);
     const float stepLength = (exitDistance - entryDistance) / float(steps);
     const float samplePhase = clamp(parameters.RaySamplePhase, 0.0F, 1.0F);
-    const bool shiftedSamples = !fogEnabled && samplePhase > 0.0F;
+    const bool shiftedSamples = !fogEnabled && !planetary && samplePhase > 0.0F;
     // Each of 16 boxes adds at most two edges; cloud slab and fog cutoff add three more.
     const uint exclusionCount = fogEnabled ? min(fog.Controls.w, 16U) : 0U;
     const uint intervalCount = steps + (shiftedSamples ? 1U : 0U) +
-        (fogEnabled ? 35U + exclusionCount * 4U : 0U);
+        (fogEnabled ? 35U + exclusionCount * 4U + (planetary ? 2U : 0U) : 0U);
     CloudVolumeInterval exclusionIntervals[32];
     for (uint index = 0U; index < exclusionCount; ++index)
     {
@@ -347,6 +427,11 @@ float4 IntegrateCloudVolumeWithDepth(float3 origin, float3 direction, float entr
     airPrefix.Transmission = 1.0F;
     float previousSampleDistance = fogEnabled ? 0.0F :
         entryDistance + 0.5F * stepLength * (shiftedSamples ? samplePhase : 1.0F);
+    if (planetary && !fogEnabled)
+    {
+        const PlanetaryCloudSampleInterval firstSample = PlanetaryCloudSample(shell, steps, 0U);
+        previousSampleDistance = 0.5F * (firstSample.Entry + firstSample.Exit);
+    }
     float3 previousAirPosition = airOrigin + direction * (previousSampleDistance * 0.001F);
     if (atmosphereEnabled && includeRadiance)
     {
@@ -364,6 +449,12 @@ float4 IntegrateCloudVolumeWithDepth(float3 origin, float3 direction, float entr
 
         float intervalLength = stepLength;
         float sampleDistance = entryDistance + (float(step) + 0.5F) * stepLength;
+        if (planetary && !fogEnabled)
+        {
+            const PlanetaryCloudSampleInterval interval = PlanetaryCloudSample(shell, steps, step);
+            intervalLength = interval.Exit - interval.Entry;
+            sampleDistance = 0.5F * (interval.Entry + interval.Exit);
+        }
         if (shiftedSamples)
         {
             const CloudVolumeInterval interval = CloudVolumeShiftedInterval(
@@ -383,6 +474,10 @@ float4 IntegrateCloudVolumeWithDepth(float3 origin, float3 direction, float entr
             }
             float boundary = min(exitDistance, entryDistance + float(gridIndex) * stepLength);
             boundary = NextVolumeIntervalBoundary(cursor, boundary, slab);
+            if (planetary)
+            {
+                boundary = NextVolumeIntervalBoundary(cursor, boundary, secondSlab);
+            }
             if (fog.HeightDensity.w > cursor)
             {
                 boundary = min(boundary, fog.HeightDensity.w);
@@ -417,16 +512,18 @@ float4 IntegrateCloudVolumeWithDepth(float3 origin, float3 direction, float entr
             segmentMedium.Controls.y = 1.0F;
             const AtmosphereTransport segment = IntegrateAtmosphereMedium(
                 previousAirPosition, direction,
-                ((shiftedSamples || fogEnabled) ? sampleDistance - previousSampleDistance : stepLength) * 0.001F, segmentMedium);
+                ((shiftedSamples || fogEnabled || planetary) ? sampleDistance - previousSampleDistance : stepLength) * 0.001F, segmentMedium);
             airPrefix.Radiance += airPrefix.Transmission * segment.Radiance;
             airPrefix.Transmission *= segment.Transmission;
         }
         previousAirPosition = airPosition;
         previousSampleDistance = sampleDistance;
-        const float cloudExtinction = cloudEnabled && sampleDistance >= slab.Entry && sampleDistance <= slab.Exit ?
+        const bool insideCloud = (sampleDistance >= slab.Entry && sampleDistance <= slab.Exit) ||
+            (planetary && sampleDistance >= secondSlab.Entry && sampleDistance <= secondSlab.Exit);
+        const float cloudExtinction = cloudEnabled && insideCloud ?
             VolumeCloudDensity(position, direction, intervalLength, parameters) * parameters.Extinction : 0.0F;
         const float fogExtinction = fogEnabled && sampleDistance < fog.HeightDensity.w ?
-            SampleFogSegmentDensity(position, direction * intervalLength, fog) : 0.0F;
+            SampleFogSegmentDensity(position, direction * intervalLength, fog, medium.ObserverRadius.xyz) : 0.0F;
         precise float extinction = cloudExtinction + fogExtinction;
         if (extinction <= 0.0F)
         {
@@ -453,6 +550,17 @@ float4 IntegrateCloudVolumeWithDepth(float3 origin, float3 direction, float entr
         if (atmosphereEnabled && sunlightEnabled)
         {
             solarTransmission = AtmosphereMediumSunTransmission(airPosition, medium);
+        }
+        else if (planetary && sunlightEnabled)
+        {
+            // The opaque planet blocks every scattering order even when atmospheric scattering is disabled.
+            const PlanetaryCloudRoots sunGround = PlanetaryCloudSphereRoots(
+                parameters.PlanetaryCloud.RadiusGeometry.x, PlanetaryCloudAltitude(position, parameters.PlanetaryCloud),
+                dot(normalize(PlanetaryCloudRadialVector(position, parameters.PlanetaryCloud)), sunDirection), 0.0F);
+            if (sunGround.Hit && sunGround.Near >= 0.0F && sunGround.Far > 0.0F)
+            {
+                solarTransmission = 0.0F;
+            }
         }
         float3 cloudSource = 0.0F;
         if (cloudExtinction > 0.0F)

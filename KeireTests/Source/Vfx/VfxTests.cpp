@@ -15,6 +15,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <limits>
 #include <map>
 #include <memory>
 #include <numeric>
@@ -394,6 +395,218 @@ namespace
         HeadlessRenderProbe& m_Probe;
     };
 } // namespace
+
+TEST_CASE("VFX origin translation retains particles history and emitter progression")
+{
+    for (const auto backend : {Keire::VfxBackend::Cpu, Keire::VfxBackend::Gpu})
+    {
+        for (const auto space : {Keire::VfxSimulationSpace::World, Keire::VfxSimulationSpace::Local})
+        {
+            auto definition = EffectDefinition();
+            definition.Space = space;
+            const auto effect = Keire::CreateRef<Keire::VfxEffectAsset>(definition);
+            Keire::VfxWorldSpecification specification;
+            specification.Backend = backend;
+            specification.WorldOrigin = {1.0e15, 0.0, 0.0};
+            auto world = Keire::CreateRef<Keire::VfxWorld>(specification);
+            const auto handle = world->Activate({effect});
+            REQUIRE(handle);
+            world->Update(0.1F);
+            const auto before = world->CaptureRenderSnapshot();
+            world->RebaseOrigin({1.0e15 + 128.0, 64.0, -128.0});
+            const auto after = world->CaptureRenderSnapshot();
+            CHECK(world->IsAlive(handle));
+            CHECK(after.Revision() > before.Revision());
+            CHECK(after.ResetRevision() == before.ResetRevision());
+            CHECK(after.SimulationStepRevision() == before.SimulationStepRevision());
+            CHECK(before.WorldOrigin() == specification.WorldOrigin);
+            REQUIRE(after.Particles().size() == before.Particles().size());
+            if (backend == Keire::VfxBackend::Cpu)
+            {
+                REQUIRE_FALSE(after.Particles().empty());
+                for (std::size_t index = 0; index < before.Particles().size(); ++index)
+                {
+                    const auto& previous = before.Particles()[index];
+                    const auto& current = after.Particles()[index];
+                    CHECK(current.Position.X + 128.0F == doctest::Approx(previous.Position.X).epsilon(0.0001));
+                    CHECK(current.Position.Y + 64.0F == doctest::Approx(previous.Position.Y).epsilon(0.0001));
+                    CHECK(current.Position.Z - 128.0F == doctest::Approx(previous.Position.Z).epsilon(0.0001));
+                    CHECK(current.PreviousPosition.X + 128.0F ==
+                          doctest::Approx(previous.PreviousPosition.X).epsilon(0.0001));
+                    CHECK(current.Effect == previous.Effect);
+                    CHECK(current.Tint == previous.Tint);
+                    CHECK(current.Size == previous.Size);
+                    CHECK(current.StripId == previous.StripId);
+                }
+            }
+            else
+            {
+                REQUIRE(after.GpuEmitters().size() == 1);
+                CHECK(after.GpuEmitters()[0].Position == Keire::Vector3{-128.0F, -64.0F, 128.0F});
+                CHECK(after.GpuEmitters()[0].SimulationRevision == before.GpuEmitters()[0].SimulationRevision);
+                CHECK(after.GpuEmitters()[0].SpawnSequence == before.GpuEmitters()[0].SpawnSequence);
+            }
+            const auto checkpoint = world->CaptureCheckpoint();
+            CHECK_THROWS_AS(world->RebaseOrigin({std::numeric_limits<double>::infinity(), 0.0, 0.0}),
+                            std::invalid_argument);
+            CHECK(world->CaptureCheckpoint() == checkpoint);
+            world->Update(0.1F);
+            CHECK(world->IsAlive(handle));
+        }
+    }
+}
+
+TEST_CASE("VFX origin precision rejection leaves all emitters and particles unchanged")
+{
+    const auto effect = Keire::CreateRef<Keire::VfxEffectAsset>(EffectDefinition());
+    for (const auto backend : {Keire::VfxBackend::Cpu, Keire::VfxBackend::Gpu})
+    {
+        Keire::VfxWorldSpecification specification;
+        specification.Backend = backend;
+        auto world = Keire::CreateRef<Keire::VfxWorld>(specification);
+        REQUIRE(world->Activate({effect}));
+        Keire::VfxActivation fractional{effect};
+        fractional.Position = {0.015625F, 0.0F, 0.0F};
+        REQUIRE(world->Activate(fractional));
+        world->Update(0.1F);
+        const auto before = world->CaptureCheckpoint();
+        CHECK_THROWS_AS(world->RebaseOrigin({16777216.0, 0.0, 0.0}), std::out_of_range);
+        CHECK(world->CaptureCheckpoint() == before);
+        CHECK_THROWS_AS(world->RebaseOrigin({1152921504606846976.0, 0.0, 0.0}), std::out_of_range);
+        CHECK(world->CaptureCheckpoint() == before);
+        CHECK_THROWS_AS(world->RebaseOrigin({}, -1.0), std::invalid_argument);
+        CHECK(world->CaptureCheckpoint() == before);
+    }
+}
+
+TEST_CASE("VFX precise activation preserves local simulation and checkpoint frame identity")
+{
+    const auto effect = Keire::CreateRef<Keire::VfxEffectAsset>(EffectDefinition());
+    for (const auto backend : {Keire::VfxBackend::Cpu, Keire::VfxBackend::Gpu})
+    {
+        Keire::VfxWorldSpecification specification;
+        specification.MaximumParticles = 64;
+        specification.Backend = backend;
+        auto local = Keire::CreateRef<Keire::VfxWorld>(specification);
+        specification.WorldOrigin = {1e15, 0.0, 0.0};
+        auto distant = Keire::CreateRef<Keire::VfxWorld>(specification);
+        Keire::VfxActivation activation{effect};
+        activation.Position = {0.125F, 0.25F, 0.5F};
+        REQUIRE(local->Activate(activation));
+        const auto handle = distant->ActivatePrecise(activation, {1e15 + 0.125, 0.25, 0.5}, 0.0);
+        REQUIRE(handle);
+        local->Update(0.1F);
+        distant->Update(0.1F);
+        const auto localSnapshot = local->CaptureRenderSnapshot();
+        const auto distantSnapshot = distant->CaptureRenderSnapshot();
+        CHECK(distantSnapshot.WorldOrigin() == specification.WorldOrigin);
+        CHECK(std::ranges::equal(localSnapshot.Particles(), distantSnapshot.Particles()));
+        if (backend == Keire::VfxBackend::Gpu)
+        {
+            REQUIRE(distantSnapshot.GpuEmitters().size() == 1U);
+            CHECK(distantSnapshot.GpuEmitters()[0].Position == activation.Position);
+        }
+        const auto checkpoint = distant->CaptureCheckpoint();
+        CHECK_NOTHROW(distant->RestoreCheckpoint(checkpoint));
+        CHECK_THROWS_AS(local->RestoreCheckpoint(checkpoint), std::runtime_error);
+        const auto revision = distant->CaptureRenderSnapshot().Revision();
+        CHECK_THROWS_AS(
+            distant->SetTransformPrecise(handle, {std::numeric_limits<double>::infinity(), 0.0, 0.0}, {}, 0.0),
+            std::invalid_argument);
+        CHECK(distant->CaptureRenderSnapshot().Revision() == revision);
+        CHECK(distant->IsAlive(handle));
+    }
+    Keire::VfxWorldSpecification invalid;
+    invalid.WorldOrigin.X = std::numeric_limits<double>::quiet_NaN();
+    CHECK_THROWS_AS(Keire::CreateRef<Keire::VfxWorld>(invalid), std::invalid_argument);
+}
+
+TEST_CASE("VFX version one checkpoints restore only into the zero-origin simulation frame")
+{
+    const auto effect = Keire::CreateRef<Keire::VfxEffectAsset>(EffectDefinition());
+    for (const auto backend : {Keire::VfxBackend::Cpu, Keire::VfxBackend::Gpu})
+    {
+        INFO(static_cast<int>(backend));
+        Keire::VfxWorldSpecification specification;
+        specification.Backend = backend;
+        specification.MaximumParticles = 64;
+        auto world = Keire::CreateRef<Keire::VfxWorld>(specification);
+        const auto handle = world->Activate({effect});
+        REQUIRE(handle);
+        world->Update(0.1F);
+        const auto versionTwo = world->CaptureCheckpoint();
+        auto legacy = versionTwo;
+        // Version 1 has the same body but omits the three origin doubles after the configuration header.
+        constexpr std::size_t signatureBytes = 8;
+        constexpr std::size_t versionOffset = signatureBytes;
+        constexpr std::size_t originOffset =
+            signatureBytes + sizeof(std::uint32_t) + sizeof(std::uint8_t) + 2 * sizeof(std::uint32_t);
+        constexpr std::size_t originBytes = 3 * sizeof(double);
+        REQUIRE(legacy.size() > originOffset + originBytes);
+        REQUIRE(legacy[versionOffset] == std::byte{2});
+        legacy[versionOffset] = std::byte{1};
+        legacy.erase(legacy.begin() + originOffset, legacy.begin() + originOffset + originBytes);
+
+        world->Update(0.2F);
+        REQUIRE(world->CaptureCheckpoint() != versionTwo);
+        REQUIRE_NOTHROW(world->RestoreCheckpoint(legacy));
+        CHECK(world->CaptureCheckpoint() == versionTwo);
+        CHECK(world->IsAlive(handle));
+        CHECK(world->WorldOrigin() == Keire::Vector3d{});
+
+        specification.WorldOrigin = {1.0e15, 0.0, 0.0};
+        auto distant = Keire::CreateRef<Keire::VfxWorld>(specification);
+        const auto distantHandle = distant->Activate({effect});
+        REQUIRE(distantHandle);
+        distant->Update(0.1F);
+        const auto beforeRejection = distant->CaptureCheckpoint();
+        CHECK_THROWS_AS(distant->RestoreCheckpoint(legacy), std::runtime_error);
+        CHECK(distant->CaptureCheckpoint() == beforeRejection);
+        CHECK(distant->IsAlive(distantHandle));
+    }
+}
+
+TEST_CASE("VFX precise transforms match local transforms and reject conversions without mutation")
+{
+    const auto effect = Keire::CreateRef<Keire::VfxEffectAsset>(EffectDefinition());
+    for (const auto backend : {Keire::VfxBackend::Cpu, Keire::VfxBackend::Gpu})
+    {
+        INFO(static_cast<int>(backend));
+        Keire::VfxWorldSpecification specification;
+        specification.Backend = backend;
+        specification.MaximumParticles = 64;
+        specification.WorldOrigin = {1.0e15, 0.0, 0.0};
+        auto precise = Keire::CreateRef<Keire::VfxWorld>(specification);
+        auto relative = Keire::CreateRef<Keire::VfxWorld>(specification);
+        const auto preciseHandle = precise->Activate({effect});
+        const auto relativeHandle = relative->Activate({effect});
+        REQUIRE(preciseHandle);
+        REQUIRE(relativeHandle);
+        precise->Update(0.1F);
+        relative->Update(0.1F);
+        const Keire::Vector3 offset{0.25F, 0.03125F, -0.0625F};
+        precise->SetTransformPrecise(preciseHandle, {1.0e15 + 0.25, 0.03125, -0.0625}, {}, 0.0);
+        relative->SetTransform(relativeHandle, offset, {});
+        CHECK(precise->CaptureCheckpoint() == relative->CaptureCheckpoint());
+        precise->Update(0.1F);
+        relative->Update(0.1F);
+        CHECK(precise->CaptureCheckpoint() == relative->CaptureCheckpoint());
+
+        const auto beforeRejection = precise->CaptureCheckpoint();
+        CHECK_THROWS_AS(precise->SetTransformPrecise(preciseHandle, {1.0e15, 0.1, 0.0}, {}, 0.0), std::out_of_range);
+        CHECK(precise->CaptureCheckpoint() == beforeRejection);
+        CHECK_THROWS_AS(precise->SetTransformPrecise(preciseHandle, {1.0e15, 0.0, 0.0}, {}, -1.0),
+                        std::invalid_argument);
+        CHECK(precise->CaptureCheckpoint() == beforeRejection);
+        CHECK_THROWS_AS(precise->SetTransformPrecise(preciseHandle,
+                                                     {1.0e15, std::numeric_limits<double>::quiet_NaN(), 0.0}, {}, 0.0),
+                        std::invalid_argument);
+        CHECK(precise->CaptureCheckpoint() == beforeRejection);
+        CHECK_THROWS_AS((void)precise->ActivatePrecise({effect}, {1.0e15, 0.1, 0.0}, 0.0), std::out_of_range);
+        CHECK(precise->CaptureCheckpoint() == beforeRejection);
+        CHECK(precise->IsAlive(preciseHandle));
+    }
+}
 
 TEST_CASE("VFX schema round trips deterministically and preserves stable module IDs")
 {

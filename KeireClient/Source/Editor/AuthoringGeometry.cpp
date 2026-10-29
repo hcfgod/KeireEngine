@@ -33,6 +33,24 @@ namespace KeireEditor::Detail
 
 namespace KeireEditor
 {
+    namespace
+    {
+        Keire::Matrix4 AuthoringLinearTransform(const Keire::TransformComponent& transform)
+        {
+            auto result = Keire::Math::ComposeTransform({}, transform.LocalRotation(), transform.LocalScale());
+            for (auto parent = transform.Parent(); parent; parent = parent.Parent())
+            {
+                const auto ancestor = parent.GetComponent<Keire::TransformComponent>();
+                if (ancestor)
+                {
+                    result = Keire::Math::Multiply(
+                        Keire::Math::ComposeTransform({}, ancestor->LocalRotation(), ancestor->LocalScale()), result);
+                }
+            }
+            return result;
+        }
+    } // namespace
+
     std::vector<SceneTransformTarget> SceneTransformGroup::Capture(const Keire::Ref<Keire::Scene>& scene,
                                                                    const std::span<const Keire::AssetId> selections,
                                                                    const Keire::EntityId primary)
@@ -62,8 +80,8 @@ namespace KeireEditor
             const auto transform = entity.GetComponent<Keire::TransformComponent>();
             if (!transform)
                 continue;
-            result.push_back({transform, transform->WorldMatrix(), transform->LocalPosition(),
-                              transform->LocalRotation(), transform->LocalScale()});
+            result.push_back({transform, AuthoringLinearTransform(*transform), transform->LocalPositionPrecise(),
+                              transform->LocalRotation(), transform->LocalScale(), transform->WorldPositionPrecise()});
         }
         return result;
     }
@@ -72,7 +90,7 @@ namespace KeireEditor
     {
         for (const auto& target : targets)
         {
-            target.Transform->SetLocalPosition(target.InitialPosition);
+            target.Transform->SetLocalPositionPrecise(target.InitialPosition);
             target.Transform->SetLocalRotation(target.InitialRotation);
             target.Transform->SetLocalScale(target.InitialScale);
         }
@@ -80,7 +98,7 @@ namespace KeireEditor
 
     void SceneTransformGroup::Apply(const std::span<const SceneTransformTarget> targets, const SceneTool tool,
                                     const SceneTransformAxis axis, const float amount, const Keire::Vector3 worldAxis,
-                                    const Keire::Vector3 pivot, const Keire::Quaternion pivotRotation)
+                                    const Keire::Vector3d pivot, const Keire::Quaternion pivotRotation)
     {
         if (tool == SceneTool::View)
             return;
@@ -88,12 +106,18 @@ namespace KeireEditor
         Keire::Matrix4 delta;
         if (tool == SceneTool::Translate)
         {
-            delta = Keire::Math::ComposeTransform({worldAxis.X * amount, worldAxis.Y * amount, worldAxis.Z * amount},
-                                                  {}, one);
+            for (const auto& target : targets)
+            {
+                const auto initial = target.InitialWorldPosition;
+                target.Transform->SetWorldPositionPrecise({initial.X + static_cast<double>(worldAxis.X) * amount,
+                                                           initial.Y + static_cast<double>(worldAxis.Y) * amount,
+                                                           initial.Z + static_cast<double>(worldAxis.Z) * amount});
+            }
+            return;
         }
         else
         {
-            const auto pivotFrame = Keire::Math::ComposeTransform(pivot, pivotRotation, one);
+            const auto pivotFrame = Keire::Math::ComposeTransform({}, pivotRotation, one);
             Keire::Matrix4 localDelta;
             if (tool == SceneTool::Rotate)
             {
@@ -128,9 +152,9 @@ namespace KeireEditor
             const auto parentTransform =
                 parent ? parent.GetComponent<Keire::TransformComponent>() : Keire::Ref<Keire::TransformComponent>{};
             const auto desiredLocal =
-                parentTransform
-                    ? Keire::Math::Multiply(Keire::Math::Inverse(parentTransform->WorldMatrix()), desiredWorld)
-                    : desiredWorld;
+                parentTransform ? Keire::Math::Multiply(
+                                      Keire::Math::Inverse(AuthoringLinearTransform(*parentTransform)), desiredWorld)
+                                : desiredWorld;
             Keire::Vector3 position;
             Keire::Quaternion rotation;
             Keire::Vector3 scale;
@@ -138,7 +162,14 @@ namespace KeireEditor
                 continue;
             if (!Keire::TransformComponent::IsValidLocalScale(scale))
                 continue;
-            target.Transform->SetLocalPosition(position);
+            const auto& matrix = delta.Elements;
+            const auto initial = target.InitialWorldPosition;
+            const Keire::Vector3d offset{initial.X - pivot.X, initial.Y - pivot.Y, initial.Z - pivot.Z};
+            const Keire::Vector3d worldPosition{
+                pivot.X + (matrix[0] * offset.X + matrix[4] * offset.Y + matrix[8] * offset.Z),
+                pivot.Y + (matrix[1] * offset.X + matrix[5] * offset.Y + matrix[9] * offset.Z),
+                pivot.Z + (matrix[2] * offset.X + matrix[6] * offset.Y + matrix[10] * offset.Z)};
+            target.Transform->SetWorldPositionPrecise(worldPosition);
             target.Transform->SetLocalRotation(rotation);
             target.Transform->SetLocalScale(scale);
         }

@@ -36,7 +36,8 @@ namespace Keire::Detail
                 {"anisotropy", settings.Anisotropy},
                 {"viewSteps", settings.ViewSteps},
                 {"localVolumes", volumes},
-                {"exclusionRegions", exclusions}};
+                {"exclusionRegions", exclusions},
+                {"planetaryHeight", settings.PlanetaryHeight}};
     }
 
     [[nodiscard]] inline FogSettings DecodeFogDensity(const nlohmann::json& record)
@@ -44,7 +45,9 @@ namespace Keire::Detail
         try
         {
             const bool hasExclusions = record.contains("exclusionRegions");
-            if (!record.is_object() || record.size() != (hasExclusions ? 10U : 9U) ||
+            const bool hasPlanetaryHeight = record.contains("planetaryHeight");
+            if (!record.is_object() || record.size() != (hasExclusions ? 10U : 9U) + (hasPlanetaryHeight ? 1U : 0U) ||
+                (hasPlanetaryHeight && !record.at("planetaryHeight").is_boolean()) ||
                 !record.at("enabled").is_boolean())
             {
                 throw std::invalid_argument("Malformed fog record.");
@@ -74,6 +77,7 @@ namespace Keire::Detail
             }
             FogSettings settings;
             settings.Enabled = record.at("enabled").get<bool>();
+            settings.PlanetaryHeight = hasPlanetaryHeight ? record.at("planetaryHeight").get<bool>() : false;
             settings.BaseHeightMeters = scalar(record.at("baseHeight"));
             settings.HeightFalloffPerMeter = scalar(record.at("heightFalloff"));
             settings.ExtinctionPerMeter = scalar(record.at("extinction"));

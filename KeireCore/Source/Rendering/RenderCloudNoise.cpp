@@ -1,6 +1,9 @@
 #include "KeireInternal/Rendering/RenderBackendInternal.h"
 
+#include "KeireInternal/Rendering/CloudNoiseBuffer.h"
 #include "KeireInternal/Rendering/CloudNoiseUpload.h"
+
+#include <span>
 
 namespace Keire::RenderBackend
 {
@@ -33,5 +36,17 @@ namespace Keire::RenderBackend
         }
         CloudNoiseTexture = resources;
         return CloudNoiseTexture;
+    }
+    SDL_GPUBuffer* RenderSharedState::EnsureCloudNoiseBuffer()
+    {
+        if (CloudNoiseBuffer)
+        {
+            return CloudNoiseBuffer;
+        }
+        constexpr std::uint32_t noiseDimension = 64;
+        constexpr std::uint32_t atlasSeed = 1;
+        const auto packed = PackCloudNoiseBuffer(BuildCloudNoiseVolume(noiseDimension, atlasSeed));
+        CloudNoiseBuffer = UploadBuffer(std::as_bytes(std::span(packed)), SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ);
+        return CloudNoiseBuffer;
     }
 } // namespace Keire::RenderBackend

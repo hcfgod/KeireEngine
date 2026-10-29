@@ -1,13 +1,37 @@
 #include "KeireInternal/Scenes/SceneRuntimeSessionImpl.h"
 
 #include <algorithm>
+#include <limits>
+#include <stdexcept>
 
 namespace Keire
 {
+    namespace
+    {
+        [[nodiscard]] Matrix4 VfxEmitterLinearTransform(const TransformComponent& transform)
+        {
+            auto linear = Math::ComposeTransform({}, transform.LocalRotation(), transform.LocalScale());
+            auto ancestor = transform.Parent();
+            while (ancestor)
+            {
+                const auto parent = ancestor.GetComponent<TransformComponent>();
+                if (!parent)
+                {
+                    throw std::logic_error("VFX emitter parent has no Transform component.");
+                }
+                linear =
+                    Math::Multiply(Math::ComposeTransform({}, parent->LocalRotation(), parent->LocalScale()), linear);
+                ancestor = parent->Parent();
+            }
+            return linear;
+        }
+    } // namespace
+
     void SceneRuntimeSession::Impl::InitializeVfx(const VfxBackend backend)
     {
         ClearVfx();
         VfxWorldSpecification specification;
+        specification.WorldOrigin = PhysicsWorldService ? PhysicsWorldService->WorldOrigin() : Vector3d{};
         specification.Backend = backend;
         specification.MaximumParticles = backend == VfxBackend::Gpu ? 1'000'000U : VfxRenderSnapshot::MaximumParticles;
         specification.CollisionQuery = [this](const Vector3 start, const Vector3 end)
@@ -76,7 +100,7 @@ namespace Keire
             Vector3 position;
             Quaternion rotation;
             Vector3 scale;
-            if (!Math::DecomposeTransform(transform->WorldMatrix(), position, rotation, scale))
+            if (!Math::DecomposeTransform(VfxEmitterLinearTransform(*transform), position, rotation, scale))
             {
                 constexpr std::string_view diagnostic = "VFX Emitter Transform cannot be decomposed.";
                 if (state.Diagnostic != diagnostic)
@@ -90,12 +114,19 @@ namespace Keire
             const auto revision = state.EffectHandle.Revision();
             if (state.RejectedRevision == revision && state.RejectedOverrides == overrides)
                 continue;
+            bool positionValidated = false;
             try
             {
+                const auto precisePosition = transform->WorldPositionPrecise();
+                // Preserve the legacy approximate range until runtime physics and event positions share a local frame.
+                constexpr double positionErrorBudget = std::numeric_limits<double>::max();
+                (void)Math::RelativeFloat(precisePosition, VfxWorldService->WorldOrigin(), positionErrorBudget);
+                positionValidated = true;
                 if (!state.Handle || !VfxWorldService->IsAlive(state.Handle))
                 {
-                    state.Handle = VfxWorldService->Activate(
-                        {effect, revision, position, rotation, emitter->SeedOffset(), overrides});
+                    state.Handle = VfxWorldService->ActivatePrecise(
+                        {effect, revision, {}, rotation, emitter->SeedOffset(), overrides}, precisePosition,
+                        positionErrorBudget);
                     state.Revision = revision;
                     state.Overrides = overrides;
                 }
@@ -114,7 +145,7 @@ namespace Keire
                         VfxWorldService->SetParameterOverrides(state.Handle, overrides);
                         state.Overrides = overrides;
                     }
-                    VfxWorldService->SetTransform(state.Handle, position, rotation);
+                    VfxWorldService->SetTransformPrecise(state.Handle, precisePosition, rotation, positionErrorBudget);
                 }
                 if (state.Handle)
                     VfxWorldService->SetSimulationSpeed(state.Handle, emitter->SimulationSpeed());
@@ -144,7 +175,7 @@ namespace Keire
                 }
                 const bool dependencyPending =
                     std::string_view(exception.what()).starts_with("VFX Subgraph dependency is unavailable:");
-                state.RejectedRevision = dependencyPending ? 0 : revision;
+                state.RejectedRevision = dependencyPending || !positionValidated ? 0 : revision;
                 state.RejectedOverrides = overrides;
                 if (state.Diagnostic != exception.what())
                 {

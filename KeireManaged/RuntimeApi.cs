@@ -251,7 +251,7 @@ public static partial class Input
     }
 }
 
-public static class Physics
+public static partial class Physics
 {
     public static bool TryRaycast(Entity context, Vector3 origin, Vector3 direction, out RaycastHit hit,
                                   float maximumDistance = 1000.0f, uint mask = uint.MaxValue,
@@ -393,6 +393,25 @@ public enum ForceMode : byte
     VelocityChange
 }
 
+/// <summary>Damping in inverse seconds and speed limits in metres/second and radians/second.</summary>
+public readonly record struct RigidBodyMotionSettings(float LinearDamping, float AngularDamping,
+                                                      float MaximumLinearSpeed, float MaximumAngularSpeed)
+{
+    public static RigidBodyMotionSettings Default => new(0.05f, 0.05f, 500.0f, 47.12389f);
+
+    internal void Validate()
+    {
+        if (!float.IsFinite(LinearDamping) || LinearDamping < 0.0f ||
+            !float.IsFinite(AngularDamping) || AngularDamping < 0.0f ||
+            !float.IsFinite(MaximumLinearSpeed) || MaximumLinearSpeed <= 0.0f ||
+            !float.IsFinite(MaximumAngularSpeed) || MaximumAngularSpeed <= 0.0f)
+        {
+            throw new ArgumentOutOfRangeException(nameof(RigidBodyMotionSettings),
+                "Damping must be finite and nonnegative; speed limits must be finite and positive.");
+        }
+    }
+}
+
 public readonly record struct RigidBodyProperties(RigidBodyMotion Motion, float Mass, Vector3 Velocity, bool Continuous,
                                                   bool UseGravity);
 
@@ -403,6 +422,16 @@ public sealed class RigidBody : Component
     private RigidBodyProperties Properties =>
         IsValid && NativeRuntime.TryGetRigidBodyProperties(Entity, out RigidBodyProperties properties) ? properties
                                                                                                        : default;
+
+    public RigidBodyMotionSettings MotionSettings
+    {
+        get => NativeRuntime.GetRigidBodyMotionSettings(Entity);
+        set
+        {
+            value.Validate();
+            NativeRuntime.SetRigidBodyMotionSettings(Entity, value);
+        }
+    }
 
     public RigidBodyMotion Motion
     {

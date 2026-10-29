@@ -1,8 +1,8 @@
+#include "Keire/Core.h"
 #include "KeireClient/Editor/ProjectSettingsDocument.h"
 #include "KeireClientInternal/Editor/EnvironmentPreviewClock.h"
 #include "KeireClientInternal/Editor/SettingsEditSurfaceTracker.h"
 #include "KeireInternal/Environment/EnvironmentTimeSettingsStore.h"
-#include "KeireTests/TestSupport.h"
 
 #include <doctest/doctest.h>
 
@@ -10,7 +10,8 @@ namespace
 {
     struct ProjectEnvironmentFixture final
     {
-        std::filesystem::path Root = KeireTests::MakeTestDirectory("ProjectEnvironmentTime");
+        std::filesystem::path Root = std::filesystem::temp_directory_path() /
+                                     ("Keire-ProjectEnvironmentTime-" + Keire::AssetId::Generate().ToString());
 
         ~ProjectEnvironmentFixture()
         {

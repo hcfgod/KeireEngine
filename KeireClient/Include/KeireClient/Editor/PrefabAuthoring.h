@@ -36,6 +36,11 @@ namespace KeireEditor
     [[nodiscard]] Keire::PrefabInstanceDefinition
     InstantiatePrefab(Keire::SceneDefinition& scene, Keire::AssetId prefab, const Keire::SceneDefinition& composed,
                       Keire::AssetId parent = {}, std::optional<Keire::Vector3> position = std::nullopt);
+    [[nodiscard]] Keire::PrefabInstanceDefinition
+    InstantiatePrefabPrecise(Keire::SceneDefinition& scene, Keire::AssetId prefab,
+                             const Keire::SceneDefinition& composed, Keire::AssetId parent = {},
+                             std::optional<Keire::Vector3d> position = std::nullopt);
+
     [[nodiscard]] Keire::PrefabInstanceDefinition ConnectPrefabInstance(Keire::SceneDefinition& scene,
                                                                         Keire::AssetId prefab,
                                                                         const Keire::SceneDefinition& source,

@@ -46,3 +46,24 @@ TEST_CASE("Scene document views become inert after the underlying scene closes")
     CHECK_FALSE(document.Dirty());
     CHECK_NOTHROW(document.SynchronizeSelection());
 }
+
+TEST_CASE("Source scene asset readiness cannot reopen or complete a superseded scene")
+{
+    KeireEditor::SceneTransitionCoordinator transitions;
+    const auto initial = Keire::AssetId::Generate();
+    const auto replacement = Keire::AssetId::Generate();
+    transitions.RequireStartupRefresh(initial);
+    transitions.AwaitSceneAssets(initial);
+    transitions.CompleteStartupRefresh(replacement);
+    CHECK(transitions.StartupRefresh() == initial);
+    CHECK_FALSE(transitions.CompleteSceneAssets(replacement));
+    REQUIRE(transitions.Request({KeireEditor::SceneTransitionKind::Open, replacement}));
+    CHECK_FALSE(transitions.AwaitingSceneAssets());
+    CHECK_FALSE(transitions.CompleteSceneAssets(initial));
+    transitions.AwaitSceneAssets(replacement);
+    transitions.CompleteStartupRefresh(initial);
+    CHECK_FALSE(transitions.StartupRefresh());
+    CHECK(transitions.AwaitingSceneAssets() == replacement);
+    CHECK(transitions.CompleteSceneAssets(replacement));
+    CHECK_FALSE(transitions.CompleteSceneAssets(replacement));
+}

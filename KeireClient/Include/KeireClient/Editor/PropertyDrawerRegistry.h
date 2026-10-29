@@ -10,6 +10,7 @@
 #include <map>
 #include <optional>
 #include <span>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -54,6 +55,24 @@ namespace KeireEditor
         }
         [[nodiscard]] virtual bool EditVector2(std::string_view label, Keire::Vector2& value, double step) = 0;
         [[nodiscard]] virtual bool EditVector3(std::string_view label, Keire::Vector3& value, double step) = 0;
+        [[nodiscard]] virtual bool EditVector3d(std::string_view label, Keire::Vector3d& value, double step)
+        {
+            auto edited = value;
+            const std::string prefix(label);
+            bool changed = EditScalar(prefix + " X", edited.X, step, {}, {});
+            changed = EditScalar(prefix + " Y", edited.Y, step, {}, {}) || changed;
+            changed = EditScalar(prefix + " Z", edited.Z, step, {}, {}) || changed;
+            if (changed)
+            {
+                if (!Keire::Math::IsFinite(edited))
+                {
+                    throw std::invalid_argument("Precise position edits must be finite.");
+                }
+                value = edited;
+            }
+            return changed;
+        }
+
         [[nodiscard]] virtual bool EditVector4(std::string_view label, Keire::Vector4& value, double step) = 0;
         [[nodiscard]] virtual bool EditQuaternion(std::string_view label, Keire::Quaternion& value, double step) = 0;
         [[nodiscard]] virtual bool EditColor(std::string_view label, Keire::Color& value) = 0;

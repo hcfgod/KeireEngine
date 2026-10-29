@@ -21,6 +21,9 @@ namespace Keire
         [[nodiscard]] bool Continuous() const noexcept { return m_Continuous; }
         [[nodiscard]] bool UseGravity() const noexcept { return m_UseGravity; }
 
+        [[nodiscard]] PhysicsMotionSettings MotionSettings() const noexcept { return m_MotionSettings; }
+
+        void SetMotionSettings(const PhysicsMotionSettings& value);
         void SetMotion(PhysicsMotionType value);
         void SetMass(float value);
         void SetLinearVelocity(Vector3 value);
@@ -34,6 +37,7 @@ namespace Keire
         Vector3 m_LinearVelocity;
         bool m_Continuous = false;
         bool m_UseGravity = true;
+        PhysicsMotionSettings m_MotionSettings;
     };
 
     [[nodiscard]] KEIRE_API ComponentRegistration CreateRigidBodyComponentRegistration();

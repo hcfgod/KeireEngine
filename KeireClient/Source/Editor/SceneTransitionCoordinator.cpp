@@ -10,6 +10,7 @@ namespace KeireEditor
             return false;
         // A user transition supersedes the startup intent even if its later load fails or is cancelled.
         m_StartupScene = {};
+        m_AwaitingSceneAssets = {};
         m_Request = request;
         m_State = SceneTransitionState::Queued;
         m_Diagnostic.clear();
@@ -61,6 +62,38 @@ namespace KeireEditor
     Keire::AssetId SceneTransitionCoordinator::PendingStartupScene() const noexcept { return m_StartupScene; }
 
     Keire::AssetId SceneTransitionCoordinator::TakeStartupScene() noexcept { return std::exchange(m_StartupScene, {}); }
+
+    void SceneTransitionCoordinator::AwaitSceneAssets(const Keire::AssetId asset) noexcept
+    {
+        m_AwaitingSceneAssets = asset;
+    }
+
+    Keire::AssetId SceneTransitionCoordinator::AwaitingSceneAssets() const noexcept { return m_AwaitingSceneAssets; }
+
+    bool SceneTransitionCoordinator::CompleteSceneAssets(const Keire::AssetId asset) noexcept
+    {
+        if (!asset || asset != m_AwaitingSceneAssets)
+        {
+            return false;
+        }
+        m_AwaitingSceneAssets = {};
+        return true;
+    }
+
+    void SceneTransitionCoordinator::RequireStartupRefresh(const Keire::AssetId asset) noexcept
+    {
+        m_StartupRefresh = asset;
+    }
+
+    Keire::AssetId SceneTransitionCoordinator::StartupRefresh() const noexcept { return m_StartupRefresh; }
+
+    void SceneTransitionCoordinator::CompleteStartupRefresh(const Keire::AssetId asset) noexcept
+    {
+        if (asset == m_StartupRefresh)
+        {
+            m_StartupRefresh = {};
+        }
+    }
 
     SceneTransitionState SceneTransitionCoordinator::State() const noexcept { return m_State; }
 

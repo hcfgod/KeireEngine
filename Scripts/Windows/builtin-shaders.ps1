@@ -29,11 +29,16 @@ $Includes = @((Join-Path $Root "KeireCore\Shaders\BuiltinLighting.hlsli"),
               (Join-Path $Root "KeireCore\Shaders\AtmosphereGround.hlsli"),
               (Join-Path $Root "KeireCore\Shaders\CloudLayered.hlsl"),
               (Join-Path $Root "KeireCore\Shaders\CloudVolume.hlsli"),
+              (Join-Path $Root "KeireCore\Shaders\CloudNoiseBuffer.hlsli"),
               (Join-Path $Root "KeireCore\Shaders\CloudLightCacheSampling.hlsli"),
               (Join-Path $Root "KeireCore\Shaders\CloudTemporalRejection.hlsli"),
               (Join-Path $Root "KeireCore\Shaders\CloudRadianceEncoding.hlsli"),
               (Join-Path $Root "KeireCore\Shaders\DisplayTransfer.hlsli"),
               (Join-Path $Root "KeireCore\Shaders\CloudVolumeGeometry.hlsli"),
+              (Join-Path $Root "KeireCore\Shaders\PlanetaryCloudIntersections.hlsli"),
+              (Join-Path $Root "KeireCore\Shaders\PlanetaryCloudGeometry.hlsli"),
+              (Join-Path $Root "KeireCore\Shaders\PlanetaryCloudWeather.hlsli"),
+              (Join-Path $Root "KeireCore\Shaders\PlanetaryCloudLayered.hlsli"),
               (Join-Path $Root "KeireCore\Shaders\FogDensity.hlsli"),
               (Join-Path $Root "KeireCore\Shaders\FogExclusion.hlsli"),
               (Join-Path $Root "KeireCore\Shaders\FogTerrainShadow.hlsli"),
@@ -138,7 +143,9 @@ try {
     $SourceBuilder = [Text.StringBuilder]::new()
     [void]$SourceBuilder.Append("#pragma once`n`nnamespace Keire::Detail`n{`n")
     [void]$SourceBuilder.Append('    inline constexpr char CloudVolumeShaderSource[] = "\n"').Append("`n")
-    foreach ($SourceName in @('VolumeTransport', 'AtmosphereMedium', 'CloudVolumeGeometry', 'FogDensity', 'FogExclusion', 'FogRayIntervals', 'CloudVolumeLighting', 'CloudVolumeDensity', 'CloudWeather', 'CloudVolume',
+    foreach ($SourceName in @('VolumeTransport', 'AtmosphereMedium', 'CloudVolumeGeometry',
+                              'PlanetaryCloudIntersections', 'PlanetaryCloudGeometry', 'PlanetaryCloudWeather',
+                              'FogExclusion', 'FogDensity', 'FogRayIntervals', 'CloudVolumeLighting', 'CloudVolumeDensity', 'CloudWeather', 'CloudNoiseBuffer', 'CloudVolume',
                               'VolumeSurfaceComposition', 'CloudVolumeView')) {
         $SourcePath = Join-Path $Root "KeireCore\Shaders\$SourceName.hlsli"
         foreach ($SourceLine in [IO.File]::ReadAllLines($SourcePath)) {

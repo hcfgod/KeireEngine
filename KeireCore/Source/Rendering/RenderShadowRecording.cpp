@@ -78,6 +78,7 @@ namespace Keire::RenderBackend
         Statistics.SampledResolvedDepthAvailable = true;
         surface.SampledDepthViewProjection = viewProjection;
         surface.SampledDepthInverseViewProjection = Math::Inverse(viewProjection);
+        surface.SampledDepthWorldOrigin = packet.Camera.WorldOrigin;
         surface.SampledDepthValid = true;
     }
 

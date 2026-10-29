@@ -8,6 +8,8 @@
 #include <SDL3/SDL.h>
 #include <doctest/doctest.h>
 
+#include <algorithm>
+#include <limits>
 #include <memory>
 
 namespace
@@ -215,6 +217,51 @@ namespace
             CHECK(state->CameraMotionHistory.at(key).Frame == 44);
             CHECK(state->CameraMotionHistory.at(key).Stars.Seed == 12346);
             CHECK(state->CaptureRequests.empty());
+            request.Environment.Stars.Density = 0.0;
+            auto traveller = scene->CreateEntity("Distant mesh");
+            REQUIRE(traveller.AddComponent<Keire::MeshRendererComponent>());
+            traveller.GetComponent<Keire::TransformComponent>()->SetLocalPositionPrecise({1e15 + 0.5, 0.0, 0.0});
+            auto camera = view->Camera();
+            camera.WorldOrigin = {1e15, 0.0, 0.0};
+            camera.EnvironmentAnchor = camera.WorldOrigin;
+            view->SetCamera(camera);
+            packet = capture(100);
+            REQUIRE(packet.DrawItems.size() == 1U);
+            CHECK(packet.DrawItems[0].World.Elements[12] == 0.5F);
+            camera.WorldOrigin.X += 0.25;
+            view->SetCamera(camera);
+            packet = capture(101);
+            REQUIRE(packet.DrawItems.size() == 1U);
+            CHECK(packet.TemporalHistoryContinuous);
+            CHECK(packet.DrawItems[0].World.Elements[12] == 0.25F);
+            CHECK(packet.DrawItems[0].PreviousWorld.Elements[12] == 0.5F);
+            CHECK(state->CameraMotionHistory.at(key).WorldOrigin == camera.WorldOrigin);
+            auto appearing = scene->CreateEntity("Newly visible distant mesh");
+            REQUIRE(appearing.AddComponent<Keire::MeshRendererComponent>());
+            appearing.GetComponent<Keire::TransformComponent>()->SetLocalPositionPrecise({1e15 + 0.75, 0.0, 0.0});
+            camera.WorldOrigin.X += 0.25;
+            view->SetCamera(camera);
+            packet = capture(102);
+            REQUIRE(packet.DrawItems.size() == 2U);
+            const auto appearingDraw =
+                std::ranges::find_if(packet.DrawItems, [&](const auto& item) { return item.Entity == appearing.Id(); });
+            REQUIRE(appearingDraw != packet.DrawItems.end());
+            CHECK(appearingDraw->World.Elements[12] == 0.25F);
+            CHECK(appearingDraw->PreviousWorld.Elements[12] == 0.5F);
+            const auto validCamera = camera;
+            camera.WorldOrigin.X = std::numeric_limits<double>::infinity();
+            CHECK_THROWS_AS(view->SetCamera(camera), std::invalid_argument);
+            CHECK(view->Camera().WorldOrigin == validCamera.WorldOrigin);
+            camera = validCamera;
+            camera.EnvironmentAnchor.X += 1.0;
+            view->SetCamera(camera);
+            CHECK_FALSE(capture(103).TemporalHistoryContinuous);
+            packet = capture(105);
+            CHECK_FALSE(packet.TemporalHistoryContinuous);
+            for (const auto& item : packet.DrawItems)
+            {
+                CHECK(item.PreviousWorld == item.World);
+            }
             state->CaptureRequests.clear();
             scene->Close();
             m_Checked = true;

@@ -158,9 +158,10 @@ TEST_CASE("Scene framing keeps small creature bounds visible at authored scale")
         float extent = 0.0F;
         for (int corner = 0; corner < 8; ++corner)
         {
-            const Keire::Vector3 p{corner & 1 ? bounds.Maximum.X : bounds.Minimum.X,
-                                   corner & 2 ? bounds.Maximum.Y : bounds.Minimum.Y,
-                                   corner & 4 ? bounds.Maximum.Z : bounds.Minimum.Z};
+            const Keire::Vector3d absolutePoint{corner & 1 ? bounds.Maximum.X : bounds.Minimum.X,
+                                                corner & 2 ? bounds.Maximum.Y : bounds.Minimum.Y,
+                                                corner & 4 ? bounds.Maximum.Z : bounds.Minimum.Z};
+            const auto p = Keire::Math::RelativeFloat(absolutePoint, camera.PreciseFocus(), 0.001);
             const float x = m[0] * p.X + m[4] * p.Y + m[8] * p.Z + m[12];
             const float y = m[1] * p.X + m[5] * p.Y + m[9] * p.Z + m[13];
             const float z = m[2] * p.X + m[6] * p.Y + m[10] * p.Z + m[14];
@@ -177,6 +178,49 @@ TEST_CASE("Scene framing keeps small creature bounds visible at authored scale")
     CHECK(KeireEditor::SceneEntityBounds{}.Radius() == 0.0F);
     const KeireEditor::SceneEntityBounds point{{}, {}, true};
     CHECK(point.Radius() == 0.25F);
+}
+
+TEST_CASE("Scene framing jumps from a nearby camera to a distant small mesh without losing its bounds")
+{
+    auto scene = Keire::CreateRef<Keire::Scene>(Keire::AssetId::Generate(),
+                                                Keire::SceneAsset::EmptyDefinition("Distant framing"));
+    auto entity = scene->CreateEntity("Distant mesh");
+    entity.AddComponent<Keire::MeshRendererComponent>()->SetMesh(Keire::AssetId::Generate());
+    const Keire::Vector3d position{1000000000000.25, 1.125, -5.0};
+    entity.GetComponent<Keire::TransformComponent>()->SetLocalPositionPrecise(position);
+    const KeireEditor::MeshBoundsResolver meshBounds = [](Keire::AssetId)
+    { return Keire::MeshBounds{{-0.75F, -0.5F, -0.25F}, {0.75F, 0.5F, 0.25F}}; };
+
+    for (const Keire::Vector3d previousFocus : {Keire::Vector3d{}, Keire::Vector3d{-1000000000000.0, 8.0, 16.0}})
+    {
+        KeireEditor::SceneCameraController camera;
+        camera.SetFocusPrecise(previousFocus);
+        const auto bounds = KeireEditor::CalculateSceneEntityBounds(entity, meshBounds, {}, camera.PreciseFocus());
+        REQUIRE(bounds.Valid);
+        CHECK(bounds.CenterPrecise() == position);
+        CHECK(bounds.Radius() == doctest::Approx(std::sqrt(0.875)));
+        camera.FramePrecise(bounds.CenterPrecise(), bounds.Radius(), 1.0F);
+        CHECK(camera.PreciseFocus() == position);
+        CHECK(camera.State().Distance < 10.0F);
+
+        const auto renderCamera = camera.RenderCamera(1.0F);
+        const Keire::UiItemRect viewport{{0.0F, 0.0F}, {200.0F, 200.0F}};
+        CHECK(KeireEditor::PickSceneEntity(scene, viewport, {100.0F, 100.0F}, renderCamera, meshBounds) == entity.Id());
+        const auto matrix = Keire::Math::Multiply(renderCamera.Projection, renderCamera.View);
+        for (int corner = 0; corner < 8; ++corner)
+        {
+            const Keire::Vector3 local{corner & 1 ? 0.75F : -0.75F, corner & 2 ? 0.5F : -0.5F,
+                                       corner & 4 ? 0.25F : -0.25F};
+            const auto& m = matrix.Elements;
+            const float x = m[0] * local.X + m[4] * local.Y + m[8] * local.Z + m[12];
+            const float y = m[1] * local.X + m[5] * local.Y + m[9] * local.Z + m[13];
+            const float w = m[3] * local.X + m[7] * local.Y + m[11] * local.Z + m[15];
+            REQUIRE(w > 0.0F);
+            CHECK(std::abs(x / w) <= 0.8F);
+            CHECK(std::abs(y / w) <= 0.8F);
+        }
+    }
+    scene->Close();
 }
 
 TEST_CASE("Scene viewport right toolbar drops optional controls before overlapping the gizmo toolbar")
@@ -290,4 +334,28 @@ TEST_CASE("Scene status hides before overlapping the top toolbar")
 {
     CHECK_FALSE(KeireEditor::CanPlaceSceneViewportStatus({{0.0F, 0.0F}, {440.0F, 60.0F}}));
     CHECK(KeireEditor::CanPlaceSceneViewportStatus({{0.0F, 0.0F}, {440.0F, 100.0F}}));
+}
+
+TEST_CASE("Scene picking and rectangle selection retain distant camera-relative positions")
+{
+    auto scene = Keire::CreateRef<Keire::Scene>(Keire::AssetId::Generate(),
+                                                Keire::SceneAsset::EmptyDefinition("Distant picking"));
+    const auto entity = scene->CreateEntity("Distant selection target");
+    const auto transform = entity.GetComponent<Keire::TransformComponent>();
+    REQUIRE(transform);
+    const Keire::UiItemRect viewport{{0.0F, 0.0F}, {200.0F, 200.0F}};
+    const Keire::UiItemRect selection{{85.0F, 85.0F}, {115.0F, 115.0F}};
+    Keire::RenderCamera camera;
+    camera.Projection = Keire::Math::Perspective(60.0F, 1.0F, 0.1F, 100.0F);
+    for (const double origin : {0.0, 1.0e15})
+    {
+        camera.WorldOrigin = {origin, 0.0, 0.0};
+        transform->SetWorldPositionPrecise({origin + 0.25, 0.0, 0.0});
+        camera.View = Keire::Math::LookAt({0.25F, 0.0F, -5.0F}, {0.25F, 0.0F, 0.0F}, {0.0F, 1.0F, 0.0F});
+        CHECK(KeireEditor::PickSceneEntity(scene, viewport, {100.0F, 100.0F}, camera) == entity.Id());
+        CHECK(KeireEditor::SelectSceneEntitiesInRectangle(scene, viewport, selection, camera) ==
+              std::vector{entity.Id()});
+        CHECK_FALSE(KeireEditor::PickSceneEntity(scene, viewport, {190.0F, 100.0F}, camera));
+    }
+    scene->Close();
 }

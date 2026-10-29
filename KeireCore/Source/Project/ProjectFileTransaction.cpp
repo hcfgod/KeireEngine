@@ -21,6 +21,7 @@ namespace Keire::Detail
         constexpr std::size_t MaximumFileBytes = 32U * 1024U * 1024U;
         constexpr std::size_t MaximumTransactionBytes = 512U * 1024U * 1024U;
         constexpr std::size_t MaximumJournalBytes = 4U * 1024U * 1024U;
+        constexpr std::size_t MaximumSettingsFiles = 5;
         struct TransactionPolicy
         {
             std::filesystem::path JournalRoot;
@@ -65,7 +66,8 @@ namespace Keire::Detail
                 if (destination != "ProjectSettings/Rendering.keiresettings" &&
                     destination != "ProjectSettings/Authoring.keiresettings" &&
                     destination != "ProjectSettings/EnvironmentTime.keiresettings" &&
-                    destination != "ProjectSettings/EnvironmentLighting.keiresettings")
+                    destination != "ProjectSettings/EnvironmentLighting.keiresettings" &&
+                    destination != "ProjectSettings/Planets.keiresettings")
                 {
                     throw std::invalid_argument("Settings transaction destination is not an editable settings file.");
                 }
@@ -212,7 +214,7 @@ namespace Keire::Detail
                 {
                     continue;
                 }
-                if (journal.at("files").size() > 4)
+                if (journal.at("files").size() > MaximumSettingsFiles)
                 {
                     throw std::runtime_error("Settings recovery journal exceeds its file-count bound.");
                 }
@@ -262,7 +264,7 @@ namespace Keire::Detail
             for (const auto& path : Journals(root, policy))
             {
                 auto journal = ReadJournal(fs, path);
-                if (policy.SettingsOnly && journal.at("files").size() > 4)
+                if (policy.SettingsOnly && journal.at("files").size() > MaximumSettingsFiles)
                 {
                     throw std::runtime_error("Settings recovery journal exceeds its file-count bound.");
                 }
@@ -281,7 +283,7 @@ namespace Keire::Detail
         {
             if (files.empty())
                 return;
-            if (files.size() > (policy.SettingsOnly ? 4U : 4096U))
+            if (files.size() > (policy.SettingsOnly ? MaximumSettingsFiles : 4096U))
                 throw std::invalid_argument("Project file transaction exceeds its file-count bound.");
             const AnchoredFileSystem fs(root);
             fs.CreateDirectories("Library");

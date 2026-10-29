@@ -20,7 +20,7 @@ namespace KeireEditor
 
         struct TransformValues final
         {
-            std::optional<Keire::Vector3> Position;
+            std::optional<Keire::Vector3d> Position;
             std::optional<Keire::Vector3> EulerDegrees;
             std::optional<Keire::Vector3> Scale;
         };

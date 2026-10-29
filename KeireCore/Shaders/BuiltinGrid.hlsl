@@ -19,6 +19,8 @@ cbuffer GridConstants : register(b0, space3)
     float4x4 ViewProjection;
     float4 GridParameters;
     float4 GridAppearance;
+    float4 GridOriginPhaseAndPlane;
+    float4 GridOriginAxes;
 };
 
 VertexOutput VSMain(const uint vertexId : SV_VertexID)
@@ -47,15 +49,18 @@ FragmentOutput PSMain(const VertexOutput input)
     const float rayDenominator = rayDirection.y;
     if (abs(rayDenominator) < 1.0e-6F)
         discard;
-    const float rayDistance = -cameraWorld.y / rayDenominator;
+    const float rayDistance = (GridOriginPhaseAndPlane.y - cameraWorld.y) / rayDenominator;
     if (rayDistance <= 0.0F)
         discard;
 
     const float3 worldPosition = cameraWorld.xyz + rayDirection * rayDistance;
-    const float minorLine = GridLine(worldPosition.xz, max(GridParameters.x, 1.0e-4F));
-    const float majorLine = GridLine(worldPosition.xz, max(GridParameters.y, GridParameters.x));
+    const float2 gridPosition = worldPosition.xz + GridOriginPhaseAndPlane.xz;
+    const float minorLine = GridLine(gridPosition, max(GridParameters.x, 1.0e-4F));
+    const float majorLine = GridLine(gridPosition, max(GridParameters.y, GridParameters.x));
     const float axisDerivative = max(max(fwidth(worldPosition.x), fwidth(worldPosition.z)), 1.0e-6F);
-    const float axisLine = 1.0F - saturate(min(abs(worldPosition.x), abs(worldPosition.z)) / axisDerivative);
+    const float xAxisLine = (1.0F - saturate(abs(worldPosition.x - GridOriginAxes.x) / axisDerivative)) * GridOriginAxes.z;
+    const float zAxisLine = (1.0F - saturate(abs(worldPosition.z - GridOriginAxes.y) / axisDerivative)) * GridOriginAxes.w;
+    const float axisLine = max(xAxisLine, zAxisLine);
     const float opacity = max(max(minorLine * GridParameters.z, majorLine * GridParameters.w), axisLine * 0.9F) *
         GridVisibility(GridAppearance.x, GridAppearance.y, rayDistance);
     if (opacity <= 0.001F)

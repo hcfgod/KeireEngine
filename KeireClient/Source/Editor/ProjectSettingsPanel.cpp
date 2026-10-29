@@ -12,6 +12,7 @@
 #include "KeireClientInternal/Editor/EnvironmentSkyControls.h"
 #include "KeireClientInternal/Editor/ExternalEditorSettings.h"
 #include "KeireClientInternal/Editor/FogControls.h"
+#include "KeireClientInternal/Editor/PlanetControls.h"
 #include "KeireClientInternal/Editor/StarFieldControls.h"
 #include "KeireClientInternal/Editor/VolumetricCloudControls.h"
 #include "KeireInternal/FileSystem.h"
@@ -26,6 +27,25 @@
 
 namespace KeireEditor
 {
+    void ProjectSettingsPanel::ObserveEditSurface(const Detail::SettingsEditSurface surface, const bool visible,
+                                                  const bool focused)
+    {
+        if (!m_EditSurfaces.Observe(surface, visible, focused))
+        {
+            return;
+        }
+        try
+        {
+            // Finish the gesture without silently retrying a failed save or saving an Undo operation.
+            // Both surfaces retain their visible dirty indicator and explicit Save action.
+            m_Document.CommitEdit("Edit Project Environment");
+        }
+        catch (const std::exception& error)
+        {
+            m_Error = error.what();
+        }
+    }
+
     namespace
     {
         [[nodiscard]] constexpr const char* RenderPathName(const Keire::RenderPath path) noexcept
@@ -145,6 +165,7 @@ namespace KeireEditor
             {
                 try
                 {
+                    m_Controller.ApplyProjectAuthoringSettings(m_Document.AuthoringSettings());
                     m_Document.Save();
                     m_Error.clear();
                 }
@@ -182,7 +203,6 @@ namespace KeireEditor
         }
 
         bool authoringCommit = false;
-        bool matrixChanged = false;
         bool commit = false;
         int activeCategory = -1;
         if (auto category = ui.BeginTabItem("Scripting"); category)
@@ -538,6 +558,29 @@ namespace KeireEditor
                     ui.TextColoredWrapped(theme.MutedText,
                                           "256 audible / 1024 virtual voices is the balanced desktop default.");
                 }
+                ui.Separator();
+                ui.Text("Default Gravity");
+                if (ui.DragVector3("Acceleration (m/s^2)", authoring.PhysicsGravity, 0.05F))
+                {
+                    authoringChanged = true;
+                }
+                authoringCommit |= ui.LastItemState().DeactivatedAfterEdit;
+                ui.TextColoredWrapped(theme.MutedText,
+                                      "Applied to new physics worlds and the next Play session. Use zero for space; "
+                                      "bodies with Use Gravity disabled are unaffected.");
+                if (ui.Button("Earth Gravity"))
+                {
+                    authoring.PhysicsGravity = {0.0F, -9.81F, 0.0F};
+                    authoringChanged = true;
+                    authoringCommit = true;
+                }
+                ui.SameLine();
+                if (ui.Button("Zero Gravity"))
+                {
+                    authoring.PhysicsGravity = {};
+                    authoringChanged = true;
+                    authoringCommit = true;
+                }
                 if (auto layers = ui.BeginTreeNode("Physics Layers (32)"); layers)
                 {
                     for (std::size_t index = 0; index < authoring.PhysicsLayerNames.size(); ++index)
@@ -581,7 +624,6 @@ namespace KeireEditor
                                     }
                                     authoringChanged = true;
                                     authoringCommit = true;
-                                    matrixChanged = true;
                                 }
                             }
                         }
@@ -591,7 +633,6 @@ namespace KeireEditor
                 {
                     m_Document.ResetAuthoring();
                     authoringCommit = true;
-                    matrixChanged = true;
                 }
                 else if (authoringChanged)
                 {
@@ -847,6 +888,7 @@ namespace KeireEditor
             {
                 try
                 {
+                    commit |= Detail::DrawPlanetControls(ui, theme, m_Document);
                     if (auto* preview = m_Controller.ProjectEnvironmentPreview())
                     {
                         Detail::DrawEnvironmentPreviewControls(ui, theme, *preview, m_Document);
@@ -949,8 +991,7 @@ namespace KeireEditor
         {
             try
             {
-                if (matrixChanged)
-                    m_Controller.ApplyProjectAuthoringSettings(m_Document.AuthoringSettings());
+                m_Controller.ApplyProjectAuthoringSettings(m_Document.AuthoringSettings());
                 m_Document.CommitEdit();
                 m_Document.Save();
                 m_Error.clear();

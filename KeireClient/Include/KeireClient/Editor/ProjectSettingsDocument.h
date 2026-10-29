@@ -3,6 +3,7 @@
 #include "Keire/Core.h"
 #include "KeireInternal/Environment/EnvironmentClock.h"
 #include "KeireInternal/Environment/EnvironmentLightingProfile.h"
+#include "KeireInternal/Spatial/PlanetProjectSettings.h"
 
 #include <array>
 #include <cstddef>
@@ -42,20 +43,24 @@ namespace KeireEditor
         }
         [[nodiscard]] Keire::Ref<Keire::UndoContext> UndoContext() const noexcept { return m_Undo; }
 
+        [[nodiscard]] const Keire::Detail::PlanetProjectSettings& Planets() const noexcept { return m_Planets; }
+
         void Update(Keire::RenderEnvironmentSettings settings);
         void UpdateAuthoring(Keire::ProjectAuthoringSettings settings);
         void UpdateEnvironmentTime(Keire::Detail::EnvironmentClockState settings);
         void UpdateEnvironmentLighting(Keire::Detail::EnvironmentLightingProfile settings);
+        void UpdatePlanets(Keire::Detail::PlanetProjectSettings settings);
         void CommitEdit(std::string_view name = "Edit Project Settings");
         void CancelEdit() noexcept;
         void Reset();
         void ResetAuthoring();
         void ResetEnvironmentTime();
         void ResetEnvironmentLighting();
+        void ResetPlanets();
         void Save();
 
       private:
-        using FileBaseline = std::array<std::optional<std::vector<std::byte>>, 4>;
+        using FileBaseline = std::array<std::optional<std::vector<std::byte>>, 5>;
 
         void OpenImpl(std::filesystem::path projectRoot, Keire::RenderEnvironmentSettings settings,
                       std::optional<Keire::ProjectAuthoringSettings> authoringSettings,
@@ -68,13 +73,14 @@ namespace KeireEditor
             Keire::ProjectAuthoringSettings Authoring;
             Keire::Detail::EnvironmentClockState EnvironmentTime;
             Keire::Detail::EnvironmentLightingProfile EnvironmentLighting;
+            Keire::Detail::PlanetProjectSettings Planets;
 
             [[nodiscard]] bool operator==(const Snapshot&) const = default;
         };
 
         [[nodiscard]] Snapshot Current() const
         {
-            return {m_Settings, m_AuthoringSettings, m_EnvironmentTime, m_EnvironmentLighting};
+            return {m_Settings, m_AuthoringSettings, m_EnvironmentTime, m_EnvironmentLighting, m_Planets};
         }
         void Assign(Snapshot settings) noexcept;
         void RefreshDirty() noexcept;
@@ -84,6 +90,7 @@ namespace KeireEditor
         Keire::ProjectAuthoringSettings m_AuthoringSettings = Keire::DefaultProjectAuthoringSettings();
         Keire::Detail::EnvironmentClockState m_EnvironmentTime;
         Keire::Detail::EnvironmentLightingProfile m_EnvironmentLighting;
+        Keire::Detail::PlanetProjectSettings m_Planets;
         std::optional<Snapshot> m_EditBaseline;
         std::optional<Snapshot> m_SavedState;
         FileBaseline m_FileBaseline;

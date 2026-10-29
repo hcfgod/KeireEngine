@@ -31,9 +31,10 @@ namespace Keire::Detail
                 }
             }
             const auto shadows = profile.Shadows();
-            nlohmann::json result{{"version", profile.Sky() ? 4
-                                              : ambient     ? 3
-                                                            : 2},
+            nlohmann::json result{{"version", profile.DirectionFrame() != EnvironmentDirectionalFrame::LegacyWorld ? 5
+                                              : profile.Sky()                                                      ? 4
+                                              : ambient                                                            ? 3
+                                                                                                                   : 2},
                                   {"ownership", profile.Ownership() == EnvironmentDirectionalOwnership::Authored
                                                     ? "authored"
                                                     : "environment"},
@@ -47,6 +48,12 @@ namespace Keire::Detail
             {
                 result["sky"] = EncodeEnvironmentSky(*profile.Sky());
             }
+            if (profile.DirectionFrame() != EnvironmentDirectionalFrame::LegacyWorld)
+            {
+                result["directionFrame"] = profile.DirectionFrame() == EnvironmentDirectionalFrame::PlanetFixed
+                                               ? "planet-fixed"
+                                               : "inertial-root";
+            }
             return result;
         }
 
@@ -56,8 +63,9 @@ namespace Keire::Detail
             {
                 if (!record.is_object() || !record.at("version").is_number_integer() ||
                     (record.at("version") != 1 && record.at("version") != 2 && record.at("version") != 3 &&
-                     record.at("version") != 4) ||
+                     record.at("version") != 4 && record.at("version") != 5) ||
                     record.size() != (record.at("version") == 1   ? 3U
+                                      : record.at("version") == 5 ? (record.contains("sky") ? 6U : 5U)
                                       : record.at("version") == 4 ? 5U
                                                                   : 4U) ||
                     !record.at("ownership").is_string() || !record.at("keyframes").is_array() ||
@@ -66,6 +74,17 @@ namespace Keire::Detail
                     throw std::invalid_argument("Unsupported or malformed environment lighting record.");
                 }
                 EnvironmentShadowSettings shadows;
+                auto directionFrame = EnvironmentDirectionalFrame::LegacyWorld;
+                if (record.at("version") == 5)
+                {
+                    const auto frame = record.at("directionFrame").get<std::string>();
+                    if (frame != "planet-fixed" && frame != "inertial-root")
+                    {
+                        throw std::invalid_argument("Unknown daily-light reference frame.");
+                    }
+                    directionFrame = frame == "planet-fixed" ? EnvironmentDirectionalFrame::PlanetFixed
+                                                             : EnvironmentDirectionalFrame::InertialRoot;
+                }
                 if (record.at("version") != 1)
                 {
                     const auto& encoded = record.at("shadows");
@@ -93,7 +112,7 @@ namespace Keire::Detail
                 for (const auto& encoded : record.at("keyframes"))
                 {
                     const bool ambient =
-                        record.at("version") == 3 || (record.at("version") == 4 && encoded.contains("ambient"));
+                        record.at("version") == 3 || (record.at("version") >= 4 && encoded.contains("ambient"));
                     if (!encoded.is_object() || encoded.size() != (ambient ? 6U : 5U) ||
                         !encoded.at("phase").is_number() || !encoded.at("azimuth").is_number() ||
                         !encoded.at("elevation").is_number() || !encoded.at("intensity").is_number() ||
@@ -141,7 +160,8 @@ namespace Keire::Detail
                     ownership == "authored" ? EnvironmentDirectionalOwnership::Authored
                                             : EnvironmentDirectionalOwnership::Environment,
                     std::move(keys), shadows,
-                    record.at("version") == 4 ? std::optional(DecodeEnvironmentSky(record.at("sky"))) : std::nullopt);
+                    record.contains("sky") ? std::optional(DecodeEnvironmentSky(record.at("sky"))) : std::nullopt,
+                    directionFrame);
             }
             catch (const nlohmann::json::exception&)
             {

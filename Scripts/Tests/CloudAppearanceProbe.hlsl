@@ -45,7 +45,7 @@ void CSMain(uint3 id : SV_DispatchThreadID)
     const float3 ray = normalize(forward + up * screen.y * 0.466307658F +
         float3(screen.x * aspect * 0.466307658F, 0.0F, 0.0F));
 
-    CloudVolumeParameters parameters;
+    CloudVolumeParameters parameters = (CloudVolumeParameters)0;
     parameters.RaySamplePhase = 0.0F;
     parameters.WeatherControls = ProbeWeather;
     parameters.HeightProfile = float4(0.0F, 0.15F, 0.7F, 1.0F);

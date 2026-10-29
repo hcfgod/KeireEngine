@@ -2,6 +2,7 @@
 #include "KeireInternal/Rendering/RenderBackendInternal.h"
 #include "KeireInternal/Rendering/RenderGeometryMathInternal.h"
 #include "KeireInternal/Rendering/TransparencyInternal.h"
+#include "KeireInternal/Rendering/VfxRenderCoordinates.h"
 
 #include "Keire/Log.h"
 
@@ -45,7 +46,11 @@ namespace Keire::RenderBackend
         for (std::size_t index = 0; index < packet.VfxSnapshots.size(); ++index)
         {
             const auto source = packet.VfxSnapshots[index].Particles();
-            particles.insert(particles.end(), source.begin(), source.end());
+            for (const auto& particle : source)
+            {
+                particles.push_back(VfxParticleInRenderFrame(particle, packet.VfxSnapshots[index].WorldOrigin(),
+                                                             packet.Camera.WorldOrigin, packet.PreviousWorldOrigin));
+            }
             const auto lighting = index < packet.SpatialContributions.size()
                                       ? packet.SpatialContributions[index].BakedLighting
                                       : packet.BakedLighting;
@@ -272,8 +277,9 @@ namespace Keire::RenderBackend
                 const auto cameraWorld = Math::Inverse(packet.Camera.View);
                 const auto right = Math::TransformDirection(cameraWorld, {1.0F, 0.0F, 0.0F});
                 const auto up = Math::TransformDirection(cameraWorld, {0.0F, 1.0F, 0.0F});
+                const auto simulationToRender = VfxFrameTranslation(snapshot.WorldOrigin(), packet.Camera.WorldOrigin);
                 CameraUniforms camera{
-                    Math::Multiply(packet.Camera.Projection, packet.Camera.View),
+                    Math::Multiply(Math::Multiply(packet.Camera.Projection, packet.Camera.View), simulationToRender),
                     {right.X, right.Y, right.Z, 0.0F},
                     {up.X, up.Y, up.Z, 0.0F},
                 };
@@ -319,15 +325,27 @@ namespace Keire::RenderBackend
                                                     static_cast<std::uint32_t>(storage.size()));
                     const auto* particleMaterial =
                         emitter.Material ? ResolveAssetMaterial(emitter.Material, samples) : nullptr;
+                    const bool originCompatible =
+                        !particleMaterial ||
+                        VfxMaterialSupportsRenderOrigin(particleMaterial->VfxRenderOriginAbiVersion,
+                                                        snapshot.WorldOrigin(), packet.Camera.WorldOrigin);
+                    if (!originCompatible && !emitter.MaterialDiagnosticReported)
+                    {
+                        KEIRE_CORE_ERROR("GPU VFX material {} lacks render-origin support; using built-in rendering. "
+                                         "Reimport the generated material or update its shader coordinate contract.",
+                                         emitter.Material.ToString());
+                        emitter.MaterialDiagnosticReported = true;
+                    }
                     const auto particleRole = emitter.Renderer == VfxRendererType::Ribbon
                                                   ? RuntimeMaterialPassRole::VfxRibbon
                                                   : RuntimeMaterialPassRole::VfxBillboard;
                     auto* particlePipeline = particleMaterial ? particleMaterial->PassPipeline(particleRole) : nullptr;
                     if (emitter.Renderer != VfxRendererType::Mesh && emitter.Renderer != VfxRendererType::Volumetric &&
-                        particlePipeline)
+                        particlePipeline && originCompatible)
                     {
                         SDL_BindGPUGraphicsPipeline(pass, particlePipeline);
-                        BindVfxMaterial(commands, pass, surface, packet, shadows, particleMaterial, bakedLighting);
+                        BindVfxMaterial(commands, pass, surface, packet, shadows, particleMaterial, bakedLighting,
+                                        simulationToRender);
                         SDL_DrawGPUPrimitivesIndirect(pass, renderIndirect, 0, 1);
                         if (maskedOutput)
                             ++surface.ActiveWorkset().GpuVfx.ConsumedDraws;
@@ -346,7 +364,7 @@ namespace Keire::RenderBackend
                         SDL_BindGPUIndexBuffer(pass, &indexBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
                         const auto* composed =
                             emitter.Material ? ResolveAssetMaterial(emitter.Material, samples) : nullptr;
-                        if (composed && composed->UsesInstancing)
+                        if (composed && composed->UsesInstancing && originCompatible)
                         {
                             SDL_BindGPUGraphicsPipeline(pass, composed->Pipeline);
                             SDL_BindGPUVertexStorageBuffers(pass, 0, &renderInstances, 1);
@@ -356,7 +374,8 @@ namespace Keire::RenderBackend
                                 SDL_PushGPUVertexUniformData(commands, 2, instanceParameters.data(),
                                                              sizeof(instanceParameters));
                             }
-                            BindVfxMaterial(commands, pass, surface, packet, shadows, composed, bakedLighting);
+                            BindVfxMaterial(commands, pass, surface, packet, shadows, composed, bakedLighting,
+                                            simulationToRender);
                             emitter.MaterialDiagnosticReported = false;
                         }
                         else

@@ -8,6 +8,7 @@
 #include <array>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -127,4 +128,56 @@ TEST_CASE("Published source index retains import failures across restarts and "
             CHECK(reopened->ImportStatus(bad->Id).Diagnostics.front().Message == original.Diagnostics.front().Message);
         }
     }
+}
+
+TEST_CASE("Failed catalog publication never advertises upgraded artifacts after source-index restart")
+{
+    ImportStatusProject project;
+    project.Write("shader.publish", "shader");
+    bool failPublication = false;
+    Keire::AssetImporterRegistration importer;
+    importer.Name = "Test.PublicationCompatibility";
+    importer.Type = Keire::TextAsset::StaticType();
+    importer.Extensions = {".publish"};
+    importer.Import = [](const std::span<const std::byte> bytes)
+    { return std::vector<std::byte>(bytes.begin(), bytes.end()); };
+    importer.Cook = [&failPublication](const std::span<const std::byte> bytes, Keire::AssetTargetPlatform)
+    {
+        if (failPublication)
+        {
+            throw std::runtime_error("publication rejected");
+        }
+        return std::vector<std::byte>(bytes.begin(), bytes.end());
+    };
+    Keire::AssetDatabaseSpecification specification{.ProjectRoot = project.Root, .Importers = {importer}};
+    auto database = Keire::CreateRef<Keire::AssetDatabase>(specification);
+    const auto baseline = database->ImportAll();
+    const auto readCatalog = [&baseline]
+    {
+        std::ifstream input(baseline.CatalogPath, std::ios::binary);
+        return std::string(std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>());
+    };
+    const auto originalCatalog = readCatalog();
+    const auto id = database->Records().front().Id;
+    specification.Importers.front().Version = 2;
+    database = Keire::CreateRef<Keire::AssetDatabase>(specification);
+    failPublication = true;
+    const auto result = database->ImportAll(Keire::AssetImportPolicy::KeepLastGood);
+    CHECK(result.CatalogPath.empty());
+    REQUIRE(result.Statuses.size() == 1);
+    CHECK(result.Statuses.front().State == Keire::AssetImportState::Failed);
+    CHECK(readCatalog() == originalCatalog);
+    REQUIRE(database->Find(id));
+    CHECK(database->Find(id)->ImporterVersion == 2);
+
+    const auto index = project.Root / "publication-index.json";
+    Keire::Detail::AssetDatabaseWorkerAccess::PublishSourceIndex(*database, index);
+    database = Keire::Detail::AssetDatabaseWorkerAccess::CreateFromSourceIndex(specification, index);
+    CHECK(database->ImportStatus(id).State == Keire::AssetImportState::Failed);
+    REQUIRE_FALSE(database->ImportStatus(id).Diagnostics.empty());
+    CHECK(database->ImportStatus(id).Diagnostics.back().Message.find("publication failed") != std::string::npos);
+    failPublication = false;
+    const auto retry = database->ImportAll(Keire::AssetImportPolicy::KeepLastGood);
+    CHECK_FALSE(retry.CatalogPath.empty());
+    CHECK(database->ImportStatus(id).State != Keire::AssetImportState::Failed);
 }

@@ -179,7 +179,8 @@ namespace
                                                 const Keire::SceneObjectDefinition& object)
     {
         const auto world =
-            Keire::Math::ComposeTransform(object.Transform.Position, object.Transform.Rotation, object.Transform.Scale);
+            Keire::Math::ComposeTransform(Keire::Math::RelativeFloat(object.Transform.Position, {}, 0.00001),
+                                          object.Transform.Rotation, object.Transform.Scale);
         return Keire::Math::Multiply(clipFromWorld, world);
     }
 
@@ -267,13 +268,13 @@ TEST_CASE("Sandbox GPU occlusion stress scene stays above Automatic activation t
     CHECK_FALSE(occluder->Parent);
     CHECK_FALSE(hiddenRoot->Parent);
     CHECK_FALSE(visibleRoot->Parent);
-    CHECK(hiddenRoot->Transform.Position == Keire::Vector3{});
+    CHECK(hiddenRoot->Transform.Position == Keire::Vector3d{});
     CHECK(hiddenRoot->Transform.Rotation == Keire::Quaternion{0.0F, 0.0F, 0.0F, 1.0F});
     CHECK(hiddenRoot->Transform.Scale == Keire::Vector3{1.0F, 1.0F, 1.0F});
-    CHECK(visibleRoot->Transform.Position == Keire::Vector3{});
+    CHECK(visibleRoot->Transform.Position == Keire::Vector3d{});
     CHECK(visibleRoot->Transform.Rotation == Keire::Quaternion{0.0F, 0.0F, 0.0F, 1.0F});
     CHECK(visibleRoot->Transform.Scale == Keire::Vector3{1.0F, 1.0F, 1.0F});
-    CHECK(camera->Transform.Position == Keire::Vector3{0.0F, 0.0F, -30.0F});
+    CHECK(camera->Transform.Position == Keire::Vector3d{0.0F, 0.0F, -30.0F});
     CHECK(camera->Transform.Rotation == Keire::Quaternion{0.0F, 0.0F, 0.0F, 1.0F});
     const auto* cameraComponent = FindComponent(*camera, Keire::CameraComponent::StaticType());
     REQUIRE(cameraComponent);
@@ -294,7 +295,7 @@ TEST_CASE("Sandbox GPU occlusion stress scene stays above Automatic activation t
     CHECK(occluderData.at("material").get<std::string>() == AutomotiveMaterial);
     CHECK(occluderData.at("visible").get<bool>());
     CHECK_FALSE(occluderData.at("alwaysVisible").get<bool>());
-    CHECK(occluder->Transform.Position == Keire::Vector3{});
+    CHECK(occluder->Transform.Position == Keire::Vector3d{});
     CHECK(occluder->Transform.Rotation == Keire::Quaternion{0.0F, 0.0F, 0.0F, 1.0F});
     CHECK(occluder->Transform.Scale == Keire::Vector3{12.0F, 18.0F, 1.0F});
 
@@ -334,22 +335,22 @@ TEST_CASE("Sandbox GPU occlusion stress scene stays above Automatic activation t
         CHECK(object.Transform.Position.Z - radius >
               occluder->Transform.Position.Z + occluder->Transform.Scale.Z * 0.5F);
 
-        const float cameraZ = camera->Transform.Position.Z;
-        const float wallFrontDistance = occluder->Transform.Position.Z - occluder->Transform.Scale.Z * 0.5F - cameraZ;
+        const double cameraZ = camera->Transform.Position.Z;
+        const double wallFrontDistance = occluder->Transform.Position.Z - occluder->Transform.Scale.Z * 0.5F - cameraZ;
         if (hidden)
         {
-            const float targetNearDistance = object.Transform.Position.Z - radius - cameraZ;
-            const float projectedXAtWall =
+            const double targetNearDistance = object.Transform.Position.Z - radius - cameraZ;
+            const double projectedXAtWall =
                 (std::abs(object.Transform.Position.X) + radius) * wallFrontDistance / targetNearDistance;
-            const float projectedYAtWall =
+            const double projectedYAtWall =
                 (std::abs(object.Transform.Position.Y) + radius) * wallFrontDistance / targetNearDistance;
             CHECK(projectedXAtWall < occluder->Transform.Scale.X * 0.5F);
             CHECK(projectedYAtWall < occluder->Transform.Scale.Y * 0.5F);
         }
         else
         {
-            const float targetFarDistance = object.Transform.Position.Z + radius - cameraZ;
-            const float innerProjectedXAtWall =
+            const double targetFarDistance = object.Transform.Position.Z + radius - cameraZ;
+            const double innerProjectedXAtWall =
                 (std::abs(object.Transform.Position.X) - radius) * wallFrontDistance / targetFarDistance;
             CHECK(innerProjectedXAtWall > occluder->Transform.Scale.X * 0.5F);
         }
@@ -377,7 +378,8 @@ TEST_CASE("Sandbox GPU occlusion stress scene stays above Automatic activation t
     const auto sphereBounds = CalculateBounds(sphereGeometry.first);
     const auto cubeBounds = CalculateBounds(cubeGeometry.first);
     const auto cameraWorld =
-        Keire::Math::ComposeTransform(camera->Transform.Position, camera->Transform.Rotation, camera->Transform.Scale);
+        Keire::Math::ComposeTransform(Keire::Math::RelativeFloat(camera->Transform.Position, {}, 0.00001),
+                                      camera->Transform.Rotation, camera->Transform.Scale);
     const auto view = Keire::Math::Inverse(cameraWorld);
     constexpr std::array viewports{ViewportSize{1280U, 720U}, ViewportSize{1920U, 1080U}, ViewportSize{2560U, 1440U},
                                    ViewportSize{3840U, 2160U}};

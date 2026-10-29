@@ -12,6 +12,7 @@
 #include "KeireInternal/Scenes/SceneRuntimeRenderingInternal.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <optional>
 #include <stdexcept>
@@ -194,6 +195,14 @@ void KeireEditor::SceneViewportPanel::Draw(Keire::UiFrame& ui)
         if (ui.Button("Discard Recovery"))
             m_Controller.DiscardSceneViewportRecovery();
     }
+    bool surfaceNavigation = m_Camera->State().SurfaceNavigation;
+    if (ui.Checkbox("Planet surface navigation", surfaceNavigation))
+    {
+        m_Camera->SetSurfaceNavigation(surfaceNavigation);
+    }
+    ui.SetTooltip("Follow the active planet's local up for camera navigation. Disable to keep the current "
+                  "orientation during free flight. This does not change scene gravity or character motion.",
+                  {.Delayed = true});
     const auto available = ui.ContentAvailable();
     const Keire::UiSize canvasSize{std::max(available.Width, 1.0F), std::max(available.Height, 1.0F)};
     auto size = canvasSize;
@@ -233,6 +242,27 @@ void KeireEditor::SceneViewportPanel::Draw(Keire::UiFrame& ui)
     const bool playActive = document.PlaySession() && document.PlaySession()->State() != Keire::ScenePlayState::Stopped;
     const float aspect = size.Width / std::max(size.Height, 1.0F);
     camera = m_Camera->RenderCamera(aspect);
+    if (m_Camera->State().SurfaceNavigation)
+    {
+        if (const auto planet = m_Controller.SceneViewportPlanetEnvironment(camera))
+        {
+            const auto& position = planet->ObserverFromCenterPlanetMetres;
+            const double scale = std::max({std::abs(position[0]), std::abs(position[1]), std::abs(position[2])});
+            // There is no unique radial up at the centre. Retain the last navigation basis there.
+            if (scale > 0.0 && std::isfinite(scale))
+            {
+                const std::array scaled{position[0] / scale, position[1] / scale, position[2] / scale};
+                const double length = std::hypot(scaled[0], scaled[1], scaled[2]);
+                const auto& quaternion = planet->PlanetToObserverRotation;
+                const auto orientation =
+                    Keire::Detail::FrameRotation::Normalize(quaternion[0], quaternion[1], quaternion[2], quaternion[3]);
+                const auto up = orientation.Apply({scaled[0] / length, scaled[1] / length, scaled[2] / length});
+                m_Camera->FollowSurfaceUp(
+                    {static_cast<float>(up[0]), static_cast<float>(up[1]), static_cast<float>(up[2])});
+                camera = m_Camera->RenderCamera(aspect);
+            }
+        }
+    }
     if (hasScene && m_RenderView)
     {
         if (const auto sceneCamera = SelectGameCamera(renderScene))
@@ -275,6 +305,7 @@ void KeireEditor::SceneViewportPanel::Draw(Keire::UiFrame& ui)
         renderRequest.DrawGrid = !playActive && m_Gizmos->Settings().ShowGrid;
         renderRequest.Grid = m_Gizmos->Settings().Grid;
         renderRequest.EvaluatedEnvironment = m_Controller.SceneViewportEnvironmentLighting();
+        renderRequest.PlanetEnvironment = m_Controller.SceneViewportPlanetEnvironment(camera);
         const auto& materialTime = m_Controller.SceneViewportTime();
         renderRequest.MaterialTimeSeconds = static_cast<float>(materialTime.TimeSinceStartup().Seconds());
         renderRequest.MaterialDeltaSeconds = static_cast<float>(materialTime.DeltaTime().Seconds());
@@ -469,6 +500,7 @@ void KeireEditor::SceneViewportPanel::Draw(Keire::UiFrame& ui)
             m_CameraPreviewView->SetCamera(previewCamera);
             Keire::SceneRenderRequest renderRequest{renderScene, m_CameraPreviewView, false, environment};
             renderRequest.EvaluatedEnvironment = m_Controller.SceneViewportEnvironmentLighting();
+            renderRequest.PlanetEnvironment = m_Controller.SceneViewportPlanetEnvironment(previewCamera);
             const auto& materialTime = m_Controller.SceneViewportTime();
             renderRequest.MaterialTimeSeconds = static_cast<float>(materialTime.TimeSinceStartup().Seconds());
             renderRequest.MaterialDeltaSeconds = static_cast<float>(materialTime.DeltaTime().Seconds());
@@ -683,14 +715,14 @@ void KeireEditor::SceneViewportPanel::UpdateCamera(Keire::UiFrame& ui, const Kei
             m_Camera->SetLockedEntity({});
         else
         {
-            const auto bounds =
-                KeireEditor::CalculateSceneEntityBounds(selectedEntities, resolveMeshBounds, resolvePoseBounds);
+            const auto bounds = KeireEditor::CalculateSceneEntityBounds(selectedEntities, resolveMeshBounds,
+                                                                        resolvePoseBounds, m_Camera->PreciseFocus());
             if (bounds.Valid)
             {
                 const auto viewportSize = m_ViewportRect.Size();
                 const float aspectRatio = std::max(viewportSize.Width, 1.0F) / std::max(viewportSize.Height, 1.0F);
-                m_Camera->FollowFrame(
-                    bounds.Center(), bounds.Radius(), aspectRatio,
+                m_Camera->FollowFramePrecise(
+                    bounds.CenterPrecise(), bounds.Radius(), aspectRatio,
                     static_cast<float>(m_Controller.SceneViewportTime().UnscaledDeltaTime().Seconds()));
             }
         }
@@ -714,13 +746,13 @@ void KeireEditor::SceneViewportPanel::UpdateCamera(Keire::UiFrame& ui, const Kei
                 m_Camera->ApplyFocusShortcut(selectedIds, m_Controller.SceneViewportTime().RealtimeSinceStartup());
             if (action == KeireEditor::SceneFocusShortcutAction::Frame)
             {
-                const auto bounds =
-                    KeireEditor::CalculateSceneEntityBounds(selectedEntities, resolveMeshBounds, resolvePoseBounds);
+                const auto bounds = KeireEditor::CalculateSceneEntityBounds(
+                    selectedEntities, resolveMeshBounds, resolvePoseBounds, m_Camera->PreciseFocus());
                 if (bounds.Valid)
                 {
                     const auto viewportSize = m_ViewportRect.Size();
                     const float aspectRatio = std::max(viewportSize.Width, 1.0F) / std::max(viewportSize.Height, 1.0F);
-                    m_Camera->Frame(bounds.Center(), bounds.Radius(), aspectRatio);
+                    m_Camera->FramePrecise(bounds.CenterPrecise(), bounds.Radius(), aspectRatio);
                 }
             }
             changed = action != KeireEditor::SceneFocusShortcutAction::None;

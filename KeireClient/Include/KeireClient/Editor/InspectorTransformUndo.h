@@ -19,7 +19,7 @@ namespace KeireEditor
         Scale
     };
 
-    using InspectorTransformValue = std::variant<Keire::Vector3, Keire::Quaternion>;
+    using InspectorTransformValue = std::variant<Keire::Vector3, Keire::Quaternion, Keire::Vector3d>;
 
     struct InspectorTransformEdit
     {

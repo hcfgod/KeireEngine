@@ -70,6 +70,12 @@ namespace KeireEditor
         {
             return std::nullopt;
         }
+
+        [[nodiscard]] virtual std::optional<Keire::PlanetEnvironmentView>
+        SceneViewportPlanetEnvironment(const Keire::RenderCamera&)
+        {
+            return std::nullopt;
+        }
         [[nodiscard]] virtual Keire::Ref<Keire::WindowSystem> SceneViewportWindows() const noexcept = 0;
         [[nodiscard]] virtual Keire::WindowId SceneViewportWindow() const noexcept = 0;
         [[nodiscard]] virtual float SceneViewportDisplayScale() const noexcept = 0;

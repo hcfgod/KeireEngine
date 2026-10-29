@@ -1,5 +1,51 @@
 # Architecture
 
+Project authoring settings carry finite uniform gravity in metres per second squared.
+PhysicsSystem owns the default copied into newly created PhysicsWorld instances; changing
+the default does not mutate existing worlds or their checkpoint-restored overrides.
+Editor startup and Play entry apply project defaults, and the player manifest carries the
+same acceleration. Older settings/manifests without gravity retain `(0, -9.81, 0)`.
+Gravity integration is currently awaiting native and UI validation.
+
+Physics checkpoint motion integration now captures installed native damping and speed limits.
+Restore validates settings before mutations, installs limits before velocities, and synchronizes
+component/cache settings to retain them on the next tick. Legacy native checkpoints without
+the optional field preserve destination settings. Player physics schema 5 requires four motion
+scalars per body; older encoded versions remain rejected. Integration validation is pending.
+
+Native physics motion settings explicitly control linear/angular damping and speed caps.
+Body creation preserves historical defaults; in-place changes validate before acquiring the
+body write lock, retain identity/pose, and clamp velocities to lowered limits. Settings are
+connected in source to authored components and managed APIs; integration validation is in progress.
+
+Native radial gravity sources are being integrated per physics world. Sources use double world centers and standard
+gravitational parameters; acceleration is inverse-square outside the authored radius and linear inside a uniform-density
+spherical core. Contributions add to uniform gravity. Only active, gravity-enabled dynamic bodies receive source forces;
+changing source definitions wakes eligible bodies. All forces are prepared and checked before submission, and the scratch
+buffer reuses capacity. Sources remain in world coordinates across translation rebases. Focused native radial-force
+and checkpoint tests pass; orbital accuracy, multi-source workload and fresh-process replay remain unverified.
+World checkpoints now include sources, and the in-development physics replay schema advances to 4. This does not implement
+planet authoring, orbital accuracy guarantees, moving reference-frame forces or automatic character gravity alignment.
+
+Character movement now derives its up direction from the capsule's decomposed world rotation. Desired movement
+remains a world-space displacement; vertical intent is its projection onto capsule up. Ground recovery, slope
+classification, step climbing, snapping and support-edge probes use that same direction. Rotated landing/walking/jump
+tests and the existing character/grounding/support selection pass. Rotated step limits/headroom and idle platform
+carry also pass at distant origins. Grounded grace, carry and step assistance require the previous support normal
+to remain walkable under the current up direction. Abrupt turn-away/reacquisition and continuous authored frame
+rotation pass focused tests at zero and 1e12 m offsets. This does not automatically orient a
+character to gravity or supply radial gravity acceleration.
+
+`PhysicsWorld::SetGravity` sets uniform acceleration in simulation axes on the owning thread. Finite values are
+required; unchanged values preserve sleep state, while changes wake dynamic bodies with gravity enabled.
+Translation rebasing preserves this vector. Focused native tests pass; this boundary does not yet supply
+radial gravity, rotating-frame forces or character local-up conversion. The new world-checkpoint API stores optional
+gravity plus bodies, distinguishing no world from an empty world. Restore prevalidates all body conversions and
+gravity before applying gravity, then body sleep states. The legacy bodies-only API preserves destination gravity.
+Native world-checkpoint tests pass, including empty worlds, sleep restoration and invalid-data rejection.
+Standalone replay integration is awaiting validation. Runtime physics replay now uses serializer/schema version 4;
+older versions are rejected by the existing strict serializer-version check, not silently reinterpreted.
+
 `CloudVolumePass.h` owns the internal cloud-pass enumeration and checked pipeline-slot mapping. The renderer
 continues to own and release the nine GPU pipelines; extracting the value-only contract does not transfer
 resource ownership. Composite accepts only the single-sample slot, and unsupported pass values are rejected.
@@ -619,8 +665,12 @@ restores the closest checkpoint and deterministically simulates intervening tick
 simulation scheduling and rejects any simulation-affecting module or serializer without a deterministic path.
 `PerformanceCapture` retains complete input/checkpoints and divergence reporting without promising identical
 intermediate GPU results. Runtime flags support record, play, verify, headless execution, startup-scene override, tick
-limits, profile selection, and atomic JSON result reports. Checkpoint restoration validates every serializer before
-mutation and rolls all restored serializers back if a later one fails. Runtime checkpoints include the scene graph,
+limits, profile selection, and atomic JSON result reports. Checkpoint restoration validates serializer identities,
+versions and envelope bounds before mutation; each serializer validates its own state payload. Registrations declare
+`RestoreAfter` dependencies, checked for missing IDs, duplicates and cycles before recording/playback. Restoration
+and recovery both follow dependency order so rebuilding a scene precedes its dependent state. On failure the service
+attempts to restore the captured pre-operation checkpoint; a failing recovery callback can still leave partial state.
+Standalone managed world identity and additive-world recovery remain open acceptance gates. Runtime checkpoints include the scene graph,
 Jolt transforms/velocities/sleep state, animator layers and transitions (including cumulative exit-time progress),
 managed behaviour state, presentation focus and
 queued UI events, logical audio voice frames/pause state, and VFX emitter/random/spawn state. Strict replay selects the
@@ -1113,6 +1163,72 @@ pointers. Managed physics queries are routed through the application-owned runti
 `PhysicsBodyId` values back to stable entity IDs. Collider and Rigid Body components remain serializable scene data,
 while the Play adapter owns the isolated physics world and tears it down before the runtime scene closes.
 
+Native physics worlds may declare an initial double-precision origin through
+`PhysicsSystem::CreateWorld(Vector3d)`. Body positions, query origins, hit/contact positions, and debug geometry
+remain local floats relative to that origin; directions, velocities, and shape dimensions are not translated.
+`ToLocalPosition` subtracts the origin before narrowing and rejects conversions exceeding the caller's error
+budget in metres. `ToWorldPosition` restores a double position; its precision is still bounded by the double
+representation at that magnitude. Debug snapshots carry the origin alongside their local geometry. The no-argument
+factory retains the zero-origin contract. These conversions require the open world's owner thread. This boundary
+alone does not enable planetary scene physics: scene synchronization, managed queries, moving reference frames,
+and region transfers must use the same coordinate contract before far-range gameplay is supported.
+
+`TransformComponent::WorldRelativeMatrix` constructs an authoritative simulation matrix independently of runtime
+presentation overrides, subtracting a double origin before narrowing translation. Physics presentation samples keep
+double world positions separately from their translation-free rotation/scale matrices. The precise-position overload
+of `SetRuntimePresentationWorldMatrix` installs those samples without narrowing their absolute translation; the
+existing one-argument overload retains its float-matrix input contract. Scene body creation enforces a 1 mm positional
+narrowing budget, and dynamic writeback restores world positions through the physics origin before resolving parents.
+
+The native scene query additions `RayCastPrecise`, `CastCapsulePrecise`, and `OverlapSpherePrecise` accept double
+world positions while keeping directions, dimensions, and displacement local floats. Cast hit positions are restored
+to double world coordinates. They validate and narrow positions before synchronizing authored collider changes, with
+the same 1 mm conversion budget. Existing float query entry points convert world inputs into solver coordinates and
+convert hits back to approximate float world positions. Initial scene startup selects an origin from enabled physics
+object positions when they exceed the default 8192 m region, using a bounds center snapped to a 1024 m grid. Nearby
+scenes retain zero origin. This is fixed-region initialization, not dynamic migration or partitioning of wide scenes.
+VFX starts in the selected physics frame; collision queries also support differing VFX and solver origins.
+
+The development `VfxWorld::RebaseOrigin` API preflights CPU emitter and world-space particle/history translations
+before mutation; local-space particles retain their local coordinates. Snapshots preserve their original origin.
+The renderer translates retained GPU world particles with the existing transform pass, including previous positions,
+while local GPU particles follow the emitter transform. Migration does not reset handles, spawn sequences or ages.
+GPU arithmetic retains float precision and cannot provide the CPU per-particle error-budget guarantee. CPU and GPU
+snapshot tests pass. Direct3D 12 and Vulkan readback tests also preserve rendered positions through repeated and
+skipped migrations for world/local effects; direct history-buffer and trail continuity remain unverified. Scene-wide automatic migration
+must coordinate physics and VFX atomically before this becomes an automatic travel workflow.
+`SceneRuntimeSession::RebaseSimulationOrigin` is the explicit coordinated development entry point: it prepares VFX
+translations, then runs physics/support-cache migration, then commits prepared VFX values without further allocation.
+It requires an active owner-thread session outside callbacks. Tests for both subsystem failure orders, safe paused
+operation and already-aligned VFX pass focused execution. Translation validation includes the double-addition
+residual as well as float narrowing error, rejecting extreme shifts that erase small local offsets. Automatic origin selection
+and rotating reference frames remain separate work.
+
+Runtime focus-following integration passes focused stepping/lifecycle tests. `SetSimulationFocus` accepts a live entity from the
+session's runtime scene and a threshold/grid policy. Fixed stepping checks its precise position before gameplay
+and before physics, using `RebaseSimulationOrigin` when the threshold is crossed. Inactive focus entities suspend
+following; deletion, replacement and shutdown clear ownership without resolving an old ID into a new scene.
+Migration failures fault the step with a `Simulation origin` diagnostic while preserving both origins. This API
+does not select a player automatically, stream distant content or partition a wide scene into multiple solvers.
+
+`PhysicsWorld::RebaseOrigin` explicitly translates native poses, cached contacts, queued events and debug queries.
+It preflights representability before mutation and retains body identities and velocities. Scene-owned worlds must
+be rebased through `SceneRuntimeSession::RebasePhysicsOrigin`, between callbacks, so character support and animation
+grounding caches translate together. Absolute presentation positions and support-local anchors remain unchanged.
+Focused live stack, contact and support regressions pass. This API does not automatically choose origins,
+partition a world, migrate VFX or implement rotating planetary frames.
+
+Native tests cover distant scene startup, falling bodies, queries, character support carry and animation foot
+grounding. C# precise-query API/layout tests, native host integration and editor/player consumer builds have passed
+focused validation. These
+results do not establish seamless planetary travel, moving reference frames or production workload performance.
+
+Physics checkpoints now pair each local body position with its double simulation origin. Restore subtracts origins
+before adding the local position, precomputes every converted body state, and rejects invalid/unrepresentable positions
+before updating bodies. This handles translation only; it does not transfer between rotating reference frames.
+The standalone physics replay serializer and payload schema are version 2, and version-1 physics recordings are
+incompatible with that serializer.
+
 The same boundary owns entity names, active-in-hierarchy state, hierarchy traversal, component registration lookup,
 enabled state, and deferred component mutations. Managed `Entity` and concrete `Component` wrappers are canonical for
 one runtime generation, carry only stable identity, and become non-null invalid objects after destruction. Managed
@@ -1195,11 +1311,42 @@ The runtime world privately owns a spatial frame registry. Each registered scene
 frame; ordinary erasure releases it, while retired scenes with persistent entities retain it until their session is
 removed. World closure invalidates live frame handles, including handles retained by external work. Private access
 checks owner-thread affinity and open state. This is a migration foundation: logical keys are context-local defaults,
-not globally unique serialized identities, and normal Transform coordinates and entity bindings remain unchanged.
+not globally unique serialized identities. Entity bindings still resolve to the root frame; automatic planetary
+frame transitions are not yet integrated.
 Private entity-to-frame resolution validates a live entity against the exact runtime scene instance before returning
 its scene's root frame. Matching stable entity IDs alone is insufficient: Edit/Play clones and previous Play sessions
 must not resolve interchangeably. Persistent scene entities remain resolvable after their loaded scene is retired;
 destroyed entities and entities from other runtime worlds are rejected. Frame handles do not extend entity lifetimes.
+
+The development Transform schema stores local translation as `Vector3d` (schema 2), widening schema-1 float positions
+on load. Precise world-position evaluation applies ancestor rotation and scale to double translations; rotation and
+scale remain float. Preserved reparenting computes the new local translation before publishing the hierarchy change.
+Managed `LocalPositionPrecise` and `PositionPrecise` use separate versioned native callbacks with a validated
+three-double payload. Legacy float getters remain approximate and report an explicit managed error if a position
+cannot be represented, rather than allowing an exception to cross the native callback boundary.
+SceneTransform summary positions and their JSON codecs also use doubles, so snapshot/save/load must preserve the
+same coordinates as the component property bag. Editor prefab authoring provides InstantiatePrefabPrecise; its
+legacy float entry point widens explicitly. Placement computes each root's source-relative offset before adding
+the destination, avoiding cancellation when moving distant templates near the origin. Viewport drop coordinates
+still originate in the float camera path; this helper alone does not make distant drag-and-drop precise.
+Presentation evaluation also keeps translation separate from its float rotation/scale matrix. Fixed-step samples
+interpolate in double precision; `PresentationWorldPositionPrecise` retains the result through parent composition.
+`PresentationRelativeMatrix(origin, maximumError)` requires a same-frame origin and subtracts it before checked float
+conversion. Runtime position-only overrides can use `SetRuntimePresentationWorldPositionPrecise`, preserving the
+current gameplay rotation and scale. Legacy absolute matrix queries still reject positions outside float range.
+Focused DevDist tests validate these transform APIs and the internal `PresentationCameraFrame` helper, which keeps
+a precise origin paired with its relative view. Each previous-frame view must consume object matrices expressed in
+that previous frame's coordinate system. The in-progress renderer integration carries `WorldOrigin` and
+`EnvironmentAnchor` on `RenderCamera`, captures relative mesh/light/probe matrices, and retains the origin in camera
+history. Cloud temporal history also retains its origin so rebasing cancels before camera displacement is narrowed.
+Light and probe capture now accept explicit origins, while cloud-volume capture accepts both a render origin and an
+environment anchor. Focused DevDist tests validate the coordinate helpers and headless packet/temporal routing,
+including origin changes and invalid-camera rollback. Rendered visual validation remains outstanding.
+Editor/runtime camera producers still use zero-origin defaults. VFX snapshots
+and simulation remain float-position consumers, and the grid plane still assumes render-space zero; these paths
+must be integrated before enabling camera rebasing throughout authoring and gameplay.
+This does not make render matrices, physics, camera coordinates, or planetary travel double-precision pipelines.
+See [the integration plan](LargeWorldAndEnvironmentPlan.md) for remaining consumers and validation evidence.
 
 Play-stop decisions are queued from UI callbacks and executed at the next update safe boundary. Render submission
 captures camera, lighting, transforms, mesh/material identities, and tint into an immutable frame-local packet, so
@@ -2703,12 +2850,13 @@ the complete chain before creating a sampled 3D texture, submits it on the GPU t
 on failure. The renderer's lazy resource slot owns the texture; samplers remain cache-owned. Shutdown releases the
 texture and device recovery clears its handle for regeneration. The fixed atlas is shared across views; generation
 must not run per view or per frame. Background, built-in mesh and particle shaders bind this atlas; generated material
-shaders declare volume ABI 5 and append the atlas after their existing fragment samplers. Shape controls append
-16 bytes to the existing 272-byte view prefix; regional coverage appends another 16 bytes. Atmosphere appends
-112 bytes for a 416-byte view block. Older volume ABI 1/2 materials receive 272 bytes, ABI 3 receives 288 bytes,
-and ABI 4 retains 304 bytes;
-ABI 1 also keeps its sampler layout. Shared density uses explicit mip selection from ray spacing, avoiding implicit derivatives in
-divergent marches. Integrated runtime and visual acceptance of these bindings remains pending.
+shaders normally declare volume ABI 13 and append the atlas after their existing fragment samplers. The
+in-development ABI 14 buffer fallback is described below. Legacy view prefixes remain supported: ABI 1/2
+uses 272 bytes, ABI 3 uses 288, ABI 4 uses 304, ABI 5 uses 416, ABI 6 uses 432, ABI 7 uses 448, ABI 8
+uses 1008, ABI 9 through 12 use 1520, and ABI 13/14 use 1616. ABI 1 also keeps its original sampler layout. Shared density uses
+explicit mip selection from ray spacing, avoiding implicit derivatives in divergent marches. Runtime,
+visual and performance acceptance must be established for each changed binding path; the new buffer path
+has not yet passed those integrated gates.
 
 For a single-sample HDR target, the cloud background pass copies the scene into the frame workset's existing
 fullscreen HDR input and evaluates radiance and RGB transmission once. It writes the composed result without
@@ -2760,3 +2908,54 @@ disabled volumes from density evaluation and GPU packing; legacy records without
 Exclusion regions use camera-relative coordinates, strongest-overlap retention and explicit ray boundary splits.
 Native quality/performance acceptance, terrain-shadow coupling and planetary layer geometry
 remain unfinished.
+
+Radial-height fog uses volume ABI 11 (texture noise) or 12 (buffer noise), retaining the 1520-byte
+layout while assigning fog control value 2 to the radial model. CPU preparation derives observer altitude
+from the atmosphere planet in double precision. The GPU integrates the bounded radial density layer,
+including the capped core and soft exclusions, rather than distributing every sample across empty space.
+Local fog boxes remain in the environment frame. Older layouts remain decodable for flat fog; source-less
+legacy binaries are not validated for radial mode. Native numerical probes do not replace editor/player
+visual and performance acceptance or shared planet-frame integration.
+### Portable cloud sampling resource ABI (development)
+
+Generated material shaders use volume ABI 13 while their cloud atlas fits within the portable sixteen-sampler budget. When the next atlas sampler would be slot 16 or higher, the generator emits volume ABI 14: the same uniform layout as ABI 13, but cloud noise occupies the first fragment read-only storage buffer instead of a sampled texture. Forward-plus and spatial-selection buffers follow that noise buffer. This preserves seven standard material texture channels alongside the nine fixed lighting samplers. Materials that still exceed sixteen samplers after moving noise remain rejected.
+
+ABI 13/14 append a 96-byte planet-fixed cloud block to the previous 1520-byte view prefix. Shader Graph generator 39
+and importer 54 invalidate generated shader artifacts; the legacy Material Graph importer derives its version from
+the same generator constant. Planetary rendering and performance acceptance remain pending the combined build and
+rendered travel tests. Compatibility with a prior prefix does not establish planetary support for source-less binaries.
+
+The packed buffer retains the RGBA8 atlas mip chain and uses repeat-addressed trilinear sampling. Its lifetime belongs to RenderSharedState, with release on shutdown and invalidation on device recovery. Texture-backed sampling remains the default for the main cloud renderer and materials with sampler capacity. Source integration is pending native build, starter-project, runtime-binding and performance validation; standalone sampling comparisons do not establish runtime readiness.
+
+### VFX simulation and rendering coordinate frames (integration in progress)
+
+`VfxWorldSpecification::WorldOrigin` defines the initial double-precision origin for a VFX world. Existing float activation and transform positions, particle buffers, and collision callbacks use coordinates relative to the current origin. The zero-origin default preserves existing callers. `ActivatePrecise` and `SetTransformPrecise` accept absolute double positions and an explicit conversion-error budget; they convert before mutating simulation state. Snapshot origin metadata travels with the simulation output. Explicit origin migration is under validation; retained snapshots keep their captured origin.
+
+Checkpoint version 2 stores the origin. Version 1 is interpreted as zero-origin state; restoration rejects an origin mismatch before replacing world state. CPU render capture subtracts the camera origin from the simulation origin before adding particle-local offsets, and converts previous positions using the previous camera origin. This avoids first rounding small particle offsets into enormous absolute positions. GPU draw, visibility, material, and depth-collision paths still require corresponding integration; nonzero-origin camera producers are not enabled yet. The focused grid/CPU-VFX native selection passes 19 cases / 330 assertions; legacy checkpoint migration and rendered validation remain pending.
+
+### GPU VFX render-origin material contract (pending validation)
+
+Generated shader revision 37 advertises `vfxRenderOriginAbiVersion: 1`. Missing metadata defaults to 0 for legacy
+assets. Version 1 requires mesh vertex layout 3, instancing, and instance-addressing ABI 2. The importer and asset
+codec retain this capability so runtime decisions do not depend on generated source comments.
+
+Particle buffers and instance matrices use the current VFX simulation frame. Built-in draws compose the
+simulation-to-render translation into the camera matrix. Generated billboard/ribbon passes apply the object Model
+translation before producing world positions. Generated mesh passes apply it to each instance Model when
+`InstanceParameters.y` is nonzero; `.x` remains the instance base, and ordinary scene draws keep `.y` zero.
+Translation does not alter normals. CPU particles already converted during capture keep the identity object matrix.
+
+Legacy custom shaders remain usable when simulation and render origins match. When they differ, an unsupported
+custom material selects built-in GPU particle rendering and reports a diagnostic rather than silently combining
+simulation positions with camera-relative lighting. Reimport generated materials to obtain the new contract;
+authored shaders must implement it before declaring capability 1.
+
+Visibility candidates translate bounds into the camera frame without moving retained simulation data. Sampled
+depth retains its capture origin, and collision projection/reconstruction converts between that origin and the
+simulation frame. The focused native selection passed 26 cases / 455 assertions, and the production graphics-template importer passed 1 case / 168 assertions. Rendered validation remains pending.
+
+### Precise camera and world UI integration (validation pending)
+
+Editor cameras retain double-precision focus and store it as the render origin; their view matrix is relative to that focus. Scene cameras use the presented transform position as the origin and invert its relative matrix. Projection, selection, placement, gizmo overlays, and rigging overlays must consume that same frame.
+
+World UI submissions carry the origin of their World matrix. Projection and input unprojection share this origin; frame capture translates the submitted matrix into the current render camera frame. Camera-overlay identity checks compare both origin and view-projection matrices. The appended origin defaults to zero for existing absolute-world submissions. Native and editor validation of these integrations remains pending.

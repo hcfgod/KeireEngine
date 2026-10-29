@@ -64,13 +64,18 @@ foreach ($generatorName in @(
 
 foreach ($generatorName in @("builtin-shaders.ps1", "builtin-vfx.ps1")) {
     $generator = Get-Content -LiteralPath (Join-Path $windows $generatorName) -Raw
-    foreach ($dependency in @("FogDensity.hlsli", "FogExclusion.hlsli", "FogRayIntervals.hlsli")) {
+    foreach ($dependency in @("FogDensity.hlsli", "FogExclusion.hlsli", "FogRayIntervals.hlsli", "CloudNoiseBuffer.hlsli",
+                             "PlanetaryCloudIntersections.hlsli", "PlanetaryCloudGeometry.hlsli", "PlanetaryCloudWeather.hlsli")) {
         Assert-True ($generator.Contains($dependency)) "$generatorName stages and fingerprints $dependency"
     }
 }
 $skyGenerator = Get-Content -LiteralPath (Join-Path $windows 'builtin-shaders.ps1') -Raw
 Assert-True ($skyGenerator.Contains('AtmosphereGround.hlsli')) 'Sky shader stages and fingerprints ground transport'
+Assert-True ($skyGenerator.Contains('PlanetaryCloudLayered.hlsli')) 'Sky shader stages and fingerprints planetary sheets'
+Assert-True ($skyGenerator.Contains("'PlanetaryCloudIntersections', 'PlanetaryCloudGeometry', 'PlanetaryCloudWeather'")) 'Embedded planetary declarations precede cloud consumers'
 Assert-True ($skyGenerator.Contains('FogTerrainShadow.hlsli')) 'Volume shader stages and fingerprints terrain shadows'
+Assert-True ($skyGenerator.Contains("'FogExclusion', 'FogDensity'")) 'Embedded exclusion declarations precede fog density consumers'
+Assert-True ($skyGenerator.Contains("'CloudNoiseBuffer', 'CloudVolume'")) 'Embedded noise declarations precede cloud consumers'
 $fixture = Join-Path ([IO.Path]::GetTempPath()) ("keire-generated-cache-" + [Guid]::NewGuid().ToString("N"))
 $job = $null
 $mutex = $null

@@ -7,6 +7,10 @@
 #include "KeireInternal/Rendering/RenderFramePacketInternal.h"
 #include "KeireInternal/Rendering/RenderPipelineStateInternal.h"
 #include "KeireInternal/Rendering/RenderSurfaceStateInternal.h"
+#include "KeireInternal/Rendering/RuntimeUiWorldCoordinates.h"
+#include "KeireInternal/Rendering/VfxRenderCoordinates.h"
+#include "KeireInternal/Scenes/ScenePresentationCanvasProjectionInternal.h"
+#include "KeireInternal/Scenes/SceneRuntimeRenderingInternal.h"
 
 #include <SDL3/SDL.h>
 #include <doctest/doctest.h>
@@ -17,7 +21,10 @@
 #include <chrono>
 #include <cstdlib>
 #include <cstring>
+#include <limits>
 #include <memory>
+#include <span>
+#include <stdexcept>
 #include <string>
 #include <thread>
 #include <vector>
@@ -761,6 +768,38 @@ TEST_CASE("Render pipeline accepts depths one through three without drops and fl
             CHECK_FALSE(probe.Timelines[index].Cancelled);
         }
     }
+}
+
+TEST_CASE("Spatial lighting capture preserves distant offsets relative to the render origin")
+{
+    auto scene = Keire::CreateRef<Keire::Scene>(Keire::AssetId::Generate(), Keire::SceneAsset::EmptyDefinition());
+    const Keire::Vector3d origin{1e15, 0.0, 0.0};
+    auto entity = scene->CreateEntity("Distant lighting");
+    const auto transform = entity.GetComponent<Keire::TransformComponent>();
+    transform->SetLocalPositionPrecise({origin.X + 0.125, 0.25, 2.0});
+    REQUIRE(entity.AddComponent<Keire::PointLightComponent>());
+    REQUIRE(entity.AddComponent<Keire::SpotLightComponent>());
+    REQUIRE(entity.AddComponent<Keire::ReflectionProbeComponent>());
+    REQUIRE(entity.AddComponent<Keire::LightProbeVolumeComponent>());
+    const auto lights = Keire::RenderBackend::ResolveLocalLights(scene, origin);
+    REQUIRE(lights.size() == 2U);
+    for (const auto& light : lights)
+    {
+        CHECK(light.Position == Keire::Vector3{0.125F, 0.25F, 2.0F});
+    }
+    const auto probes = Keire::RenderBackend::ResolveReflectionProbes(scene, origin);
+    const auto volumes = Keire::RenderBackend::ResolveLightProbeVolumes(scene, origin);
+    REQUIRE(probes.size() == 1U);
+    REQUIRE(volumes.size() == 1U);
+    CHECK(Keire::Math::TransformPoint(probes[0].LocalToWorld, {}) == Keire::Vector3{0.125F, 0.25F, 2.0F});
+    CHECK(Keire::Math::TransformPoint(volumes[0].LocalToWorld, {}) == Keire::Vector3{0.125F, 0.25F, 2.0F});
+    CHECK(Keire::Math::TransformPoint(probes[0].WorldToLocal, {0.125F, 0.25F, 2.0F}) == Keire::Vector3{});
+    CHECK(Keire::Math::TransformPoint(volumes[0].WorldToLocal, {0.125F, 0.25F, 2.0F}) == Keire::Vector3{});
+    REQUIRE(entity.AddComponent<Keire::DirectionalLightComponent>());
+    transform->SetLocalPositionPrecise({1e40, 0.0, 0.0});
+    CHECK_NOTHROW(Keire::RenderBackend::ResolveLighting(scene));
+    CHECK(Keire::RenderBackend::ResolveLighting(scene).Direction.Z == 1.0F);
+    scene->Close();
 }
 
 TEST_CASE("Directional shadow resolution hints scale the validated project base")
@@ -1617,3 +1656,127 @@ TEST_CASE("Flush affinity recovery signalling completion and pending Close prese
     CHECK(probe.RecoveryPendingCloseCompleted);
 }
 #endif
+
+TEST_CASE("Precise VFX render coordinates preserve local detail and paired camera origins")
+{
+    using namespace Keire;
+    const Vector3d simulationOrigin{1.0e15, -1.0e15, 1.0e15};
+    VfxRenderParticle particle;
+    particle.Position = {0.015625F, 0.03125F, -0.0625F};
+    particle.PreviousPosition = {0.0078125F, 0.015625F, -0.03125F};
+    const auto converted = RenderBackend::VfxParticleInRenderFrame(particle, simulationOrigin,
+                                                                   {1.0e15 + 0.25, -1.0e15, 1.0e15}, simulationOrigin);
+    CHECK(converted.Position.X == -0.234375F);
+    CHECK(converted.Position.Y == particle.Position.Y);
+    CHECK(converted.Position.Z == particle.Position.Z);
+    CHECK(converted.PreviousPosition.X == particle.PreviousPosition.X);
+    CHECK(converted.PreviousPosition.Y == particle.PreviousPosition.Y);
+    CHECK(converted.PreviousPosition.Z == particle.PreviousPosition.Z);
+    CHECK(particle.Position.X == 0.015625F);
+}
+
+TEST_CASE("Precise VFX depth collisions project and reconstruct in the captured depth frame")
+{
+    using namespace Keire;
+    const auto depthView = Math::ComposeTransform({-2.0F, 3.0F, -4.0F}, {}, {1.0F, 1.0F, 1.0F});
+    const Vector3d simulationOrigin{1.0e15, -1.0e15, 1.0e15};
+    const Vector3d depthOrigin{1.0e15 + 0.25, -1.0e15 - 0.5, 1.0e15 + 0.125};
+    const auto frame =
+        RenderBackend::MakeVfxCollisionFrame(depthView, Math::Inverse(depthView), simulationOrigin, depthOrigin);
+    const Vector3 local{0.015625F, 0.03125F, -0.0625F};
+    const auto projected = Math::TransformPoint(frame.ViewProjection, local);
+    const auto expected =
+        Math::TransformPoint(depthView, RenderBackend::VfxPositionInRenderFrame(local, simulationOrigin, depthOrigin));
+    CHECK(projected == expected);
+    const auto restored = Math::TransformPoint(frame.InverseViewProjection, projected);
+    CHECK(restored.X == doctest::Approx(local.X));
+    CHECK(restored.Y == doctest::Approx(local.Y));
+    CHECK(restored.Z == doctest::Approx(local.Z));
+}
+
+TEST_CASE("Precise GPU VFX frame translation preserves nearby particle offsets")
+{
+    using namespace Keire;
+    const Vector3d simulationOrigin{1.0e15, 1.0e15, -1.0e15};
+    const Vector3d cameraOrigin{1.0e15 + 0.25, 1.0e15 - 0.5, -1.0e15 + 1.0};
+    const Vector3 local{0.015625F, -0.03125F, 0.0625F};
+    const auto translation = RenderBackend::VfxFrameTranslation(simulationOrigin, cameraOrigin);
+    CHECK(Math::TransformPoint(translation, local) ==
+          RenderBackend::VfxPositionInRenderFrame(local, simulationOrigin, cameraOrigin));
+    CHECK(Math::TransformDirection(translation, local) == local);
+    CHECK(Math::TransformPoint(RenderBackend::VfxFrameTranslation(simulationOrigin, simulationOrigin), local) == local);
+}
+
+TEST_CASE("GPU VFX legacy materials require matching simulation and render origins")
+{
+    using namespace Keire;
+    const Vector3d origin{1.0e15, 0.0, 0.0};
+    const Vector3d shifted{1.0e15 + 0.25, 0.0, 0.0};
+    CHECK(RenderBackend::VfxMaterialSupportsRenderOrigin(0U, origin, origin));
+    CHECK_FALSE(RenderBackend::VfxMaterialSupportsRenderOrigin(0U, origin, shifted));
+    CHECK(RenderBackend::VfxMaterialSupportsRenderOrigin(1U, origin, shifted));
+    CHECK_FALSE(RenderBackend::VfxMaterialSupportsRenderOrigin(2U, origin, shifted));
+}
+
+TEST_CASE("World UI capture preserves local offsets across camera origin changes")
+{
+    const Keire::Vector3d source{1.0e15, -1.0e15, 1.0e15};
+    auto panel = Keire::Math::ComposeTransform({0.015625F, 2.0F, 3.0F}, {}, {2.0F, 3.0F, 1.0F});
+    const auto unchanged = Keire::Internal::RuntimeUiWorldInCameraFrame(panel, source, source);
+    CHECK(unchanged == panel);
+    const Keire::Vector3d camera{source.X + 8.0, source.Y - 4.0, source.Z + 16.0};
+    const auto captured = Keire::Internal::RuntimeUiWorldInCameraFrame(panel, source, camera);
+    CHECK(captured.Elements[12] == -7.984375F);
+    CHECK(captured.Elements[13] == 6.0F);
+    CHECK(captured.Elements[14] == -13.0F);
+    CHECK(Keire::Math::TransformDirection(captured, {1, 1, 1}) == Keire::Math::TransformDirection(panel, {1, 1, 1}));
+    const auto restored = Keire::Internal::RuntimeUiWorldInCameraFrame(captured, camera, source);
+    CHECK(restored == panel);
+    CHECK_THROWS_AS(
+        Keire::Internal::RuntimeUiWorldInCameraFrame(panel, {std::numeric_limits<double>::infinity(), 0, 0}, camera),
+        std::invalid_argument);
+}
+
+TEST_CASE("World UI projection and input retain distant camera-relative placement")
+{
+    auto scene = Keire::CreateRef<Keire::Scene>(Keire::AssetId::Generate(), Keire::SceneAsset::EmptyDefinition());
+    const auto panel = scene->CreateEntity("World panel");
+    auto cameraEntity = scene->CreateEntity("Camera");
+    const auto cameraSettings = cameraEntity.AddComponent<Keire::CameraComponent>();
+    cameraSettings->SetPrimary(true);
+    const auto tree = Keire::CreateRef<Keire::RuntimeUiTree>();
+    const auto root = tree->Create(Keire::RuntimeUiElementType::Panel);
+    Keire::Detail::UiDocumentPanelProjection document;
+    document.Entity = panel.Id();
+    document.Root = root;
+    document.Settings.Target = Keire::UiPanelTarget::WorldSurface;
+    document.Settings.ReferenceWidth = 100.0F;
+    document.Settings.ReferenceHeight = 100.0F;
+    document.Settings.WorldWidth = 2.0F;
+    document.Settings.WorldHeight = 2.0F;
+    Keire::Detail::ScenePresentationCanvasProjection projection;
+    projection.Assign(root, root);
+    for (const double origin : {0.0, 1.0e15})
+    {
+        panel.GetComponent<Keire::TransformComponent>()->SetLocalPositionPrecise({origin + 0.25, 0, 0});
+        const auto cameraTransform = cameraEntity.GetComponent<Keire::TransformComponent>();
+        cameraTransform->SetLocalPositionPrecise({origin + 0.25, 0, -5});
+        const auto camera = Keire::Internal::BuildPresentedSceneCamera(*cameraSettings, *cameraTransform, 1.0F);
+        CHECK(camera.WorldOrigin == cameraTransform->PresentationWorldPositionPrecise());
+        projection.Rebuild(scene, {}, std::span(&document, 1), 100.0F, 100.0F, &camera);
+        const auto canvas = projection.ForNode(root);
+        REQUIRE(canvas);
+        REQUIRE(canvas->Geometry.Visible);
+        CHECK(canvas->WorldOrigin == camera.WorldOrigin);
+        const Keire::Vector2 layout{50.0F * canvas->LayoutScale, 50.0F * canvas->LayoutScale};
+        const auto screen = Keire::Detail::MapCanvasLayoutToViewport(*canvas, layout);
+        REQUIRE(screen);
+        CHECK(screen->X == doctest::Approx(50.0F));
+        CHECK(screen->Y == doctest::Approx(50.0F));
+        const auto mapped = Keire::Detail::MapViewportToCanvasLayout(*canvas, *screen);
+        REQUIRE(mapped);
+        CHECK(mapped->X == doctest::Approx(layout.X));
+        CHECK(mapped->Y == doctest::Approx(layout.Y));
+    }
+    scene->Close();
+}

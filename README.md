@@ -5,9 +5,15 @@
 
 **Build worlds. Keep control.**
 
-Editor startup reuses the development catalog when available. If assets need an importer upgrade, it prepares the
-saved scene's dependencies first and refreshes unrelated assets in the background. Initial imports still require
-asset preparation; startup timing validation is in progress.
+Editor startup opens the saved source scene while asset refresh runs in the background. Incompatible cooked assets
+use pending or fallback presentation; Play waits for the scene's compatible dependency closure. Refresh preserves
+open document edits and camera state. Cold, warm, and importer-migration startup timing validation is in progress.
+
+Large-world support is undergoing a development migration. Native transforms now store double-precision translation;
+C# provides `Transform.LocalPositionPrecise` and `Transform.PositionPrecise` (`Vector3d`) for precise positions in the
+parent and scene frames. These APIs are not yet an end-to-end planetary travel workflow: camera/render matrices,
+physics, and parts of editor authoring still use floats. See the
+[large-world integration plan](Docs/LargeWorldAndEnvironmentPlan.md) before building a planetary project around them.
 
 Opening a C# script waits for its Visual Studio project and engine reference, then opens the project-owned document
 so engine types participate in completion. The Editor remains responsive while the IDE loads.
@@ -22,6 +28,12 @@ before using unsaved settings; normal editor exit saves them and stays open if t
 Settings saves prepare all four files before publication and retain a recovery journal for rollback and interrupted-save
 recovery. Pending edits remain on failure; external changes block recovery rather than being overwritten.
 See [Project Settings](Docs/ProjectSettings.md) for recovery and durability limits.
+
+Development builds expose **Default Gravity** in **Project Settings > Audio / Physics**, with XYZ acceleration in
+m/s² and Earth/Zero presets. Saved defaults apply to new physics worlds and the next Play session; existing
+per-world overrides remain intact. This is uniform gravity, separate from planetary radial gravity sources.
+Native persistence, physics tests and editor preset persistence pass; full editor acceptance and
+exported-player parity remain under validation. Weak-gravity free-flight and supported sleeping have native coverage.
 
 Development builds also provide **Window > Environment**, a dockable Lighting/Sky/Clouds/Fog/Bloom workspace sharing
 Project Settings' document, Undo history and temporary preview clock. A 24-hour intensity graph provides key markers,
@@ -629,7 +641,7 @@ Current authoring and runtime contracts include:
 | Property-backed Material source | 5 | New Materials select a shader and edit its properties in the Inspector. |
 | Legacy Material Graph source | 7 | Existing graph-owned sources retain compatibility decoding and graph editing; this is not the new-material creation workflow. |
 | VFX source | 5 | Schemas 1–4 migrate in memory; graph and compatibility payloads remain distinct execution sources. |
-| Cooked runtime manifest | 10 | Schema 4 uses default time; schemas 4/5 use authored lighting. Schema 6 adds lighting profiles; schema 7 adds atmosphere/cloud records; schema 8 requires bloom; schema 9 requires the experimental star record (visual acceptance pending). Schema 10 adds the development fog record; schemas 4–9 default fog to disabled. Schemas 4–6 retain disabled sky additions; schemas 4–7 default bloom to disabled; schemas 4–8 default stars to disabled. Unsupported newer schemas fail before partial startup. |
+| Cooked runtime manifest | 11 | Schema 4 uses default time; schemas 4/5 use authored lighting. Schema 6 adds lighting profiles; schema 7 adds atmosphere/cloud records; schema 8 requires bloom; schema 9 requires the experimental star record (visual acceptance pending). Schema 11 requires project default gravity; older schemas retain Earth gravity. Schema 10 adds the development fog record; schemas 4–9 default fog to disabled. Schemas 4–6 retain disabled sky additions; schemas 4–7 default bloom to disabled; schemas 4–8 default stars to disabled. Unsupported newer schemas fail before partial startup. |
 | Asset package archive | 1 | `KEIRASPK1` archives are deterministic, bounded, inventoried, hashed, and signature-verifiable. |
 | Project package lock | 1 | Exact versions, hashes, dependency edges, sources, and signature identities publish atomically. |
 

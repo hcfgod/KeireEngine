@@ -258,6 +258,11 @@ namespace Keire::RenderBackend
             ReleaseTextureResources(CheckerboardTexture);
             ReleaseTextureResources(DefaultSkyTexture);
             ReleaseTextureResources(CloudNoiseTexture);
+            if (CloudNoiseBuffer)
+            {
+                SDL_ReleaseGPUBuffer(Device, CloudNoiseBuffer);
+                CloudNoiseBuffer = nullptr;
+            }
             ReleaseTextureResources(BrdfIntegrationLut);
             ReleaseTextureResources(WhiteTexture);
             ReleaseTextureResources(FlatNormalTexture);

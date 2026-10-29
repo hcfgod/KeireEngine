@@ -7,6 +7,7 @@
 #include "KeireInternal/Rendering/CloudUniforms.h"
 #include "KeireInternal/Rendering/CloudVolumeViewUniforms.h"
 #include "KeireInternal/Rendering/IrradynSceneCacheInternal.h"
+#include "KeireInternal/Rendering/PlanetaryCloudUniforms.h"
 #include "KeireInternal/Rendering/SkyColorUniforms.h"
 #include "KeireInternal/Rendering/StarFieldUniforms.h"
 
@@ -382,7 +383,7 @@ namespace Keire::RenderBackend
         CloudVolumeViewUniforms Volume;
     };
 
-    static_assert(sizeof(AssetEnvironmentVolumeUniforms) == 2464U);
+    static_assert(sizeof(AssetEnvironmentVolumeUniforms) == 2560U);
     static_assert(offsetof(AssetEnvironmentVolumeUniforms, Volume) == 944U);
 
     static_assert(sizeof(AssetObjectUniforms) == sizeof(float) * 64);
@@ -410,9 +411,12 @@ namespace Keire::RenderBackend
         StarFieldUniforms Stars;
         SkyColorUniforms SkyColors;
         Vector4 GroundReflectance;
+        PlanetaryCloudUniforms PlanetaryCloud;
+        std::array<Vector4, MaximumCloudLayers> PlanetaryCloudPhase;
+        std::array<float, 4> StarOrientation;
     };
 
-    static_assert(sizeof(SkyUniforms) == sizeof(float) * 136);
+    static_assert(sizeof(SkyUniforms) == 688U);
     static_assert(offsetof(SkyUniforms, SkyColors) == 496);
 
     struct GridUniforms final
@@ -422,7 +426,9 @@ namespace Keire::RenderBackend
         Matrix4 ViewProjection;
         Vector4 Parameters;
         Vector4 Appearance;
+        Vector4 OriginPhaseAndPlane;
+        Vector4 OriginAxes;
     };
 
-    static_assert(sizeof(GridUniforms) == sizeof(float) * 56);
+    static_assert(sizeof(GridUniforms) == sizeof(float) * 64);
 } // namespace Keire::RenderBackend

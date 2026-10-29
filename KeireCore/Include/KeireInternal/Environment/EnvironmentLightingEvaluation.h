@@ -8,12 +8,13 @@
 
 namespace Keire::Detail
 {
-    // Local east/up/north frame only. Planetary observers must transform the evaluated direction separately.
+    // Evaluate in the authored basis; resolve its explicit reference frame once for each view.
     [[nodiscard]] inline EnvironmentLightingSnapshot
     EvaluateEnvironmentLighting(const EnvironmentLightingProfile& profile, const EnvironmentClockState clock,
                                 const AssetId source, const std::uint64_t revision)
     {
         EnvironmentLightingSnapshot result{source, revision, std::nullopt};
+        result.DirectionFrame = profile.DirectionFrame();
         result.Time = EnvironmentTimeSample{clock.Day, clock.DayFraction, clock.SecondsPerDay};
         if (profile.Sky())
         {

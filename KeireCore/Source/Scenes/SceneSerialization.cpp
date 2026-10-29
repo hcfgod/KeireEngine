@@ -28,6 +28,14 @@ namespace Keire::Detail
                     using T = std::remove_cvref_t<decltype(current)>;
                     if constexpr (std::same_as<T, Vector2>)
                         return Json::array({current.X, current.Y});
+                    else if constexpr (std::same_as<T, Vector3d>)
+                    {
+                        if (!Math::IsFinite(current))
+                        {
+                            throw std::invalid_argument("Precise vector property must be finite.");
+                        }
+                        return Json::array({current.X, current.Y, current.Z});
+                    }
                     else if constexpr (std::same_as<T, Vector3>)
                         return Json::array({current.X, current.Y, current.Z});
                     else if constexpr (std::same_as<T, Vector4> || std::same_as<T, Quaternion>)
@@ -109,6 +117,16 @@ namespace Keire::Detail
             case ComponentPropertyKind::Vector3:
                 requireArray(3);
                 return Vector3{value[0].get<float>(), value[1].get<float>(), value[2].get<float>()};
+            case ComponentPropertyKind::Vector3d:
+            {
+                requireArray(3);
+                const Vector3d result{value[0].get<double>(), value[1].get<double>(), value[2].get<double>()};
+                if (!Math::IsFinite(result))
+                {
+                    throw std::invalid_argument("Precise vector property must be finite.");
+                }
+                return result;
+            }
             case ComponentPropertyKind::Vector4:
                 requireArray(4);
                 return Vector4{value[0].get<float>(), value[1].get<float>(), value[2].get<float>(),

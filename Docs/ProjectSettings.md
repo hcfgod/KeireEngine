@@ -84,6 +84,10 @@ Atmosphere, layered clouds and the separate local volumetric-cloud path remain e
 weather simulation, planetary navigation and production timeline acceptance are unfinished. Technical skybox asset selection,
 IBL defaults and render-path options remain in Project Settings.
 
+**Reset Atmosphere Appearance** restores scattering, absorption, solar and reference-ground appearance
+without moving the planet or changing its radius, atmosphere thickness or enabled state. Density and
+absorption heights are bounded to the preserved atmosphere thickness, including small planets.
+
 **Ground / Void Color (linear RGB)** in the atmosphere's **Ground / Void Appearance** section controls the
 procedural reference planet below the horizon. Each channel accepts 0–1; the neutral default is 0.18.
 Sunlight and the evaluated environment ambient light illuminate this boundary. It does not create terrain,
@@ -92,6 +96,13 @@ the planet still show the space background. Existing atmosphere records receive 
 **Ground / Void Intensity** multiplies reference-ground lighting (0–100; default 1), retaining the day/night
 response. Zero removes ground illumination but retains atmospheric scattering along the view ray. Older records
 retain intensity 1. Both controls require the procedural atmosphere to be enabled.
+Despite the current "Void" label, these controls affect rays that hit the reference planet; they are not
+an empty-space background color. Moving a platform far from the origin does not relocate that planet.
+For a distant planet, move its centre with the intended environment and surface. Space transitions depend
+on height above that planet, not distance from the global origin. The authored sky-color gradient fades
+through the atmosphere height; physical scattering remains separate. Rendered acceptance of this transition
+is still pending.
+
 The boundary currently uses authored ambient illumination, not a computed sky-irradiance lookup or cloud shadows.
 Native appearance and performance acceptance are still pending for this development feature.
 
@@ -210,9 +221,17 @@ increase the effect. **Enable Region** retains the authored values while togglin
 height and local fog, not clouds. Up to 16 regions are supported independently of the local fog box limit.
 Native exclusion authoring and performance acceptance are still pending.
 
-Fog remains in development. Terrain-shadow coupling, standalone visual acceptance and final
-performance tuning are unfinished. The current height profile follows world Y; it is not yet a radial planetary
-fog model. Do not assume the same authored height settings remain appropriate throughout surface-to-orbit travel.
+**Planet-relative Height** is an opt-in development mode. It measures height above the atmosphere planet's
+surface, using the centre and radius configured under **Sky**. Base Height is then an altitude above that
+surface, rather than a world-Y coordinate. Translate the planet and surface together when placing a distant
+world. With this option off, existing projects keep their flat world-Y height profile. Local fog boxes and
+exclusion regions retain their positions in the environment coordinate frame in either mode.
+
+Fog remains in development. Standalone visual acceptance, shared planet ownership, rotating-frame integration
+and final performance tuning are unfinished. Generated material shaders must be rebuilt for the new radial-fog
+contract; pinned shared-shader libraries require their normal reviewed compiler-input update. Older cooked
+shaders without source are not validated for this mode. Radial fog alone does not make the currently flat
+cloud layer planetary or establish seamless surface-to-orbit travel.
 
 ## Player Build Settings
 
@@ -290,7 +309,7 @@ Within rendering schema 6 and later, cloud record version 2 adds appearance and 
 Legacy unlit rather than changing their look automatically. Choose Natural lit in a layer's Appearance control to
 upgrade explicitly; Undo restores the previous choice. New layers and Reset Layer use Natural lit with seed 1.
 The sky controls and separate local volumetric-cloud controls remain experimental, with no complete weather system. Their authored
-values are included in cooked runtime manifest schema 10; use matching development player binaries when recooking.
+values are included in cooked runtime manifest schema 11; use matching development player binaries when recooking.
 
 Rendering schema 7 introduced a versioned bloom record (enabled, intensity, threshold, soft knee, and radius).
 Older rendering files migrate with bloom disabled. Runtime manifest schema 8 requires this record; older manifests

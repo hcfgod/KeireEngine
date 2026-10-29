@@ -31,6 +31,14 @@ namespace KeireEditor::Detail
         }
         if (auto section = ui.BeginSection("Height and Visibility"); section)
         {
+            if (ui.Checkbox("Planet-relative Height", settings.PlanetaryHeight))
+            {
+                changed = true;
+                commit = true;
+            }
+            ui.TextColoredWrapped(theme.MutedText,
+                                  "Planet-relative height uses the Sky atmosphere's planet centre and radius. "
+                                  "Local boxes and exclusions stay in the environment coordinate frame.");
             changed |=
                 DrawCloudScalar(ui, "Base Height (m)", settings.BaseHeightMeters, 1.0, -100000.0, 100000.0, commit);
             changed |= DrawCloudScalar(ui, "Density (per m)", settings.ExtinctionPerMeter, 0.0001, 0.0, 10.0, commit);

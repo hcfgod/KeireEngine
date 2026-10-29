@@ -77,8 +77,8 @@ namespace KeireEditor::Detail
                                                "baked lighting.");
         if (changed)
         {
-            document.UpdateEnvironmentLighting(
-                LightingProfile(profile.Ownership(), profile.Keyframes(), shadows, profile.Sky()));
+            document.UpdateEnvironmentLighting(LightingProfile(profile.Ownership(), profile.Keyframes(), shadows,
+                                                               profile.Sky(), profile.DirectionFrame()));
         }
         if (ui.Button("Reset Daily Shadows"))
         {
@@ -110,9 +110,31 @@ namespace KeireEditor::Detail
                                   "restores your previous keys.");
         }
         auto profile = document.EnvironmentLighting();
+        constexpr const char* referenceFrames[] = {"Legacy world axes", "Planet-fixed axes", "Inertial root axes"};
+        if (auto combo = ui.BeginCombo("Daily Light Reference Frame",
+                                       referenceFrames[static_cast<std::size_t>(profile.DirectionFrame())]);
+            combo)
+        {
+            for (std::size_t index = 0; index < 3; ++index)
+            {
+                const auto frame = static_cast<Keire::EnvironmentDirectionalFrame>(index);
+                if (ui.Selectable(referenceFrames[index], profile.DirectionFrame() == frame))
+                {
+                    document.UpdateEnvironmentLighting(LightingProfile(profile.Ownership(), profile.Keyframes(),
+                                                                       profile.Shadows(), profile.Sky(), frame));
+                    return true;
+                }
+            }
+        }
+        ui.TextColoredWrapped(
+            theme.MutedText,
+            "Legacy preserves existing flat worlds. Planet-fixed uses the planet's authored axes. "
+            "Inertial root keeps one shared sun direction as the planet rotates. Azimuth and elevation "
+            "are measured in that frame, never in each camera's local horizon.");
         if (ui.Button("Apply Daylight Preset"))
         {
-            document.UpdateEnvironmentLighting(DaylightPreset(profile.Shadows(), profile.Sky()));
+            document.UpdateEnvironmentLighting(
+                DaylightPreset(profile.Shadows(), profile.Sky(), profile.DirectionFrame()));
             return true;
         }
         bool automatic = profile.Ownership() == LightingOwnership::Environment;

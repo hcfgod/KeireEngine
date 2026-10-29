@@ -173,6 +173,10 @@ namespace Keire::Detail
             return ComponentPropertyKind::Vector2;
         if (name == "Keire.Vector3")
             return ComponentPropertyKind::Vector3;
+        if (name == "Keire.Vector3d")
+        {
+            return ComponentPropertyKind::Vector3d;
+        }
         if (name == "Keire.Vector4")
             return ComponentPropertyKind::Vector4;
         if (name == "Keire.Quaternion")
@@ -517,6 +521,8 @@ namespace Keire::Detail
             return Vector2{};
         case ComponentPropertyKind::Vector3:
             return Vector3{};
+        case ComponentPropertyKind::Vector3d:
+            return Vector3d{};
         case ComponentPropertyKind::Vector4:
             return Vector4{};
         case ComponentPropertyKind::Quaternion:
@@ -595,6 +601,16 @@ namespace Keire::Detail
             return Vector3{static_cast<float>(JsonNumber(value, "X", "x")),
                            static_cast<float>(JsonNumber(value, "Y", "y")),
                            static_cast<float>(JsonNumber(value, "Z", "z"))};
+        case ComponentPropertyKind::Vector3d:
+        {
+            const Vector3d vector{JsonNumber(value, "X", "x"), JsonNumber(value, "Y", "y"),
+                                  JsonNumber(value, "Z", "z")};
+            if (!Math::IsFinite(vector))
+            {
+                throw std::invalid_argument("Managed precise position must be finite.");
+            }
+            return vector;
+        }
         case ComponentPropertyKind::Vector4:
             return Vector4{
                 static_cast<float>(JsonNumber(value, "X", "x")), static_cast<float>(JsonNumber(value, "Y", "y")),
@@ -677,6 +693,15 @@ namespace Keire::Detail
         case ComponentPropertyKind::Vector3:
         {
             const auto vector = std::get<Vector3>(value);
+            return {{"X", vector.X}, {"Y", vector.Y}, {"Z", vector.Z}};
+        }
+        case ComponentPropertyKind::Vector3d:
+        {
+            const auto vector = std::get<Vector3d>(value);
+            if (!Math::IsFinite(vector))
+            {
+                throw std::invalid_argument("Managed precise position must be finite.");
+            }
             return {{"X", vector.X}, {"Y", vector.Y}, {"Z", vector.Z}};
         }
         case ComponentPropertyKind::Vector4:

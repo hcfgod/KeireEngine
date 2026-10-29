@@ -1,3 +1,5 @@
+#include "PlanetaryCloudLayered.hlsli"
+
 // Reusable include. Append matching CloudGeometry/CloudPattern/CloudColor vectors for each layer to the host cbuffer.
 // Returns premultiplied linear radiance and opacity; composite before exposure/tone mapping.
 // A lit periodic sheet with procedural erosion, not volumetric transport or self-shadowing.

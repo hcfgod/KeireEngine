@@ -12,9 +12,10 @@
 namespace KeireEditor::Detail
 {
     // Art-directed defaults, not geographic solar ephemerides or physical illuminance values.
-    [[nodiscard]] inline Keire::Detail::EnvironmentLightingProfile
-    DaylightPreset(const Keire::EnvironmentShadowSettings shadows,
-                   const std::optional<Keire::Detail::EnvironmentSkyProfile>& sky = {})
+    [[nodiscard]] inline Keire::Detail::EnvironmentLightingProfile DaylightPreset(
+        const Keire::EnvironmentShadowSettings shadows,
+        const std::optional<Keire::Detail::EnvironmentSkyProfile>& sky = {},
+        const Keire::EnvironmentDirectionalFrame directionFrame = Keire::EnvironmentDirectionalFrame::LegacyWorld)
     {
         const Keire::Detail::EnvironmentLightingProfile directional(
             Keire::Detail::EnvironmentDirectionalOwnership::Environment,
@@ -36,7 +37,8 @@ namespace KeireEditor::Detail
                                                 std::lerp(0.25F, 0.45F, daylight)},
                                                std::lerp(0.08F, 0.75F, daylight)};
         }
-        return Keire::Detail::EnvironmentLightingProfile(directional.Ownership(), std::move(keys), shadows, sky);
+        return Keire::Detail::EnvironmentLightingProfile(directional.Ownership(), std::move(keys), shadows, sky,
+                                                         directionFrame);
     }
 
     // A visibility preset, not a simulated moon: preserve the authored sun and independent sky tracks.
@@ -66,7 +68,7 @@ namespace KeireEditor::Detail
             key.Ambient = ambient;
         }
         return Keire::Detail::EnvironmentLightingProfile(profile.Ownership(), std::move(keys), profile.Shadows(),
-                                                         profile.Sky());
+                                                         profile.Sky(), profile.DirectionFrame());
     }
 
     [[nodiscard]] inline std::string EnvironmentClockLabel(const double fraction)

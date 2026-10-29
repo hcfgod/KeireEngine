@@ -1,8 +1,12 @@
 #include "Keire/Assets/AssetSystem.h"
+#include "Keire/ECS/Components/TransformComponent.h"
 #include "Keire/ECS/Components/VfxEmitterComponent.h"
+#include "Keire/Math/Vector3d.h"
+#include "Keire/Physics/PhysicsSystem.h"
 #include "Keire/Scenes/Scene.h"
 #include "Keire/Scenes/SceneAsset.h"
 #include "Keire/Vfx/VfxSystem.h"
+#include "KeireInternal/Scenes/VfxPhysicsCollision.h"
 
 #include <doctest/doctest.h>
 
@@ -191,6 +195,56 @@ namespace
         return definition;
     }
 } // namespace
+
+TEST_CASE("Scene simulation origin migration commits physics and VFX together")
+{
+    for (const bool rejectVfx : {false, true})
+    {
+        CAPTURE(rejectVfx);
+        const auto scene =
+            Keire::CreateRef<Keire::Scene>(Keire::AssetId::Generate(), Keire::SceneAsset::EmptyDefinition());
+        Keire::PhysicsSystemSpecification specification;
+        specification.Mode = Keire::PhysicsMode::Enabled;
+        const auto physics = Keire::CreateRef<Keire::PhysicsSystem>(specification);
+        const auto session = Keire::CreateRef<Keire::SceneRuntimeSession>(scene, Keire::Ref<Keire::AssetSystem>{},
+                                                                          Keire::Ref<Keire::AudioSystem>{}, physics);
+        session->Play();
+        session->Pause();
+        REQUIRE(session->Physics());
+        REQUIRE(session->Vfx());
+        Keire::PhysicsBodyDefinition bodyDefinition;
+        bodyDefinition.Position.X = rejectVfx ? 0.0F : 0.015625F;
+        const auto body = session->Physics()->CreateBody(bodyDefinition);
+        Keire::VfxActivation activation{Keire::CreateRef<Keire::VfxEffectAsset>(SceneRuntimeEffect())};
+        activation.Position.X = rejectVfx ? 0.015625F : 0.0F;
+        const auto handle = session->Vfx()->Activate(activation);
+        REQUIRE(handle);
+        const auto beforeVfx = session->Vfx()->CaptureCheckpoint();
+        CHECK_THROWS_AS(session->RebaseSimulationOrigin({16777216.0, 0.0, 0.0}), std::out_of_range);
+        CHECK(session->Physics()->WorldOrigin() == Keire::Vector3d{});
+        CHECK(session->Physics()->TryGetBody(body)->Position == bodyDefinition.Position);
+        CHECK(session->Vfx()->CaptureCheckpoint() == beforeVfx);
+        CHECK_THROWS_AS(session->RebaseSimulationOrigin({1152921504606846976.0, 0.0, 0.0}), std::out_of_range);
+        CHECK(session->Physics()->WorldOrigin() == Keire::Vector3d{});
+        CHECK(session->Physics()->TryGetBody(body)->Position == bodyDefinition.Position);
+        CHECK(session->Vfx()->CaptureCheckpoint() == beforeVfx);
+        CHECK(session->State() == Keire::ScenePlayState::Paused);
+        const Keire::Vector3d destination{128.0, 64.0, -128.0};
+        REQUIRE_NOTHROW(session->RebaseSimulationOrigin(destination));
+        CHECK(session->Physics()->WorldOrigin() == destination);
+        CHECK(session->Vfx()->WorldOrigin() == destination);
+        CHECK(session->Physics()->TryGetBody(body)->Position.X == bodyDefinition.Position.X - 128.0F);
+        CHECK(session->Vfx()->IsAlive(handle));
+        session->RebasePhysicsOrigin({});
+        REQUIRE_NOTHROW(session->RebaseSimulationOrigin(destination));
+        CHECK(session->Physics()->WorldOrigin() == destination);
+        CHECK(session->Vfx()->WorldOrigin() == destination);
+        REQUIRE(session->Step(1.0F / 60.0F));
+        CHECK(session->State() == Keire::ScenePlayState::Paused);
+        session->Stop();
+        CHECK_THROWS_AS(session->RebaseSimulationOrigin({}), std::logic_error);
+    }
+}
 
 TEST_CASE("Play-mode scene keeps mixed Sprite and Mesh VFX on the GPU backend")
 {
@@ -511,4 +565,142 @@ TEST_CASE("Play-mode scene VFX range parameters update component and live handle
     CHECK(std::ranges::equal(runtimeEmitter->ParameterOverrides(), beforeRejected));
     scene->Close();
     assets->Close();
+}
+
+TEST_CASE("Scene VFX preserves hierarchy orientation across distant translations and recovers from range failures")
+{
+    const auto effectId = SceneVfxId(200);
+    auto assets = CreateSceneVfxAssets();
+    REQUIRE(assets->PublishDevelopmentAsset(effectId, Keire::CreateRef<Keire::VfxEffectAsset>(SceneRuntimeEffect())));
+    auto scene =
+        Keire::CreateRef<Keire::Scene>(SceneVfxId(201), Keire::SceneAsset::EmptyDefinition("Precise VFX hierarchy"));
+    const auto parent = scene->CreateEntity("Parent");
+    const auto parentTransform = parent.GetComponent<Keire::TransformComponent>();
+    REQUIRE(parentTransform);
+    parentTransform->SetLocalEulerAngles({0.0F, 35.0F, 0.0F});
+    parentTransform->SetLocalScale({-2.0F, 3.0F, 4.0F});
+    auto entity = scene->CreateEntity("Emitter");
+    const auto transform = entity.GetComponent<Keire::TransformComponent>();
+    REQUIRE(transform);
+    transform->SetParent(parent, false);
+    transform->SetLocalPosition({0.25F, 2.0F, -1.0F});
+    const auto emitter = entity.AddComponent<Keire::VfxEmitterComponent>();
+    REQUIRE(emitter);
+    emitter->SetEffect(effectId);
+
+    Keire::Vector3 expectedPosition;
+    Keire::Quaternion expectedRotation;
+    Keire::Vector3 expectedScale;
+    REQUIRE(
+        Keire::Math::DecomposeTransform(transform->WorldMatrix(), expectedPosition, expectedRotation, expectedScale));
+    auto session = Keire::CreateRef<Keire::SceneRuntimeSession>(scene, assets, Keire::Ref<Keire::AudioSystem>{},
+                                                                Keire::Ref<Keire::PhysicsSystem>{});
+    session->Play();
+    session->Update(0.25F);
+    const auto runtimeParent =
+        session->RuntimeScene()->FindEntity(parent.Id()).GetComponent<Keire::TransformComponent>();
+    REQUIRE(runtimeParent);
+    const auto world = session->Vfx();
+    REQUIRE(world);
+    REQUIRE(session->IsVfxAlive(entity.Id()));
+    for (const double translation : {0.0, 1.0e15})
+    {
+        runtimeParent->SetLocalPositionPrecise({translation, 0.0, 0.0});
+        session->Update(0.25F);
+        const auto snapshot = world->CaptureRenderSnapshot();
+        REQUIRE(snapshot.GpuEmitters().size() == 1);
+        const auto& gpuEmitter = snapshot.GpuEmitters().front();
+        CHECK(gpuEmitter.Rotation.X == doctest::Approx(expectedRotation.X));
+        CHECK(gpuEmitter.Rotation.Y == doctest::Approx(expectedRotation.Y));
+        CHECK(gpuEmitter.Rotation.Z == doctest::Approx(expectedRotation.Z));
+        CHECK(gpuEmitter.Rotation.W == doctest::Approx(expectedRotation.W));
+        CHECK(gpuEmitter.Position.Y == doctest::Approx(expectedPosition.Y));
+        CHECK(gpuEmitter.Position.Z == doctest::Approx(expectedPosition.Z));
+    }
+
+    runtimeParent->SetLocalPositionPrecise({1.0e40, 0.0, 0.0});
+    CHECK_NOTHROW(session->Update(0.25F));
+    CHECK(session->State() == Keire::ScenePlayState::Playing);
+    CHECK_FALSE(session->IsVfxAlive(entity.Id()));
+    runtimeParent->SetLocalPositionPrecise({});
+    session->Update(0.25F);
+    CHECK(session->IsVfxAlive(entity.Id()));
+    const auto recovered = world->CaptureRenderSnapshot();
+    REQUIRE(recovered.GpuEmitters().size() == 1);
+    CHECK(recovered.GpuEmitters().front().Position.X == doctest::Approx(expectedPosition.X));
+    session->Stop();
+    scene->Close();
+    assets->Close();
+}
+
+TEST_CASE("VFX physics collisions preserve small offsets between distant simulation origins")
+{
+    Keire::PhysicsSystemSpecification specification;
+    specification.Mode = Keire::PhysicsMode::Enabled;
+    const auto physics = Keire::CreateRef<Keire::PhysicsSystem>(specification);
+    for (const double distance : {0.0, 1.0e12, -1.0e12, 1.0e15})
+    {
+        CAPTURE(distance);
+        const auto world = physics->CreateWorld({distance, distance, distance});
+        Keire::PhysicsBodyDefinition floor;
+        floor.Position = {0.0F, -0.5F, 0.0F};
+        floor.HalfExtent = {1.0F, 0.5F, 1.0F};
+        REQUIRE(world->CreateBody(floor));
+        const Keire::Vector3d simulationOrigin{distance + 128.0, distance, distance};
+        constexpr float localX = -128.0F + 0.015625F;
+        const auto hit = Keire::Detail::QueryVfxPhysicsCollision(*world, simulationOrigin, {localX, 2.0F, 0.015625F},
+                                                                 {localX, -2.0F, 0.015625F});
+        REQUIRE(hit);
+        CHECK(hit->Position.X == localX);
+        CHECK(hit->Position.Y == doctest::Approx(0.0F));
+        CHECK(hit->Position.Z == 0.015625F);
+        CHECK(hit->Normal.Y == doctest::Approx(1.0F));
+        CHECK_FALSE(Keire::Detail::QueryVfxPhysicsCollision(*world, simulationOrigin, {localX, 2.0F, 5.0F},
+                                                            {localX, -2.0F, 5.0F}));
+        CHECK_FALSE(Keire::Detail::QueryVfxPhysicsCollision(*world, simulationOrigin, {}, {}));
+        CHECK_THROWS_AS((void)Keire::Detail::QueryVfxPhysicsCollision(*world, simulationOrigin, {1.0e30F, 0.0F, 0.0F},
+                                                                      {-1.0e30F, 0.0F, 0.0F}),
+                        std::invalid_argument);
+    }
+}
+
+TEST_CASE("Deterministic scene VFX ignores render cadence and advances during paused steps")
+{
+    for (const bool withEffect : {false, true})
+    {
+        CAPTURE(withEffect);
+        const auto scene = Keire::CreateRef<Keire::Scene>(SceneVfxId(301), Keire::SceneAsset::EmptyDefinition());
+        const auto first = Keire::CreateRef<Keire::SceneRuntimeSession>(scene);
+        const auto second = Keire::CreateRef<Keire::SceneRuntimeSession>(scene);
+        for (const auto& session : {first, second})
+        {
+            session->SetDeterministicSimulation(true);
+            session->Play();
+            REQUIRE(session->Vfx());
+            if (withEffect)
+            {
+                Keire::VfxActivation activation{Keire::CreateRef<Keire::VfxEffectAsset>(SceneRuntimeEffect())};
+                REQUIRE(session->Vfx()->Activate(activation));
+            }
+        }
+        const auto initial = first->CaptureVfxCheckpoint();
+        for (int tick = 0; tick < 60; ++tick)
+        {
+            first->Update(0.017F, 0.2F);
+            second->Update(0.003F, 0.1F);
+            second->Update(0.009F, 0.9F);
+            CHECK(first->CaptureVfxCheckpoint() == second->CaptureVfxCheckpoint());
+            first->FixedUpdate(1.0F / 60.0F);
+            second->FixedUpdate(1.0F / 60.0F);
+            CHECK(first->CaptureVfxCheckpoint() == second->CaptureVfxCheckpoint());
+        }
+        CHECK(first->CaptureVfxCheckpoint() != initial);
+        first->Pause();
+        REQUIRE(first->Step(1.0F / 60.0F));
+        second->FixedUpdate(1.0F / 60.0F);
+        CHECK(first->CaptureVfxCheckpoint() == second->CaptureVfxCheckpoint());
+        first->Stop();
+        second->Stop();
+        scene->Close();
+    }
 }

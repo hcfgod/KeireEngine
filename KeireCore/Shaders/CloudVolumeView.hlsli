@@ -3,7 +3,7 @@
 #include "CloudVolume.hlsli"
 #include "VolumeSurfaceComposition.hlsli"
 
-// Shared background/surface constants. Keep the host's 1520-byte layout in this order.
+// Shared background/surface constants. Keep the host's 1616-byte layout in this order.
 struct CloudVolumeView
 {
     float4x4 InverseProjection;
@@ -24,6 +24,7 @@ struct CloudVolumeView
     float4 HeightProfile;
     float4 WeatherControls;
     FogViewDensity Fog;
+    PlanetaryCloudGeometry PlanetaryCloud;
 };
 
 struct CloudVolumeViewTransport
@@ -66,6 +67,7 @@ CloudVolumeParameters MakeCloudVolumeParameters(CloudVolumeView view)
     parameters.RegionalControls = view.RegionalControls;
     parameters.HeightProfile = view.HeightProfile;
     parameters.WeatherControls = view.WeatherControls;
+    parameters.PlanetaryCloud = view.PlanetaryCloud;
     return parameters;
 }
 
@@ -89,6 +91,13 @@ CloudVolumeViewRay MakeCloudVolumeViewRay(float2 uv, float depth, CloudVolumeVie
         orthographic ? middleView - nearView : middleView));
     ray.MaximumDistance = max(view.Quality.x != 0U ? view.Geometry.w : 0.0F,
         view.Fog.Controls.x != 0U ? view.Fog.HeightDensity.w : 0.0F);
+    if (view.Quality.x != 0U && view.PlanetaryCloud.Controls.x != 0U)
+    {
+        // Orbital vacuum is not part of the occupied-medium travel budget.
+        ray.MaximumDistance = max(ray.MaximumDistance,
+            abs(view.PlanetaryCloud.ObserverRadialAltitude.w) + 2.0F *
+            (view.PlanetaryCloud.RadiusGeometry.x + max(view.Geometry.x + view.Geometry.y, 0.0F)));
+    }
     ray.SurfaceDistance = 0.0F;
     if (depth < 1.0F)
     {

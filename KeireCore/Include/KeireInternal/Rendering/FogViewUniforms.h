@@ -33,7 +33,8 @@ namespace Keire::RenderBackend
     static_assert(offsetof(FogViewUniforms, Local) == 48);
 
     [[nodiscard]] inline FogViewUniforms MakeFogViewUniforms(const FogSettings& settings,
-                                                             const std::array<double, 3>& observerFromAnchor)
+                                                             const std::array<double, 3>& observerFromAnchor,
+                                                             const AtmosphereSettings* planet = nullptr)
     {
         Detail::ValidateFogDensity(settings);
         if (!settings.Enabled)
@@ -48,14 +49,14 @@ namespace Keire::RenderBackend
             }
         }
         FogViewUniforms result;
-        result.HeightDensity = {static_cast<float>(settings.BaseHeightMeters - observerFromAnchor[1]),
-                                static_cast<float>(settings.HeightFalloffPerMeter),
-                                static_cast<float>(settings.ExtinctionPerMeter),
-                                static_cast<float>(settings.MaximumDistanceMeters)};
+        result.HeightDensity = {
+            static_cast<float>(settings.BaseHeightMeters - Detail::FogAltitude(settings, observerFromAnchor, planet)),
+            static_cast<float>(settings.HeightFalloffPerMeter), static_cast<float>(settings.ExtinctionPerMeter),
+            static_cast<float>(settings.MaximumDistanceMeters)};
         result.Scattering = {static_cast<float>(settings.ScatteringAlbedo[0]),
                              static_cast<float>(settings.ScatteringAlbedo[1]),
                              static_cast<float>(settings.ScatteringAlbedo[2]), static_cast<float>(settings.Anisotropy)};
-        result.Controls = {settings.Enabled ? 1U : 0U, settings.ViewSteps, 0U, 0U};
+        result.Controls = {settings.PlanetaryHeight ? 2U : 1U, settings.ViewSteps, 0U, 0U};
         for (const auto& volume : settings.LocalVolumes)
         {
             if (!volume.Enabled || volume.ExtinctionPerMeter == 0.0)

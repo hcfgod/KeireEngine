@@ -35,6 +35,7 @@
 #include "KeireInternal/FileSystem.h"
 #include "KeireInternal/Rendering/DynamicResolutionInternal.h"
 #include "KeireInternal/Scenes/SceneRuntimeRenderingInternal.h"
+#include "KeireInternal/Spatial/SceneRuntimePlanetAccess.h"
 
 #include <algorithm>
 #include <array>
@@ -212,9 +213,18 @@ void EditorWorkspaceLayer::OpenScene(const Keire::AssetId asset)
                                          (asset.ToString() + ".keirescene.recovery"));
     m_SelectedAsset = asset;
     m_ActiveUndoContext = m_SceneDocument->UndoContext();
-    if (const auto scenes = Owner().Scenes())
+    const auto assets = Owner().Assets();
+    if (const auto scenes = Owner().Scenes(); scenes && assets && assets->TryGetType(asset))
+    {
         m_SceneDocument->SetLoadOperation(scenes->Load(asset, Keire::SceneLoadMode::Single));
-    m_SceneDocument->SetStatus("Opening " + record->RelativePath.generic_string() + ".");
+        m_SceneDocument->SetStatus("Opening " + record->RelativePath.generic_string() + ".");
+    }
+    else
+    {
+        m_SceneTransitions->AwaitSceneAssets(asset);
+        m_SceneDocument->SetStatus(
+            "Scene source is open for editing. Compatible assets are refreshing in the background.");
+    }
     PersistEditorSessionScene(asset);
 }
 
@@ -238,6 +248,18 @@ void EditorWorkspaceLayer::RequestInitialScene(const Keire::AssetId candidate)
 
 void EditorWorkspaceLayer::OpenPendingStartupScene()
 {
+    const auto waiting = m_SceneTransitions->AwaitingSceneAssets();
+    const auto assets = Owner().Assets();
+    if (waiting && waiting == m_SceneDocument->Asset() && assets && assets->TryGetType(waiting))
+    {
+        if (const auto scenes = Owner().Scenes())
+        {
+            m_SceneDocument->SetLoadOperation(scenes->Load(waiting, Keire::SceneLoadMode::Single));
+            (void)m_SceneTransitions->CompleteSceneAssets(waiting);
+            // Do not reopen the source: edits, selection, camera and undo belong to the existing document.
+            m_SceneDocument->SetStatus("Compatible scene assets are ready.");
+        }
+    }
     if (const auto startup = m_SceneTransitions->TakeStartupScene())
     {
         RequestInitialScene(startup);
@@ -480,6 +502,12 @@ void EditorWorkspaceLayer::BeginPlayMode()
 {
     if (!m_SceneDocument->EditingScene() || m_SceneDocument->PlaySession() || m_PlayStartPending)
         return;
+    const auto sceneAssets = Owner().Assets();
+    if (!sceneAssets || !sceneAssets->TryGetType(m_SceneDocument->Asset()))
+    {
+        m_SceneDocument->SetStatus("Play is unavailable until this scene's compatible assets finish refreshing.");
+        return;
+    }
     const bool requiresManagedRuntime = ProjectRequiresManagedRuntime();
     const auto scripts = Owner().Scripts();
     const auto build = scripts ? scripts->BuildStatus() : Keire::ManagedBuildStatus{};
@@ -596,12 +624,20 @@ void EditorWorkspaceLayer::BeginPlayMode()
     {
         const auto environmentTime = m_ProjectSettingsDocument ? m_ProjectSettingsDocument->EnvironmentTime()
                                                                : Keire::Detail::EnvironmentClockState{};
+        if (m_ProjectSettingsDocument)
+        {
+            ApplyProjectAuthoringSettings(m_ProjectSettingsDocument->AuthoringSettings());
+        }
         const auto environmentLighting = m_ProjectSettingsDocument ? m_ProjectSettingsDocument->EnvironmentLighting()
                                                                    : Keire::Detail::EnvironmentLightingProfile{};
         Keire::Detail::SceneRuntimeEnvironmentAccess::Restore(*m_PlayRuntimeWorld, environmentTime,
                                                               environmentLighting);
+        Keire::Detail::SceneRuntimePlanetAccess::ConfigureProject(
+            *m_PlayRuntimeWorld,
+            m_ProjectSettingsDocument ? m_ProjectSettingsDocument->Planets() : Keire::Detail::PlanetProjectSettings{});
         m_SceneDocument->BeginPlay(std::move(playUndo), Owner().Assets(), Owner().Audio(), Owner().Physics(),
                                    defaultMixer, m_PlayRuntimeWorld);
+        Keire::Detail::SceneRuntimePlanetAccess::InitializeGravity(*m_PlayRuntimeWorld);
         m_PlayChangeTracker->BindSession(m_SceneDocument->PlaySession());
     }
     catch (...)
@@ -1027,11 +1063,11 @@ void EditorWorkspaceLayer::RevealSceneViewportScenes()
 void EditorWorkspaceLayer::RouteSceneViewportAsset(const Keire::AssetTypeId type, const Keire::AssetId asset,
                                                    const Keire::EntityId target, Keire::UiPosition position)
 {
-    Keire::Vector3 worldPosition{};
+    Keire::Vector3d worldPosition{};
     if (type == Keire::PrefabAsset::StaticType() || type == Keire::MeshAsset::StaticType() ||
         type == Keire::VfxEffectAsset::StaticType())
-        worldPosition = KeireEditor::ResolveSceneDropPosition(m_SceneViewportPanel->ViewportRect(), position,
-                                                              m_SceneViewportPanel->LastCamera());
+        worldPosition = KeireEditor::ResolveSceneDropPositionPrecise(m_SceneViewportPanel->ViewportRect(), position,
+                                                                     m_SceneViewportPanel->LastCamera());
     m_ViewportAssetDropRouter->Route(type, asset, target, worldPosition, *this);
 }
 
@@ -1062,7 +1098,7 @@ void EditorWorkspaceLayer::OpenDroppedInputActions(const Keire::AssetId asset)
     m_InputActionsPanel->Registration().SetVisible(true);
 }
 
-void EditorWorkspaceLayer::InstantiateDroppedPrefab(const Keire::AssetId asset, Keire::Vector3 position)
+void EditorWorkspaceLayer::InstantiateDroppedPrefab(const Keire::AssetId asset, Keire::Vector3d position)
 {
     const auto scene = ActiveScene();
     if (!scene || !m_AssetDatabase || !Owner().GetProject())
@@ -1080,7 +1116,7 @@ void EditorWorkspaceLayer::InstantiateDroppedPrefab(const Keire::AssetId asset, 
     RecordSceneUndo("Instantiate Prefab");
     auto replacement = scene->Snapshot();
 
-    const auto instance = KeireEditor::InstantiatePrefab(replacement, asset, composed, {}, position);
+    const auto instance = KeireEditor::InstantiatePrefabPrecise(replacement, asset, composed, {}, position);
     auto rebuilt = Keire::CreateRef<Keire::Scene>(scene->Asset(), std::move(replacement), scene->Components());
     rebuilt->MarkDirty();
     m_SceneDocument->ReplaceEditingScene(std::move(rebuilt));
@@ -1088,7 +1124,7 @@ void EditorWorkspaceLayer::InstantiateDroppedPrefab(const Keire::AssetId asset, 
     m_SceneDocument->SetStatus("Instantiated prefab in the active scene.");
 }
 
-void EditorWorkspaceLayer::CreateDroppedMeshEntity(const Keire::AssetId asset, Keire::Vector3 position)
+void EditorWorkspaceLayer::CreateDroppedMeshEntity(const Keire::AssetId asset, Keire::Vector3d position)
 {
     const auto scene = ActiveScene();
     if (!scene)
@@ -1118,7 +1154,7 @@ void EditorWorkspaceLayer::CreateDroppedMeshEntity(const Keire::AssetId asset, K
         (animation.Skin ? " Imported rig assigned. Create or assign an Animator Controller to play clips." : ""));
 }
 
-void EditorWorkspaceLayer::CreateDroppedVfxEntity(const Keire::AssetId asset, Keire::Vector3 position)
+void EditorWorkspaceLayer::CreateDroppedVfxEntity(const Keire::AssetId asset, Keire::Vector3d position)
 {
     const auto scene = ActiveScene();
     if (!scene)

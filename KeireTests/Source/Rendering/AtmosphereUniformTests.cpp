@@ -1,8 +1,34 @@
 #include "KeireInternal/Rendering/AtmosphereUniforms.h"
+#include "KeireInternal/Rendering/EnvironmentViewCoordinates.h"
+#include "KeireInternal/Rendering/FogViewUniforms.h"
 
 #include <doctest/doctest.h>
 
+#include <array>
 #include <limits>
+#include <stdexcept>
+
+TEST_CASE("Atmosphere and fog retain local observer detail around distant environment anchors")
+{
+    const Keire::Vector3 observer{0.015625F, 0.03125F, -0.0625F};
+    const Keire::Vector3d anchor{1e15, 1e15, -1e15};
+    const Keire::Vector3d origin{anchor.X + 1024.0, anchor.Y + 128.0, anchor.Z - 512.0};
+    const auto relative = Keire::RenderBackend::EnvironmentRelativeObserver(observer, origin, anchor);
+    CHECK(relative == std::array<double, 3>{1024.015625, 128.03125, -512.0625});
+    Keire::AtmosphereSettings atmosphere;
+    const auto expected = Keire::RenderBackend::MakeAtmosphereUniforms(
+        atmosphere, {1024.015625F, 128.03125F, -512.0625F}, {0.0F, -1.0F, 0.0F});
+    const auto actual =
+        Keire::RenderBackend::MakeAtmosphereUniforms(atmosphere, observer, {0.0F, -1.0F, 0.0F}, origin, anchor);
+    CHECK(actual.ObserverRadius == expected.ObserverRadius);
+    Keire::FogSettings fog;
+    fog.Enabled = true;
+    CHECK(Keire::RenderBackend::MakeFogViewUniforms(fog, relative) ==
+          Keire::RenderBackend::MakeFogViewUniforms(fog, {1024.015625, 128.03125, -512.0625}));
+    CHECK_THROWS_AS(Keire::RenderBackend::EnvironmentRelativeObserver(
+                        observer, {std::numeric_limits<double>::quiet_NaN(), 0.0, 0.0}, anchor),
+                    std::invalid_argument);
+}
 
 TEST_CASE("Atmosphere shader packing preserves optical units and selected sun direction")
 {

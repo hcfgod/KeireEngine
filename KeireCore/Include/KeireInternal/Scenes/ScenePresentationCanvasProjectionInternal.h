@@ -16,6 +16,7 @@ namespace Keire::Detail
         ScenePresentationCanvasGeometry Geometry;
         RuntimeUiElementId Root;
         Matrix4 World;
+        Vector3d WorldOrigin{};
         Matrix4 ViewProjection;
         Matrix4 InverseViewProjection;
         Vector2 ReferenceResolution{1920.0F, 1080.0F};

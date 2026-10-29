@@ -11,6 +11,39 @@
 #include <thread>
 #include <vector>
 
+TEST_CASE("Planet preview simulation time pauses resets and stays separate from distant calendar scrubbing")
+{
+    KeireEditor::EnvironmentPreviewClock preview;
+    preview.Bind({});
+    CHECK(preview.SimulationTime() == 0.0);
+    preview.Tick(10.0, true, true);
+    CHECK(preview.SimulationTime() == 0.0);
+    preview.SetPlaying(true);
+    preview.Tick(0.25, true, true);
+    CHECK(preview.SimulationTime() == 0.25);
+    preview.Tick(10.0, false, true);
+    preview.Tick(10.0, true, false);
+    CHECK(preview.SimulationTime() == 0.25);
+    preview.SetPlaying(false);
+    preview.Tick(10.0, true, true);
+    CHECK(preview.SimulationTime() == 0.25);
+    preview.Seek(std::numeric_limits<std::int64_t>::max(), 0.125);
+    CHECK(preview.SimulationTime() == 0.25);
+    CHECK(preview.State().Day == std::numeric_limits<std::int64_t>::max());
+    preview.Reset();
+    CHECK(preview.SimulationTime() == 0.0);
+    CHECK_FALSE(preview.Playing());
+    preview.SetPlaying(true);
+    preview.SetSpeed(0.0);
+    preview.Tick(std::numeric_limits<double>::max(), true, true);
+    const auto original = preview.State();
+    CHECK_THROWS_AS(preview.Tick(std::numeric_limits<double>::max(), true, true), std::overflow_error);
+    CHECK(preview.SimulationTime() == std::numeric_limits<double>::max());
+    CHECK(preview.State() == original);
+    preview.Bind({.Day = -100});
+    CHECK(preview.SimulationTime() == 0.0);
+}
+
 TEST_CASE("Preview key lookup distinguishes existing keys from nearby insertion times")
 {
     using namespace KeireEditor::Detail;

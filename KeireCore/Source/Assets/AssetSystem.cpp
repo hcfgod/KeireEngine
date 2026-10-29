@@ -555,13 +555,22 @@ namespace Keire
         const auto entry = m_Impl->Resolved.find(id);
         if (entry == m_Impl->Resolved.end() || entry->second.Entry.Type != type)
         {
-            m_Impl->Completions.push_back({state,
-                                           {},
-                                           {"resolve", entry == m_Impl->Resolved.end()
-                                                           ? "Asset ID is not present in any mounted catalog."
-                                                           : "Catalog type does not match the requested handle type."},
-                                           false,
-                                           false});
+            const bool filtered =
+                std::ranges::any_of(m_Impl->Mounts,
+                                    [id](const auto& mount)
+                                    {
+                                        return std::ranges::find(mount.Specification.ExcludedAssets, id) !=
+                                               mount.Specification.ExcludedAssets.end();
+                                    });
+            m_Impl->Completions.push_back(
+                {state,
+                 {},
+                 {"resolve", entry == m_Impl->Resolved.end()
+                                 ? (filtered ? "Asset is awaiting a compatible catalog refresh."
+                                             : "Asset ID is not present in any mounted catalog.")
+                                 : "Catalog type does not match the requested handle type."},
+                 false,
+                 false});
             return state;
         }
         if (m_Impl->QueueSize >= m_Impl->Specification.QueueCapacity)
@@ -622,6 +631,46 @@ namespace Keire
         if (specification.CatalogPath.empty())
             throw std::invalid_argument("Asset catalog path must not be empty.");
         auto catalog = Detail::LoadCatalog(specification.CatalogPath);
+        auto filteredSpecification = specification;
+        std::unordered_set<AssetId> excluded(specification.ExcludedAssets.begin(), specification.ExcludedAssets.end());
+        if (specification.AllowedAssets)
+        {
+            const std::unordered_set<AssetId> allowed(specification.AllowedAssets->begin(),
+                                                      specification.AllowedAssets->end());
+            for (const auto& entry : catalog.Entries)
+            {
+                if (!allowed.contains(entry.Id))
+                {
+                    excluded.insert(entry.Id);
+                }
+            }
+        }
+        std::unordered_map<AssetId, std::vector<AssetId>> dependants;
+        for (const auto& entry : catalog.Entries)
+        {
+            for (const auto dependency : entry.Dependencies)
+            {
+                dependants[dependency].push_back(entry.Id);
+            }
+        }
+        std::vector<AssetId> pendingExclusions(excluded.begin(), excluded.end());
+        for (std::size_t index = 0; index < pendingExclusions.size(); ++index)
+        {
+            const auto found = dependants.find(pendingExclusions[index]);
+            if (found == dependants.end())
+            {
+                continue;
+            }
+            for (const auto dependant : found->second)
+            {
+                if (excluded.insert(dependant).second)
+                {
+                    pendingExclusions.push_back(dependant);
+                }
+            }
+        }
+        std::erase_if(catalog.Entries, [&excluded](const auto& entry) { return excluded.contains(entry.Id); });
+        filteredSpecification.ExcludedAssets.assign(excluded.begin(), excluded.end());
         std::unordered_set<AssetId> catalogIds;
         std::unordered_set<std::filesystem::path> packs;
         for (const auto& entry : catalog.Entries)
@@ -651,7 +700,7 @@ namespace Keire
             throw std::invalid_argument("Asset catalog is already mounted.");
 
         auto mounts = m_Impl->Mounts;
-        mounts.push_back({specification, std::move(catalog)});
+        mounts.push_back({std::move(filteredSpecification), std::move(catalog)});
         std::ranges::sort(mounts, [](const auto& left, const auto& right)
                           { return left.Specification.Priority < right.Specification.Priority; });
         std::unordered_map<AssetId, Impl::ResolvedEntry> resolved;

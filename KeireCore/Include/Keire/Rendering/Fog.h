@@ -48,6 +48,8 @@ namespace Keire
         std::uint32_t ViewSteps = 64;
         std::vector<LocalFogVolume> LocalVolumes;
         std::vector<FogExclusionRegion> ExclusionRegions;
+        /// Measure height above the environment atmosphere's planet instead of the flat world-Y plane.
+        bool PlanetaryHeight = false;
 
         auto operator<=>(const FogSettings&) const noexcept = default;
     };

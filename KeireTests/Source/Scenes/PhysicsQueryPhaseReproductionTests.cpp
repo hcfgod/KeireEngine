@@ -201,6 +201,9 @@ TEST_CASE("Authored physics queries preserve pending controllers dynamics and re
     auto invalid = ray;
     invalid.Direction = {};
     CHECK_THROWS_AS((void)fixture.Session->RayCast(invalid), std::invalid_argument);
+    invalid.Direction = {1.0e30F, 0.0F, 0.0F};
+    CHECK_THROWS_AS((void)fixture.Session->RayCast(invalid), std::invalid_argument);
+    CHECK_THROWS_AS((void)fixture.Session->CastCapsule({.Displacement = {1.0e30F, 0.0F, 0.0F}}), std::invalid_argument);
     CHECK_THROWS_AS((void)fixture.Session->CastCapsule({.Radius = -1}), std::invalid_argument);
     CHECK_THROWS_AS((void)fixture.Session->OverlapSphere({.Radius = -1}), std::invalid_argument);
     CHECK(fixture.Session->Physics()->TryGetBody(installed)->Position.Y == 0);

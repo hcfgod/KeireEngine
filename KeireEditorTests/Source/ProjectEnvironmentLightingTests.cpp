@@ -1,9 +1,9 @@
+#include "Keire/Core.h"
 #include "KeireClient/Editor/ProjectSettingsDocument.h"
 #include "KeireClientInternal/Editor/EnvironmentAuthoringPresets.h"
 #include "KeireClientInternal/Editor/EnvironmentLightingEditing.h"
 #include "KeireInternal/Environment/EnvironmentLightingSettingsStore.h"
 #include "KeireInternal/ProjectFileTransaction.h"
-#include "KeireTests/TestSupport.h"
 
 #include <doctest/doctest.h>
 
@@ -17,7 +17,8 @@ namespace
 {
     struct LightingDocumentFixture final
     {
-        std::filesystem::path Root = KeireTests::MakeTestDirectory("ProjectEnvironmentLighting");
+        std::filesystem::path Root = std::filesystem::temp_directory_path() /
+                                     ("Keire-ProjectEnvironmentLighting-" + Keire::AssetId::Generate().ToString());
 
         ~LightingDocumentFixture()
         {

@@ -9,6 +9,13 @@
 
 namespace Keire
 {
+    enum class EnvironmentDirectionalFrame : std::uint8_t
+    {
+        LegacyWorld,
+        PlanetFixed,
+        InertialRoot
+    };
+
     struct EnvironmentShadowSettings
     {
         ShadowQuality Quality = ShadowQuality::Disabled;
@@ -70,5 +77,7 @@ namespace Keire
         std::optional<EnvironmentTimeSample> Time;
         /// Empty retains the physical sky or authored environment texture.
         std::optional<EnvironmentSkyColors> SkyColors;
+        /// Daily-track direction basis. Resolve planetary modes into the view frame before submission.
+        EnvironmentDirectionalFrame DirectionFrame = EnvironmentDirectionalFrame::LegacyWorld;
     };
 } // namespace Keire

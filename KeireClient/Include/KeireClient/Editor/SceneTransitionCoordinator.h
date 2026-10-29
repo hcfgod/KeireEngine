@@ -44,6 +44,13 @@ namespace KeireEditor
         [[nodiscard]] Keire::AssetId PendingStartupScene() const noexcept;
         [[nodiscard]] Keire::AssetId TakeStartupScene() noexcept;
 
+        void AwaitSceneAssets(Keire::AssetId asset) noexcept;
+        [[nodiscard]] Keire::AssetId AwaitingSceneAssets() const noexcept;
+        [[nodiscard]] bool CompleteSceneAssets(Keire::AssetId asset) noexcept;
+        void RequireStartupRefresh(Keire::AssetId asset) noexcept;
+        [[nodiscard]] Keire::AssetId StartupRefresh() const noexcept;
+        void CompleteStartupRefresh(Keire::AssetId asset) noexcept;
+
         [[nodiscard]] bool Pending() const noexcept;
         [[nodiscard]] SceneTransitionState State() const noexcept;
         [[nodiscard]] std::string_view Diagnostic() const noexcept;
@@ -51,6 +58,8 @@ namespace KeireEditor
       private:
         std::optional<SceneTransitionRequest> m_Request;
         Keire::AssetId m_StartupScene;
+        Keire::AssetId m_AwaitingSceneAssets;
+        Keire::AssetId m_StartupRefresh;
         SceneTransitionState m_State = SceneTransitionState::Idle;
         std::string m_Diagnostic;
     };

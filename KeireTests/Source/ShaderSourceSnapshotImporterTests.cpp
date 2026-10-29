@@ -107,5 +107,5 @@ TEST_CASE("shader importer compiles retained dependency bytes despite later read
         std::ranges::find(imported.SourceDependencies, headerPath, &Keire::AssetSourceDependency::RelativePath);
     REQUIRE(captured != imported.SourceDependencies.end());
     CHECK(captured->Digest == Keire::Detail::DigestToString(Keire::Detail::Sha256(Bytes(header))));
-    CHECK(importer.Version == 11U);
+    CHECK(importer.Version == 12U);
 }

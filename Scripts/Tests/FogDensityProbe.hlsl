@@ -33,5 +33,18 @@ void CSMain(uint3 id : SV_DispatchThreadID)
     valid = valid && abs(SampleFogDensity(float3(10, 0, 0), fog) - 0.002F) < 1.0e-6F;
     fog.Controls.x = 0U;
     valid = valid && SampleFogDensity(float3(x, height, 0), fog) == 0.0F;
-    Pixels[id.y * Quality.x + id.x] = float4(sampled, expected, 0.0F, valid ? 0.0F : 1.0F);
+    fog.Controls = uint4(2U, 64U, 0U, 0U);
+    fog.HeightDensity.x = -125.0F;
+    const float3 observer = float3(0.0F, 6360.125F, 0.0F);
+    const float radialDensity = SampleFogDensity(float3(0.0F, height, 0.0F), fog, observer);
+    const float radialExpected = 0.002F * exp(-(125.0F + height) * 0.01F);
+    valid = valid && abs(radialDensity - radialExpected) < 1.0e-7F;
+    const float opposite = SampleFogDensity(float3(0.0F, -height, 0.0F), fog, -observer);
+    valid = valid && abs(opposite - radialExpected) < 1.0e-7F;
+    fog.HeightDensity.x = 0.0F;
+    fog.HeightDensity.y = 10.0F;
+    const float steep = SampleFogSegmentDensity(float3(0, 50, 0), float3(0, 100, 0), fog, observer);
+    const float steepExpected = 0.002F / 1000.0F;
+    valid = valid && abs(steep - steepExpected) < 1.0e-8F;
+    Pixels[id.y * Quality.x + id.x] = valid ? 0.0F : float4(sampled, expected, radialDensity, 1.0F);
 }

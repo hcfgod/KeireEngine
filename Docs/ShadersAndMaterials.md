@@ -174,8 +174,13 @@ stay within the resolved material's target. Retained UI uses UI materials. VFX m
 on CPU and GPU Sprite/Ribbon outputs and the existing mesh consumer. Volumetric VFX retains built-in density shading.
 Custom Graphics has the existing mesh consumer; it does not expose arbitrary render-pass scheduling.
 
-The current Shader Graph generator version is 35 and the Shader Graph importer version is 52. These versions describe
+The current Shader Graph generator version is 39 and the Shader Graph importer version is 54. These versions describe
 generated binaries and cache invalidation, not the serialized graph schema or the engine release number.
+
+Generated volume materials declare ABI 13 for texture-backed cloud noise or ABI 14 for buffer-backed noise.
+Both append planet-fixed cloud coordinates to the prior radial-fog layout. Legacy material generation also advances
+through its generator-derived importer version; existing source assets require reimport before using this layout.
+Source-less older cooked shaders do not acquire planetary support merely because the renderer accepts their old prefix.
 
 C++ uses `CameraComponent::SetFullscreenEffect(CameraEffectStage::AfterTonemapping, materialId)`.
 C# exposes nullable Material properties `Camera.EffectBeforeTonemapping`, `Camera.EffectAfterTonemapping`, and
@@ -389,7 +394,7 @@ graphs are unsupported. Discovery is conservative, not a conditional preprocesso
 
 Snapshot capture supplies the retained inputs to the persistent import cache described below. Process cancellation
 is a separate execution contract.
-The code-shader importer version is 11. Updating importer versions invalidates previously derived outputs; the next
+The code-shader importer version is 12. Updating importer versions invalidates previously derived outputs; the next
 import may therefore take longer while those shaders are rebuilt. Cooked shader schemas are unchanged by this update.
 
 ### Cancelling Background Compilation

@@ -1,4 +1,5 @@
 #pragma once
+#include "Keire/Math/Vector3d.h"
 
 #include "Keire/Math/Math.h"
 #include "KeireInternal/Rendering/CloudVolumeViewUniforms.h"
@@ -35,6 +36,8 @@ namespace Keire::RenderBackend
         Matrix4 RotationViewProjection;
         Matrix4 UnjitteredProjection;
         std::uint64_t FrameId = 0;
+        Vector3d WorldOrigin;
+        std::optional<Detail::ResolvedPlanetFrame> PlanetFrame;
     };
 
     struct CloudTemporalWriter final

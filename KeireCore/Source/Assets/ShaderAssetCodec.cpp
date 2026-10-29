@@ -111,6 +111,7 @@ namespace Keire::Detail
                     {"volumeLightingAbiVersion", definition.VolumeLightingAbiVersion},
                     {"usesVertexMaterialParameters", definition.UsesVertexMaterialParameters},
                     {"instanceAddressingAbiVersion", definition.InstanceAddressingAbiVersion},
+                    {"vfxRenderOriginAbiVersion", definition.VfxRenderOriginAbiVersion},
                     {"occlusionSupport", static_cast<std::uint8_t>(definition.OcclusionSupport)},
                     {"maximumWorldPositionDisplacementRadius",
                      definition.MaximumWorldPositionDisplacementRadius
@@ -153,7 +154,9 @@ namespace Keire::Detail
                 source.at("volumeLightingAbiVersion") != 3U && source.at("volumeLightingAbiVersion") != 4U &&
                 source.at("volumeLightingAbiVersion") != 5U && source.at("volumeLightingAbiVersion") != 6U &&
                 source.at("volumeLightingAbiVersion") != 7U && source.at("volumeLightingAbiVersion") != 8U &&
-                source.at("volumeLightingAbiVersion") != 9U)
+                source.at("volumeLightingAbiVersion") != 9U && source.at("volumeLightingAbiVersion") != 10U &&
+                source.at("volumeLightingAbiVersion") != 11U && source.at("volumeLightingAbiVersion") != 12U &&
+                source.at("volumeLightingAbiVersion") != 13U && source.at("volumeLightingAbiVersion") != 14U)
             {
                 throw std::invalid_argument("Shader volume-lighting ABI version is unsupported.");
             }
@@ -165,6 +168,13 @@ namespace Keire::Detail
             result.UsesVertexMaterialParameters = source.value("usesVertexMaterialParameters", false);
             result.InstanceAddressingAbiVersion =
                 source.value("instanceAddressingAbiVersion", static_cast<std::uint8_t>(0));
+            if (source.contains("vfxRenderOriginAbiVersion") &&
+                (!source.at("vfxRenderOriginAbiVersion").is_number_integer() ||
+                 (source.at("vfxRenderOriginAbiVersion") != 0U && source.at("vfxRenderOriginAbiVersion") != 1U)))
+            {
+                throw std::invalid_argument("Shader VFX render-origin ABI version is unsupported.");
+            }
+            result.VfxRenderOriginAbiVersion = source.value("vfxRenderOriginAbiVersion", static_cast<std::uint8_t>(0));
             result.OcclusionSupport = static_cast<ShaderOcclusionSupport>(
                 source.value("occlusionSupport", static_cast<std::uint8_t>(ShaderOcclusionSupport::None)));
             if (sourceSchemaVersion >= 2U && source.contains("maximumWorldPositionDisplacementRadius") &&

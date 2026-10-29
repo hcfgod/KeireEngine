@@ -18,6 +18,8 @@ namespace Keire
     {
         class SceneRuntimeSpatialAccess;
         class SceneRuntimeEnvironmentAccess;
+        class SceneRuntimeIdentityAccess;
+        class SceneRuntimePlanetAccess;
     } // namespace Detail
 
     struct SceneHandleTag;
@@ -119,6 +121,8 @@ namespace Keire
       private:
         friend class Detail::SceneRuntimeSpatialAccess;
         friend class Detail::SceneRuntimeEnvironmentAccess;
+        friend class Detail::SceneRuntimeIdentityAccess;
+        friend class Detail::SceneRuntimePlanetAccess;
         class Impl;
         std::unique_ptr<Impl> m_Impl;
     };

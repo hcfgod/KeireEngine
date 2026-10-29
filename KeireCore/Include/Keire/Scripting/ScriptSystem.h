@@ -4,6 +4,7 @@
 #include "Keire/Assets/RenderingAssets.h"
 #include "Keire/ECS/Component.h"
 #include "Keire/Input/Input.h"
+#include "Keire/Math/Vector3d.h"
 #include "Keire/Modules/EngineModule.h"
 #include "Keire/Ref.h"
 #include "Keire/Rendering/RenderSystem.h"
@@ -20,6 +21,7 @@
 #include <memory>
 #include <optional>
 #include <span>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -163,6 +165,52 @@ namespace Keire
         std::uint64_t World = 0;
         AssetId ContextEntity;
         Vector3 Center;
+        float Radius = 0.5F;
+        std::uint32_t Mask = ~0U;
+        AssetId IgnoredEntity;
+        bool IncludeTriggers = true;
+    };
+
+    // Precise world-space contracts coexist with the legacy float query ABI.
+    struct ManagedRaycastQueryPrecise
+    {
+        std::uint64_t World = 0;
+        AssetId ContextEntity;
+        Vector3d Origin;
+        Vector3 Direction{0.0F, 0.0F, -1.0F};
+        float MaximumDistance = 1000.0F;
+        std::uint32_t Mask = ~0U;
+        AssetId IgnoredEntity;
+        bool IncludeTriggers = false;
+    };
+
+    struct ManagedRaycastHitPrecise
+    {
+        AssetId Entity;
+        Vector3d Point;
+        Vector3 Normal;
+        float Distance = 0.0F;
+    };
+
+    struct ManagedCapsuleCastQueryPrecise
+    {
+        std::uint64_t World = 0;
+        AssetId ContextEntity;
+        Vector3d Origin;
+        Quaternion Rotation;
+        float Radius = 0.5F;
+        float Height = 1.0F;
+        Vector3 Displacement;
+        std::uint32_t Mask = ~0U;
+        AssetId IgnoredEntity;
+        bool IncludeTriggers = false;
+    };
+
+    struct ManagedSphereOverlapQueryPrecise
+    {
+        std::uint64_t World = 0;
+        AssetId ContextEntity;
+        Vector3d Center;
         float Radius = 0.5F;
         std::uint32_t Mask = ~0U;
         AssetId IgnoredEntity;
@@ -559,6 +607,22 @@ namespace Keire
             return std::nullopt;
         }
         [[nodiscard]] virtual std::vector<AssetId> OverlapSphereManaged(const ManagedSphereOverlapQuery&) { return {}; }
+        [[nodiscard]] virtual std::optional<ManagedRaycastHitPrecise>
+        RaycastManagedPrecise(const ManagedRaycastQueryPrecise&)
+        {
+            throw std::logic_error("Precise managed raycasts are not supported by this runtime service.");
+        }
+
+        [[nodiscard]] virtual std::optional<ManagedRaycastHitPrecise>
+        CapsuleCastManagedPrecise(const ManagedCapsuleCastQueryPrecise&)
+        {
+            throw std::logic_error("Precise managed capsule casts are not supported by this runtime service.");
+        }
+
+        [[nodiscard]] virtual std::vector<AssetId> OverlapSphereManagedPrecise(const ManagedSphereOverlapQueryPrecise&)
+        {
+            throw std::logic_error("Precise managed overlaps are not supported by this runtime service.");
+        }
         virtual void SetManagedCursorVisible(bool) noexcept {}
         virtual void SetManagedCursorLocked(bool) noexcept {}
         [[nodiscard]] virtual bool IsManagedCursorVisible() const noexcept { return true; }

@@ -637,9 +637,9 @@ TEST_CASE("scene transform groups move every selected root once and restore the 
     const std::array selections{parent.Id().Value(), child.Id().Value(), independent.Id().Value()};
     const auto targets = KeireEditor::SceneTransformGroup::Capture(scene, selections, independent.Id());
     REQUIRE(targets.size() == 2);
-    KeireEditor::SceneTransformGroup::Apply(targets, KeireEditor::SceneTool::Translate,
-                                            KeireEditor::SceneTransformAxis::X, 3.0F, {1.0F, 0.0F, 0.0F},
-                                            independent.GetComponent<Keire::TransformComponent>()->WorldPosition(), {});
+    KeireEditor::SceneTransformGroup::Apply(
+        targets, KeireEditor::SceneTool::Translate, KeireEditor::SceneTransformAxis::X, 3.0F, {1.0F, 0.0F, 0.0F},
+        independent.GetComponent<Keire::TransformComponent>()->WorldPositionPrecise(), {});
     CHECK(parent.GetComponent<Keire::TransformComponent>()->WorldPosition().X == doctest::Approx(4.0F));
     CHECK(child.GetComponent<Keire::TransformComponent>()->WorldPosition().X == doctest::Approx(6.0F));
     CHECK(independent.GetComponent<Keire::TransformComponent>()->WorldPosition().X == doctest::Approx(8.0F));
@@ -648,6 +648,33 @@ TEST_CASE("scene transform groups move every selected root once and restore the 
     CHECK(parent.GetComponent<Keire::TransformComponent>()->LocalPosition().X == doctest::Approx(1.0F));
     CHECK(child.GetComponent<Keire::TransformComponent>()->LocalPosition().X == doctest::Approx(2.0F));
     CHECK(independent.GetComponent<Keire::TransformComponent>()->LocalPosition().X == doctest::Approx(5.0F));
+}
+
+TEST_CASE("scene translation and drag cancellation retain precise distant coordinates")
+{
+    auto scene = Keire::CreateRef<Keire::Scene>(Keire::AssetId::Generate(), Keire::SceneAsset::EmptyDefinition());
+    auto parent = scene->CreateEntity("Distant parent");
+    auto parentTransform = parent.GetComponent<Keire::TransformComponent>();
+    parentTransform->SetLocalPositionPrecise({1e15, -1e15, 6371000.0});
+    parentTransform->SetLocalScale({2, 1, 1});
+    auto child = scene->CreateEntity("Traveller");
+    child.SetParent(parent, false);
+    auto transform = child.GetComponent<Keire::TransformComponent>();
+    const Keire::Vector3d local{0.125, -0.25, 0.001};
+    transform->SetLocalPositionPrecise(local);
+    const auto world = transform->WorldPositionPrecise();
+    const std::array selections{child.Id().Value()};
+    const auto targets = KeireEditor::SceneTransformGroup::Capture(scene, selections, child.Id());
+    REQUIRE(targets.size() == 1);
+
+    KeireEditor::SceneTransformGroup::Apply(targets, KeireEditor::SceneTool::Translate,
+                                            KeireEditor::SceneTransformAxis::X, 0.5F, {1, 0, 0}, {}, {});
+    CHECK(transform->WorldPositionPrecise() == Keire::Vector3d{world.X + 0.5, world.Y, world.Z});
+    CHECK(transform->LocalPositionPrecise().X == 0.375);
+    KeireEditor::SceneTransformGroup::Restore(targets);
+    CHECK(transform->LocalPositionPrecise() == local);
+    CHECK(transform->WorldPositionPrecise() == world);
+    scene->Close();
 }
 
 TEST_CASE("scene document targets the isolated runtime scene while playing")
@@ -690,7 +717,7 @@ TEST_CASE("scene document commands validate and target the active scene")
     CHECK(scene->FindEntity(child).Name() == "Child");
     document.RenameEntity(child, "Authored light");
     document.SetEntityActive(child, false);
-    document.SetTransform(child, {.Position = Keire::Vector3{1.0F, 2.0F, 3.0F}});
+    document.SetTransform(child, {.Position = Keire::Vector3d{1.0, 2.0, 3.0}});
     document.SetComponentProperty(child, Keire::PointLightComponent::StaticType(), "intensity", 12.0);
 
     auto entity = scene->FindEntity(child);
@@ -699,8 +726,8 @@ TEST_CASE("scene document commands validate and target the active scene")
     REQUIRE(transform);
     const auto previousScale = transform->LocalScale();
     const auto previousPosition = transform->LocalPosition();
-    CHECK_THROWS_AS(document.SetTransform(child, {.Position = Keire::Vector3{9.0F, 9.0F, 9.0F},
-                                                  .Scale = Keire::Vector3{1.0F, 0.0F, 1.0F}}),
+    CHECK_THROWS_AS(document.SetTransform(
+                        child, {.Position = Keire::Vector3d{9.0, 9.0, 9.0}, .Scale = Keire::Vector3{1.0F, 0.0F, 1.0F}}),
                     std::invalid_argument);
     CHECK(transform->LocalPosition() == previousPosition);
     CHECK(transform->LocalScale() == previousScale);
@@ -1252,6 +1279,7 @@ TEST_CASE("generic property drawers cover every component property kind")
         {{"text", "Text", {}, Keire::ComponentPropertyKind::Text}, std::string("original")},
         {{"vector2", "Vector2", {}, Keire::ComponentPropertyKind::Vector2}, Keire::Vector2{}},
         {{"vector3", "Vector3", {}, Keire::ComponentPropertyKind::Vector3}, Keire::Vector3{}},
+        {{"vector3d", "Precise Position", {}, Keire::ComponentPropertyKind::Vector3d}, Keire::Vector3d{}},
         {{"vector4", "Vector4", {}, Keire::ComponentPropertyKind::Vector4}, Keire::Vector4{}},
         {{"quaternion", "Quaternion", {}, Keire::ComponentPropertyKind::Quaternion}, Keire::Quaternion{}},
         {{"color", "Color", {}, Keire::ComponentPropertyKind::Color}, Keire::Color{}},
@@ -1261,6 +1289,16 @@ TEST_CASE("generic property drawers cover every component property kind")
     for (auto [property, value] : properties)
         CHECK(drawers.Draw(editor, CustomComponent::StaticType(), property, value));
     CHECK(editor.ExpectedAssetType == assetType);
+}
+
+TEST_CASE("Precise vector drawers retain double values")
+{
+    TestPropertyEditor editor;
+    editor.Scalar = 1.0e15 + 0.125;
+    Keire::Vector3d value{};
+    REQUIRE(editor.EditVector3d("Position", value, 0.125));
+    CHECK(value == Keire::Vector3d{editor.Scalar, editor.Scalar, editor.Scalar});
+    CHECK(editor.EditKinds.size() == 3);
 }
 
 TEST_CASE("ScriptableObject property drawers preserve the declared managed type constraint")
@@ -1928,8 +1966,10 @@ TEST_CASE("scene framing bounds use imported mesh metadata and transformed desce
             return std::nullopt;
         });
     REQUIRE(bounds.Valid);
-    CHECK(bounds.Minimum == (Keire::Vector3{6.0F, 0.0F, -4.0F}));
-    CHECK(bounds.Maximum == (Keire::Vector3{14.0F, 10.15F, -2.0F}));
+    CHECK(bounds.Minimum == (Keire::Vector3d{6.0, 0.0, -4.0}));
+    CHECK(bounds.Maximum.X == 14.0);
+    CHECK(bounds.Maximum.Y == doctest::Approx(10.15));
+    CHECK(bounds.Maximum.Z == -2.0);
     CHECK(bounds.Center() == (Keire::Vector3{10.0F, 5.075F, -3.0F}));
     CHECK(bounds.Radius() > 6.5F);
 
@@ -1949,9 +1989,10 @@ TEST_CASE("scene framing bounds use imported mesh metadata and transformed desce
     const auto viewProjection = Keire::Math::Multiply(camera.ProjectionMatrix(1.0F), camera.ViewMatrix());
     for (int corner = 0; corner < 8; ++corner)
     {
-        const Keire::Vector3 point{corner & 1 ? bounds.Maximum.X : bounds.Minimum.X,
-                                   corner & 2 ? bounds.Maximum.Y : bounds.Minimum.Y,
-                                   corner & 4 ? bounds.Maximum.Z : bounds.Minimum.Z};
+        const Keire::Vector3d absolutePoint{corner & 1 ? bounds.Maximum.X : bounds.Minimum.X,
+                                            corner & 2 ? bounds.Maximum.Y : bounds.Minimum.Y,
+                                            corner & 4 ? bounds.Maximum.Z : bounds.Minimum.Z};
+        const auto point = Keire::Math::RelativeFloat(absolutePoint, camera.PreciseFocus(), 0.001);
         const auto& elements = viewProjection.Elements;
         const float clipX = elements[0] * point.X + elements[4] * point.Y + elements[8] * point.Z + elements[12];
         const float clipY = elements[1] * point.X + elements[5] * point.Y + elements[9] * point.Z + elements[13];
@@ -1969,9 +2010,9 @@ TEST_CASE("viewport asset drops dispatch through narrow typed commands")
       public:
         void OpenDroppedScene(const Keire::AssetId asset) override { Scene = asset; }
         void OpenDroppedInputActions(const Keire::AssetId asset) override { Input = asset; }
-        void InstantiateDroppedPrefab(const Keire::AssetId asset, Keire::Vector3) override { Prefab = asset; }
-        void CreateDroppedMeshEntity(const Keire::AssetId asset, Keire::Vector3) override { Mesh = asset; }
-        void CreateDroppedVfxEntity(const Keire::AssetId asset, const Keire::Vector3 position) override
+        void InstantiateDroppedPrefab(const Keire::AssetId asset, Keire::Vector3d) override { Prefab = asset; }
+        void CreateDroppedMeshEntity(const Keire::AssetId asset, Keire::Vector3d) override { Mesh = asset; }
+        void CreateDroppedVfxEntity(const Keire::AssetId asset, const Keire::Vector3d position) override
         {
             Vfx = asset;
             VfxPosition = position;
@@ -1987,7 +2028,7 @@ TEST_CASE("viewport asset drops dispatch through narrow typed commands")
         Keire::AssetId Prefab;
         Keire::AssetId Mesh;
         Keire::AssetId Vfx;
-        Keire::Vector3 VfxPosition;
+        Keire::Vector3d VfxPosition;
         Keire::AssetId Material;
         Keire::EntityId Target;
     } commands;
@@ -2002,9 +2043,9 @@ TEST_CASE("viewport asset drops dispatch through narrow typed commands")
     CHECK(commands.Prefab == asset);
     router.Route(Keire::MeshAsset::StaticType(), asset, {}, {}, commands);
     CHECK(commands.Mesh == asset);
-    router.Route(Keire::VfxEffectAsset::StaticType(), asset, {}, {1.0F, 2.0F, 3.0F}, commands);
+    router.Route(Keire::VfxEffectAsset::StaticType(), asset, {}, {1.0e15 + 0.25, 2.0, -1.0e15}, commands);
     CHECK(commands.Vfx == asset);
-    CHECK(commands.VfxPosition == (Keire::Vector3{1.0F, 2.0F, 3.0F}));
+    CHECK(commands.VfxPosition == (Keire::Vector3d{1.0e15 + 0.25, 2.0, -1.0e15}));
     router.Route(Keire::MaterialAsset::StaticType(), asset, target, {}, commands);
     CHECK(commands.Material == asset);
     CHECK(commands.Target == target);
@@ -2184,4 +2225,55 @@ TEST_CASE("editor window restoration selects visible displays and clamps removed
     const auto small = KeireEditor::CorrectEditorWindowPlacement(removed, smallDisplay);
     CHECK(small.WindowedSize == Keire::LogicalExtent{800, 560});
     CHECK(small.Position == Keire::WindowPosition{0, 0});
+}
+
+TEST_CASE("scene camera persists precise focus and reads legacy camera state")
+{
+    const auto root = std::filesystem::temp_directory_path() / "Keire-PreciseSceneCamera-Test";
+    const auto path = root / "SceneCamera.state";
+    std::filesystem::create_directories(root);
+    KeireEditor::SceneCameraController camera;
+    const Keire::Vector3d focus{1.0e15 + 0.25, -1.0e15 + 0.5, 123456789.12345679};
+    camera.SetFocusPrecise(focus);
+    camera.MarkDirty();
+    REQUIRE(camera.Save(path));
+    KeireEditor::SceneCameraController restored;
+    REQUIRE(restored.Load(path));
+    CHECK(restored.PreciseFocus() == focus);
+    CHECK(restored.RenderCamera(1.0F).WorldOrigin == focus);
+    CHECK(restored.RenderCamera(1.0F).View == camera.RenderCamera(1.0F).View);
+    {
+        std::ofstream legacy(path);
+        legacy << "1\n4 5 6\n35 -15 12\n";
+    }
+    REQUIRE(restored.Load(path));
+    CHECK(restored.PreciseFocus() == (Keire::Vector3d{4.0, 5.0, 6.0}));
+    std::filesystem::remove_all(root);
+}
+
+TEST_CASE("scene rotation and scaling preserve a distant precise pivot")
+{
+    auto scene = Keire::CreateRef<Keire::Scene>(Keire::AssetId::Generate(), Keire::SceneAsset::EmptyDefinition());
+    auto entity = scene->CreateEntity("Distant handle");
+    const auto transform = entity.GetComponent<Keire::TransformComponent>();
+    const Keire::Vector3d pivot{1.0e15 + 0.25, -1.0e15, 0.0};
+    const Keire::Vector3d initial{pivot.X + 2.0, pivot.Y, 0.0};
+    transform->SetLocalPositionPrecise(initial);
+    const std::array selections{entity.Id().Value()};
+    const auto targets = KeireEditor::SceneTransformGroup::Capture(scene, selections, entity.Id());
+    KeireEditor::SceneTransformGroup::Apply(targets, KeireEditor::SceneTool::Rotate, KeireEditor::SceneTransformAxis::Z,
+                                            90.0F, {0, 0, 1}, pivot, {});
+    const auto rotated = transform->WorldPositionPrecise();
+    CHECK(rotated.X == pivot.X);
+    CHECK(rotated.Y == pivot.Y + 2.0);
+    KeireEditor::SceneTransformGroup::Restore(targets);
+    CHECK(transform->WorldPositionPrecise() == initial);
+    KeireEditor::SceneTransformGroup::Apply(targets, KeireEditor::SceneTool::Scale,
+                                            KeireEditor::SceneTransformAxis::Uniform, 1.0F, {1, 1, 1}, pivot, {});
+    CHECK(transform->WorldPositionPrecise() == Keire::Vector3d{pivot.X + 4.0, pivot.Y, 0.0});
+    CHECK(transform->LocalScale() == Keire::Vector3{2, 2, 2});
+    KeireEditor::SceneTransformGroup::Restore(targets);
+    CHECK(transform->WorldPositionPrecise() == initial);
+    CHECK(transform->LocalScale() == Keire::Vector3{1, 1, 1});
+    scene->Close();
 }

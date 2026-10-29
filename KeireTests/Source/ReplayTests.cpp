@@ -9,6 +9,9 @@
 #include <fstream>
 #include <iterator>
 #include <limits>
+#include <stdexcept>
+#include <string>
+#include <utility>
 #include <vector>
 
 namespace
@@ -292,6 +295,97 @@ TEST_CASE("replay checkpoint restoration rolls every serializer back when a late
     CHECK(second == 20);
     CHECK(playback->Status().State == Keire::ReplaySessionState::Failed);
     CHECK_FALSE(playback->Status().Diagnostic.empty());
+}
+
+TEST_CASE("replay restores dependencies before dependent state on playback and rollback")
+{
+    for (const bool failRestore : {false, true})
+    {
+        CAPTURE(failRestore);
+        ReplayDirectory directory;
+        const auto path = directory.Path / "dependent.keirereplay";
+        int scene = 1;
+        int physics = 2;
+        auto recorder = Keire::CreateRef<Keire::ReplaySystem>();
+        auto sceneSerializer = IntegerSerializer(scene);
+        sceneSerializer.Id = "z.scene";
+        auto physicsSerializer = IntegerSerializer(physics);
+        physicsSerializer.Id = "a.physics";
+        physicsSerializer.RestoreAfter = {"z.scene"};
+        recorder->RegisterSerializer(sceneSerializer);
+        recorder->RegisterSerializer(physicsSerializer);
+        recorder->BeginRecording({path});
+        (void)recorder->BeginFixedTick({.Tick = 1});
+        recorder->EndFixedTick(1);
+        recorder->Stop();
+
+        scene = 10;
+        physics = 20;
+        std::vector<std::string> order;
+        sceneSerializer.Restore = [&](const std::span<const std::byte> bytes)
+        {
+            REQUIRE(bytes.size() == sizeof(scene));
+            std::memcpy(&scene, bytes.data(), sizeof(scene));
+            physics = 0;
+            order.push_back("scene");
+        };
+        physicsSerializer.Restore = [&](const std::span<const std::byte> bytes)
+        {
+            REQUIRE(bytes.size() == sizeof(physics));
+            std::memcpy(&physics, bytes.data(), sizeof(physics));
+            order.push_back("physics");
+            if (failRestore && physics == 2)
+            {
+                throw std::runtime_error("dependent restore failed");
+            }
+        };
+        auto playback = Keire::CreateRef<Keire::ReplaySystem>();
+        playback->RegisterSerializer(std::move(physicsSerializer));
+        playback->RegisterSerializer(std::move(sceneSerializer));
+        if (failRestore)
+        {
+            CHECK_THROWS_WITH_AS(playback->BeginPlayback({path}), "dependent restore failed", std::runtime_error);
+            CHECK(scene == 10);
+            CHECK(physics == 20);
+            CHECK(order == std::vector<std::string>{"scene", "physics", "scene", "physics"});
+        }
+        else
+        {
+            REQUIRE_NOTHROW(playback->BeginPlayback({path}));
+            CHECK(scene == 1);
+            CHECK(physics == 2);
+            CHECK(order == std::vector<std::string>{"scene", "physics"});
+        }
+    }
+}
+
+TEST_CASE("replay rejects invalid restore dependencies before capturing state")
+{
+    ReplayDirectory directory;
+    for (const auto& dependencies :
+         std::vector<std::vector<std::string>>{{"missing"}, {"first"}, {"second", "second"}, {"second"}})
+    {
+        CAPTURE(dependencies);
+        int state = 0;
+        int captures = 0;
+        auto replay = Keire::CreateRef<Keire::ReplaySystem>();
+        auto first = IntegerSerializer(state);
+        first.Id = "first";
+        first.RestoreAfter = dependencies;
+        first.Capture = [&]
+        {
+            ++captures;
+            return std::vector<std::byte>(sizeof(state));
+        };
+        auto second = first;
+        second.Id = "second";
+        second.RestoreAfter = {"first"};
+        replay->RegisterSerializer(std::move(first));
+        replay->RegisterSerializer(std::move(second));
+        CHECK_THROWS_AS(replay->BeginRecording({directory.Path / "invalid.keirereplay"}), std::invalid_argument);
+        CHECK(captures == 0);
+        CHECK(replay->Status().State == Keire::ReplaySessionState::Failed);
+    }
 }
 
 TEST_CASE("replay enforces rewind and decoded-size budgets before retaining data")

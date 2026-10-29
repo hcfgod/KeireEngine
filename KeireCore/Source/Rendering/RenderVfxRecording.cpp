@@ -1,4 +1,5 @@
 #include "KeireInternal/Rendering/RenderBackendInternal.h"
+#include "KeireInternal/Rendering/VfxRenderCoordinates.h"
 #include "KeireInternal/Vfx/VfxGpuValidationInternal.h"
 
 #include "Keire/Log.h"
@@ -702,8 +703,14 @@ namespace Keire::RenderBackend
         static_assert(sizeof(Dispatch) == 1776);
         Dispatch dispatch;
         dispatch.Capacity = resources.Capacity;
-        dispatch.CollisionViewProjection = surface.SampledDepthViewProjection;
-        dispatch.CollisionInverseViewProjection = surface.SampledDepthInverseViewProjection;
+        if (surface.SampledDepthValid)
+        {
+            const auto collisionFrame =
+                MakeVfxCollisionFrame(surface.SampledDepthViewProjection, surface.SampledDepthInverseViewProjection,
+                                      snapshot.WorldOrigin(), surface.SampledDepthWorldOrigin);
+            dispatch.CollisionViewProjection = collisionFrame.ViewProjection;
+            dispatch.CollisionInverseViewProjection = collisionFrame.InverseViewProjection;
+        }
         dispatch.CollisionParameters = {surface.SampledDepthValid ? 1.0F : 0.0F, static_cast<float>(surface.Width),
                                         static_cast<float>(surface.Height), 0.002F};
         const auto simulationDelta = [](const VfxGpuEmitter& emitter) noexcept
@@ -1166,6 +1173,10 @@ namespace Keire::RenderBackend
         }
         const auto consumeSimulation = resources.ShouldConsumeSimulationStep(snapshot.SimulationStepRevision());
         const auto resetWorld = applySnapshot && resources.ResetRevision != snapshot.ResetRevision();
+        const auto originTranslation = resources.HasAppliedSnapshot && !resetWorld
+                                           ? Math::RelativeFloat(resources.SimulationOrigin, snapshot.WorldOrigin(),
+                                                                 std::numeric_limits<float>::max())
+                                           : Vector3{};
         auto nextEmitters = resetWorld ? decltype(resources.Emitters){} : resources.Emitters;
         if (resetWorld)
             dispatchCompute(VfxInitializePipeline, (resources.Capacity + 255U) / 256U);
@@ -1208,12 +1219,28 @@ namespace Keire::RenderBackend
             }
             for (const auto& emitter : snapshot.GpuEmitters())
             {
-                if (emitter.Space != VfxSimulationSpace::Local)
-                    continue;
                 const auto key =
                     (static_cast<std::uint64_t>(emitter.Handle.Index()) << 32U) | emitter.Handle.Generation();
                 const auto previous = nextEmitters.find(key);
-                if (previous == nextEmitters.end() || previous->second.Space != VfxSimulationSpace::Local ||
+                if (previous == nextEmitters.end())
+                {
+                    continue;
+                }
+                if (emitter.Space == VfxSimulationSpace::World)
+                {
+                    if (originTranslation == Vector3{})
+                    {
+                        continue;
+                    }
+                    dispatch.Position = {originTranslation.X, originTranslation.Y, originTranslation.Z, 0.0F};
+                    dispatch.PreviousPosition = {};
+                    dispatch.Rotation = {0.0F, 0.0F, 0.0F, 1.0F};
+                    dispatch.PreviousRotation = dispatch.Rotation;
+                    dispatch.Identity = {emitter.Handle.Index(), emitter.Handle.Generation(), 0U, 0U};
+                    dispatchCompute(VfxTransformPipeline, (resources.Capacity + 255U) / 256U);
+                    continue;
+                }
+                if (previous->second.Space != VfxSimulationSpace::Local ||
                     (previous->second.Position == emitter.Position && previous->second.Rotation == emitter.Rotation))
                 {
                     continue;
@@ -1394,6 +1421,7 @@ namespace Keire::RenderBackend
         if (applySnapshot)
         {
             resources.ResetRevision = snapshot.ResetRevision();
+            resources.SimulationOrigin = snapshot.WorldOrigin();
             resources.MarkSnapshotApplied(snapshot.Revision());
         }
         if (consumeSimulation)

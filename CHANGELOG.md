@@ -1,6 +1,137 @@
 # Changelog
 
 ## Unreleased
+- Add development planetary settings, sector-relative environment capture, spherical clouds, explicit gravity
+  modes, and cooked manifest schema 12. Preview and runtime own separate paused simulation clocks; replay
+  restores planet time. Live rotating physics-frame transfers and integrated travel acceptance remain unfinished.
+- Open startup source scenes before compatible asset refresh completes, preserving edits while gating Play on
+  readiness. Exclude stale cooked assets and persist publication failures for retry. Performance validation pending.
+- Add opt-in development planet-relative fog height, preserving legacy flat-height records. Clip radial
+  integration to the meaningful density layer so thin tangent haze is not skipped by long rays. Focused GPU
+  probes pass; complete native, editor/player and performance acceptance remains pending.
+- Preserve planet placement, radius, atmosphere thickness and enabled state when resetting atmosphere
+  appearance. Six editor atmosphere cases pass, including save and Undo/Redo; interactive reset preserves distant placement.
+- Fade authored sky-color gradients by planet-relative altitude, preserving surface appearance when
+  camera and planet are translated together. Sky/atmosphere tests pass; rendered validation is pending.
+- Extend periodic horizontal cloud coordinates to +/-1e12 metres while retaining the vertical domain
+  limit; 127 cloud/atmosphere regression cases pass. Rendered validation remains pending.
+- Advance deterministic-session VFX on fixed simulation ticks, including paused stepping, rather than
+  variable render frames. Render-cadence and existing scene VFX regressions pass (9 cases / 422 assertions).
+- Correct fallback contact-normal orientation to match live contacts. Prevent unsupported bodies
+  under weak gravity from sleeping while retaining solid-contact sleep. Physics/radial regressions pass;
+  updated editor/player integration is pending.
+- Add project default gravity with XYZ acceleration, Earth/Zero presets, legacy defaults,
+  Play-session initialization and player export. Native tests and editor preset persistence pass;
+  full editor and exported-player acceptance remain pending.
+- Persist installed body motion settings in physics checkpoints and restore limits before velocities.
+  Physics replay schema advances to 5; native integration/player validation is pending.
+- Add native rigid-body damping and speed-limit settings, including in-place updates.
+  Add grouped component fields, serialization defaults and C# access; integration validation is still in progress.
+- Implement native radial gravity sources with finite-radius interiors, per-body solver forces and checkpoint persistence.
+  Physics replay schema advances to 4. Native three-revolution orbit tests pass near/far origins with rebasing;
+  standalone replay validation remains open.
+- Preserve native body identity and angular velocity when gameplay changes linear velocity or gravity enablement.
+  Focused motion and broad physics/support regressions pass.
+- Drop stale character support when a changed capsule-up direction makes its previous ground normal unwalkable,
+  preventing carry, stepping and grounded grace from retaining the old surface.
+- Use capsule-local up for character movement, step/slope evaluation and grounding instead of world Y.
+  Rotated/distant landing, walking and jump tests pass; automatic gravity alignment is not implemented.
+- Add world-level physics checkpoints with gravity and explicit absent-world state. Runtime physics replay moves
+  to version 4 with radial sources; older physics serializer versions are rejected. Uniform-gravity checkpoint tests pass;
+  radial-source and player replay validation
+  remains pending.
+- Reject physics checkpoint restores that lose fractional local position during double addition, before mutating bodies.
+- Add native per-world uniform gravity control, preserving acceleration across translation rebases and waking
+  affected dynamic bodies when gravity changes. Focused native tests pass; scene/checkpoint integration remains open.
+- Add explicitly assigned runtime focus following at fixed-step boundaries, with coordinated physics/VFX rebasing.
+  Focused integration/lifecycle regressions pass; automatic player selection and world partitioning remain open.
+- Add a coordinated scene-origin migration entry point that prepares VFX before committing physics/support caches
+  and VFX together. Focused transaction, lifecycle and precision-failure tests pass.
+- Reject origin translations that lose local detail during double addition before float conversion, preserving
+  physics and VFX state when the requested precision budget cannot be met.
+- Add explicit VFX-origin migration with CPU particle-history translation and GPU retained-particle translation.
+  CPU/snapshot regressions and Direct3D 12/Vulkan rendered-position checks pass; trail validation and scene-wide
+  automatic migration remain unfinished.
+- Add explicit live physics-origin translation and coordinated scene support/grounding cache translation.
+  Repeated stack, contact and moving-support regressions pass; automatic planetary migration is unfinished.
+- Report runtime replacement initialization failures and restore the prior playing/paused mode on a valid retry.
+  Failure-injection and lifecycle tests pass; this does not provide complete replay transaction rollback.
+- Add explicit replay restore dependencies for both playback and rollback, with preflight graph validation.
+  Standalone scene-dependent serializers declare their prerequisite. Native validation is in progress.
+
+- Convert legacy scene queries, animation foot probes/support anchors, and VFX collision segments through the
+  physics region origin. VFX hits return in their simulation frame without an absolute float intermediate.
+  Focused query, grounding and VFX regressions pass; initial distant scene-region selection is supported; dynamic region transfer remains unfinished.
+- Add real-solver far-origin stack stability and thin-wall CCD regressions through 1e15 metres, plus differing-origin
+  VFX collision precision coverage. These fixed-region tests do not establish planetary-travel readiness.
+
+- Carry a double `PointPrecise` through native and managed collision/trigger callbacks while retaining the legacy
+  approximate `Point`. Legacy managed construction and callback entry points widen their supplied float point.
+  Managed production API, design-time parity and native callback integration tests pass.
+
+- Add native scene precise raycast, capsule cast, and sphere overlap queries with double world positions, checked
+  conversion into the solver region, and entity filtering. Legacy queries remain available. The DevDist test build
+  and 74 focused regressions pass; precise managed bindings and editor/player consumer builds now pass focused validation.
+
+- Retain simulation origins in scene physics checkpoints and validate all origin conversions before restoring
+  bodies. Standalone physics replay serializer/schema advances to version 2 to preserve those origins; version-1
+  physics replay checkpoints are incompatible. Native checkpoint regressions and the standalone player build pass;
+  fresh-process playback currently fails on managed world identity; end-to-end replay remains unverified.
+
+- Use the physics origin consistently for character sweeps, grounding, and moving-platform anchors. Focused
+  controller/query/presentation regressions pass, including distant-parent cancellation; planetary scene-region
+  selection and transfer remain unfinished.
+
+- Preserve precise positions separately from linear transforms in physics presentation interpolation, and avoid
+  absolute float matrices when applying character displacement. Add authoritative origin-relative transform
+  matrices for simulation consumers. The DevDist build and 66 focused physics, transform, query, and presentation
+  regressions pass; automatic scene-region selection and planetary travel validation remain pending.
+
+- Add immutable double-precision origins and checked world-to-local position conversion to native physics worlds.
+  Debug snapshots retain the simulation origin. The DevDist build and focused native physics tests pass;
+  scene physics integration and planetary gameplay acceptance remain pending.
+
+- Use the same precise, interpolated scene camera in the standalone player and editor Game view, preserving
+  projection, clip planes, clear color, and fullscreen effects. Focused camera tests and the runtime build pass;
+  rendered standalone validation remains pending.
+
+- Keep scene framing bounds in double precision so focusing a small object far from the current camera does not
+  round away its position or collapse its extents. Focused regressions and a desktop focus/translation/undo check
+  at X = 1,000,000,000,000.25 pass; this does not establish complete planetary travel support.
+
+- Integrate double-precision editor camera focus and persistence, origin-relative selection and gizmos,
+  precise asset-drop routing, and runtime camera/UI coordinate origins. World UI retains its source origin
+  through frame capture. Compilation and focused regression validation are in progress; rendered large-world
+  and planetary travel acceptance remains outstanding.
+
+- Advance generated material shaders to revision 37 for GPU billboard/ribbon coordinate conversion before lighting.
+  Cached material imports regenerate; focused native and production-importer tests pass. Rendered validation remains pending.
+
+- Add an immutable double-precision VFX simulation origin, checked precise activation/transform APIs, and
+  origin metadata in snapshots and version-2 checkpoints. Legacy version-1 checkpoints use the zero origin;
+  mismatched checkpoint origins are rejected. CPU particle render capture converts current and previous
+  positions into their respective camera frames. GPU draw, visibility and depth-collision origin integration passes
+  focused native tests; rendered validation remains incomplete.
+
+- Begin origin-aware render capture with explicit camera/world and environment-anchor coordinates. Meshes,
+  lighting, probes and environment packing share the coordinate contract; camera/cloud history retain origins.
+  Focused headless tests pass; rendered validation is pending. Editor and runtime camera producers now adopt this contract; their integrated validation remains pending.
+
+- Retain double translation through fixed-step presentation and hierarchy composition. Add checked origin-relative
+  presentation matrices and precise runtime position overrides. Focused tests pass; renderer integration is in progress.
+
+- Preserve double coordinates in scene snapshot summaries and prefab transform codecs. Add precise prefab
+  placement with source-relative arithmetic to retain small destination offsets. Validation is in progress;
+  camera-based placement and planetary runtime integration remain incomplete.
+
+- Fix starter-project material generation exceeding the portable sixteen-sampler budget. Generated materials
+  that exhaust the sampler budget use volume ABI 10's read-only cloud-noise buffer; lower-resource materials
+  retain hardware texture filtering. Integrated rendering and performance acceptance are in progress.
+
+- Begin the large-world position migration with native and managed `Vector3d`, checked origin-relative float
+  conversion, double transform storage, schema-1 scene-component migration and precise hierarchy edits.
+  C# precise transform access uses separate, size-checked calls. Renderer, physics, scene editing and planetary
+  travel integration remain in progress; this does not announce complete large-world support.
 
 - Add development fog exclusion regions with soft edges, strength, enable controls and strongest-overlap behavior.
   Volume ABI 9 and Shader Graph importer 50 carry the new uniforms; legacy fog records load without exclusions.

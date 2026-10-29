@@ -843,7 +843,7 @@ internal static class ManagedReferenceGraphCodec
         type == typeof(ushort) || type == typeof(int) || type == typeof(uint) || type == typeof(long) ||
         type == typeof(ulong) || type == typeof(char) || type == typeof(float) || type == typeof(double) ||
         type == typeof(decimal) || type == typeof(string) || type == typeof(Guid) || type.IsEnum ||
-        type == typeof(Vector2) || type == typeof(Vector3) || type == typeof(Vector4) ||
+        type == typeof(Vector2) || type == typeof(Vector3) || type == typeof(Vector3d) || type == typeof(Vector4) ||
         type == typeof(Quaternion) || type == typeof(Color);
 
     private static void ValidateScalarValue(object value, Type declaredType, string path)

@@ -14,7 +14,7 @@
 namespace Keire::Detail
 {
     inline constexpr std::array<char, 8> VfxCheckpointMagic{'K', 'R', 'V', 'F', 'X', 'C', 'P', '\0'};
-    inline constexpr std::uint32_t VfxCheckpointVersion = 1;
+    inline constexpr std::uint32_t VfxCheckpointVersion = 2;
 
     class VfxCheckpointWriter final
     {

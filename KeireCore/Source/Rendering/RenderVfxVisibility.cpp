@@ -1,4 +1,5 @@
 #include "KeireInternal/Rendering/RenderBackendInternal.h"
+#include "KeireInternal/Rendering/VfxRenderCoordinates.h"
 
 #include <array>
 #include <cstdint>
@@ -14,9 +15,10 @@ namespace
         std::array<std::uint32_t, 4> Execution{};
         Keire::Vector4 BoundsMinimum;
         Keire::Vector4 BoundsMaximum;
+        Keire::Vector4 SimulationToRender;
     };
 
-    static_assert(sizeof(VfxVisibilityDispatch) == 64);
+    static_assert(sizeof(VfxVisibilityDispatch) == 80);
 
     [[nodiscard]] std::uint64_t EmitterKey(const Keire::VfxGpuEmitter& emitter) noexcept
     {
@@ -136,6 +138,9 @@ namespace Keire::RenderBackend
                 const auto primitiveCount =
                     emitter.Renderer == VfxRendererType::Mesh ? ResolveMesh(emitter.Mesh).IndexCount : 6U;
                 VfxVisibilityDispatch dispatch;
+                const auto originOffset =
+                    VfxPositionInRenderFrame({}, snapshot.WorldOrigin(), packet.Camera.WorldOrigin);
+                dispatch.SimulationToRender = {originOffset.X, originOffset.Y, originOffset.Z, 0.0F};
                 dispatch.Metadata = {occlusion.VfxCandidateFirst + planEntry.First, planEntry.First, planEntry.Count,
                                      primitiveCount};
                 dispatch.Execution = {world->second.Capacity, source.Capacity,
@@ -306,6 +311,9 @@ namespace Keire::RenderBackend
                 const auto primitiveCount =
                     emitter.Renderer == VfxRendererType::Mesh ? ResolveMesh(emitter.Mesh).IndexCount : 6U;
                 VfxVisibilityDispatch dispatch;
+                const auto originOffset =
+                    VfxPositionInRenderFrame({}, snapshot.WorldOrigin(), packet.Camera.WorldOrigin);
+                dispatch.SimulationToRender = {originOffset.X, originOffset.Y, originOffset.Z, 0.0F};
                 dispatch.Metadata = {occlusion.VfxCandidateFirst + planEntry.First, planEntry.First, planEntry.Count,
                                      primitiveCount};
                 dispatch.Execution = {world->second.Capacity, source.Capacity,

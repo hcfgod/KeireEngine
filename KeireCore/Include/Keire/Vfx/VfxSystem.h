@@ -6,6 +6,7 @@
 #include "Keire/Authoring/GraphAuthoring.h"
 #include "Keire/Math/Curves.h"
 #include "Keire/Math/Math.h"
+#include "Keire/Math/Vector3d.h"
 #include "Keire/Ref.h"
 #include "Keire/Vfx/VfxValueOpcode.h"
 
@@ -1061,6 +1062,9 @@ namespace Keire
         std::function<std::optional<VfxResourceQueryResult>(const VfxResourceQuery& query)> ResourceQuery;
         /// Resolves referenced VFX Subgraph assets during activation and reload. Missing dependencies fail explicitly.
         VfxSubgraphResolver SubgraphResolver;
+        /// Initial simulation-frame origin, copied when the world is constructed. Float positions and
+        /// collision/resource callbacks are relative to it; zero preserves the original coordinate convention.
+        Vector3d WorldOrigin;
     };
 
     /// Parameters used to create one effect instance.
@@ -1070,7 +1074,8 @@ namespace Keire
         Ref<const VfxEffectAsset> Effect;
         /// Nonzero content revision used by Reload and render synchronization.
         std::uint64_t Revision = 1;
-        /// Initial emitter world position and rotation. Scale is intentionally not part of the VFX contract.
+        /// Initial emitter position relative to VfxWorld::WorldOrigin(), and rotation in that same frame.
+        /// Scale is intentionally not part of the VFX contract.
         Vector3 Position;
         Quaternion Rotation;
         /// Combined with VfxEffectDefinition::Seed using XOR for deterministic per-emitter variation.
@@ -1325,6 +1330,7 @@ namespace Keire
         [[nodiscard]] std::uint64_t SimulationStepRevision() const noexcept { return m_SimulationStepRevision; }
         [[nodiscard]] std::uint32_t ParticleCapacity() const noexcept { return m_ParticleCapacity; }
         [[nodiscard]] float DeltaSeconds() const noexcept { return m_DeltaSeconds; }
+        [[nodiscard]] Vector3d WorldOrigin() const noexcept { return m_WorldOrigin; }
         [[nodiscard]] std::span<const VfxRenderParticle> Particles() const noexcept { return m_Particles; }
         [[nodiscard]] std::span<const VfxGpuEmitter> GpuEmitters() const noexcept { return m_GpuEmitters; }
         [[nodiscard]] std::size_t DroppedParticles() const noexcept { return m_DroppedParticles; }
@@ -1337,6 +1343,7 @@ namespace Keire
         std::uint64_t m_SimulationStepRevision = 0;
         std::uint32_t m_ParticleCapacity = 0;
         float m_DeltaSeconds = 0.0F;
+        Vector3d m_WorldOrigin;
         std::vector<VfxRenderParticle> m_Particles;
         std::vector<VfxGpuEmitter> m_GpuEmitters;
         std::size_t m_DroppedParticles = 0;
@@ -1374,14 +1381,31 @@ namespace Keire
         /// Activates an effect and retains activation.Effect. Returns an empty handle when the effect budget is full;
         /// malformed activations throw std::invalid_argument.
         [[nodiscard]] VfxHandle Activate(const VfxActivation& activation);
+        /// Converts an absolute position in the same coordinate frame as WorldOrigin() before activation, replacing
+        /// activation.Position. The finite, nonnegative error budget is measured in metres per coordinate.
+        /// Invalid or unrepresentable positions throw before activation changes the world.
+        [[nodiscard]] VfxHandle ActivatePrecise(const VfxActivation& activation, Vector3d position,
+                                                double maximumError);
+        [[nodiscard]] Vector3d WorldOrigin() const noexcept;
+        /// Translates the simulation frame while retaining live handles, ages and spawn progress.
+        /// CPU world-space particle positions and history are checked against the supplied per-axis error budget.
+        /// GPU particle translation is applied when the next snapshot is rendered, using GPU float precision.
+        /// Local-space particle coordinates remain unchanged. Invalid conversions leave CPU state unchanged.
+        void RebaseOrigin(Vector3d origin, double maximumError = 0.001);
         /// Returns true only while handle still identifies its original active generation in this world.
         [[nodiscard]] bool IsAlive(VfxHandle handle) const noexcept;
         /// Stops a live handle and releases only its particles. GPU retirement is generation-qualified, so unrelated
         /// handles in the same world keep their particles and spawn progress. Stale handles are ignored.
         void Stop(VfxHandle handle);
-        /// Updates the emitter origin. On both backends, Local particles follow the rigid position/rotation change;
+        /// Updates the emitter position relative to WorldOrigin(). On both backends, Local particles follow the
+        /// rigid position/rotation change;
         /// existing World particles remain where they spawned. Scale is not part of this contract.
         void SetTransform(VfxHandle handle, Vector3 position, Quaternion rotation);
+        /// Converts an absolute position in the same coordinate frame as WorldOrigin(), then applies SetTransform.
+        /// The finite, nonnegative per-coordinate error budget is measured in metres. Conversion failures leave
+        /// the world unchanged; invalid inputs throw std::invalid_argument and precision/range failures throw
+        /// std::out_of_range. This does not change the simulation origin.
+        void SetTransformPrecise(VfxHandle handle, Vector3d position, Quaternion rotation, double maximumError);
         /// Sets a per-effect 0..8 simulation multiplier. Zero pauses this handle.
         void SetSimulationSpeed(VfxHandle handle, float speed);
         /// Replaces all overrides transactionally. Unknown, hidden, or type-mismatched parameters are rejected.
@@ -1416,6 +1440,9 @@ namespace Keire
         void Clear() noexcept;
 
       private:
+        friend class SceneRuntimeSession;
+        /// The prerequisite must not mutate this VFX world. It runs after preflight, before the no-allocation commit.
+        void RebaseOriginAfter(Vector3d origin, double maximumError, const std::function<void()>& prerequisite);
         class Impl;
         std::unique_ptr<Impl> m_Impl;
     };

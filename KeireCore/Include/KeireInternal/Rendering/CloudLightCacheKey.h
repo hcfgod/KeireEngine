@@ -27,6 +27,9 @@ namespace Keire::RenderBackend
         std::uint32_t ShadowSteps = 0;
         bool AmbientOcclusionEnabled = false;
         bool SunlightEnabled = false;
+        PlanetaryCloudUniforms PlanetaryCloud;
+        AssetId Planet;
+        std::uint64_t DiscontinuityRevision = 0;
 
         bool operator==(const CloudLightCacheKey&) const noexcept = default;
     };
@@ -54,6 +57,7 @@ namespace Keire::RenderBackend
                 view.Volume.Quality[1],
                 view.Volume.Quality[3],
                 view.AmbientRadiance.W > 0.0F,
-                sunlightEnabled};
+                sunlightEnabled,
+                view.PlanetaryCloud};
     }
 } // namespace Keire::RenderBackend

@@ -1,5 +1,7 @@
 var tests = new (string Name, Action Run)[]
 {
+    ("Rigid body motion settings validate and round trip through the native bridge", RigidBodyMotionSettingsTests.Run),
+    ("Precise positions subtract origins before bounded float conversion", PrecisePositionTests.Run),
     ("Transform aliases and axis-angle rotation preserve composition validation and identity", TransformRotationTests.Run),
     ("Asset-bound limb goals preserve the native bridge contract", BoundLimbBridgeTests.Run),
     ("Generic limb gait scheduling preserves support recovery and atomic admission", LimbGaitSchedulerTests.Run),

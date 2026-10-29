@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Keire/Math/Math.h"
+#include "Keire/Math/Vector3d.h"
 #include "Keire/Rendering/Atmosphere.h"
 
 #include <algorithm>
@@ -23,18 +24,21 @@ namespace Keire::RenderBackend
     static_assert(sizeof(AtmosphereUniforms) == sizeof(float) * 28);
 
     [[nodiscard]] inline AtmosphereUniforms MakeAtmosphereUniforms(const AtmosphereSettings& settings,
-                                                                   const Vector3 observer,
-                                                                   const Vector3 lightDirection) noexcept
+                                                                   const Vector3 observer, const Vector3 lightDirection,
+                                                                   const Vector3d renderOrigin = {},
+                                                                   const Vector3d environmentAnchor = {}) noexcept
     {
         constexpr double MetresPerKilometre = 1000.0;
         const auto kilometres = [](const double value) { return static_cast<float>(value / MetresPerKilometre); };
         const auto perKilometre = [](const double value) { return static_cast<float>(value * MetresPerKilometre); };
-        // Subtract before narrowing; this does not restore precision already lost in a float scene transform.
+        // Cancel frame origins and the planet centre before adding the local camera offset.
+        // This retains local detail even when the planet is far from the global origin.
         AtmosphereUniforms result{};
-        result.ObserverRadius = {kilometres(static_cast<double>(observer.X) - settings.PlanetCenter[0]),
-                                 kilometres(static_cast<double>(observer.Y) - settings.PlanetCenter[1]),
-                                 kilometres(static_cast<double>(observer.Z) - settings.PlanetCenter[2]),
-                                 kilometres(settings.PlanetRadius)};
+        result.ObserverRadius = {
+            kilometres(((renderOrigin.X - environmentAnchor.X) - settings.PlanetCenter[0]) + observer.X),
+            kilometres(((renderOrigin.Y - environmentAnchor.Y) - settings.PlanetCenter[1]) + observer.Y),
+            kilometres(((renderOrigin.Z - environmentAnchor.Z) - settings.PlanetCenter[2]) + observer.Z),
+            kilometres(settings.PlanetRadius)};
         const double directionLength =
             std::hypot(static_cast<double>(lightDirection.X), static_cast<double>(lightDirection.Y),
                        static_cast<double>(lightDirection.Z));

@@ -2,7 +2,10 @@
 
 #include "KeireInternal/Environment/EnvironmentLightingEvaluation.h"
 #include "KeireInternal/Environment/SceneRuntimeEnvironmentAccess.h"
+#include "KeireInternal/Physics/GravityField.h"
+#include "KeireInternal/Scenes/SceneRuntimeIdentityAccess.h"
 #include "KeireInternal/Spatial/FrameRegistry.h"
+#include "KeireInternal/Spatial/SceneRuntimePlanetAccess.h"
 #include "KeireInternal/Spatial/SceneRuntimeSpatialAccess.h"
 
 #include <algorithm>
@@ -87,6 +90,7 @@ namespace Keire
         {
             SceneHandle Handle;
             AssetId Asset;
+            AssetId Instance;
             Ref<SceneRuntimeSession> Runtime;
             std::set<EntityId> PersistentRoots;
             Detail::FrameAttachment SpatialAttachment;
@@ -130,6 +134,10 @@ namespace Keire
         {
             if (!session)
                 throw std::invalid_argument("SceneRuntimeWorld requires a runtime session.");
+            if (std::ranges::any_of(Entries, [&](const Entry& entry) { return entry.Runtime == session; }))
+            {
+                throw std::invalid_argument("A runtime session already belongs to this world.");
+            }
             const auto runtimeScene = session->RuntimeScene();
             const auto editScene = session->EditScene();
             if (!runtimeScene && !editScene)
@@ -139,8 +147,9 @@ namespace Keire
             Entry entry;
             entry.Handle = handle;
             entry.Asset = asset;
+            entry.Instance = AssetId::Generate();
             entry.Runtime = std::move(session);
-            entry.SpatialAttachment = Spatial.Attach(Spatial.Find(Detail::SceneRuntimeSpatialAccess::RootFrame));
+            entry.SpatialAttachment = Spatial->Attach(Spatial->Find(Detail::SceneRuntimeSpatialAccess::RootFrame));
             Entries.push_back(std::move(entry));
             if (!Active)
                 Active = handle;
@@ -162,6 +171,7 @@ namespace Keire
             {
                 // Publish ownership before Play invokes callbacks on the newly cloned scene.
                 session->Play();
+                ApplyConfiguredGravity(session);
                 if (Paused)
                 {
                     session->Pause();
@@ -264,12 +274,106 @@ namespace Keire
             return result;
         }
 
+        [[nodiscard]] std::vector<Detail::BoundFrameSnapshot> PublishPlanetFrames(const double time)
+        {
+            std::vector<Detail::FrameSnapshot> evaluations;
+            evaluations.reserve(Planets.size());
+            for (const auto& planet : Planets)
+            {
+                evaluations.push_back(Detail::EvaluatePlanetFrame(planet, time, Spatial->Revision()));
+            }
+            return Spatial->Publish(evaluations, time);
+        }
+
+        [[nodiscard]] std::vector<PhysicsGravitySource> BuildPlanetGravity(const double time)
+        {
+            const auto snapshots = PublishPlanetFrames(time);
+            const auto target = Spatial->Find(Detail::SceneRuntimeSpatialAccess::RootFrame);
+            const Detail::SectorPosition targetZero(Spatial->Identity(target), {}, {});
+            std::vector<PhysicsGravitySource> sources;
+            sources.reserve(Planets.size());
+            for (const auto& planet : Planets)
+            {
+                if (planet.GravitationalParameter == 0.0)
+                {
+                    continue;
+                }
+                const auto source = Spatial->Find(planet.Frame);
+                const auto position = Detail::ConvertFrameMotion(
+                    *Spatial, source, target,
+                    Detail::SpatialMotion{Detail::SectorPosition(Spatial->Identity(source), {}, {}), {}, {}}, snapshots,
+                    time);
+                const auto center = position.Position.RelativeTo(targetZero);
+                constexpr double maximumPositionErrorMetres = 0.001;
+                for (const double error : targetZero.Translated(center).RelativeTo(position.Position))
+                {
+                    if (std::abs(error) > maximumPositionErrorMetres)
+                    {
+                        throw std::out_of_range(
+                            "Planet gravity requires a local simulation frame to preserve placement.");
+                    }
+                }
+                PhysicsGravitySource gravity{
+                    {center[0], center[1], center[2]}, planet.GravitationalParameter, planet.RadiusMetres};
+                Detail::ValidateGravitySource(gravity);
+                sources.push_back(gravity);
+            }
+            return sources;
+        }
+
+        void ApplyConfiguredGravity(const Ref<SceneRuntimeSession>& session)
+        {
+            if (!session || !session->Physics() || PlanetSettings.Gravity == Detail::PlanetGravityMode::Uniform)
+            {
+                return;
+            }
+            auto sources = BuildPlanetGravity(PlanetSimulationTime);
+            session->Physics()->SetGravitySources(std::move(sources));
+            if (PlanetSettings.Gravity == Detail::PlanetGravityMode::Radial)
+            {
+                session->Physics()->SetGravity({});
+            }
+        }
+
+        void PreparePlanetTick(const double deltaSeconds)
+        {
+            if (!std::isfinite(PlanetSimulationTime + deltaSeconds))
+            {
+                throw std::overflow_error("Planet simulation time exceeded its finite local epoch.");
+            }
+            // Every source is projected and validated before any session is changed.
+            if (PlanetSettings.Gravity != Detail::PlanetGravityMode::Uniform)
+            {
+                const auto sources = BuildPlanetGravity(PlanetSimulationTime);
+                std::vector<std::pair<Ref<PhysicsWorld>, std::vector<PhysicsGravitySource>>> prepared;
+                for (const auto& entry : Entries)
+                {
+                    if (entry.Runtime && entry.Runtime->Physics())
+                    {
+                        prepared.emplace_back(entry.Runtime->Physics(), sources);
+                    }
+                }
+                for (auto& [physics, gravity] : prepared)
+                {
+                    physics->SetGravitySources(std::move(gravity));
+                    if (PlanetSettings.Gravity == Detail::PlanetGravityMode::Radial)
+                    {
+                        physics->SetGravity({});
+                    }
+                }
+            }
+        }
+
         SceneRuntimeWorldSpecification Specification;
         Detail::EnvironmentClock Environment;
         Detail::EnvironmentLightingProfile EnvironmentLighting;
         const AssetId EnvironmentSource = AssetId::Generate();
-        Detail::FrameRegistry Spatial{Detail::SceneRuntimeSpatialAccess::DefaultLogicalWorld,
-                                      Detail::SceneRuntimeSpatialAccess::RootFrame};
+        std::unique_ptr<Detail::FrameRegistry> Spatial = std::make_unique<Detail::FrameRegistry>(
+            Detail::SceneRuntimeSpatialAccess::DefaultLogicalWorld, Detail::SceneRuntimeSpatialAccess::RootFrame);
+        std::vector<Detail::PlanetDefinition> Planets;
+        std::vector<Detail::FrameAttachment> PlanetAttachments;
+        Detail::PlanetProjectSettings PlanetSettings;
+        double PlanetSimulationTime = 0.0;
         std::thread::id OwnerThread;
         std::vector<Entry> Entries;
         std::vector<Ref<SceneRuntimeLoadOperation>> Loads;
@@ -289,6 +393,197 @@ namespace Keire
     }
 
     SceneRuntimeWorld::~SceneRuntimeWorld() { Close(); }
+
+    void Detail::SceneRuntimePlanetAccess::Configure(SceneRuntimeWorld& world, std::vector<PlanetDefinition> planets)
+    {
+        auto& state = *world.m_Impl;
+        state.RequireOwner("ConfigurePlanets");
+        if (state.Stepping || state.Processing || !state.Entries.empty() || !state.Loads.empty())
+        {
+            throw std::logic_error("Planet topology must be configured before runtime scene adoption or loading.");
+        }
+        constexpr std::size_t maximumPlanets = 64;
+        if (planets.size() > maximumPlanets)
+        {
+            throw std::invalid_argument("Runtime planet configuration exceeds 64 sources.");
+        }
+        auto registry = std::make_unique<FrameRegistry>(SceneRuntimeSpatialAccess::DefaultLogicalWorld,
+                                                        SceneRuntimeSpatialAccess::RootFrame);
+        std::set<AssetId> identities;
+        std::set<std::uint64_t> pending;
+        for (const auto& planet : planets)
+        {
+            ValidatePlanetDefinition(planet);
+            if (planet.ParentCenter.Identity().World != SceneRuntimeSpatialAccess::DefaultLogicalWorld ||
+                planet.Frame == SceneRuntimeSpatialAccess::RootFrame || !identities.insert(planet.Planet).second ||
+                !pending.insert(planet.Frame).second)
+            {
+                throw std::invalid_argument("Planet identity/frame is duplicate or belongs to another logical world.");
+            }
+        }
+        std::set<std::uint64_t> created{SceneRuntimeSpatialAccess::RootFrame};
+        std::vector<FrameAttachment> attachments;
+        attachments.reserve(planets.size());
+        while (!pending.empty())
+        {
+            bool progressed = false;
+            for (const auto& planet : planets)
+            {
+                const auto parent = planet.ParentCenter.Identity().Frame;
+                if (pending.contains(planet.Frame) && created.contains(parent))
+                {
+                    const auto frame = registry->Create(planet.Frame, registry->Find(parent));
+                    attachments.push_back(registry->Attach(frame));
+                    created.insert(planet.Frame);
+                    pending.erase(planet.Frame);
+                    progressed = true;
+                }
+            }
+            if (!progressed)
+            {
+                throw std::invalid_argument("Planet frames contain a cycle or unknown parent.");
+            }
+        }
+        // Nothing visible changes until the complete topology and all attachments have been allocated.
+        auto environment = state.Environment;
+        environment.Restore(environment.State());
+        state.Spatial.swap(registry);
+        state.Planets.swap(planets);
+        state.PlanetAttachments.swap(attachments);
+        state.Environment = environment;
+        state.PlanetSettings = {};
+        state.PlanetSimulationTime = 0.0;
+    }
+
+    void Detail::SceneRuntimePlanetAccess::ConfigureProject(SceneRuntimeWorld& world, PlanetProjectSettings settings)
+    {
+        ValidatePlanetProjectSettings(settings);
+        Configure(world, settings.Planets);
+        world.m_Impl->PlanetSettings = std::move(settings);
+    }
+
+    Detail::PlanetProjectSettings Detail::SceneRuntimePlanetAccess::Settings(const SceneRuntimeWorld& world)
+    {
+        world.m_Impl->RequireOwner("PlanetProjectSettings");
+        return world.m_Impl->PlanetSettings;
+    }
+
+    std::optional<Detail::ResolvedPlanetFrame>
+    Detail::SceneRuntimePlanetAccess::ResolveSelected(SceneRuntimeWorld& world,
+                                                      const SectorPosition& rootObserverPosition)
+    {
+        world.m_Impl->RequireOwner("ResolveSelectedPlanet");
+        auto& state = *world.m_Impl;
+        if (state.PlanetSettings.Geometry == PlanetGeometryMode::Flat)
+        {
+            return std::nullopt;
+        }
+        return Resolve(world, state.PlanetSettings.SelectedPlanet,
+                       state.Spatial->Find(SceneRuntimeSpatialAccess::RootFrame), rootObserverPosition,
+                       state.PlanetSimulationTime);
+    }
+
+    void Detail::SceneRuntimePlanetAccess::InitializeGravity(SceneRuntimeWorld& world)
+    {
+        world.m_Impl->RequireOwner("InitializePlanetGravity");
+        if (world.m_Impl->Stepping || world.m_Impl->Processing)
+        {
+            throw std::logic_error("Planet gravity initialization requires a runtime safe boundary.");
+        }
+        world.m_Impl->PreparePlanetTick(0.0);
+    }
+
+    Detail::PlanetRuntimeCheckpoint Detail::SceneRuntimePlanetAccess::CaptureCheckpoint(const SceneRuntimeWorld& world)
+    {
+        world.m_Impl->RequireOwner("CapturePlanetCheckpoint");
+        return {world.m_Impl->PlanetSettings, world.m_Impl->PlanetSimulationTime, world.m_Impl->Environment.State()};
+    }
+
+    void Detail::SceneRuntimePlanetAccess::RestoreCheckpoint(SceneRuntimeWorld& world,
+                                                             const PlanetRuntimeCheckpoint& checkpoint)
+    {
+        auto& state = *world.m_Impl;
+        state.RequireOwner("RestorePlanetCheckpoint");
+        if (state.Stepping || state.Processing)
+        {
+            throw std::logic_error("Planet checkpoint restoration requires a runtime safe boundary.");
+        }
+        ValidatePlanetProjectSettings(checkpoint.Settings);
+        if (checkpoint.Settings != state.PlanetSettings || !std::isfinite(checkpoint.SimulationTime) ||
+            checkpoint.SimulationTime < 0.0)
+        {
+            throw std::invalid_argument("Planet checkpoint settings or simulation time are incompatible.");
+        }
+        auto clock = state.Environment;
+        clock.Restore(checkpoint.Clock);
+        // Preflight frame evaluations before committing either clock. Physics owns its separate body/source checkpoint.
+        for (const auto& planet : state.Planets)
+        {
+            (void)EvaluatePlanetFrame(planet, checkpoint.SimulationTime, state.Spatial->Revision());
+        }
+        state.Environment = clock;
+        state.PlanetSimulationTime = checkpoint.SimulationTime;
+    }
+
+    std::vector<Detail::PlanetDefinition> Detail::SceneRuntimePlanetAccess::Definitions(const SceneRuntimeWorld& world)
+    {
+        world.m_Impl->RequireOwner("PlanetDefinitions");
+        return world.m_Impl->Planets;
+    }
+
+    Detail::FrameRotation Detail::SceneRuntimePlanetAccess::Rotation(SceneRuntimeWorld& world, const LiveFrame& source,
+                                                                     const LiveFrame& target, const double snapshotTime)
+    {
+        auto& state = *world.m_Impl;
+        state.RequireOwner("ResolveFrameRotation");
+        (void)state.Spatial->Identity(source);
+        (void)state.Spatial->Identity(target);
+        const auto snapshots = state.PublishPlanetFrames(snapshotTime);
+        return ConvertFrameRotation(*state.Spatial, source, target, snapshots, snapshotTime);
+    }
+
+    Detail::ResolvedPlanetFrame Detail::SceneRuntimePlanetAccess::Resolve(SceneRuntimeWorld& world,
+                                                                          const AssetId planet,
+                                                                          const LiveFrame& observerFrame,
+                                                                          const SectorPosition& observerPosition,
+                                                                          const double snapshotTime)
+    {
+        auto& state = *world.m_Impl;
+        state.RequireOwner("ResolvePlanet");
+        const auto found = std::ranges::find(state.Planets, planet, &PlanetDefinition::Planet);
+        if (found == state.Planets.end())
+        {
+            throw std::invalid_argument("Unknown planet identity in this runtime world.");
+        }
+        // Reject foreign observer handles before publishing a new evaluation epoch.
+        if (state.Spatial->Identity(observerFrame) != observerPosition.Identity())
+        {
+            throw std::invalid_argument("Planet observer position does not match its live frame.");
+        }
+        const auto snapshots = state.PublishPlanetFrames(snapshotTime);
+        return ResolvePlanetFrame(*state.Spatial, state.Spatial->Find(found->Frame), observerFrame, observerPosition,
+                                  snapshots, snapshotTime, state.Environment.State(), planet, found->RadiusMetres,
+                                  state.Environment.DiscontinuityRevision());
+    }
+
+    void Detail::SceneRuntimePlanetAccess::ApplyGravity(SceneRuntimeWorld& world, const SceneHandle scene,
+                                                        const double snapshotTime)
+    {
+        auto& state = *world.m_Impl;
+        state.RequireOwner("ApplyPlanetGravity");
+        if (state.Stepping || state.Processing)
+        {
+            throw std::logic_error("Planet gravity changes require a runtime safe boundary.");
+        }
+        const auto entry = state.Find(scene);
+        if (entry == state.Entries.end() || !entry->Runtime || !entry->Runtime->Physics())
+        {
+            throw std::invalid_argument("Planet gravity requires an owned scene with active physics.");
+        }
+        auto sources = state.BuildPlanetGravity(snapshotTime);
+        // Physics validates before its vector swap; failed preparation leaves every existing source untouched.
+        entry->Runtime->Physics()->SetGravitySources(std::move(sources));
+    }
 
     Detail::EnvironmentClockState Detail::SceneRuntimeEnvironmentAccess::State(const SceneRuntimeWorld& world)
     {
@@ -343,7 +638,7 @@ namespace Keire
     const Detail::FrameRegistry& Detail::SceneRuntimeSpatialAccess::Frames(const SceneRuntimeWorld& world)
     {
         world.m_Impl->RequireOwner("SpatialFrames");
-        return world.m_Impl->Spatial;
+        return *world.m_Impl->Spatial;
     }
 
     Detail::LiveFrame Detail::SceneRuntimeSpatialAccess::FrameForEntity(const SceneRuntimeWorld& world,
@@ -359,16 +654,69 @@ namespace Keire
             const auto scene = entry.Runtime ? entry.Runtime->RuntimeScene() : Ref<Scene>{};
             if (scene && scene->FindEntity(entity.Id()) == entity)
             {
-                return world.m_Impl->Spatial.Find(RootFrame);
+                return world.m_Impl->Spatial->Find(RootFrame);
             }
         }
         throw std::invalid_argument("The entity does not belong to this runtime spatial world.");
     }
 
+    std::vector<Detail::SceneRuntimeIdentityBinding>
+    Detail::SceneRuntimeIdentityAccess::Capture(const SceneRuntimeWorld& world)
+    {
+        world.m_Impl->RequireOwner("CaptureInstanceIdentities");
+        std::vector<SceneRuntimeIdentityBinding> result;
+        result.reserve(world.m_Impl->Entries.size());
+        for (const auto& entry : world.m_Impl->Entries)
+        {
+            result.push_back({entry.Handle, entry.Instance});
+        }
+        return result;
+    }
+
+    void Detail::SceneRuntimeIdentityAccess::Rebind(SceneRuntimeWorld& world,
+                                                    const std::span<const SceneRuntimeIdentityBinding> bindings)
+    {
+        world.m_Impl->RequireOwner("RestoreInstanceIdentities");
+        if (world.m_Impl->Stepping || world.m_Impl->Processing)
+        {
+            throw std::logic_error("Runtime instance identities cannot change during world callbacks.");
+        }
+        if (bindings.size() != world.m_Impl->Entries.size())
+        {
+            throw std::invalid_argument("Runtime instance identity bindings must contain every scene instance.");
+        }
+        std::set<SceneHandle> handles;
+        std::set<AssetId> identities;
+        for (const auto& binding : bindings)
+        {
+            if (!binding.Instance || !handles.insert(binding.Handle).second ||
+                !identities.insert(binding.Instance).second ||
+                world.m_Impl->Find(binding.Handle) == world.m_Impl->Entries.end())
+            {
+                throw std::invalid_argument("Runtime instance identity binding is invalid or duplicated.");
+            }
+        }
+        for (const auto& binding : bindings)
+        {
+            world.m_Impl->Find(binding.Handle)->Instance = binding.Instance;
+        }
+    }
+
     SceneHandle SceneRuntimeWorld::Adopt(Ref<SceneRuntimeSession> session)
     {
         m_Impl->RequireOwner("Adopt");
+        const auto previousActive = m_Impl->Active;
         const auto handle = m_Impl->Add(session);
+        try
+        {
+            m_Impl->ApplyConfiguredGravity(session);
+        }
+        catch (...)
+        {
+            m_Impl->Entries.pop_back();
+            m_Impl->Active = previousActive;
+            throw;
+        }
         if (m_Impl->Paused)
         {
             session->Pause();
@@ -564,6 +912,7 @@ namespace Keire
         {
             return false;
         }
+        m_Impl->PreparePlanetTick(fixedDeltaSeconds);
         struct StepScope
         {
             bool& Active;
@@ -572,6 +921,7 @@ namespace Keire
         m_Impl->Stepping = true;
         // Commit once before callbacks. A gameplay fault cannot roll back an already accepted world tick.
         m_Impl->Environment.Advance(fixedDeltaSeconds);
+        m_Impl->PlanetSimulationTime += fixedDeltaSeconds;
         bool succeeded = true;
         for (const auto& session : sessions)
         {
@@ -602,6 +952,7 @@ namespace Keire
         {
             return;
         }
+        m_Impl->PreparePlanetTick(deltaSeconds);
         struct TickScope
         {
             bool& Active;
@@ -609,6 +960,7 @@ namespace Keire
         } scope{m_Impl->Stepping};
         m_Impl->Stepping = true;
         m_Impl->Environment.Advance(deltaSeconds);
+        m_Impl->PlanetSimulationTime += deltaSeconds;
         for (const auto& session : sessions)
         {
             session->FixedUpdate(deltaSeconds);
@@ -796,7 +1148,9 @@ namespace Keire
             if (entry->Runtime)
                 entry->Runtime->Stop();
         m_Impl->Entries.clear();
-        m_Impl->Spatial.Close();
+        m_Impl->PlanetAttachments.clear();
+        m_Impl->Planets.clear();
+        m_Impl->Spatial->Close();
         m_Impl->PendingUnloads.clear();
         m_Impl->PendingActive.reset();
         m_Impl->Active = {};

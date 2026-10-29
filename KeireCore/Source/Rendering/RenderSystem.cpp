@@ -198,7 +198,8 @@ namespace Keire
     RenderCamera RenderView::Camera() const noexcept { return m_Impl->Camera; }
     void RenderView::SetCamera(const RenderCamera camera)
     {
-        if (!Math::IsFinite(camera.View) || !Math::IsFinite(camera.Projection) || !ValidColor(camera.ClearColor))
+        if (!Math::IsFinite(camera.View) || !Math::IsFinite(camera.Projection) || !ValidColor(camera.ClearColor) ||
+            !Math::IsFinite(camera.WorldOrigin) || !Math::IsFinite(camera.EnvironmentAnchor))
             throw std::invalid_argument("Render camera contains invalid values.");
         if (!std::isfinite(camera.NearPlane) || !std::isfinite(camera.FarPlane) || camera.NearPlane <= 0.0F ||
             camera.FarPlane <= camera.NearPlane || camera.FarPlane > 10'000'000.0F)
@@ -339,14 +340,14 @@ namespace Keire
         {
             if (!submission.View || !submission.View->Surface())
                 throw std::invalid_argument("World-surface runtime UI requires a render view and surface.");
-            if (!Math::IsFinite(submission.World) || !std::isfinite(submission.Viewport.X) ||
-                !std::isfinite(submission.Viewport.Y) || submission.Viewport.X <= 0.0F ||
-                submission.Viewport.Y <= 0.0F || !std::isfinite(submission.ReferenceResolution.X) ||
-                !std::isfinite(submission.ReferenceResolution.Y) || submission.ReferenceResolution.X <= 0.0F ||
-                submission.ReferenceResolution.Y <= 0.0F || !std::isfinite(submission.Pivot.X) ||
-                !std::isfinite(submission.Pivot.Y) || !std::isfinite(submission.WorldUnitsPerPixel.X) ||
-                !std::isfinite(submission.WorldUnitsPerPixel.Y) || submission.WorldUnitsPerPixel.X <= 0.0F ||
-                submission.WorldUnitsPerPixel.Y <= 0.0F)
+            if (!Math::IsFinite(submission.World) || !Math::IsFinite(submission.WorldOrigin) ||
+                !std::isfinite(submission.Viewport.X) || !std::isfinite(submission.Viewport.Y) ||
+                submission.Viewport.X <= 0.0F || submission.Viewport.Y <= 0.0F ||
+                !std::isfinite(submission.ReferenceResolution.X) || !std::isfinite(submission.ReferenceResolution.Y) ||
+                submission.ReferenceResolution.X <= 0.0F || submission.ReferenceResolution.Y <= 0.0F ||
+                !std::isfinite(submission.Pivot.X) || !std::isfinite(submission.Pivot.Y) ||
+                !std::isfinite(submission.WorldUnitsPerPixel.X) || !std::isfinite(submission.WorldUnitsPerPixel.Y) ||
+                submission.WorldUnitsPerPixel.X <= 0.0F || submission.WorldUnitsPerPixel.Y <= 0.0F)
             {
                 throw std::invalid_argument("World-surface runtime UI contains invalid projection values.");
             }

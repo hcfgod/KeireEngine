@@ -35,16 +35,41 @@ float SampleLocalFogDensity(float3 cameraRelativePosition, FogViewDensity fog)
     return extinction;
 }
 
-float SampleFogDensity(float3 cameraRelativePosition, FogViewDensity fog)
+float FogHeightOffset(float3 cameraRelativePosition, FogViewDensity fog, float3 planetObserverKilometres)
+{
+    if (fog.Controls.x != 2U)
+    {
+        return cameraRelativePosition.y;
+    }
+    // The host computes camera altitude in double precision. Only evaluate its local change here;
+    // subtracting two planet-sized float radii would erase small surface heights.
+    const float3 displacement = cameraRelativePosition * 0.001F;
+    const float denominator = length(planetObserverKilometres + displacement) + length(planetObserverKilometres);
+    return denominator > 0.0F ?
+        1000.0F * dot(displacement, 2.0F * planetObserverKilometres + displacement) / denominator : 0.0F;
+}
+
+float SampleHeightFogDensity(float3 position, FogViewDensity fog, float3 planetObserverKilometres)
+{
+    const float height = max(0.0F, FogHeightOffset(position, fog, planetObserverKilometres) - fog.HeightDensity.x);
+    return fog.HeightDensity.z * exp(-height * fog.HeightDensity.y);
+}
+
+float SampleFogDensity(float3 cameraRelativePosition, FogViewDensity fog, float3 planetObserverKilometres)
 {
     if (fog.Controls.x == 0U)
     {
         return 0.0F;
     }
-    const float height = max(0.0F, cameraRelativePosition.y - fog.HeightDensity.x);
-    const float extinction = fog.HeightDensity.z * exp(-height * fog.HeightDensity.y) +
+    const float extinction = SampleHeightFogDensity(cameraRelativePosition, fog, planetObserverKilometres) +
         SampleLocalFogDensity(cameraRelativePosition, fog);
     return extinction * FogExclusionRetention(cameraRelativePosition, fog.Controls.w, fog.Exclusions);
+}
+
+// Flat-height callers have no planet descriptor. Planetary callers must supply the observer explicitly.
+float SampleFogDensity(float3 cameraRelativePosition, FogViewDensity fog)
+{
+    return SampleFogDensity(cameraRelativePosition, fog, float3(0.0F, 0.0F, 0.0F));
 }
 
 // Integrate exponential height density exactly, including segments crossing the constant-density base.
@@ -157,10 +182,133 @@ float AverageLocalFogDensity(float3 midpoint, float3 segmentSpan, FogLocalDensit
     return saturate(average) * local.CenterExtinction.w;
 }
 
-float SampleUnexcludedFogSegmentDensity(float3 midpoint, float3 segmentSpan, FogViewDensity fog)
+float IntegrateExcludedRadialInterval(float low, float high, float3 closest, float3 direction,
+                                     FogViewDensity fog, float3 observer)
+{
+    if (high <= low)
+    {
+        return 0.0F;
+    }
+    const float nodes[4] = {0.1834346425F, 0.5255324099F, 0.7966664774F, 0.9602898565F};
+    const float weights[4] = {0.3626837834F, 0.3137066459F, 0.2223810345F, 0.1012285363F};
+    float result = 0.0F;
+    for (uint part = 0U; part < 4U; ++part)
+    {
+        const float halfWidth = (high - low) * 0.125F;
+        const float center = low + (float(part) + 0.5F) * (high - low) * 0.25F;
+        for (uint node = 0U; node < 4U; ++node)
+        {
+            const float offset = halfWidth * nodes[node];
+            const float3 left = closest + direction * (center - offset);
+            const float3 right = closest + direction * (center + offset);
+            result += halfWidth * weights[node] *
+                (SampleHeightFogDensity(left, fog, observer) *
+                 FogExclusionRetention(left, fog.Controls.w, fog.Exclusions) +
+                 SampleHeightFogDensity(right, fog, observer) *
+                 FogExclusionRetention(right, fog.Controls.w, fog.Exclusions));
+        }
+    }
+    return result;
+}
+
+float SampleExcludedRadialHeight(float3 midpoint, float3 span, FogViewDensity fog, float3 observer)
+{
+    const float segmentLength = length(span);
+    if (segmentLength <= 0.0F)
+    {
+        return SampleHeightFogDensity(midpoint, fog, observer) *
+            FogExclusionRetention(midpoint, fog.Controls.w, fog.Exclusions);
+    }
+    const float3 direction = span / segmentLength;
+    if (fog.HeightDensity.y == 0.0F)
+    {
+        return IntegrateExcludedRadialInterval(-segmentLength * 0.5F, segmentLength * 0.5F,
+                                              midpoint, direction, fog, observer) / segmentLength;
+    }
+    const float closestDistance = -dot(observer * 1000.0F + midpoint, direction);
+    const float3 closest = midpoint + direction * closestDistance;
+    const float radius = length(observer + closest * 0.001F) * 1000.0F;
+    const float baseDelta = fog.HeightDensity.x - FogHeightOffset(closest, fog, observer);
+    const float outerDelta = baseDelta + 24.0F / fog.HeightDensity.y;
+    if (outerDelta <= 0.0F)
+    {
+        return 0.0F;
+    }
+    const float outerHalf = sqrt(outerDelta * (2.0F * radius + outerDelta));
+    const float coreHalf = baseDelta > 0.0F ? sqrt(baseDelta * (2.0F * radius + baseDelta)) : 0.0F;
+    const float first = max(-segmentLength * 0.5F - closestDistance, -outerHalf);
+    const float last = min(segmentLength * 0.5F - closestDistance, outerHalf);
+    return (IntegrateExcludedRadialInterval(first, min(last, -coreHalf), closest, direction, fog, observer) +
+            IntegrateExcludedRadialInterval(max(first, -coreHalf), min(last, coreHalf), closest,
+                                            direction, fog, observer) +
+            IntegrateExcludedRadialInterval(max(first, coreHalf), last, closest, direction, fog, observer)) /
+           segmentLength;
+}
+
+float SampleUnexcludedFogSegmentDensity(float3 midpoint, float3 segmentSpan, FogViewDensity fog,
+                                       float3 planetObserverKilometres)
 {
     const float halfSpan = abs(segmentSpan.y) * 0.5F;
     float extinction = AverageHeightFogDensity(midpoint.y - halfSpan, midpoint.y + halfSpan, fog);
+    if (fog.Controls.x == 2U)
+    {
+        // Radial altitude is nonlinear along a tangent ray; the flat exponential integral does not apply.
+        const float firstHeight = FogHeightOffset(midpoint - segmentSpan * 0.5F, fog, planetObserverKilometres);
+        const float lastHeight = FogHeightOffset(midpoint + segmentSpan * 0.5F, fog, planetObserverKilometres);
+        const float middleHeight = FogHeightOffset(midpoint, fog, planetObserverKilometres);
+        const float curvature = abs(middleHeight - 0.5F * (firstHeight + lastHeight));
+        if (curvature * fog.HeightDensity.y <= 1.0e-5F)
+        {
+            // Radial rays are linear even with extremely steep falloff. An analytic average avoids
+            // missing their thin endpoint layer and saves eight density samples on locally flat rays.
+            extinction = AverageHeightFogDensity(firstHeight, lastHeight, fog);
+        }
+        else
+        {
+            const float segmentLength = length(segmentSpan);
+            const float3 direction = segmentSpan / segmentLength;
+            const float closestDistance = -dot(planetObserverKilometres * 1000.0F + midpoint, direction);
+            const float3 closestPosition = midpoint + direction * closestDistance;
+            const float closestHeight = FogHeightOffset(closestPosition, fog, planetObserverKilometres);
+            const float closestRadius = length(planetObserverKilometres + closestPosition * 0.001F) * 1000.0F;
+            const float baseDelta = fog.HeightDensity.x - closestHeight;
+            // Beyond 24 scale heights the density contributes less than 4e-11 of the base density.
+            const float outerDelta = baseDelta + 24.0F / fog.HeightDensity.y;
+            extinction = 0.0F;
+            if (outerDelta > 0.0F)
+            {
+                const float outerHalf = sqrt(outerDelta * (2.0F * closestRadius + outerDelta));
+                const float coreHalf = baseDelta > 0.0F ?
+                    sqrt(baseDelta * (2.0F * closestRadius + baseDelta)) : 0.0F;
+                const float first = max(-segmentLength * 0.5F - closestDistance, -outerHalf);
+                const float last = min(segmentLength * 0.5F - closestDistance, outerHalf);
+                const float coreLength = max(0.0F, min(last, coreHalf) - max(first, -coreHalf));
+                extinction = coreLength * fog.HeightDensity.z / segmentLength;
+                const float nodes[4] = {0.1834346425F, 0.5255324099F, 0.7966664774F, 0.9602898565F};
+                const float weights[4] = {0.3626837834F, 0.3137066459F, 0.2223810345F, 0.1012285363F};
+                for (uint side = 0U; side < 2U; ++side)
+                {
+                    const float low = side == 0U ? first : max(first, coreHalf);
+                    const float high = side == 0U ? min(last, -coreHalf) : last;
+                    if (high <= low)
+                    {
+                        continue;
+                    }
+                    const float halfWidth = (high - low) * 0.5F;
+                    const float center = (high + low) * 0.5F;
+                    for (uint node = 0U; node < 4U; ++node)
+                    {
+                        const float offset = halfWidth * nodes[node];
+                        extinction += halfWidth * weights[node] / segmentLength *
+                            (SampleHeightFogDensity(closestPosition + direction * (center - offset), fog,
+                                                    planetObserverKilometres) +
+                             SampleHeightFogDensity(closestPosition + direction * (center + offset), fog,
+                                                    planetObserverKilometres));
+                    }
+                }
+            }
+        }
+    }
     for (uint index = 0U; index < min(fog.Controls.z, 16U); ++index)
     {
         extinction += AverageLocalFogDensity(midpoint, segmentSpan, fog.Local[index]);
@@ -168,9 +316,10 @@ float SampleUnexcludedFogSegmentDensity(float3 midpoint, float3 segmentSpan, Fog
     return extinction;
 }
 
-float SampleFogSegmentDensity(float3 midpoint, float3 segmentSpan, FogViewDensity fog)
+float SampleFogSegmentDensity(float3 midpoint, float3 segmentSpan, FogViewDensity fog,
+                             float3 planetObserverKilometres)
 {
-    const float original = SampleUnexcludedFogSegmentDensity(midpoint, segmentSpan, fog);
+    float original = SampleUnexcludedFogSegmentDensity(midpoint, segmentSpan, fog, planetObserverKilometres);
     if (fog.Controls.w == 0U || original <= 0.0F)
     {
         return original;
@@ -208,6 +357,22 @@ float SampleFogSegmentDensity(float3 midpoint, float3 segmentSpan, FogViewDensit
     {
         return original * (1.0F - coreStrength);
     }
+    float radialHeight = 0.0F;
+    if (fog.Controls.x == 2U && fog.HeightDensity.z > 0.0F)
+    {
+        radialHeight = SampleExcludedRadialHeight(midpoint, segmentSpan, fog, planetObserverKilometres);
+        // Local boxes retain their own interval integration; their density can lie outside the radial shell.
+        fog.HeightDensity.z = 0.0F;
+        original = 0.0F;
+        for (uint index = 0U; index < min(fog.Controls.z, 16U); ++index)
+        {
+            original += AverageLocalFogDensity(midpoint, segmentSpan, fog.Local[index]);
+        }
+        if (original == 0.0F)
+        {
+            return radialHeight;
+        }
+    }
     const float nodes[4] = {0.1834346425F, 0.5255324099F, 0.7966664774F, 0.9602898565F};
     const float weights[4] = {0.3626837834F, 0.3137066459F, 0.2223810345F, 0.1012285363F};
     float retained = 0.0F;
@@ -222,8 +387,7 @@ float SampleFogSegmentDensity(float3 midpoint, float3 segmentSpan, FogViewDensit
                 const float fraction = (float(subdivision) + 0.5F +
                     nodes[node] * (side == 0U ? -0.5F : 0.5F)) * 0.25F - 0.5F;
                 const float3 position = midpoint + segmentSpan * fraction;
-                const float height = max(0.0F, position.y - fog.HeightDensity.x);
-                const float density = fog.HeightDensity.z * exp(-height * fog.HeightDensity.y) +
+                const float density = SampleHeightFogDensity(position, fog, planetObserverKilometres) +
                     SampleLocalFogDensity(position, fog);
                 const float weighted = weights[node] * density;
                 reference += weighted;
@@ -231,5 +395,5 @@ float SampleFogSegmentDensity(float3 midpoint, float3 segmentSpan, FogViewDensit
             }
         }
     }
-    return reference > 0.0F ? original * saturate(retained / reference) : 0.0F;
+    return radialHeight + (reference > 0.0F ? original * saturate(retained / reference) : 0.0F);
 }

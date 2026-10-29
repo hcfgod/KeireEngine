@@ -56,7 +56,7 @@ namespace KeireEditor::Detail
                       std::optional<Keire::Detail::EnvironmentSkyProfile> sky)
     {
         return Keire::Detail::EnvironmentLightingProfile(profile.Ownership(), profile.Keyframes(), profile.Shadows(),
-                                                         std::move(sky));
+                                                         std::move(sky), profile.DirectionFrame());
     }
 
     [[nodiscard]] inline Keire::Detail::EnvironmentSkyProfile DaylightSkyPreset()

@@ -9,6 +9,7 @@
 #include "KeireClientInternal/Editor/EnvironmentSkyControls.h"
 #include "KeireClientInternal/Editor/EnvironmentTimelineControls.h"
 #include "KeireClientInternal/Editor/FogControls.h"
+#include "KeireClientInternal/Editor/PlanetControls.h"
 #include "KeireClientInternal/Editor/StarFieldControls.h"
 #include "KeireClientInternal/Editor/VolumetricCloudControls.h"
 
@@ -20,25 +21,6 @@ namespace KeireEditor
     {
         Draw(ui, theme);
         DrawEnvironment(ui, theme);
-    }
-
-    void ProjectSettingsPanel::ObserveEditSurface(const Detail::SettingsEditSurface surface, const bool visible,
-                                                  const bool focused)
-    {
-        if (!m_EditSurfaces.Observe(surface, visible, focused))
-        {
-            return;
-        }
-        try
-        {
-            // Finish the gesture without silently retrying a failed save or saving an Undo operation.
-            // Both surfaces retain their visible dirty indicator and explicit Save action.
-            m_Document.CommitEdit("Edit Project Environment");
-        }
-        catch (const std::exception& error)
-        {
-            m_Error = error.what();
-        }
     }
 
     void ProjectSettingsPanel::DrawEnvironment(Keire::UiFrame& ui, const Keire::UiThemeDefinition& theme)
@@ -121,6 +103,7 @@ namespace KeireEditor
                 {
                     commit |= Detail::DrawSkyColorControls(ui, theme, m_Document,
                                                            m_Controller.ProjectEnvironmentPreview(), m_SkySelectedKeys);
+                    commit |= Detail::DrawPlanetControls(ui, theme, m_Document);
                     changed |= Detail::DrawAtmosphereControls(ui, theme, settings.Atmosphere, commit);
                     changed |= Detail::DrawStarFieldControls(ui, theme, settings.Stars, commit);
                 }

@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <stdexcept>
 
 namespace Keire::Detail
@@ -11,6 +12,11 @@ namespace Keire::Detail
         constexpr float DegreesToRadians = 0.01745329251994329577F;
 
         [[nodiscard]] Vector3 Add(const Vector3 left, const Vector3 right) noexcept
+        {
+            return {left.X + right.X, left.Y + right.Y, left.Z + right.Z};
+        }
+
+        [[nodiscard]] Vector3d Add(const Vector3d left, const Vector3 right) noexcept
         {
             return {left.X + right.X, left.Y + right.Y, left.Z + right.Z};
         }
@@ -35,6 +41,12 @@ namespace Keire::Detail
         {
             return {left.Y * right.Z - left.Z * right.Y, left.Z * right.X - left.X * right.Z,
                     left.X * right.Y - left.Y * right.X};
+        }
+
+        [[nodiscard]] Vector3 Rotate(const FrameRotation& rotation, const Vector3 vector) noexcept
+        {
+            const auto result = rotation.Apply({vector.X, vector.Y, vector.Z});
+            return {static_cast<float>(result[0]), static_cast<float>(result[1]), static_cast<float>(result[2])};
         }
     } // namespace
 
@@ -169,7 +181,7 @@ namespace Keire::Detail
             const float speed = m_State.MoveSpeed * input.DeltaSeconds * acceleration;
             Vector3 movement =
                 Add(Scale(Forward(), input.MoveForward * speed), Scale(Right(), input.MoveRight * speed));
-            movement = Add(movement, Scale(Vector3{0.0F, 1.0F, 0.0F}, input.MoveUp * speed));
+            movement = Add(movement, Scale(NavigationUp(), input.MoveUp * speed));
             m_State.Focus = Add(m_State.Focus, movement);
             changed = changed || Length(movement) > 0.0F;
         }
@@ -178,6 +190,12 @@ namespace Keire::Detail
 
     void EditorCameraController::Frame(const Vector3 center, const float radius, const float verticalFieldOfViewDegrees,
                                        const float aspectRatio)
+    {
+        FramePrecise(Math::Widen(center), radius, verticalFieldOfViewDegrees, aspectRatio);
+    }
+
+    void EditorCameraController::FramePrecise(const Vector3d center, const float radius,
+                                              const float verticalFieldOfViewDegrees, const float aspectRatio)
     {
         if (!Math::IsFinite(center) || !std::isfinite(radius) || radius <= 0.0F || verticalFieldOfViewDegrees <= 1.0F ||
             verticalFieldOfViewDegrees >= 179.0F || !std::isfinite(aspectRatio) || aspectRatio <= 0.0F)
@@ -191,7 +209,9 @@ namespace Keire::Detail
         m_State.OrthographicSize = std::clamp(radius * 2.0F * padding, 0.01F, 10000.0F);
     }
 
-    void EditorCameraController::SetFocus(const Vector3 focus)
+    void EditorCameraController::SetFocus(const Vector3 focus) { SetFocusPrecise(Math::Widen(focus)); }
+
+    void EditorCameraController::SetFocusPrecise(const Vector3d focus)
     {
         if (!Math::IsFinite(focus))
             throw std::invalid_argument("Editor camera focus must be finite.");
@@ -223,31 +243,88 @@ namespace Keire::Detail
                                  : EditorCameraProjection::Perspective;
     }
 
+    void EditorCameraController::SetSurfaceNavigation(const bool enabled) noexcept
+    {
+        // Leaving surface mode retains the current heading and roll for continuous free flight.
+        m_State.SurfaceNavigation = enabled;
+    }
+
+    Vector3 EditorCameraController::NavigationUp() const noexcept
+    {
+        return Rotate(m_State.NavigationToWorld, {0.0F, 1.0F, 0.0F});
+    }
+
+    void EditorCameraController::FollowSurfaceUp(const Vector3 up)
+    {
+        if (!m_State.SurfaceNavigation)
+        {
+            return;
+        }
+        const float scale = std::max({std::abs(up.X), std::abs(up.Y), std::abs(up.Z)});
+        if (!Math::IsFinite(up) || scale == 0.0F)
+        {
+            throw std::invalid_argument("Surface navigation requires a finite nonzero up direction.");
+        }
+        const auto target = Normalize({up.X / scale, up.Y / scale, up.Z / scale});
+        const auto current = NavigationUp();
+        const double alignment =
+            std::clamp(static_cast<double>(current.X) * target.X + static_cast<double>(current.Y) * target.Y +
+                           static_cast<double>(current.Z) * target.Z,
+                       -1.0, 1.0);
+        if (alignment > 1.0 - 1.0e-12)
+        {
+            return;
+        }
+        const auto axis =
+            alignment < -1.0 + 1.0e-8 ? Rotate(m_State.NavigationToWorld, {1.0F, 0.0F, 0.0F}) : Cross(current, target);
+        const auto transport =
+            FrameRotation::Normalize(axis.X, axis.Y, axis.Z, alignment < -1.0 + 1.0e-8 ? 0.0 : 1.0 + alignment);
+        m_State.NavigationToWorld = transport.Compose(m_State.NavigationToWorld);
+    }
+
+    void EditorCameraController::ReexpressReferenceFrame(const Vector3d focusInTarget,
+                                                         const FrameRotation& sourceToTarget)
+    {
+        if (!Math::IsFinite(focusInTarget))
+        {
+            throw std::invalid_argument("Camera frame transfer requires a finite resolved focus.");
+        }
+        const auto orientation = sourceToTarget.Compose(m_State.NavigationToWorld);
+        m_State.Focus = focusInTarget;
+        m_State.NavigationToWorld = orientation;
+    }
+
     Vector3 EditorCameraController::Forward() const noexcept
     {
         const float yaw = m_State.YawDegrees * DegreesToRadians;
         const float pitch = m_State.PitchDegrees * DegreesToRadians;
         const float horizontal = std::cos(pitch);
-        return Normalize({horizontal * std::sin(yaw), std::sin(pitch), horizontal * std::cos(yaw)});
+        return Rotate(m_State.NavigationToWorld,
+                      Normalize({horizontal * std::sin(yaw), std::sin(pitch), horizontal * std::cos(yaw)}));
     }
 
-    Vector3 EditorCameraController::Right() const noexcept
-    {
-        return Normalize(Cross(Vector3{0.0F, 1.0F, 0.0F}, Forward()));
-    }
+    Vector3 EditorCameraController::Right() const noexcept { return Normalize(Cross(NavigationUp(), Forward())); }
 
     Vector3 EditorCameraController::Up() const noexcept { return Normalize(Cross(Forward(), Right())); }
 
-    Vector3 EditorCameraController::Eye() const noexcept
+    Vector3d EditorCameraController::EyePrecise() const noexcept
     {
         return Add(m_State.Focus, Scale(Forward(), -m_State.Distance));
+    }
+
+    Vector3 EditorCameraController::Eye() const
+    {
+        return Math::RelativeFloat(EyePrecise(), {}, std::numeric_limits<double>::max());
     }
 
     Matrix4 EditorCameraController::ViewMatrix() const
     {
         const auto forward = Forward();
-        const auto up = std::abs(forward.Y) > 0.999F ? Vector3{0.0F, 0.0F, 1.0F} : Vector3{0.0F, 1.0F, 0.0F};
-        return Math::LookAt(Eye(), m_State.Focus, up);
+        const auto localUp = std::abs(std::sin(m_State.PitchDegrees * DegreesToRadians)) > 0.999F
+                                 ? Vector3{0.0F, 0.0F, 1.0F}
+                                 : Vector3{0.0F, 1.0F, 0.0F};
+        const auto up = Rotate(m_State.NavigationToWorld, localUp);
+        return Math::LookAt(Scale(forward, -m_State.Distance), {}, up);
     }
 
     Matrix4 EditorCameraController::ProjectionMatrix(const float aspectRatio, const float verticalFieldOfViewDegrees,

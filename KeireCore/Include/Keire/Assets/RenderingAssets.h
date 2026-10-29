@@ -21,6 +21,16 @@ namespace Keire
 {
     inline constexpr std::uint32_t ShaderAssetSchemaVersion = 4;
     inline constexpr std::size_t ShaderAssetPassRoleHardLimit = 32;
+
+    [[nodiscard]] constexpr bool VolumeLightingUsesNoiseBuffer(const std::uint32_t version) noexcept
+    {
+        return version == 10U || version == 12U || version == 14U;
+    }
+
+    [[nodiscard]] constexpr bool VolumeLightingUsesNoiseTexture(const std::uint32_t version) noexcept
+    {
+        return version >= 2U && !VolumeLightingUsesNoiseBuffer(version);
+    }
     /// Retained UI: float3 pixel position, float4 color, float2 UV; optional float perspective W at location 3.
     /// Multiply reconstructed clip position by W for perspective interpolation; viewport uniform is b0/space1.
     inline constexpr std::uint8_t UiShaderVertexLayoutVersion = 4;
@@ -186,6 +196,8 @@ namespace Keire
         /// Version 7 appends independent weather controls, for a 448-byte view block.
         /// Version 8 appends height/local fog controls, for a 1008-byte view block.
         /// Version 9 appends fog exclusion regions, for a 1520-byte view block.
+        /// Version 10 uses storage-buffer cloud noise. Versions 11/12 add radial fog semantics,
+        /// retaining the 1520-byte block with texture/buffer cloud noise respectively.
         std::uint32_t VolumeLightingAbiVersion = 0;
         bool UsesVertexMaterialParameters = false;
         /// Additional graph-authored combined texture/sampler slots and fragment read-only buffers.
@@ -200,6 +212,10 @@ namespace Keire
         /// Authored target retained across import; legacy code shaders default to Material.
         std::string ProgramTarget = "Material";
         std::vector<std::string> Keywords;
+        /// Version 1 applies Model as a simulation-to-render translation for GPU VFX billboard/ribbon passes.
+        /// Instanced mesh passes apply Model before the instance transform when InstanceParameters.y is nonzero.
+        /// Normal transforms remain unchanged. Zero is legacy and only supports matching simulation/render origins.
+        std::uint8_t VfxRenderOriginAbiVersion = 0;
     };
 
     class KEIRE_API ShaderAsset final : public Asset

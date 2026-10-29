@@ -2,6 +2,7 @@
 #include "KeireInternal/Rendering/DisplacementBoundsInternal.h"
 #include "KeireInternal/Rendering/ForwardPlusInternal.h"
 #include "KeireInternal/Rendering/GlobalIlluminationPolicyInternal.h"
+#include "KeireInternal/Rendering/GridOriginUniforms.h"
 #include "KeireInternal/Rendering/InstanceBatchInternal.h"
 #include "KeireInternal/Rendering/RenderBackendInternal.h"
 
@@ -620,9 +621,10 @@ namespace Keire::RenderBackend
                 const float textureLayout = environment.Empty() ? -1.0F
                                                                 : static_cast<float>(environment.EnvironmentLayout) +
                                                                       (environment.HdrEncoded ? 16.0F : 0.0F);
-                const auto sky =
-                    MakeSkyUniforms(camera, packet.Environment, lighting, observer, packet.CloudAdvectionPhase,
-                                    cloudsEnabled, textureLayout, packet.StarTwinklePhase, packet.SkyColors);
+                const auto sky = MakeSkyUniforms(
+                    camera, packet.Environment, lighting, observer, packet.CloudAdvectionPhase, cloudsEnabled,
+                    textureLayout, packet.StarTwinklePhase, packet.SkyColors, camera.WorldOrigin,
+                    camera.EnvironmentAnchor, packet.PlanetFrame ? &*packet.PlanetFrame : nullptr);
                 const SDL_GPUTextureSamplerBinding binding{
                     environment.Empty() ? WhiteTexture.Texture : environment.Texture,
                     environment.Empty() ? WhiteTexture.Sampler : environment.Sampler};
@@ -637,15 +639,26 @@ namespace Keire::RenderBackend
         if (firstBatch == 0U &&
             (phase == SceneDrawPhase::Opaque || phase == SceneDrawPhase::DeferredForwardOpaqueTail) && packet.DrawGrid)
         {
-            const GridUniforms grid{Math::Inverse(camera.Projection),
-                                    Math::Inverse(camera.View),
-                                    Math::Multiply(camera.Projection, camera.View),
-                                    {1.0F, 10.0F, 0.45F, 0.7F},
-                                    {packet.Grid.Opacity, packet.Grid.FadeDistance, 0.0F, 0.0F}};
-            SDL_PushGPUFragmentUniformData(commands, 0, &grid, sizeof(grid));
-            SDL_BindGPUGraphicsPipeline(pass, pipelines.Grid);
-            SDL_DrawGPUPrimitives(pass, 3, 1, 0, 0);
-            ++Statistics.DrawCalls;
+            constexpr float minorSpacing = 1.0F;
+            constexpr float majorSpacing = 10.0F;
+            const auto inverseView = Math::Inverse(camera.View);
+            const auto gridObserver = Math::TransformPoint(inverseView, {});
+            const auto gridOrigin =
+                MakeGridOriginUniforms(camera.WorldOrigin, gridObserver, packet.Grid.FadeDistance, majorSpacing);
+            if (gridOrigin)
+            {
+                const GridUniforms grid{Math::Inverse(camera.Projection),
+                                        inverseView,
+                                        Math::Multiply(camera.Projection, camera.View),
+                                        {minorSpacing, majorSpacing, 0.45F, 0.7F},
+                                        {packet.Grid.Opacity, packet.Grid.FadeDistance, 0.0F, 0.0F},
+                                        gridOrigin->PhaseAndPlane,
+                                        gridOrigin->Axes};
+                SDL_PushGPUFragmentUniformData(commands, 0, &grid, sizeof(grid));
+                SDL_BindGPUGraphicsPipeline(pass, pipelines.Grid);
+                SDL_DrawGPUPrimitives(pass, 3, 1, 0, 0);
+                ++Statistics.DrawCalls;
+            }
         }
 
         AssetLocalLightUniforms localLights{};
@@ -823,6 +836,13 @@ namespace Keire::RenderBackend
             if (material)
             {
                 SDL_BindGPUGraphicsPipeline(pass, selectedPipeline);
+                const std::uint32_t cloudNoiseStorageCount =
+                    VolumeLightingUsesNoiseBuffer(material->VolumeLightingAbiVersion) ? 1U : 0U;
+                if (cloudNoiseStorageCount != 0U)
+                {
+                    auto* noiseBuffer = EnsureCloudNoiseBuffer();
+                    SDL_BindGPUFragmentStorageBuffers(pass, 0, &noiseBuffer, 1);
+                }
                 if (material->SpatialLightingAbiVersion == 3U)
                 {
                     if (!fallbackSpatialSelectionValid)
@@ -833,12 +853,12 @@ namespace Keire::RenderBackend
                     const std::array storageBuffers{forwardPlusBuffers[0], forwardPlusBuffers[1], forwardPlusBuffers[2],
                                                     gpuSpatialSelectionValid ? spatial.OutputRecords.Buffer
                                                                              : SpatialSelectionFallbackBuffer};
-                    SDL_BindGPUFragmentStorageBuffers(pass, 0, storageBuffers.data(),
+                    SDL_BindGPUFragmentStorageBuffers(pass, cloudNoiseStorageCount, storageBuffers.data(),
                                                       static_cast<std::uint32_t>(storageBuffers.size()));
                 }
                 else if (material->UsesForwardPlus)
                 {
-                    SDL_BindGPUFragmentStorageBuffers(pass, 0, forwardPlusBuffers.data(),
+                    SDL_BindGPUFragmentStorageBuffers(pass, cloudNoiseStorageCount, forwardPlusBuffers.data(),
                                                       static_cast<std::uint32_t>(forwardPlusBuffers.size()));
                 }
                 const AssetObjectUniforms object{item.World, camera.View, camera.Projection,
@@ -983,7 +1003,7 @@ namespace Keire::RenderBackend
                                           bindings.begin() + static_cast<std::ptrdiff_t>(bindingCount));
                         bindingCount += spatialBindings.size();
                     }
-                    if (material->VolumeLightingAbiVersion >= 2U)
+                    if (VolumeLightingUsesNoiseTexture(material->VolumeLightingAbiVersion))
                     {
                         const auto& noise = EnsureCloudNoiseTexture();
                         bindings[bindingCount++] = {noise.Texture, noise.Sampler};

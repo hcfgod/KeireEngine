@@ -176,6 +176,10 @@ namespace Keire
                                            reinterpret_cast<void*>(&Impl::RuntimeGetLocalPosition));
                 managedApi.AddInternalCall("Keire.NativeRuntime", "SetLocalPositionIcall",
                                            reinterpret_cast<void*>(&Impl::RuntimeSetLocalPosition));
+                managedApi.AddInternalCall("Keire.NativeRuntime", "GetPrecisePositionV1Icall",
+                                           reinterpret_cast<void*>(&Impl::RuntimeGetPrecisePositionV1));
+                managedApi.AddInternalCall("Keire.NativeRuntime", "SetPrecisePositionV1Icall",
+                                           reinterpret_cast<void*>(&Impl::RuntimeSetPrecisePositionV1));
                 managedApi.AddInternalCall("Keire.NativeRuntime", "GetLocalRotationIcall",
                                            reinterpret_cast<void*>(&Impl::RuntimeGetLocalRotation));
                 managedApi.AddInternalCall("Keire.NativeRuntime", "SetLocalRotationIcall",
@@ -186,6 +190,10 @@ namespace Keire
                                            reinterpret_cast<void*>(&Impl::RuntimeGetCharacterControllerState));
                 managedApi.AddInternalCall("Keire.NativeRuntime", "GetRigidBodyPropertiesIcall",
                                            reinterpret_cast<void*>(&Impl::RuntimeGetRigidBodyProperties));
+                managedApi.AddInternalCall("Keire.NativeRuntime", "GetRigidBodyMotionSettingsIcall",
+                                           reinterpret_cast<void*>(&Impl::RuntimeGetRigidBodyMotionSettings));
+                managedApi.AddInternalCall("Keire.NativeRuntime", "SetRigidBodyMotionSettingsIcall",
+                                           reinterpret_cast<void*>(&Impl::RuntimeSetRigidBodyMotionSettings));
                 managedApi.AddInternalCall("Keire.NativeRuntime", "SetRigidBodyMotionIcall",
                                            reinterpret_cast<void*>(&Impl::RuntimeSetRigidBodyMotion));
                 managedApi.AddInternalCall("Keire.NativeRuntime", "SetRigidBodyMassIcall",

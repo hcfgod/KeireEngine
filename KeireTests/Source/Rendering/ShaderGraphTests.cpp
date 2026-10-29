@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
@@ -117,7 +118,7 @@ TEST_CASE("Shader Graph source and cooked assets preserve stable graph identity"
 
     const auto importer = Keire::CreateShaderGraphAssetImporter();
     CHECK(importer.Name == "Keire.ShaderGraph");
-    CHECK(importer.Version == 48);
+    CHECK(importer.Version == 54);
     CHECK(importer.Extensions == std::vector<std::string>{".keireshadergraph"});
 }
 
@@ -174,7 +175,7 @@ TEST_CASE("Shader Graph v2 catalogs stable node identities and migrates v1 sourc
 TEST_CASE("Shader Graph compatibility versions are explicit and future sources fail recoverably")
 {
     CHECK(Keire::ShaderGraphSourceSchemaVersion == 6);
-    CHECK(Keire::ShaderGraphGeneratedShaderVersion == 35);
+    CHECK(Keire::ShaderGraphGeneratedShaderVersion == 39);
     CHECK(Keire::ShaderGraphVertexLayoutVersion == 3);
 
     const auto graph = Keire::CreateDefaultShaderGraph();
@@ -189,11 +190,12 @@ TEST_CASE("Shader Graph compatibility versions are explicit and future sources f
     CHECK(manifest.at("materialGraphGeneratedShaderVersion") == Keire::ShaderGraphGeneratedShaderVersion);
     CHECK(manifest.at("vertexLayoutVersion") == Keire::ShaderGraphVertexLayoutVersion);
     CHECK(manifest.at("instanceAddressingAbiVersion") == 2U);
+    CHECK(manifest.at("vfxRenderOriginAbiVersion") == 1U);
     CHECK(manifest.at("occlusionSupport") == 3U);
     CHECK(manifest.at("spatialLightingAbiVersion") == 3U);
-    CHECK(manifest.at("volumeLightingAbiVersion") == 9U);
+    CHECK(manifest.at("volumeLightingAbiVersion") == 13U);
     CHECK(manifest.at("maximumWorldPositionDisplacementRadius").get<float>() == doctest::Approx(0.0F));
-    CHECK(variant.Hlsl.find("Generator version 26, source schema 6") != std::string::npos);
+    CHECK(variant.Hlsl.find("Generator version 39, source schema 6") != std::string::npos);
     CHECK(variant.Hlsl.find("#define KEIRE_CLOUD_NOISE_TEXTURE t") != std::string::npos);
     CHECK(variant.Hlsl.find("Texture3D<float4> VolumeCloudNoiseTexture") != std::string::npos);
     CHECK(variant.Hlsl.find("#define KEIRE_CLOUD_NOISE_TEXTURE t9\n") != std::string::npos);
@@ -227,11 +229,13 @@ TEST_CASE("Shader Graph compatibility versions are explicit and future sources f
 
     auto legacyManifest = manifest;
     legacyManifest.erase("instanceAddressingAbiVersion");
+    legacyManifest.erase("vfxRenderOriginAbiVersion");
     legacyManifest.erase("occlusionSupport");
     legacyManifest.erase("maximumWorldPositionDisplacementRadius");
     const auto legacyManifestText = legacyManifest.dump();
     const auto legacyShader = Keire::ShaderAsset::DecodeManifest(std::as_bytes(std::span(legacyManifestText)));
     CHECK(legacyShader.InstanceAddressingAbiVersion == 0U);
+    CHECK(legacyShader.VfxRenderOriginAbiVersion == 0U);
     CHECK(legacyShader.OcclusionSupport == Keire::ShaderOcclusionSupport::None);
     CHECK_FALSE(legacyShader.MaximumWorldPositionDisplacementRadius);
 
@@ -563,7 +567,7 @@ TEST_CASE("Shader Graph generated HLSL compiles through the production shader im
     context.ReadProjectFile = [root = directory.Path](const std::filesystem::path& relative)
     { return ReadBytes(root / relative); };
     const auto importer = Keire::CreateShaderAssetImporter();
-    CHECK(importer.Version == 11);
+    CHECK(importer.Version == 12);
     REQUIRE(importer.ContextualImport);
     const auto imported = importer.ContextualImport(context, ReadBytes(manifest));
     const auto shader = Keire::ShaderAsset::Decode(imported.Bytes);
@@ -621,14 +625,14 @@ TEST_CASE("Shader Graph generated HLSL compiles through the production shader im
     CHECK(compilation.Variants.front().Hlsl.find("EvaluateGraphDirectLighting") != std::string::npos);
     CHECK(compilation.Variants.front().Hlsl.find("ForwardPlusLights") != std::string::npos);
     CHECK(compilation.Variants.front().Hlsl.find(
-              "StructuredBuffer<ShaderGraphLocalLight> ForwardPlusLights : register(t10, space2)") !=
+              "StructuredBuffer<ShaderGraphLocalLight> ForwardPlusLights : register(t11, space2)") !=
           std::string::npos);
-    CHECK(compilation.Variants.front().Hlsl.find("StructuredBuffer<uint4> ForwardPlusTiles : register(t11, space2)") !=
+    CHECK(compilation.Variants.front().Hlsl.find("StructuredBuffer<uint4> ForwardPlusTiles : register(t12, space2)") !=
           std::string::npos);
     CHECK(compilation.Variants.front().Hlsl.find(
-              "StructuredBuffer<uint4> ForwardPlusLightIndices : register(t12, space2)") != std::string::npos);
+              "StructuredBuffer<uint4> ForwardPlusLightIndices : register(t13, space2)") != std::string::npos);
     CHECK(compilation.Variants.front().Hlsl.find(
-              "StructuredBuffer<ShaderGraphSpatialSelectionRecord> SpatialSelectionRecords : register(t13, space2)") !=
+              "StructuredBuffer<ShaderGraphSpatialSelectionRecord> SpatialSelectionRecords : register(t14, space2)") !=
           std::string::npos);
     CHECK(compilation.Variants.front().Hlsl.find("register(t16, space2)") == std::string::npos);
     CHECK(compilation.Variants.front().Hlsl.find("EvaluateDirectionalShadow") != std::string::npos);
@@ -732,6 +736,9 @@ TEST_CASE("every graphics shader template compiles through the production import
             const auto imported = Keire::CreateShaderAssetImporter().ContextualImport(context, ReadBytes(manifest));
             const auto shader = Keire::ShaderAsset::Decode(imported.Bytes);
             CHECK(shader->Definition().ProgramTarget == Keire::ShaderGraphTargetName(graph.Target.Target));
+            const bool screenSpace = graph.Target.Target == Keire::ShaderGraphTarget::Ui ||
+                                     graph.Target.Target == Keire::ShaderGraphTarget::Fullscreen;
+            CHECK(shader->Definition().VfxRenderOriginAbiVersion == (screenSpace ? 0U : 1U));
             REQUIRE(shader->Definition().Properties.size() == 1U);
             CHECK(shader->Definition().Properties.front().Id == tint.Id);
             CHECK(imported.Diagnostics.empty());
@@ -1432,5 +1439,196 @@ TEST_CASE("Scene Color rejects mesh and UI consumers and preserves source identi
         CHECK_FALSE(compilation.Succeeded());
         REQUIRE_FALSE(compilation.Diagnostics.empty());
         CHECK(compilation.Diagnostics.front().Message.find("Fullscreen") != std::string::npos);
+    }
+}
+
+TEST_CASE("Shader Graph preserves seven material textures within the portable sampler budget")
+{
+    for (const std::uint32_t textureCount : {6U, 7U})
+    {
+        CAPTURE(textureCount);
+        auto graph = Keire::CreateDefaultShaderGraph();
+        for (std::uint32_t index = 0; index < textureCount; ++index)
+        {
+            graph.Nodes.push_back(
+                Parameter("Channel" + std::to_string(index), Keire::ShaderGraphValueType::Texture2D, Keire::AssetId{}));
+        }
+        const auto compilation = Keire::CompileShaderGraph(graph);
+        REQUIRE(compilation.Succeeded());
+        REQUIRE(compilation.Variants.size() == 1);
+        const auto& variant = compilation.Variants.front();
+        const auto manifest = nlohmann::json::parse(variant.Manifest);
+        CHECK(manifest.at("volumeLightingAbiVersion") == (textureCount == 7U ? 14U : 13U));
+        CHECK(variant.Hlsl.find(textureCount == 7U ? "#define KEIRE_CLOUD_NOISE_BUFFER t16\n"
+                                                   : "#define KEIRE_CLOUD_NOISE_TEXTURE t15\n") != std::string::npos);
+        CHECK(variant.Hlsl.find("ForwardPlusLights : register(t" + std::to_string(textureCount + 10U) + ", space2)") !=
+              std::string::npos);
+    }
+}
+
+TEST_CASE("Seven-texture volume material compiles through the production shader importer")
+{
+    auto graph = Keire::CreateDefaultShaderGraph();
+    std::optional<Keire::ShaderGraphNode> accumulated;
+    for (std::uint32_t index = 0; index < 7U; ++index)
+    {
+        auto texture =
+            Parameter("Channel" + std::to_string(index), Keire::ShaderGraphValueType::Texture2D, Keire::AssetId{});
+        // Missing test textures must sample neutral white, not the Generic magenta error checkerboard.
+        texture.TextureSemantic = Keire::ShaderTextureSemantic::BaseColor;
+        auto sample =
+            Keire::CreateShaderGraphNode(Keire::ShaderGraphNodeKind::TextureSample, Keire::ShaderGraphValueType::Color);
+        graph.Nodes.insert(graph.Nodes.end(), {texture, sample});
+        Connect(graph, texture, "Value", sample, "Texture");
+        if (accumulated)
+        {
+            auto add =
+                Keire::CreateShaderGraphNode(Keire::ShaderGraphNodeKind::Add, Keire::ShaderGraphValueType::Color);
+            graph.Nodes.push_back(add);
+            Connect(graph, *accumulated, index == 1U ? "RGBA" : "Result", add, "A");
+            Connect(graph, sample, "RGBA", add, "B");
+            accumulated = add;
+        }
+        else
+        {
+            accumulated = sample;
+        }
+    }
+    Connect(graph, *accumulated, "Result", graph.Nodes.front(), "BaseColor");
+    SUBCASE("Opaque") { graph.Output = Keire::ShaderGraphOutput::Surface; }
+    SUBCASE("Transparent")
+    {
+        graph.Output = Keire::ShaderGraphOutput::Transparent;
+        Pin(graph.Nodes.front(), "Opacity").DefaultValue = 0.5F;
+    }
+    Keire::ShaderGraphCompileOptions options;
+    options.GeneratedSource = "Assets/Generated/SevenTextureVolume.hlsl";
+    const auto compilation = Keire::CompileShaderGraph(graph, options);
+    REQUIRE(compilation.Succeeded());
+    REQUIRE(compilation.Variants.size() == 1);
+    const auto& variant = compilation.Variants.front();
+    REQUIRE(nlohmann::json::parse(variant.Manifest).at("volumeLightingAbiVersion") == 14U);
+
+    // Opt-in source fixture for the separate interactive renderer acceptance pass. Never overwrite
+    // an existing destination or make ordinary unit-test runs publish files into a user's project.
+    if (const auto* fixtureRoot = std::getenv("KEIRE_TEST_SHADER_FIXTURE_ROOT");
+        fixtureRoot && graph.Output == Keire::ShaderGraphOutput::Surface)
+    {
+        const std::filesystem::path destination(fixtureRoot);
+        REQUIRE(destination.is_absolute());
+        REQUIRE_FALSE(std::filesystem::exists(destination));
+        const auto graphBytes = Keire::ShaderGraphAsset::EncodeSource(graph);
+        WriteText(destination / "SevenTextureVolume.keireshadergraph",
+                  std::string_view(reinterpret_cast<const char*>(graphBytes.data()), graphBytes.size()));
+        auto transparentGraph = graph;
+        transparentGraph.Output = Keire::ShaderGraphOutput::Transparent;
+        Pin(transparentGraph.Nodes.front(), "Opacity").DefaultValue = 0.5F;
+        const auto transparentBytes = Keire::ShaderGraphAsset::EncodeSource(transparentGraph);
+        WriteText(destination / "SevenTextureVolumeTransparent.keireshadergraph",
+                  std::string_view(reinterpret_cast<const char*>(transparentBytes.data()), transparentBytes.size()));
+    }
+
+    TemporaryDirectory directory;
+    const auto source = directory.Path / variant.GeneratedSource;
+    auto manifest = source;
+    manifest.replace_extension(".keireshader");
+    WriteText(source, variant.Hlsl);
+    WriteText(manifest, variant.Manifest);
+    Keire::AssetImportContext context;
+    context.ProjectRoot = directory.Path;
+    context.SourceRoot = directory.Path / "Assets";
+    context.SourcePath = manifest;
+    context.RelativePath = manifest.lexically_relative(context.SourceRoot);
+    context.ReadProjectFile = [root = directory.Path](const std::filesystem::path& relative)
+    { return ReadBytes(root / relative); };
+    const auto importer = Keire::CreateShaderAssetImporter();
+    const auto imported = importer.ContextualImport(context, ReadBytes(manifest));
+    const auto shader = Keire::ShaderAsset::Decode(imported.Bytes);
+    CHECK(shader->Definition().VolumeLightingAbiVersion == 14U);
+    const bool transparent = graph.Output == Keire::ShaderGraphOutput::Transparent;
+    CHECK(shader->Definition().Blend == transparent);
+    CHECK(shader->Definition().DepthWrite == !transparent);
+    CHECK(std::ranges::count(shader->Definition().Properties, Keire::ShaderPropertyType::Texture2D,
+                             &Keire::ShaderPropertyDefinition::Type) == 7);
+    CHECK(std::ranges::count(shader->Definition().Properties, Keire::ShaderTextureSemantic::BaseColor,
+                             &Keire::ShaderPropertyDefinition::TextureSemantic) == 7);
+    for (const auto format :
+         {Keire::ShaderBinaryFormat::Dxil, Keire::ShaderBinaryFormat::SpirV, Keire::ShaderBinaryFormat::Msl})
+    {
+        if (graph.Output == Keire::ShaderGraphOutput::Transparent)
+        {
+            CHECK(shader->Variant(format, "forwardTransparent") != nullptr);
+        }
+        else
+        {
+            for (const auto role : {"depthVelocity", "deferredGBufferStandard", "forwardOpaque"})
+            {
+                CHECK(shader->Variant(format, role) != nullptr);
+            }
+        }
+    }
+    CHECK(imported.Diagnostics.empty());
+}
+
+TEST_CASE("VFX material vertices convert simulation positions before world lighting outputs")
+{
+    const auto graph = Keire::CreateShaderGraphTemplate(Keire::ShaderGraphTemplate::Vfx);
+    const auto compilation = Keire::CompileShaderGraph(graph, {});
+    REQUIRE(compilation.Succeeded());
+    REQUIRE(compilation.Variants.size() == 1U);
+    const auto& source = compilation.Variants.front().Hlsl;
+    const auto translation = source.find("#if defined(KEIRE_PASS_VFX_BILLBOARD) || defined(KEIRE_PASS_VFX_RIBBON)\n"
+                                         "    instance.Model = Model;");
+    REQUIRE(translation != std::string::npos);
+    const auto world = source.find("float4 world = mul(instance.Model, float4(input.Position, 1.0F));", translation);
+    REQUIRE(world != std::string::npos);
+    const auto lightingPosition = source.find("output.WorldPosition", world);
+    REQUIRE(lightingPosition != std::string::npos);
+    CHECK(translation < world);
+    CHECK(world < lightingPosition);
+}
+
+TEST_CASE("Generated instanced material supports explicit VFX render-frame translation")
+{
+    const auto compilation = Keire::CompileShaderGraph(Keire::CreateDefaultShaderGraph(), {});
+    REQUIRE(compilation.Succeeded());
+    REQUIRE(compilation.Variants.size() == 1U);
+    const auto& source = compilation.Variants.front().Hlsl;
+    CHECK(source.find("if (InstanceParameters.y != 0U)") != std::string::npos);
+    CHECK(source.find("instance.Model = mul(Model, instance.Model);") != std::string::npos);
+    CHECK(source.find("instance.NormalMatrix = mul(Model") == std::string::npos);
+}
+
+TEST_CASE("generated shader manifests advertise VFX origins only for mesh coordinate contracts")
+{
+    for (const auto graphTemplate : {Keire::ShaderGraphTemplate::Lit, Keire::ShaderGraphTemplate::Unlit,
+                                     Keire::ShaderGraphTemplate::Vfx, Keire::ShaderGraphTemplate::CustomGraphics,
+                                     Keire::ShaderGraphTemplate::Ui, Keire::ShaderGraphTemplate::Fullscreen})
+    {
+        const auto graph = Keire::CreateShaderGraphTemplate(graphTemplate);
+        const auto compilation = Keire::CompileShaderGraph(graph);
+        REQUIRE(compilation.Succeeded());
+        REQUIRE(compilation.Variants.size() == 1U);
+        const auto manifest = nlohmann::json::parse(compilation.Variants.front().Manifest);
+        const bool screenSpace = graph.Target.Target == Keire::ShaderGraphTarget::Ui ||
+                                 graph.Target.Target == Keire::ShaderGraphTarget::Fullscreen;
+        CHECK(manifest.at("vfxRenderOriginAbiVersion") == (screenSpace ? 0U : 1U));
+        for (const auto& unsupported : {nlohmann::json(2U), nlohmann::json(257U), nlohmann::json(-1),
+                                        nlohmann::json(1.5), nlohmann::json(true), nlohmann::json("1")})
+        {
+            auto invalid = manifest;
+            invalid["vfxRenderOriginAbiVersion"] = unsupported;
+            const auto text = invalid.dump();
+            CHECK_THROWS_AS((void)Keire::ShaderAsset::DecodeManifest(std::as_bytes(std::span(text))),
+                            std::invalid_argument);
+        }
+        if (screenSpace)
+        {
+            auto invalid = manifest;
+            invalid["vfxRenderOriginAbiVersion"] = 1U;
+            const auto text = invalid.dump();
+            CHECK_THROWS_AS((void)Keire::ShaderAsset::DecodeManifest(std::as_bytes(std::span(text))),
+                            std::invalid_argument);
+        }
     }
 }

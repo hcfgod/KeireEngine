@@ -20,6 +20,27 @@ namespace
     }
 } // namespace
 
+TEST_CASE("Cloud light cache keys distinguish planetary geometry identity and discontinuities")
+{
+    CloudVolumeViewUniforms view{};
+    const auto flat = Key(view);
+    Keire::Detail::ResolvedPlanetFrame frame;
+    frame.Planet = {1, 2};
+    frame.RadiusMetres = 6360000.0;
+    frame.ObserverFromCenterPlanetMetres = {0.0, 6361000.0, 0.0};
+    view.PlanetaryCloud = MakePlanetaryCloudUniforms(frame, 1000.0);
+    const auto original = Key(view);
+    CHECK(original != flat);
+    view.PlanetaryCloud.RadiusGeometry.X += 100.0F;
+    CHECK(Key(view) != original);
+    auto changedIdentity = original;
+    changedIdentity.Planet = {1, 3};
+    CHECK(changedIdentity != original);
+    auto changedRevision = original;
+    ++changedRevision.DiscontinuityRevision;
+    CHECK(changedRevision != original);
+}
+
 TEST_CASE("Cloud light cache rejects changed density, wind, geometry and shadow budgets")
 {
     CloudVolumeViewUniforms baseline{};

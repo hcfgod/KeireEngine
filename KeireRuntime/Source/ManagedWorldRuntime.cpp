@@ -823,4 +823,28 @@ namespace KeireRuntime
             m_RuntimeWorld ? m_RuntimeWorld->SessionForWorld(query.World) : Keire::Ref<Keire::SceneRuntimeSession>{};
         return Keire::Detail::QueryManagedSphereOverlap(runtime, query);
     }
+
+    std::optional<Keire::ManagedRaycastHitPrecise>
+    ManagedWorldRuntimeServices::RaycastManagedPrecise(const Keire::ManagedRaycastQueryPrecise& query)
+    {
+        const auto runtime =
+            m_RuntimeWorld ? m_RuntimeWorld->SessionForWorld(query.World) : Keire::Ref<Keire::SceneRuntimeSession>{};
+        return Keire::Detail::QueryManagedRayPrecise(runtime, query);
+    }
+
+    std::optional<Keire::ManagedRaycastHitPrecise>
+    ManagedWorldRuntimeServices::CapsuleCastManagedPrecise(const Keire::ManagedCapsuleCastQueryPrecise& query)
+    {
+        const auto runtime =
+            m_RuntimeWorld ? m_RuntimeWorld->SessionForWorld(query.World) : Keire::Ref<Keire::SceneRuntimeSession>{};
+        return Keire::Detail::QueryManagedCapsulePrecise(runtime, query);
+    }
+
+    std::vector<Keire::AssetId>
+    ManagedWorldRuntimeServices::OverlapSphereManagedPrecise(const Keire::ManagedSphereOverlapQueryPrecise& query)
+    {
+        const auto runtime =
+            m_RuntimeWorld ? m_RuntimeWorld->SessionForWorld(query.World) : Keire::Ref<Keire::SceneRuntimeSession>{};
+        return Keire::Detail::QueryManagedSphereOverlapPrecise(runtime, query);
+    }
 } // namespace KeireRuntime

@@ -224,7 +224,7 @@ void EditorWorkspaceLayer::DrawMainMenu(Keire::UiFrame& ui, Keire::UiWorkspace& 
                 RecordSceneUndo();
                 const auto created =
                     m_SceneDocument->CreateEntity("Main Camera", {}, Keire::CameraComponent::StaticType());
-                m_SceneDocument->SetTransform(created, {.Position = Keire::Vector3{0.0F, 1.0F, -10.0F}});
+                m_SceneDocument->SetTransform(created, {.Position = Keire::Vector3d{0.0, 1.0, -10.0}});
                 m_SceneDocument->Select(created.Value());
                 MarkPlayEditorEntity(m_SceneDocument->Selection());
             }

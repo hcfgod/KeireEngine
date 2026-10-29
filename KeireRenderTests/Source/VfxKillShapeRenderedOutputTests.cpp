@@ -8,7 +8,9 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cstdint>
+#include <cstdlib>
 #include <memory>
 #include <stdexcept>
 #include <utility>
@@ -57,13 +59,16 @@ namespace
         return Keire::AssetId(0x4b494c4c53485045ULL, value);
     }
 
-    [[nodiscard]] Keire::Ref<Keire::VfxEffectAsset> KillShapeEffect(const Keire::VfxKillShapeMode mode)
+    [[nodiscard]] Keire::Ref<Keire::VfxEffectAsset>
+    KillShapeEffect(const Keire::VfxKillShapeMode mode,
+                    const Keire::VfxSimulationSpace space = Keire::VfxSimulationSpace::World)
     {
         Keire::VfxEffectDefinition definition;
         definition.EmitterId = RenderVfxId(mode == Keire::VfxKillShapeMode::Solid ? 1 : 2);
         definition.Name = mode == Keire::VfxKillShapeMode::Solid ? "GPU solid Kill Shape" : "GPU inverted Kill Shape";
         definition.Duration = 4.0F;
         definition.Capacity = 16;
+        definition.Space = space;
         definition.Modules = {
             {RenderVfxId(3), true, Keire::VfxBurstModule{0.0F, 8, 1, 0.1F}},
             {RenderVfxId(4), true, Keire::VfxShapeModule{}},
@@ -106,14 +111,17 @@ namespace
     class KillShapeCaptureLayer final : public Keire::Layer
     {
       public:
-        KillShapeCaptureLayer(Keire::Ref<Keire::VfxEffectAsset> effect, std::shared_ptr<CaptureResults> results)
-            : Layer("Kill Shape capture"), m_Effect(std::move(effect)), m_Results(std::move(results))
+        KillShapeCaptureLayer(Keire::Ref<Keire::VfxEffectAsset> effect, std::shared_ptr<CaptureResults> results,
+                              const bool testOriginMigration = false)
+            : Layer("Kill Shape capture"), m_Effect(std::move(effect)), m_Results(std::move(results)),
+              m_TestOriginMigration(testOriginMigration)
         {
         }
 
       protected:
         void OnAttach() override
         {
+            m_ReadyDeadline = std::chrono::steady_clock::now() + std::chrono::minutes(2);
             m_Scene = Keire::CreateRef<Keire::Scene>(Keire::AssetId::Generate(),
                                                      Keire::SceneAsset::EmptyDefinition("Kill Shape capture"),
                                                      Keire::ComponentRegistry::CreateDefault());
@@ -129,6 +137,10 @@ namespace
             camera.View = Keire::Math::LookAt({0.0F, 0.0F, 2.5F}, {}, {0.0F, 1.0F, 0.0F});
             camera.Projection = Keire::Math::Perspective(55.0F, 1.0F, 0.1F, 100.0F);
             camera.ClearColor = surface.ClearColor;
+            if (m_TestOriginMigration)
+            {
+                camera.WorldOrigin = {1.0e12, 0.0, 0.0};
+            }
             m_View->SetCamera(camera);
             m_Environment.SkyVisible = false;
             m_Environment.AmbientColor = {1.0F, 1.0F, 1.0F, 1.0F};
@@ -137,8 +149,12 @@ namespace
             const auto compiled = Keire::CompileVfxEffect(m_Effect->Definition(), Keire::VfxBackend::Gpu);
             if (!compiled.Valid)
                 throw std::logic_error("Rendered Kill Shape effect did not compile for the GPU backend.");
-            m_World = Keire::CreateRef<Keire::VfxWorld>(Keire::VfxWorldSpecification{
-                .MaximumEffects = 1, .MaximumParticles = 16, .Backend = Keire::VfxBackend::Gpu});
+            Keire::VfxWorldSpecification worldSpecification;
+            worldSpecification.MaximumEffects = 1;
+            worldSpecification.MaximumParticles = 16;
+            worldSpecification.Backend = Keire::VfxBackend::Gpu;
+            worldSpecification.WorldOrigin = camera.WorldOrigin;
+            m_World = Keire::CreateRef<Keire::VfxWorld>(worldSpecification);
             if (!m_World->Activate({m_Effect}))
                 throw std::logic_error("Could not activate the rendered Kill Shape effect.");
             m_World->Update(0.01F);
@@ -162,9 +178,18 @@ namespace
                 m_Submitted = true;
                 return;
             }
+            const auto statistics = Owner().Renderer()->Statistics();
+            if (m_TestOriginMigration && statistics.VfxGpuWorlds == 0)
+            {
+                if (std::chrono::steady_clock::now() >= m_ReadyDeadline)
+                {
+                    throw std::runtime_error("GPU VFX migration capture timed out waiting for pipeline warmup.");
+                }
+                Submit();
+                return;
+            }
             m_Results->Frames.push_back(
                 Keire::RenderSystemInternalAccess::ReadbackRGBA8(*Owner().Renderer(), *m_View->Surface()));
-            const auto statistics = Owner().Renderer()->Statistics();
             m_Results->Statistics.VfxGpuWorlds = std::max(m_Results->Statistics.VfxGpuWorlds, statistics.VfxGpuWorlds);
             m_Results->HasStatistics = true;
             if (m_Results->Frames.size() >= 60)
@@ -172,7 +197,28 @@ namespace
                 Owner().RequestExit();
                 return;
             }
-            m_World->Update(1.0F / 60.0F);
+            if (m_TestOriginMigration)
+            {
+                const auto frame = m_Results->Frames.size();
+                if (frame == 25)
+                {
+                    m_World->RebaseOrigin({1.0e12 + 128.0, 64.0, -128.0});
+                }
+                else if (frame == 35)
+                {
+                    // The renderer must consume the cumulative shift when intermediate snapshots are skipped.
+                    m_World->RebaseOrigin({1.0e12 - 256.0, -128.0, 64.0});
+                    m_World->RebaseOrigin({1.0e12 + 512.0, 128.0, -64.0});
+                }
+                else if (frame == 45)
+                {
+                    m_World->RebaseOrigin({1.0e12, 0.0, 0.0});
+                }
+            }
+            else
+            {
+                m_World->Update(1.0F / 60.0F);
+            }
             Submit();
         }
 
@@ -189,6 +235,8 @@ namespace
         Keire::Ref<Keire::VfxWorld> m_World;
         Keire::RenderEnvironmentSettings m_Environment;
         bool m_Submitted = false;
+        bool m_TestOriginMigration = false;
+        std::chrono::steady_clock::time_point m_ReadyDeadline;
     };
 } // namespace
 
@@ -218,4 +266,38 @@ TEST_CASE("GPU Kill Shape applies Solid and Inverted sphere semantics in render 
     }
     CHECK(lateRed[1] > 10.0F);
     CHECK(lateRed[0] < lateRed[1] * 0.2F);
+}
+
+TEST_CASE("GPU particles retain rendered position through repeated and skipped origin migrations")
+{
+    for (const auto space : {Keire::VfxSimulationSpace::World, Keire::VfxSimulationSpace::Local})
+    {
+        CAPTURE(space);
+        const auto results = std::make_shared<CaptureResults>();
+        {
+            Keire::Application application(RenderTestSpecification());
+            (void)application.PushLayer(std::make_unique<KillShapeCaptureLayer>(
+                KillShapeEffect(Keire::VfxKillShapeMode::Inverted, space), results, true));
+            REQUIRE(application.Run() == 0);
+        }
+        REQUIRE(results->Frames.size() == 60);
+        REQUIRE(results->Statistics.VfxGpuWorlds > 0);
+        const auto& baseline = results->Frames[24];
+        REQUIRE(MeasureChannelSignal(baseline, 0).Weight > 10.0F);
+        for (const std::size_t frame : {29U, 39U, 49U, 59U})
+        {
+            CAPTURE(frame);
+            const auto& pixels = results->Frames[frame];
+            REQUIRE(pixels.size() == baseline.size());
+            std::uint64_t difference = 0;
+            for (std::size_t index = 0; index < pixels.size(); ++index)
+            {
+                difference += static_cast<std::uint64_t>(
+                    std::abs(static_cast<int>(pixels[index]) - static_cast<int>(baseline[index])));
+            }
+            CHECK(static_cast<double>(difference) / pixels.size() < 0.5);
+            CHECK(MeasureChannelSignal(pixels, 0).Weight ==
+                  doctest::Approx(MeasureChannelSignal(baseline, 0).Weight).epsilon(0.02));
+        }
+    }
 }

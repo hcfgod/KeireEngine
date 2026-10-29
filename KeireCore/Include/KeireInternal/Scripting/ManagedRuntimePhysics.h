@@ -14,6 +14,13 @@ namespace Keire
 
 namespace Keire::Detail
 {
+    [[nodiscard]] std::optional<ManagedRaycastHitPrecise>
+    QueryManagedRayPrecise(const Ref<SceneRuntimeSession>& runtime, const ManagedRaycastQueryPrecise& query);
+    [[nodiscard]] std::optional<ManagedRaycastHitPrecise>
+    QueryManagedCapsulePrecise(const Ref<SceneRuntimeSession>& runtime, const ManagedCapsuleCastQueryPrecise& query);
+    [[nodiscard]] std::vector<AssetId> QueryManagedSphereOverlapPrecise(const Ref<SceneRuntimeSession>& runtime,
+                                                                        const ManagedSphereOverlapQueryPrecise& query);
+
     [[nodiscard]] std::optional<ManagedRaycastHit> QueryManagedCapsule(const Ref<SceneRuntimeSession>& runtime,
                                                                        const ManagedCapsuleCastQuery& query) noexcept;
     [[nodiscard]] std::vector<AssetId> QueryManagedSphereOverlap(const Ref<SceneRuntimeSession>& runtime,

@@ -29,6 +29,7 @@
 #include "KeireInternal/Environment/EnvironmentTimeSettingsStore.h"
 #include "KeireInternal/FileSystem.h"
 #include "KeireInternal/Process.h"
+#include "KeireInternal/Spatial/PlanetProjectSettingsStore.h"
 #include "KeireProjectModules/SourceModulePack.h"
 
 #include <nlohmann/json.hpp>
@@ -517,6 +518,7 @@ namespace
         const auto authoring = Keire::LoadProjectAuthoringSettings(project.Root());
         const auto environmentTime = Keire::Detail::EnvironmentTimeSettingsStore::Load(project.Root());
         const auto environmentLighting = Keire::Detail::EnvironmentLightingSettingsStore::Load(project.Root());
+        const auto planets = Keire::Detail::PlanetProjectSettingsStore::Load(project.Root());
         const auto& build = Keire::GetBuildInfo();
         nlohmann::json physicsLayerNames = nlohmann::json::array();
         nlohmann::json physicsCollisionMatrix = nlohmann::json::array();
@@ -550,6 +552,7 @@ namespace
             {"schemaVersion", Keire::Detail::EnvironmentRuntimeManifest::CurrentSchema},
             {"environmentTime", Keire::Detail::EnvironmentClockRecord::Encode(environmentTime)},
             {"environmentLighting", Keire::Detail::EnvironmentLightingRecord::Encode(environmentLighting)},
+            {"planets", Keire::Detail::PlanetProjectSettingsRecord::Encode(planets)},
             {"startupScene", buildScenes.front().ToString()},
             {"buildScenes", std::move(encodedBuildScenes)},
             {"defaultInput",
@@ -568,7 +571,9 @@ namespace
              scripting ? nlohmann::json::array({"ManagedAssemblies"}) : nlohmann::json::array()},
             {"subsystems", {{"scripting", scripting}, {"physics", true}, {"audio", true}, {"navigation", true}}},
             {"physics",
-             {{"layerNames", std::move(physicsLayerNames)}, {"collisionMatrix", std::move(physicsCollisionMatrix)}}},
+             {{"layerNames", std::move(physicsLayerNames)},
+              {"collisionMatrix", std::move(physicsCollisionMatrix)},
+              {"gravity", {authoring.PhysicsGravity.X, authoring.PhysicsGravity.Y, authoring.PhysicsGravity.Z}}}},
             {"audio",
              {{"mixSampleRate", authoring.Audio.MixSampleRate},
               {"periodFrames", authoring.Audio.PeriodFrames},

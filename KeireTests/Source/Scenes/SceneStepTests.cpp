@@ -3,10 +3,12 @@
 #include <doctest/doctest.h>
 
 #include <chrono>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <limits>
 #include <memory>
 #include <span>
@@ -24,6 +26,7 @@ namespace
         std::vector<std::string> Calls;
         std::string ThrowAt;
         bool MoveInFixed = false;
+        std::function<void()> DuringFixedUpdate;
         std::vector<Keire::AnimationIkMessage> IkContexts;
     };
 
@@ -47,6 +50,10 @@ namespace
         void FixedUpdate(float) override
         {
             Record("FixedUpdate");
+            if (m_State->DuringFixedUpdate)
+            {
+                m_State->DuringFixedUpdate();
+            }
             if (m_State->MoveInFixed)
             {
                 const auto transform = Owner().GetComponent<Keire::TransformComponent>();
@@ -180,6 +187,391 @@ namespace
         Keire::Ref<Keire::SceneRuntimeSession> Session;
     };
 } // namespace
+
+TEST_CASE("Simulation focus follows a dynamic body out and back across repeated origin thresholds")
+{
+    for (const double offset : {0.0, 1.0e12})
+    {
+        CAPTURE(offset);
+        StepFixture fixture;
+        Keire::PhysicsSystemSpecification specification;
+        specification.Mode = Keire::PhysicsMode::Enabled;
+        fixture.Physics = Keire::CreateRef<Keire::PhysicsSystem>(specification);
+        fixture.Character.GetComponent<Keire::TransformComponent>()->SetWorldPositionPrecise(
+            {offset + 0.125, 0.0, 0.0});
+        (void)fixture.Character.AddComponent<Keire::ColliderComponent>();
+        fixture.Character.AddComponent<Keire::RigidBodyComponent>()->SetUseGravity(false);
+        fixture.Start();
+        fixture.Session->Pause(false);
+        const auto focus = fixture.Session->RuntimeScene()->FindEntity(fixture.Character.Id());
+        const auto transform = focus.GetComponent<Keire::TransformComponent>();
+        const auto body = focus.GetComponent<Keire::RigidBodyComponent>();
+        fixture.Session->SetSimulationFocus(focus);
+        float velocity = 480.0F;
+        fixture.Probe->DuringFixedUpdate = [&] { body->SetLinearVelocity({velocity, 0.0F, 0.0F}); };
+        auto previousOrigin = fixture.Session->Physics()->WorldOrigin();
+        int migrations = 0;
+        for (int direction = 0; direction < 2; ++direction)
+        {
+            velocity = direction == 0 ? 480.0F : -480.0F;
+            for (int tick = 0; tick < 1280; ++tick)
+            {
+                fixture.Session->FixedUpdate(0.1F);
+                REQUIRE(fixture.Session->State() == Keire::ScenePlayState::Playing);
+                const auto origin = fixture.Session->Physics()->WorldOrigin();
+                CHECK(origin == fixture.Session->Vfx()->WorldOrigin());
+                CHECK(std::abs(transform->WorldPositionPrecise().X - origin.X) <= 8240.0);
+                if (origin != previousOrigin)
+                {
+                    ++migrations;
+                    previousOrigin = origin;
+                }
+            }
+            if (direction == 0)
+            {
+                CHECK(transform->WorldPositionPrecise().X - offset > 60000.0);
+            }
+        }
+        CHECK(migrations >= 12);
+        CHECK(std::abs(transform->WorldPositionPrecise().X - (offset + 0.125)) < 0.1);
+    }
+}
+
+TEST_CASE("Simulation focus preserves floor support and wall collision across automatic origin shifts")
+{
+    for (const double offset : {0.0, 1.0e12})
+    {
+        CAPTURE(offset);
+        StepFixture fixture;
+        Keire::PhysicsSystemSpecification specification;
+        specification.Mode = Keire::PhysicsMode::Enabled;
+        fixture.Physics = Keire::CreateRef<Keire::PhysicsSystem>(specification);
+        auto floor = fixture.Scene->CreateEntity("Travel floor");
+        floor.GetComponent<Keire::TransformComponent>()->SetWorldPositionPrecise({offset + 12.0, -0.5, 0.0});
+        floor.AddComponent<Keire::ColliderComponent>()->SetHalfExtent({32.0F, 0.5F, 4.0F});
+        auto wall = fixture.Scene->CreateEntity("Travel barrier");
+        wall.GetComponent<Keire::TransformComponent>()->SetWorldPositionPrecise({offset + 24.0, 2.0, 0.0});
+        wall.AddComponent<Keire::ColliderComponent>()->SetHalfExtent({0.5F, 2.0F, 4.0F});
+        fixture.Character.GetComponent<Keire::TransformComponent>()->SetWorldPositionPrecise({offset, 0.5, 0.0});
+        (void)fixture.Character.AddComponent<Keire::ColliderComponent>();
+        (void)fixture.Character.AddComponent<Keire::RigidBodyComponent>();
+        fixture.Start();
+        fixture.Session->Pause(false);
+        const auto focus = fixture.Session->RuntimeScene()->FindEntity(fixture.Character.Id());
+        const auto transform = focus.GetComponent<Keire::TransformComponent>();
+        const auto body = focus.GetComponent<Keire::RigidBodyComponent>();
+        fixture.Session->SetSimulationFocus(focus, 8.0, 4.0);
+        fixture.Probe->DuringFixedUpdate = [&] { body->SetLinearVelocity({12.0F, 0.0F, 0.0F}); };
+        auto previousOrigin = fixture.Session->Physics()->WorldOrigin();
+        int migrations = 0;
+        for (int tick = 0; tick < 300; ++tick)
+        {
+            fixture.Session->FixedUpdate(0.02F);
+            REQUIRE(fixture.Session->State() == Keire::ScenePlayState::Playing);
+            const auto position = transform->WorldPositionPrecise();
+            CHECK(position.Y > 0.4);
+            CHECK(position.Y < 0.6);
+            CHECK(position.X - offset < 23.1);
+            const auto origin = fixture.Session->Physics()->WorldOrigin();
+            CHECK(origin == fixture.Session->Vfx()->WorldOrigin());
+            if (origin != previousOrigin)
+            {
+                ++migrations;
+                previousOrigin = origin;
+            }
+        }
+        CHECK(migrations >= 2);
+        CHECK(transform->WorldPositionPrecise().X - offset > 22.9);
+    }
+}
+
+TEST_CASE("Physics checkpoint restoration rejects gameplay callbacks without changing world state")
+{
+    StepFixture fixture;
+    Keire::PhysicsSystemSpecification specification;
+    specification.Mode = Keire::PhysicsMode::Enabled;
+    fixture.Physics = Keire::CreateRef<Keire::PhysicsSystem>(specification);
+    (void)fixture.Character.AddComponent<Keire::ColliderComponent>();
+    fixture.Start();
+    const auto original = fixture.Session->CapturePhysicsWorldCheckpoint();
+    REQUIRE(original.Gravity);
+    REQUIRE(original.Bodies.size() == 1);
+    auto changed = original;
+    changed.Gravity = Keire::Vector3{12.0F, 0.0F, 0.0F};
+    changed.Bodies.front().Position.X += 20.0F;
+    for (const bool worldCheckpoint : {false, true})
+    {
+        CAPTURE(worldCheckpoint);
+        bool rejected = false;
+        fixture.Probe->DuringFixedUpdate = [&]
+        {
+            try
+            {
+                if (worldCheckpoint)
+                {
+                    fixture.Session->RestorePhysicsWorldCheckpoint(changed);
+                }
+                else
+                {
+                    fixture.Session->RestorePhysicsCheckpoint(changed.Bodies);
+                }
+            }
+            catch (const std::logic_error&)
+            {
+                rejected = true;
+            }
+        };
+        REQUIRE(fixture.Session->Step(1.0F / 60.0F));
+        CHECK(rejected);
+        const auto after = fixture.Session->CapturePhysicsWorldCheckpoint();
+        CHECK(after.Gravity == original.Gravity);
+        REQUIRE(after.Bodies.size() == original.Bodies.size());
+        CHECK(after.Bodies.front().Position == original.Bodies.front().Position);
+        CHECK(fixture.Session->State() == Keire::ScenePlayState::Paused);
+    }
+}
+
+TEST_CASE("Simulation focus setter guards preserve ownership and support VFX-only sessions")
+{
+    StepFixture fixture;
+    fixture.Start();
+    auto focus = fixture.Session->RuntimeScene()->FindEntity(fixture.Character.Id());
+    auto alternative = fixture.Session->RuntimeScene()->CreateEntity("Alternative focus");
+    fixture.Session->SetSimulationFocus(focus);
+    bool callbackRejected = false;
+    fixture.Probe->DuringFixedUpdate = [&]
+    {
+        try
+        {
+            fixture.Session->SetSimulationFocus(alternative);
+        }
+        catch (const std::logic_error&)
+        {
+            callbackRejected = true;
+        }
+    };
+    REQUIRE(fixture.Session->Step(1.0F / 60.0F));
+    CHECK(callbackRejected);
+    CHECK(fixture.Session->SimulationFocus() == focus);
+    bool threadRejected = false;
+    std::thread foreign(
+        [&]
+        {
+            try
+            {
+                fixture.Session->SetSimulationFocus(alternative);
+            }
+            catch (const std::logic_error&)
+            {
+                threadRejected = true;
+            }
+        });
+    foreign.join();
+    CHECK(threadRejected);
+    CHECK(fixture.Session->SimulationFocus() == focus);
+    fixture.Probe->DuringFixedUpdate = {};
+    alternative.GetComponent<Keire::TransformComponent>()->SetWorldPositionPrecise({20000.0, 0.0, 0.0});
+    fixture.Session->SetSimulationFocus(alternative);
+    REQUIRE(fixture.Session->Step(1.0F / 60.0F));
+    CHECK(fixture.Session->Vfx()->WorldOrigin().X == 20480.0);
+    fixture.Session->SetSimulationFocus();
+    alternative.GetComponent<Keire::TransformComponent>()->SetWorldPositionPrecise({40000.0, 0.0, 0.0});
+    REQUIRE(fixture.Session->Step(1.0F / 60.0F));
+    CHECK(fixture.Session->Vfx()->WorldOrigin().X == 20480.0);
+    CHECK_FALSE(fixture.Session->SimulationFocus());
+}
+
+TEST_CASE("Simulation focus follows fixed-step travel and preserves explicit lifetime ownership")
+{
+    StepFixture fixture;
+    Keire::PhysicsSystemSpecification specification;
+    specification.Mode = Keire::PhysicsMode::Enabled;
+    fixture.Physics = Keire::CreateRef<Keire::PhysicsSystem>(specification);
+    (void)fixture.Character.AddComponent<Keire::ColliderComponent>();
+    fixture.Start();
+    auto focus = fixture.Session->RuntimeScene()->FindEntity(fixture.Character.Id());
+    CHECK_THROWS_AS(fixture.Session->SetSimulationFocus(fixture.Character), std::invalid_argument);
+    REQUIRE_NOTHROW(fixture.Session->SetSimulationFocus(focus));
+    CHECK_THROWS_AS(fixture.Session->SetSimulationFocus({}, 0.0), std::invalid_argument);
+    CHECK(fixture.Session->SimulationFocus() == focus);
+    const auto transform = focus.GetComponent<Keire::TransformComponent>();
+    fixture.Probe->DuringFixedUpdate = [&] { transform->SetWorldPositionPrecise({9000.125, 0.0, 0.0}); };
+    REQUIRE(fixture.Session->Step(1.0F / 60.0F));
+    CHECK(fixture.Session->Physics()->WorldOrigin() == Keire::Vector3d{9216.0, 0.0, 0.0});
+    CHECK(fixture.Session->Vfx()->WorldOrigin() == fixture.Session->Physics()->WorldOrigin());
+    CHECK(transform->WorldPositionPrecise().X == 9000.125);
+    fixture.Probe->DuringFixedUpdate = {};
+    focus.SetActive(false);
+    transform->SetWorldPositionPrecise({20000.125, 0.0, 0.0});
+    REQUIRE(fixture.Session->Step(1.0F / 60.0F));
+    CHECK(fixture.Session->Physics()->WorldOrigin().X == 9216.0);
+    focus.SetActive(true);
+    REQUIRE(fixture.Session->Step(1.0F / 60.0F));
+    CHECK(fixture.Session->Physics()->WorldOrigin().X == 20480.0);
+    const auto snapshot = fixture.Session->RuntimeScene()->Snapshot();
+    fixture.Session->ReplaceRuntime(snapshot);
+    CHECK_FALSE(fixture.Session->SimulationFocus());
+    CHECK_THROWS_AS(fixture.Session->SetSimulationFocus(focus), std::invalid_argument);
+    auto replacement = fixture.Session->RuntimeScene()->FindEntity(fixture.Character.Id());
+    fixture.Session->SetSimulationFocus(replacement);
+    REQUIRE(replacement.Destroy());
+    REQUIRE(fixture.Session->Step(1.0F / 60.0F));
+    CHECK_FALSE(fixture.Session->SimulationFocus());
+}
+
+TEST_CASE("Simulation focus failure faults the step without committing either origin")
+{
+    StepFixture fixture;
+    Keire::PhysicsSystemSpecification specification;
+    specification.Mode = Keire::PhysicsMode::Enabled;
+    fixture.Physics = Keire::CreateRef<Keire::PhysicsSystem>(specification);
+    auto obstacle = fixture.Scene->CreateEntity("Precision obstacle");
+    obstacle.GetComponent<Keire::TransformComponent>()->SetWorldPositionPrecise({0.015625, 0.0, 0.0});
+    (void)obstacle.AddComponent<Keire::ColliderComponent>();
+    fixture.Start();
+    const auto focus = fixture.Session->RuntimeScene()->FindEntity(fixture.Character.Id());
+    fixture.Session->SetSimulationFocus(focus);
+    focus.GetComponent<Keire::TransformComponent>()->SetWorldPositionPrecise({0x1p60, 0.0, 0.0});
+    CHECK_FALSE(fixture.Session->Step(1.0F / 60.0F));
+    CHECK(fixture.Session->State() == Keire::ScenePlayState::Faulted);
+    CHECK(fixture.Session->Diagnostic().Callback == "Simulation origin");
+    CHECK(fixture.Session->Physics()->WorldOrigin() == Keire::Vector3d{});
+    CHECK(fixture.Session->Vfx()->WorldOrigin() == Keire::Vector3d{});
+    CHECK(fixture.Probe->Calls.empty());
+}
+
+TEST_CASE("Physics origin changes reject callbacks and foreign threads without mutation")
+{
+    bool sharedOrigin = false;
+    SUBCASE("physics only") {}
+    SUBCASE("physics and VFX") { sharedOrigin = true; }
+    StepFixture fixture;
+    Keire::PhysicsSystemSpecification specification;
+    specification.Mode = Keire::PhysicsMode::Enabled;
+    fixture.Physics = Keire::CreateRef<Keire::PhysicsSystem>(specification);
+    (void)fixture.Character.AddComponent<Keire::ColliderComponent>();
+    fixture.Start();
+    const auto origin = fixture.Session->Physics()->WorldOrigin();
+    const auto rebase = [&]
+    {
+        if (sharedOrigin)
+        {
+            fixture.Session->RebaseSimulationOrigin({128.0, 0.0, 0.0});
+        }
+        else
+        {
+            fixture.Session->RebasePhysicsOrigin({128.0, 0.0, 0.0});
+        }
+    };
+    bool callbackRejected = false;
+    fixture.Probe->DuringFixedUpdate = [&]
+    {
+        try
+        {
+            rebase();
+        }
+        catch (const std::logic_error&)
+        {
+            callbackRejected = true;
+        }
+    };
+    REQUIRE(fixture.Session->Step(1.0F / 60.0F));
+    CHECK(callbackRejected);
+    CHECK(fixture.Session->Physics()->WorldOrigin() == origin);
+    CHECK(fixture.Session->State() == Keire::ScenePlayState::Paused);
+    bool sessionRejected = false;
+    bool worldRejected = false;
+    const auto physicsWorld = fixture.Session->Physics();
+    std::thread foreign(
+        [&]
+        {
+            try
+            {
+                rebase();
+            }
+            catch (const std::logic_error&)
+            {
+                sessionRejected = true;
+            }
+            try
+            {
+                physicsWorld->RebaseOrigin({128.0, 0.0, 0.0});
+            }
+            catch (const std::logic_error&)
+            {
+                worldRejected = true;
+            }
+        });
+    foreign.join();
+    CHECK(sessionRejected);
+    CHECK(worldRejected);
+    CHECK(fixture.Session->Physics()->WorldOrigin() == origin);
+    fixture.Probe->DuringFixedUpdate = {};
+    REQUIRE_NOTHROW(rebase());
+    CHECK(fixture.Session->Physics()->WorldOrigin() == Keire::Vector3d{128.0, 0.0, 0.0});
+    REQUIRE(fixture.Session->Step(1.0F / 60.0F));
+    CHECK(fixture.Session->State() == Keire::ScenePlayState::Paused);
+}
+
+TEST_CASE("Runtime replacement reports initialization failure and recovers the previous play state")
+{
+    for (const bool paused : {false, true})
+    {
+        CAPTURE(paused);
+        StepFixture fixture;
+        Keire::PhysicsSystemSpecification specification;
+        specification.Mode = Keire::PhysicsMode::Enabled;
+        fixture.Physics = Keire::CreateRef<Keire::PhysicsSystem>(specification);
+        (void)fixture.Character.AddComponent<Keire::ColliderComponent>();
+        fixture.Start();
+        fixture.Session->Pause(paused);
+        const auto expectedState = paused ? Keire::ScenePlayState::Paused : Keire::ScenePlayState::Playing;
+        const auto baseline = fixture.Session->RuntimeScene()->Snapshot();
+        const auto originalPhysics = fixture.Session->Physics();
+        REQUIRE(originalPhysics);
+        fixture.Probe->ThrowAt = "Awake";
+        CHECK_THROWS_AS(fixture.Session->ReplaceRuntime(baseline), std::runtime_error);
+        CHECK(fixture.Session->State() == Keire::ScenePlayState::Faulted);
+        CHECK(fixture.Session->Diagnostic().Callback == "Awake/OnEnable");
+        CHECK_FALSE(originalPhysics->IsOpen());
+        CHECK_THROWS_AS(fixture.Session->ReplaceRuntime(baseline), std::runtime_error);
+        CHECK(fixture.Session->State() == Keire::ScenePlayState::Faulted);
+
+        fixture.Probe->ThrowAt.clear();
+        fixture.Probe->Calls.clear();
+        REQUIRE_NOTHROW(fixture.Session->ReplaceRuntime(baseline));
+        CHECK(fixture.Session->State() == expectedState);
+        CHECK(fixture.Session->Diagnostic().Message.empty());
+        REQUIRE(fixture.Session->Physics());
+        CHECK(fixture.Session->Physics()->IsOpen());
+        CHECK(fixture.Session->Physics() != originalPhysics);
+        if (paused)
+        {
+            REQUIRE(fixture.Session->Step(1.0F / 60.0F));
+        }
+        else
+        {
+            fixture.Session->FixedUpdate(1.0F / 60.0F);
+            fixture.Session->Update(1.0F / 60.0F);
+        }
+        CHECK(fixture.Probe->Calls == std::vector<std::string>{"FixedUpdate", "Update", "LateUpdate"});
+        CHECK(fixture.Session->State() == expectedState);
+    }
+}
+
+TEST_CASE("Runtime replacement recovers a fault from ordinary paused stepping")
+{
+    StepFixture fixture;
+    fixture.Start();
+    const auto baseline = fixture.Session->RuntimeScene()->Snapshot();
+    fixture.Probe->ThrowAt = "FixedUpdate";
+    CHECK_FALSE(fixture.Session->Step(1.0F / 60.0F));
+    REQUIRE(fixture.Session->State() == Keire::ScenePlayState::Faulted);
+    fixture.Probe->ThrowAt.clear();
+    REQUIRE_NOTHROW(fixture.Session->ReplaceRuntime(baseline));
+    CHECK(fixture.Session->State() == Keire::ScenePlayState::Paused);
+    CHECK(fixture.Session->Step(1.0F / 60.0F));
+}
 
 TEST_CASE("Paused scene stepping runs a complete frame and stays paused")
 {

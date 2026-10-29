@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Keire/Rendering/StarField.h"
+#include "KeireInternal/Spatial/FrameRotation.h"
 
 #include <array>
 #include <cmath>
@@ -10,6 +11,17 @@
 
 namespace Keire::RenderBackend
 {
+    // Apply before the existing artistic Y rotation. Stars live in the inertial root, independently of
+    // planet weather rotation and camera radial up. Identity preserves legacy world-oriented star fields.
+    [[nodiscard]] inline std::array<float, 4>
+    MakeStarFieldOrientation(const Detail::FrameRotation& rootToObserver = {}) noexcept
+    {
+        const auto inverse = rootToObserver.Inverse();
+        const auto& rotation = inverse.Components();
+        return {static_cast<float>(rotation[0]), static_cast<float>(rotation[1]), static_cast<float>(rotation[2]),
+                static_cast<float>(rotation[3])};
+    }
+
     struct alignas(16) StarFieldUniforms
     {
         std::array<float, 4> Appearance{};

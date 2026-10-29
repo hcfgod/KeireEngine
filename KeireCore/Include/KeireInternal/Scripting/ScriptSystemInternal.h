@@ -237,6 +237,16 @@ namespace Keire
         static void RuntimeSetLocalPosition(const std::uint64_t world, const std::uint64_t high,
                                             const std::uint64_t low, const Vector3 value) noexcept;
 
+        [[nodiscard]] static std::uint8_t RuntimeGetPrecisePositionV1(std::uint64_t world, std::uint64_t high,
+                                                                      std::uint64_t low, std::uint8_t worldSpace,
+                                                                      Vector3d* destination,
+                                                                      std::uint32_t size) noexcept;
+
+        [[nodiscard]] static std::uint8_t RuntimeSetPrecisePositionV1(std::uint64_t world, std::uint64_t high,
+                                                                      std::uint64_t low, std::uint8_t worldSpace,
+                                                                      const Vector3d* value,
+                                                                      std::uint32_t size) noexcept;
+
         [[nodiscard]] static Quaternion RuntimeGetLocalRotation(const std::uint64_t world, const std::uint64_t high,
                                                                 const std::uint64_t low) noexcept;
 
@@ -271,6 +281,16 @@ namespace Keire
         RuntimeGetRigidBodyProperties(const std::uint64_t world, const std::uint64_t high, const std::uint64_t low,
                                       std::uint8_t* motion, float* mass, Vector3* velocity, std::uint8_t* continuous,
                                       std::uint8_t* gravity) noexcept;
+
+        [[nodiscard]] static std::uint8_t RuntimeGetRigidBodyMotionSettings(std::uint64_t world, std::uint64_t high,
+                                                                            std::uint64_t low, float* linearDamping,
+                                                                            float* angularDamping, float* linearSpeed,
+                                                                            float* angularSpeed) noexcept;
+
+        [[nodiscard]] static std::uint8_t RuntimeSetRigidBodyMotionSettings(std::uint64_t world, std::uint64_t high,
+                                                                            std::uint64_t low, float linearDamping,
+                                                                            float angularDamping, float linearSpeed,
+                                                                            float angularSpeed) noexcept;
 
         [[nodiscard]] static std::uint8_t RuntimeSetRigidBodyMotion(const std::uint64_t world, const std::uint64_t high,
                                                                     const std::uint64_t low,

@@ -41,6 +41,35 @@ internal struct NativeRaycastHit
     internal float Distance;
 }
 
+[StructLayout(LayoutKind.Explicit, Size = 128)]
+internal struct NativePrecisePhysicsQuery
+{
+    [FieldOffset(0)] internal ulong World;
+    [FieldOffset(8)] internal ulong ContextHigh;
+    [FieldOffset(16)] internal ulong ContextLow;
+    [FieldOffset(24)] internal ulong IgnoredHigh;
+    [FieldOffset(32)] internal ulong IgnoredLow;
+    [FieldOffset(40)] internal Vector3d Origin;
+    [FieldOffset(64)] internal Vector3 Direction;
+    [FieldOffset(76)] internal Quaternion Rotation;
+    [FieldOffset(92)] internal Vector3 Displacement;
+    [FieldOffset(104)] internal float MaximumDistance;
+    [FieldOffset(108)] internal float Radius;
+    [FieldOffset(112)] internal float Height;
+    [FieldOffset(116)] internal uint Mask;
+    [FieldOffset(120)] internal uint Kind;
+    [FieldOffset(124)] internal uint IncludeTriggers;
+}
+
+[StructLayout(LayoutKind.Explicit, Size = 56)]
+internal struct NativePrecisePhysicsHit
+{
+    [FieldOffset(0)] internal ulong EntityHigh;
+    [FieldOffset(8)] internal ulong EntityLow;
+    [FieldOffset(16)] internal Vector3d Point;
+    [FieldOffset(40)] internal Vector3 Normal;
+    [FieldOffset(52)] internal float Distance;
+}
 [StructLayout(LayoutKind.Sequential)]
 internal struct NativeEntityId
 {
@@ -344,6 +373,8 @@ internal static unsafe class NativeRuntime
     internal static delegate* unmanaged<byte> IsCursorLockedIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, Vector3> GetLocalPositionIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, Vector3, void> SetLocalPositionIcall;
+    internal static delegate* unmanaged<ulong, ulong, ulong, byte, Vector3d*, uint, byte> GetPrecisePositionV1Icall;
+    internal static delegate* unmanaged<ulong, ulong, ulong, byte, Vector3d*, uint, byte> SetPrecisePositionV1Icall;
     internal static delegate* unmanaged<ulong, ulong, ulong, Quaternion> GetLocalRotationIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, Quaternion, void> SetLocalRotationIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, Vector3, byte> MoveCharacterControllerIcall;
@@ -351,6 +382,10 @@ internal static unsafe class NativeRuntime
         GetCharacterControllerStateIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, byte*, float*, Vector3*, byte*, byte*, byte>
         GetRigidBodyPropertiesIcall;
+    internal static delegate* unmanaged<ulong, ulong, ulong, float*, float*, float*, float*, byte>
+        GetRigidBodyMotionSettingsIcall;
+    internal static delegate* unmanaged<ulong, ulong, ulong, float, float, float, float, byte>
+        SetRigidBodyMotionSettingsIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, byte, byte> SetRigidBodyMotionIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, float, byte> SetRigidBodyMassIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, Vector3, byte> SetRigidBodyVelocityIcall;
@@ -433,6 +468,8 @@ internal static unsafe class NativeRuntime
         ulong, ulong, NativeRaycastHit*, byte> CapsuleCastIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, Vector3, float, uint, byte, ulong, ulong, NativeEntityId*,
         int, int> OverlapSphereIcall;
+    internal static delegate* unmanaged<NativePrecisePhysicsQuery*, int, NativePrecisePhysicsHit*, int, NativeEntityId*, int, int>
+        PrecisePhysicsQueryV1Icall;
     internal static delegate* unmanaged<ulong, ulong, ulong, ulong, ulong, float, byte> PlayAudioIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, ulong, ulong, ulong, ulong, ulong, ulong, NativeString,
         float, float, uint, byte, byte, float, float, byte> PlayAudioAdvancedIcall;
@@ -672,7 +709,53 @@ internal static unsafe class NativeRuntime
             throw new InvalidOperationException($"Component property '{key}' could not be changed.");
     }
     internal static Vector3 GetLocalPosition(Entity entity) =>
-        GetLocalPositionIcall(entity.World, entity.Id.High, entity.Id.Low);
+        RequireFiniteLegacyPosition(GetLocalPositionIcall(entity.World, entity.Id.High, entity.Id.Low));
+
+    private static Vector3 RequireFiniteLegacyPosition(Vector3 value)
+    {
+        if (!float.IsFinite(value.X) || !float.IsFinite(value.Y) || !float.IsFinite(value.Z))
+        {
+            throw new InvalidOperationException("The transform position could not be read through the legacy float API.");
+        }
+        return value;
+    }
+
+    internal static Vector3d GetPrecisePosition(Entity entity, bool worldSpace)
+    {
+        if (GetPrecisePositionV1Icall == null)
+        {
+            throw new NotSupportedException("The loaded runtime does not support precise transform positions.");
+        }
+        Vector3d value;
+        if (GetPrecisePositionV1Icall(entity.World, entity.Id.High, entity.Id.Low,
+                                    worldSpace ? (byte)1 : (byte)0, &value, (uint)sizeof(Vector3d)) == 0)
+        {
+            throw new InvalidOperationException("The precise transform position could not be read.");
+        }
+        if (!value.IsFinite)
+        {
+            throw new InvalidOperationException("The runtime returned a nonfinite transform position.");
+        }
+        return value;
+    }
+
+    internal static void SetPrecisePosition(Entity entity, Vector3d value, bool worldSpace)
+    {
+        if (!value.IsFinite)
+        {
+            throw new ArgumentException("Transform positions must be finite.", nameof(value));
+        }
+        if (SetPrecisePositionV1Icall == null)
+        {
+            throw new NotSupportedException("The loaded runtime does not support precise transform positions.");
+        }
+        if (SetPrecisePositionV1Icall(entity.World, entity.Id.High, entity.Id.Low,
+                                    worldSpace ? (byte)1 : (byte)0, &value, (uint)sizeof(Vector3d)) == 0)
+        {
+            throw new InvalidOperationException("The precise transform position could not be changed.");
+        }
+    }
+
     internal static void SetLocalPosition(Entity entity, Vector3 value) =>
         SetLocalPositionIcall(entity.World, entity.Id.High, entity.Id.Low, value);
     internal static Quaternion GetLocalRotation(Entity entity) =>
@@ -716,6 +799,23 @@ internal static unsafe class NativeRuntime
         }
         properties = new RigidBodyProperties((RigidBodyMotion)motion, mass, velocity, continuous != 0, gravity != 0);
         return true;
+    }
+
+    internal static RigidBodyMotionSettings GetRigidBodyMotionSettings(Entity entity)
+    {
+        float linearDamping = default;
+        float angularDamping = default;
+        float linearSpeed = default;
+        float angularSpeed = default;
+        RequireRigidBodyResult(GetRigidBodyMotionSettingsIcall(entity.World, entity.Id.High, entity.Id.Low,
+            &linearDamping, &angularDamping, &linearSpeed, &angularSpeed));
+        return new(linearDamping, angularDamping, linearSpeed, angularSpeed);
+    }
+
+    internal static void SetRigidBodyMotionSettings(Entity entity, RigidBodyMotionSettings settings)
+    {
+        RequireRigidBodyResult(SetRigidBodyMotionSettingsIcall(entity.World, entity.Id.High, entity.Id.Low,
+            settings.LinearDamping, settings.AngularDamping, settings.MaximumLinearSpeed, settings.MaximumAngularSpeed));
     }
 
     internal static void SetRigidBodyMotion(Entity entity, RigidBodyMotion motion) =>
@@ -973,9 +1073,9 @@ internal static unsafe class NativeRuntime
     internal static void SetLocalScale(Entity entity, Vector3 value) =>
         SetLocalScaleIcall(entity.World, entity.Id.High, entity.Id.Low, value);
     internal static Vector3 GetWorldPosition(Entity entity) =>
-        GetWorldPositionIcall(entity.World, entity.Id.High, entity.Id.Low);
+        RequireFiniteLegacyPosition(GetWorldPositionIcall(entity.World, entity.Id.High, entity.Id.Low));
     internal static Vector3 GetPresentationWorldPosition(Entity entity) =>
-        GetPresentationWorldPositionIcall(entity.World, entity.Id.High, entity.Id.Low);
+        RequireFiniteLegacyPosition(GetPresentationWorldPositionIcall(entity.World, entity.Id.High, entity.Id.Low));
     internal static Quaternion GetPresentationWorldRotation(Entity entity) =>
         GetPresentationWorldRotationIcall(entity.World, entity.Id.High, entity.Id.Low);
     internal static void ResetPresentationInterpolation(Entity entity) =>
@@ -1208,4 +1308,59 @@ internal static unsafe class NativeRuntime
                 new EntityId(nativeEntities[index].High, nativeEntities[index].Low))!;
         return result;
     }
-}
+    internal static bool TryPrecisePhysicsQuery(Entity context, NativePrecisePhysicsQuery query,
+        out RaycastHitPrecise hit)
+    {
+        if (PrecisePhysicsQueryV1Icall == null)
+        {
+            throw new InvalidOperationException("The native runtime does not support precise physics queries.");
+        }
+        NativePrecisePhysicsHit result = default;
+        int status = PrecisePhysicsQueryV1Icall(&query, sizeof(NativePrecisePhysicsQuery), &result,
+            sizeof(NativePrecisePhysicsHit), null, 0);
+        if (status < 0 || status > 1)
+        {
+            throw new InvalidOperationException("The native physics world rejected the precise query.");
+        }
+        hit = status == 1
+            ? new RaycastHitPrecise(Entity.FromId(context.World, new EntityId(result.EntityHigh, result.EntityLow))!,
+                result.Point, result.Normal, result.Distance)
+            : default;
+        return status == 1;
+    }
+
+    internal static IReadOnlyList<Entity> PrecisePhysicsOverlap(Entity context, NativePrecisePhysicsQuery query)
+    {
+        if (PrecisePhysicsQueryV1Icall == null)
+        {
+            throw new InvalidOperationException("The native runtime does not support precise physics queries.");
+        }
+        int count = PrecisePhysicsQueryV1Icall(&query, sizeof(NativePrecisePhysicsQuery), null,
+            sizeof(NativePrecisePhysicsHit), null, 0);
+        const int maximumResults = 256;
+        if (count < 0 || count > maximumResults)
+        {
+            throw new InvalidOperationException("The native physics world rejected the precise overlap.");
+        }
+        if (count == 0)
+        {
+            return Array.Empty<Entity>();
+        }
+        var nativeEntities = new NativeEntityId[count];
+        fixed (NativeEntityId* destination = nativeEntities)
+        {
+            int copied = PrecisePhysicsQueryV1Icall(&query, sizeof(NativePrecisePhysicsQuery), null,
+                sizeof(NativePrecisePhysicsHit), destination, count);
+            if (copied != count)
+            {
+                throw new InvalidOperationException("The native overlap changed during one managed call.");
+            }
+        }
+        var result = new Entity[count];
+        for (int index = 0; index < count; ++index)
+        {
+            result[index] = Entity.FromId(context.World,
+                new EntityId(nativeEntities[index].High, nativeEntities[index].Low))!;
+        }
+        return result;
+    }}

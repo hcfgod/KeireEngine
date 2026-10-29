@@ -9,6 +9,11 @@
 
 namespace Keire
 {
+    namespace
+    {
+        constexpr double MaximumGroundingPositionErrorMetres = 0.001;
+    }
+
     [[nodiscard]] std::string SceneRuntimeSession::Impl::ApplyFootGrounding(
         const Entity& entity, const SkeletonAsset& skeleton, const AnimatorFootGroundingSettings& settings,
         const float runtimeWeight, const AssetId skinnedMesh, const float deltaSeconds,
@@ -70,17 +75,21 @@ namespace Keire
             return "Foot grounding references one or more unavailable skeleton bones.";
         }
 
+        // Probes, support anchors and retained foot positions share the solver region frame.
+        // Subtract the double origin before any float matrix or ray operation.
         Matrix4 worldToModel;
         try
         {
-            worldToModel = Math::Inverse(transform->WorldMatrix());
+            worldToModel = Math::Inverse(transform->WorldRelativeMatrix(PhysicsWorldService->WorldOrigin(),
+                                                                        MaximumGroundingPositionErrorMetres));
         }
         catch (const std::exception&)
         {
             clearContacts();
             return "Foot grounding could not invert the Animator world transform.";
         }
-        const auto modelToWorld = transform->WorldMatrix();
+        const auto modelToWorld =
+            transform->WorldRelativeMatrix(PhysicsWorldService->WorldOrigin(), MaximumGroundingPositionErrorMetres);
         ModelBoneMatrices(skeleton, localPose, runtimeState.ModelMatrixScratch);
         const auto& modelBones = runtimeState.ModelMatrixScratch;
         const auto leftHipPosition = Math::TransformPoint(modelBones[*chains[0][0]], {});
@@ -262,13 +271,17 @@ namespace Keire
                 const auto supportTransform = supportEntity && hasSupportBody
                                                   ? supportEntity.GetComponent<TransformComponent>()
                                                   : Ref<TransformComponent>{};
-                const auto supportContact = supportTransform
-                                                ? Detail::ResolveFootPlantSupportAnchor(supportTransform->WorldMatrix(),
-                                                                                        plantRuntime.SupportAnchor)
-                                                : std::nullopt;
+                const auto supportContact =
+                    supportTransform ? Detail::ResolveFootPlantSupportAnchor(
+                                           supportTransform->WorldRelativeMatrix(PhysicsWorldService->WorldOrigin(),
+                                                                                 MaximumGroundingPositionErrorMetres),
+                                           plantRuntime.SupportAnchor)
+                                     : std::nullopt;
                 const auto supportSurface =
-                    supportTransform ? Detail::ResolveFootPlantSupportAnchor(supportTransform->WorldMatrix(),
-                                                                             plantRuntime.SupportSurfaceAnchor)
+                    supportTransform ? Detail::ResolveFootPlantSupportAnchor(
+                                           supportTransform->WorldRelativeMatrix(PhysicsWorldService->WorldOrigin(),
+                                                                                 MaximumGroundingPositionErrorMetres),
+                                           plantRuntime.SupportSurfaceAnchor)
                                      : std::nullopt;
                 if (supportContact && supportSurface)
                 {
@@ -276,8 +289,10 @@ namespace Keire
                     // follows rising platforms immediately but lags behind their descent and rotation.
                     if (smoothing.HasContact && plantRuntime.SmoothedSupportAnchor)
                     {
-                        const auto carried = Detail::ResolveFootPlantSupportAnchor(supportTransform->WorldMatrix(),
-                                                                                   *plantRuntime.SmoothedSupportAnchor);
+                        const auto carried = Detail::ResolveFootPlantSupportAnchor(
+                            supportTransform->WorldRelativeMatrix(PhysicsWorldService->WorldOrigin(),
+                                                                  MaximumGroundingPositionErrorMetres),
+                            *plantRuntime.SmoothedSupportAnchor);
                         if (carried)
                         {
                             smoothing.Position = carried->Position;
@@ -404,9 +419,11 @@ namespace Keire
                 plantRuntime.ReconciliationSupport = hitSupport;
                 plantRuntime.ReconciliationSupportState = {};
             }
-            const bool supportSettled = hitSupportTransform && Detail::ObserveSettledFootSupport(
-                                                                   hitSupportTransform->WorldMatrix(), deltaSeconds,
-                                                                   plantRuntime.ReconciliationSupportState);
+            const bool supportSettled =
+                hitSupportTransform && Detail::ObserveSettledFootSupport(
+                                           hitSupportTransform->WorldRelativeMatrix(
+                                               PhysicsWorldService->WorldOrigin(), MaximumGroundingPositionErrorMetres),
+                                           deltaSeconds, plantRuntime.ReconciliationSupportState);
             const auto character = characterPhysicsRoot.GetComponent<CharacterControllerComponent>();
             const auto motion = character ? character->RuntimeState() : CharacterControllerRuntimeState{};
             const bool settledContact =
@@ -431,10 +448,14 @@ namespace Keire
                                                       legLength + settings.MaximumPelvisAdjustment, deltaSeconds,
                                                       awaiting, reconciled))
                 {
-                    const auto anchor = Detail::CaptureFootPlantSupportAnchor(hitSupportTransform->WorldMatrix(),
-                                                                              reconciled.Position, reconciled.Normal);
-                    const auto surfaceAnchor = Detail::CaptureFootPlantSupportAnchor(hitSupportTransform->WorldMatrix(),
-                                                                                     hit->Position, normal);
+                    const auto anchor = Detail::CaptureFootPlantSupportAnchor(
+                        hitSupportTransform->WorldRelativeMatrix(PhysicsWorldService->WorldOrigin(),
+                                                                 MaximumGroundingPositionErrorMetres),
+                        reconciled.Position, reconciled.Normal);
+                    const auto surfaceAnchor = Detail::CaptureFootPlantSupportAnchor(
+                        hitSupportTransform->WorldRelativeMatrix(PhysicsWorldService->WorldOrigin(),
+                                                                 MaximumGroundingPositionErrorMetres),
+                        hit->Position, normal);
                     if (anchor && surfaceAnchor)
                     {
                         plantState = reconciled;
@@ -631,16 +652,20 @@ namespace Keire
                                 const auto supportTransform = supportEntity
                                                                   ? supportEntity.GetComponent<TransformComponent>()
                                                                   : Ref<TransformComponent>{};
-                                const auto supportAnchor =
-                                    supportTransform
-                                        ? Detail::CaptureFootPlantSupportAnchor(supportTransform->WorldMatrix(),
-                                                                                plantState.Position, plantState.Normal)
-                                        : std::nullopt;
-                                const auto supportSurfaceAnchor =
-                                    supportTransform
-                                        ? Detail::CaptureFootPlantSupportAnchor(supportTransform->WorldMatrix(),
-                                                                                hit->Position, candidateNormal)
-                                        : std::nullopt;
+                                const auto supportAnchor = supportTransform
+                                                               ? Detail::CaptureFootPlantSupportAnchor(
+                                                                     supportTransform->WorldRelativeMatrix(
+                                                                         PhysicsWorldService->WorldOrigin(),
+                                                                         MaximumGroundingPositionErrorMetres),
+                                                                     plantState.Position, plantState.Normal)
+                                                               : std::nullopt;
+                                const auto supportSurfaceAnchor = supportTransform
+                                                                      ? Detail::CaptureFootPlantSupportAnchor(
+                                                                            supportTransform->WorldRelativeMatrix(
+                                                                                PhysicsWorldService->WorldOrigin(),
+                                                                                MaximumGroundingPositionErrorMetres),
+                                                                            hit->Position, candidateNormal)
+                                                                      : std::nullopt;
                                 if (supportAnchor && supportSurfaceAnchor)
                                 {
                                     plantRuntime.Support = *support;
@@ -714,7 +739,9 @@ namespace Keire
                 if (supportTransform)
                 {
                     plantRuntime.SmoothedSupportAnchor = Detail::CaptureFootPlantSupportAnchor(
-                        supportTransform->WorldMatrix(), smoothing.Position, smoothing.Normal);
+                        supportTransform->WorldRelativeMatrix(PhysicsWorldService->WorldOrigin(),
+                                                              MaximumGroundingPositionErrorMetres),
+                        smoothing.Position, smoothing.Normal);
                 }
             }
             if (!smoothed)
@@ -1362,12 +1389,14 @@ namespace Keire
                 state.CharacterBodyScratch.push_back(physics.Body);
         }
 
-        const auto hits = PhysicsWorldService->RayCast({.Origin = transform->WorldPosition(),
-                                                        .Direction = {0.0F, -1.0F, 0.0F},
-                                                        .MaximumDistance = bodyClearance + maximumClearance,
-                                                        .Mask = profile.CollisionMask,
-                                                        .IncludeTriggers = false,
-                                                        .Layer = character ? character->Layer() : 1U});
+        const auto hits =
+            PhysicsWorldService->RayCast({.Origin = PhysicsWorldService->ToLocalPosition(
+                                              transform->WorldPositionPrecise(), MaximumGroundingPositionErrorMetres),
+                                          .Direction = {0.0F, -1.0F, 0.0F},
+                                          .MaximumDistance = bodyClearance + maximumClearance,
+                                          .Mask = profile.CollisionMask,
+                                          .IncludeTriggers = false,
+                                          .Layer = character ? character->Layer() : 1U});
         const auto landing = std::ranges::find_if(
             hits,
             [&](const PhysicsQueryHit& hit)

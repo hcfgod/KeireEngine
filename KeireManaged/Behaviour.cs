@@ -3,7 +3,10 @@ using System.Reflection;
 
 namespace Keire;
 
-public readonly record struct CollisionContact(Entity Other, Vector3 Point, Vector3 Normal, float Impulse, bool Trigger);
+public readonly record struct CollisionContact(Entity Other, Vector3 Point, Vector3 Normal, float Impulse, bool Trigger)
+{
+    public Vector3d PointPrecise { get; init; } = Vector3d.Widen(Point);
+}
 public readonly record struct AnimationEvent(string Name, float NormalizedTime, int Integer, float Scalar, string Text);
 public readonly record struct AnimationIkContext(float LayerWeight)
 {
@@ -266,8 +269,14 @@ public abstract class Behaviour : Component
     public void RuntimePhysicsContact(byte phase, byte trigger, ulong otherHigh, ulong otherLow, Vector3 point,
                                       Vector3 normal, float impulse)
     {
+        RuntimePhysicsContactPrecise(phase, trigger, otherHigh, otherLow, point, normal, impulse, Vector3d.Widen(point));
+    }
+
+    public void RuntimePhysicsContactPrecise(byte phase, byte trigger, ulong otherHigh, ulong otherLow, Vector3 point,
+                                             Vector3 normal, float impulse, Vector3d pointPrecise)
+    {
         var contact = new CollisionContact(new Entity(Entity.World, new EntityId(otherHigh, otherLow)), point, normal,
-                                           impulse, trigger != 0);
+                                           impulse, trigger != 0) { PointPrecise = pointPrecise };
         InvokeWithContext(() =>
         {
             if (trigger != 0)

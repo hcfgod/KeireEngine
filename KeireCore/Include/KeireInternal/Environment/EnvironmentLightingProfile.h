@@ -38,7 +38,7 @@ namespace Keire::Detail
 
     struct EnvironmentDirectionalSample
     {
-        // Incoming light-ray direction in the observer's local east/up/north basis.
+        // Incoming light-ray direction in the profile's explicit XYZ basis (legacy east/up/north by default).
         std::array<double, 3> Direction{};
         std::array<double, 3> LinearColor{};
         double Intensity = 0.0;
@@ -55,8 +55,10 @@ namespace Keire::Detail
         explicit EnvironmentLightingProfile(
             const EnvironmentDirectionalOwnership ownership = EnvironmentDirectionalOwnership::Authored,
             std::vector<EnvironmentLightingKeyframe> keyframes = {}, EnvironmentShadowSettings shadows = {},
-            std::optional<EnvironmentSkyProfile> sky = {})
-            : m_Ownership(ownership), m_Keyframes(std::move(keyframes)), m_Shadows(shadows), m_Sky(std::move(sky))
+            std::optional<EnvironmentSkyProfile> sky = {},
+            const EnvironmentDirectionalFrame directionFrame = EnvironmentDirectionalFrame::LegacyWorld)
+            : m_Ownership(ownership), m_Keyframes(std::move(keyframes)), m_Shadows(shadows), m_Sky(std::move(sky)),
+              m_DirectionFrame(directionFrame)
         {
             Validate();
         }
@@ -68,7 +70,8 @@ namespace Keire::Detail
         EnvironmentLightingProfile(EnvironmentLightingProfile&& other) noexcept
             : m_Ownership(std::exchange(other.m_Ownership, EnvironmentDirectionalOwnership::Authored)),
               m_Keyframes(std::move(other.m_Keyframes)), m_Shadows(std::exchange(other.m_Shadows, {})),
-              m_Sky(std::move(other.m_Sky))
+              m_Sky(std::move(other.m_Sky)),
+              m_DirectionFrame(std::exchange(other.m_DirectionFrame, EnvironmentDirectionalFrame::LegacyWorld))
         {
             other.m_Keyframes.clear();
             other.m_Sky.reset();
@@ -80,6 +83,7 @@ namespace Keire::Detail
             m_Keyframes.swap(other.m_Keyframes);
             std::swap(m_Shadows, other.m_Shadows);
             m_Sky.swap(other.m_Sky);
+            std::swap(m_DirectionFrame, other.m_DirectionFrame);
             return *this;
         }
 
@@ -90,6 +94,8 @@ namespace Keire::Detail
         [[nodiscard]] EnvironmentShadowSettings Shadows() const noexcept { return m_Shadows; }
 
         [[nodiscard]] const std::optional<EnvironmentSkyProfile>& Sky() const noexcept { return m_Sky; }
+
+        [[nodiscard]] EnvironmentDirectionalFrame DirectionFrame() const noexcept { return m_DirectionFrame; }
 
         [[nodiscard]] std::optional<EnvironmentDirectionalSample> Evaluate(const EnvironmentClockState clock) const
         {
@@ -149,6 +155,12 @@ namespace Keire::Detail
       private:
         void Validate() const
         {
+            if (m_DirectionFrame != EnvironmentDirectionalFrame::LegacyWorld &&
+                m_DirectionFrame != EnvironmentDirectionalFrame::PlanetFixed &&
+                m_DirectionFrame != EnvironmentDirectionalFrame::InertialRoot)
+            {
+                throw std::invalid_argument("Unknown daily-light reference frame.");
+            }
             if (m_Sky)
             {
                 m_Sky->Validate();
@@ -198,5 +210,6 @@ namespace Keire::Detail
         std::vector<EnvironmentLightingKeyframe> m_Keyframes;
         EnvironmentShadowSettings m_Shadows;
         std::optional<EnvironmentSkyProfile> m_Sky;
+        EnvironmentDirectionalFrame m_DirectionFrame = EnvironmentDirectionalFrame::LegacyWorld;
     };
 } // namespace Keire::Detail

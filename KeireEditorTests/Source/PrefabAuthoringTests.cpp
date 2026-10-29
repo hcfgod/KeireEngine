@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <array>
+#include <limits>
 #include <stdexcept>
 
 namespace
@@ -165,12 +166,12 @@ TEST_CASE("prefab placement includes origin persists as an override and preserve
     auto scene = Keire::SceneAsset::EmptyDefinition("Scene");
     const auto instance =
         KeireEditor::InstantiatePrefab(scene, Keire::AssetId::Generate(), composed, {}, Keire::Vector3{});
-    CHECK(scene.Objects[0].Transform.Position == Keire::Vector3{});
-    CHECK(scene.Objects[1].Transform.Position == Keire::Vector3{3.0F, 0.0F, 0.0F});
-    CHECK(scene.Objects[2].Transform.Position == Keire::Vector3{1.0F, 2.0F, 3.0F});
+    CHECK(scene.Objects[0].Transform.Position == Keire::Vector3d{});
+    CHECK(scene.Objects[1].Transform.Position == Keire::Vector3d{3.0F, 0.0F, 0.0F});
+    CHECK(scene.Objects[2].Transform.Position == Keire::Vector3d{1.0F, 2.0F, 3.0F});
     REQUIRE(instance.Overrides.size() == 2);
     CHECK(instance.Overrides.front().Kind == Keire::PrefabOverrideKind::SetObjectTransform);
-    CHECK(instance.Overrides.front().Transform.Position == Keire::Vector3{});
+    CHECK(instance.Overrides.front().Transform.Position == Keire::Vector3d{});
     const auto decoded = Keire::SceneAsset::Decode(Keire::SceneAsset::Encode(scene));
     CHECK(decoded->Definition().PrefabInstances.front().Overrides.size() == 2);
 }
@@ -284,7 +285,7 @@ TEST_CASE("Prefab revert retains every root placement and parent while restoring
     }
     scene = Keire::SceneAsset::Decode(Keire::SceneAsset::Encode(scene))->Definition();
     const auto placement = scene.Objects[1].Transform;
-    REQUIRE(placement.Position == Keire::Vector3{-4.0F, 2.0F, 3.0F});
+    REQUIRE(placement.Position == Keire::Vector3d{-4.0, 2.0, 3.0});
     REQUIRE(placement.Scale == Keire::Vector3{2.0F, 3.0F, 4.0F});
     REQUIRE(placement.Rotation == Keire::Quaternion{0.0F, 1.0F, 0.0F, 0.0F});
     REQUIRE(scene.Objects[2].Transform.Position.X == 12.0F);
@@ -304,4 +305,37 @@ TEST_CASE("Prefab revert retains every root placement and parent while restoring
         std::ranges::find(source.Objects[0].Components, mesh, &Keire::SceneComponentDefinition::Type);
     REQUIRE(sourceMesh != source.Objects[0].Components.end());
     CHECK(restoredMesh->Data == sourceMesh->Data);
+}
+
+TEST_CASE("Precise prefab placement preserves nearby destinations from distant sources")
+{
+    auto source = Keire::SceneAsset::EmptyDefinition("Distant prefab");
+    source.Objects = {Object(Keire::AssetId::Generate(), "Root"), Object(Keire::AssetId::Generate(), "Other")};
+    source.Objects[0].Transform.Position = {1e15, -1e15, 1e15};
+    source.Objects[1].Transform.Position = {1e15 + 0.5, -1e15 + 0.25, 1e15 - 0.5};
+    auto scene = Keire::SceneAsset::EmptyDefinition("Destination");
+    const Keire::Vector3d destination{0.001, -0.002, 0.003};
+    const auto instance =
+        KeireEditor::InstantiatePrefabPrecise(scene, Keire::AssetId::Generate(), source, {}, destination);
+    REQUIRE(scene.Objects.size() == 2);
+    CHECK(scene.Objects[0].Transform.Position == destination);
+    CHECK(scene.Objects[1].Transform.Position == Keire::Vector3d{0.501, 0.248, -0.497});
+    REQUIRE(instance.Overrides.size() == 2);
+    const auto decoded = Keire::SceneAsset::Decode(Keire::SceneAsset::Encode(scene));
+    CHECK(decoded->Definition().PrefabInstances.front().Overrides.front().Transform.Position == destination);
+}
+
+TEST_CASE("Precise prefab placement rejects nonfinite destinations transactionally")
+{
+    auto source = Keire::SceneAsset::EmptyDefinition("Prefab");
+    source.Objects = {Object(Keire::AssetId::Generate(), "Root")};
+    auto scene = Keire::SceneAsset::EmptyDefinition("Destination");
+    const auto original = Keire::SceneAsset::Encode(scene);
+    for (const auto coordinate : {std::numeric_limits<double>::infinity(), std::numeric_limits<double>::quiet_NaN()})
+    {
+        CHECK_THROWS_AS((void)KeireEditor::InstantiatePrefabPrecise(scene, Keire::AssetId::Generate(), source, {},
+                                                                    Keire::Vector3d{coordinate, 0, 0}),
+                        std::invalid_argument);
+        CHECK(Keire::SceneAsset::Encode(scene) == original);
+    }
 }

@@ -3,6 +3,7 @@
 #include "Keire/BuiltinUnlitShaders.h"
 #include "KeireInternal/Rendering/CloudLightCacheGrid.h"
 
+#include <cmath>
 #include <stdexcept>
 #include <string>
 
@@ -115,7 +116,8 @@ namespace Keire::RenderBackend
                                                         CloudLightCacheResources& resources,
                                                         const CloudVolumeViewUniforms& view,
                                                         const GpuTextureResources& noise,
-                                                        const std::optional<float> cloudBasePatternPhase)
+                                                        const std::optional<float> cloudBasePatternPhase,
+                                                        const Detail::ResolvedPlanetFrame* planetFrame)
     {
         if (!device || !commands || !noise.Texture || !noise.Sampler)
         {
@@ -127,20 +129,70 @@ namespace Keire::RenderBackend
         {
             InvalidateCloudLightCache(resources);
         }
-        const auto grid =
-            MakeCloudLightCacheGrid(view.Volume, view.WeatherControls.X > 0.5F ? view.WeatherControls.W : 0.0F);
+        auto grid = MakeCloudLightCacheGrid(view.Volume, view.WeatherControls.X > 0.5F ? view.WeatherControls.W : 0.0F);
         if (view.Volume.Quality[0] == 0U || view.Volume.Density[0] <= 0.0F || view.Volume.Density[1] <= 0.0F || !grid)
         {
             return {};
         }
 
-        const CloudLightCacheLookupUniforms lookup{{grid->Origin[0], grid->Origin[1], grid->Origin[2], 0.0F},
-                                                   {grid->CellSize[0], grid->CellSize[1], grid->CellSize[2], 0.0F},
-                                                   {grid->Dimensions[0], grid->Dimensions[1], grid->Dimensions[2], 0U}};
+        CloudLightCacheLookupUniforms lookup{{grid->Origin[0], grid->Origin[1], grid->Origin[2], 0.0F},
+                                             {grid->CellSize[0], grid->CellSize[1], grid->CellSize[2], 0.0F},
+                                             {grid->Dimensions[0], grid->Dimensions[1], grid->Dimensions[2], 0U}};
         auto buildView = view;
         auto buildGrid = *grid;
-        AlignCloudLightCacheBuild(buildView.Volume, buildGrid, cloudBasePatternPhase);
-        const auto key = MakeCloudLightCacheKey(buildView, buildGrid.Origin, buildGrid.CellSize, buildGrid.Dimensions);
+        if (view.PlanetaryCloud.Controls[0] != 0U && planetFrame)
+        {
+            // Keep the existing allocation budget: 81^3 cells are fewer than the flat grid's 129*33*129.
+            // A planet-fixed snapped neighborhood is reusable across camera rebases and never flattens the shell.
+            auto buildFrame = *planetFrame;
+            buildFrame.PlanetToObserver = {};
+            const auto& observer = planetFrame->ObserverFromCenterPlanetMetres;
+            const double observerRadius = std::hypot(observer[0], observer[1], observer[2]);
+            const double shellRadius =
+                std::max(planetFrame->RadiusMetres,
+                         planetFrame->RadiusMetres + view.Volume.Geometry[0] + view.Volume.Geometry[1] * 0.5);
+            const double cellSize =
+                std::min(shellRadius / 8.0, std::max(static_cast<double>(view.Volume.Geometry[2]) / 16.0,
+                                                     static_cast<double>(view.Volume.Geometry[1]) / 40.0));
+            buildGrid.Dimensions = {81U, 81U, 81U};
+            for (std::size_t axis = 0; axis < 3; ++axis)
+            {
+                const double anchor = std::floor(observer[axis] / observerRadius * shellRadius / cellSize) * cellSize;
+                buildFrame.ObserverFromCenterPlanetMetres[axis] = anchor;
+                const double displacement = anchor - observer[axis];
+                buildGrid.CellSize[axis] = static_cast<float>(cellSize);
+                buildGrid.Origin[axis] = static_cast<float>(-40.0 * cellSize);
+                grid->Origin[axis] = static_cast<float>(displacement - 40.0 * cellSize);
+                double phase = std::fmod(static_cast<double>(view.Volume.PatternOrigin[axis]) +
+                                             displacement / view.Volume.Geometry[2],
+                                         256.0);
+                if (phase < 0.0)
+                {
+                    phase += 256.0;
+                }
+                buildView.Volume.PatternOrigin[axis] = static_cast<float>(phase);
+            }
+            grid->CellSize = buildGrid.CellSize;
+            grid->Dimensions = buildGrid.Dimensions;
+            buildView.PlanetaryCloud = MakePlanetaryCloudUniforms(buildFrame, view.Volume.Geometry[0]);
+            const auto sunlight = planetFrame->PlanetToObserver.Inverse().Apply(
+                {view.SunDirection.X, view.SunDirection.Y, view.SunDirection.Z});
+            buildView.SunDirection = {static_cast<float>(sunlight[0]), static_cast<float>(sunlight[1]),
+                                      static_cast<float>(sunlight[2]), view.SunDirection.W};
+            lookup = {{grid->Origin[0], grid->Origin[1], grid->Origin[2], 1.0F},
+                      {grid->CellSize[0], grid->CellSize[1], grid->CellSize[2], 0.0F},
+                      {81U, 81U, 81U, 0U}};
+        }
+        else
+        {
+            AlignCloudLightCacheBuild(buildView.Volume, buildGrid, cloudBasePatternPhase);
+        }
+        auto key = MakeCloudLightCacheKey(buildView, buildGrid.Origin, buildGrid.CellSize, buildGrid.Dimensions);
+        if (planetFrame)
+        {
+            key.Planet = planetFrame->Planet;
+            key.DiscontinuityRevision = planetFrame->DiscontinuityRevision;
+        }
         if (resources.Validity->SubmittedKey == key)
         {
             return lookup;

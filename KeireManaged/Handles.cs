@@ -583,6 +583,21 @@ public sealed class Transform : Component
     internal Transform(Entity entity) : base(entity) { }
 
     public Vector3 LocalPosition { get => NativeRuntime.GetLocalPosition(Entity); set => NativeRuntime.SetLocalPosition(Entity, value); }
+
+    /// <summary>Double-precision position relative to the parent, in metres.</summary>
+    public Vector3d LocalPositionPrecise
+    {
+        get => NativeRuntime.GetPrecisePosition(Entity, false);
+        set => NativeRuntime.SetPrecisePosition(Entity, value, false);
+    }
+
+    /// <summary>Double-precision position in the current scene frame, in metres.</summary>
+    public Vector3d PositionPrecise
+    {
+        get => NativeRuntime.GetPrecisePosition(Entity, true);
+        set => NativeRuntime.SetPrecisePosition(Entity, value, true);
+    }
+
     public Quaternion LocalRotation { get => NativeRuntime.GetLocalRotation(Entity); set => NativeRuntime.SetLocalRotation(Entity, value); }
     public Vector3 LocalScale { get => NativeRuntime.GetLocalScale(Entity); set => NativeRuntime.SetLocalScale(Entity, value); }
     public Vector3 Position
@@ -606,8 +621,14 @@ public sealed class Transform : Component
     public Vector3 Forward => Rotation * Vector3.Forward;
     public Vector3 Right => Rotation * Vector3.Right;
     public Vector3 Up => Rotation * Vector3.Up;
-    public void Translate(Vector3 translation, bool worldSpace = false) =>
-        Position = worldSpace ? Position + translation : Position + (Rotation * translation);
+    public void Translate(Vector3 translation, bool worldSpace = false)
+    {
+        ValidateFinite(translation, nameof(translation));
+        Vector3 offset = worldSpace ? translation : Rotation * translation;
+        Vector3d position = PositionPrecise;
+        PositionPrecise = new Vector3d(position.X + offset.X, position.Y + offset.Y, position.Z + offset.Z);
+    }
+
     public void Rotate(Quaternion rotation, bool worldSpace = false)
     {
         ValidateRotation(rotation, nameof(rotation));

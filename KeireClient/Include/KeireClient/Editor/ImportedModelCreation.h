@@ -10,7 +10,7 @@
 namespace KeireEditor
 {
     [[nodiscard]] inline Keire::EntityId CreateImportedModel(SceneDocument& document, std::string name,
-                                                             const Keire::AssetId mesh, const Keire::Vector3 position,
+                                                             const Keire::AssetId mesh, const Keire::Vector3d position,
                                                              const ImportedModelAnimation& animation)
     {
         const auto entity = document.CreateEntity(std::move(name), {}, Keire::MeshRendererComponent::StaticType());

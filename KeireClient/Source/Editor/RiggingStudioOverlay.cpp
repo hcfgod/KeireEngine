@@ -4,6 +4,7 @@
 #include "KeireClient/EditorWorkspaceLayer.h"
 
 #include <cmath>
+#include <limits>
 #include <optional>
 
 namespace KeireEditor
@@ -70,8 +71,9 @@ namespace KeireEditor
             return;
         try
         {
-            const auto points = PublishedRigChainPoints(*m_ChainSkeleton, animator->SkinPalette(), inspection.Bones,
-                                                        transform->PresentationWorldMatrix());
+            const auto points = PublishedRigChainPoints(
+                *m_ChainSkeleton, animator->SkinPalette(), inspection.Bones,
+                transform->PresentationRelativeMatrix(camera.WorldOrigin, std::numeric_limits<double>::max()));
             const auto viewProjection = Keire::Math::Multiply(camera.Projection, camera.View);
             auto clip = ui.PushClipRect(viewport);
             constexpr Keire::UiColor cyan{0.1F, 0.9F, 1.0F, 1.0F};

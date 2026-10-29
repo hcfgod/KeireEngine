@@ -1,4 +1,6 @@
+#include "KeireClient/Editor/SceneTransitionCoordinator.h"
 #include "KeireClient/EditorWorkspaceLayer.h"
+#include "KeireClientInternal/Editor/StartupAssetReadiness.h"
 
 #include "Keire/Assets/BuiltinAssetRegistry.h"
 #include "Keire/Project/SharedShaderLibrary.h"
@@ -561,10 +563,10 @@ void EditorWorkspaceLayer::HandleExternalAssetDrop(const Keire::WindowFileDropEv
     const auto& viewportRect = m_SceneViewportPanel->ViewportRect();
     const bool viewport = position.X >= viewportRect.Minimum.X && position.X <= viewportRect.Maximum.X &&
                           position.Y >= viewportRect.Minimum.Y && position.Y <= viewportRect.Maximum.Y;
-    Keire::Vector3 worldPosition{};
+    Keire::Vector3d worldPosition{};
     if (viewport && ActiveScene())
         worldPosition =
-            KeireEditor::ResolveSceneDropPosition(viewportRect, position, m_SceneViewportPanel->LastCamera());
+            KeireEditor::ResolveSceneDropPositionPrecise(viewportRect, position, m_SceneViewportPanel->LastCamera());
     Keire::EntityId target;
     if (viewport && ActiveScene())
     {
@@ -1251,10 +1253,18 @@ void EditorWorkspaceLayer::ApplyAssetImportResult(const Keire::AssetImportResult
     Keire::Detail::AssetDatabaseWorkerAccess::ApplyImportStatuses(*m_AssetDatabase, result.Statuses);
     if (!result.CatalogPath.empty())
     {
+        for (const auto& status : result.Statuses)
+        {
+            if (status.State == Keire::AssetImportState::Imported || status.State == Keire::AssetImportState::CacheHit)
+            {
+                m_SceneTransitions->CompleteStartupRefresh(status.Id);
+            }
+        }
         if (const auto assets = Owner().Assets())
         {
             (void)assets->Unmount(result.CatalogPath);
-            assets->Mount({result.CatalogPath, 0, true});
+            assets->Mount(KeireEditor::CompatibleStartupMount(result.CatalogPath, *m_AssetDatabase, m_AssetRecords,
+                                                              m_SceneTransitions->StartupRefresh()));
 
             std::set<Keire::AssetId> affected;
             const auto includeRecord = [&affected](const Keire::AssetSourceRecord& record)

@@ -99,6 +99,10 @@ namespace Keire
 
     VfxWorld::Impl::Impl(VfxWorldSpecification specification) : Specification(std::move(specification))
     {
+        if (!Math::IsFinite(Specification.WorldOrigin))
+        {
+            throw std::invalid_argument("VFX world origin must be finite.");
+        }
         if (Specification.MaximumEffects == 0 || Specification.MaximumEffects > 1'000'000 ||
             Specification.MaximumSystemsPerEffect == 0 || Specification.MaximumSystemsPerEffect > 256 ||
             Specification.MaximumEffects >

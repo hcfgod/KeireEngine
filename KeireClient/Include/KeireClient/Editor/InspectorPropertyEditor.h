@@ -45,6 +45,7 @@ namespace KeireEditor
         bool EditTextMultiline(std::string_view label, std::string& value, std::uint32_t visibleLines) override;
         bool EditVector2(std::string_view label, Keire::Vector2& value, double step) override;
         bool EditVector3(std::string_view label, Keire::Vector3& value, double step) override;
+        bool EditVector3d(std::string_view label, Keire::Vector3d& value, double step) override;
         bool EditVector4(std::string_view label, Keire::Vector4& value, double step) override;
         bool EditQuaternion(std::string_view label, Keire::Quaternion& value, double step) override;
         bool EditColor(std::string_view label, Keire::Color& value) override;

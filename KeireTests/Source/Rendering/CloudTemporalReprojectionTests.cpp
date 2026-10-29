@@ -21,6 +21,51 @@ namespace
     }
 } // namespace
 
+TEST_CASE("Planetary cloud history follows rigid planet rotation and rejects identity changes")
+{
+    auto previous = View(10);
+    auto current = View(11);
+    Keire::Detail::ResolvedPlanetFrame frame;
+    frame.Planet = {1, 2};
+    frame.RadiusMetres = 6360000.0;
+    frame.ObserverFromCenterPlanetMetres = {0.0, 6360100.0, 0.0};
+    previous.PlanetFrame = frame;
+    previous.Volume.PlanetaryCloud = MakePlanetaryCloudUniforms(frame, 1000.0);
+    frame.PlanetToObserver = Keire::Detail::FrameRotation::Normalize(0.0, 0.0, 0.01, 1.0);
+    current.PlanetFrame = frame;
+    current.Volume.PlanetaryCloud = MakePlanetaryCloudUniforms(frame, 1000.0);
+    const auto result = MakeCloudTemporalReprojection(current, previous, true);
+    REQUIRE(result);
+    CHECK(result->CloudRotationX.Y > 0.0F);
+    CHECK(result->CloudRotationY.X < 0.0F);
+    CHECK(result->CloudPositionOffset.X == 0.0F);
+    current.PlanetFrame->Planet = {1, 3};
+    CHECK_FALSE(MakeCloudTemporalReprojection(current, previous, true));
+    current.PlanetFrame->Planet = previous.PlanetFrame->Planet;
+    ++current.PlanetFrame->DiscontinuityRevision;
+    CHECK_FALSE(MakeCloudTemporalReprojection(current, previous, true));
+}
+
+TEST_CASE("Cloud reprojection cancels render rebasing while preserving actual camera motion")
+{
+    auto previous = View(10);
+    auto current = View(11);
+    previous.WorldOrigin = {1e15, 0.0, 0.0};
+    current.WorldOrigin = {1e15 + 512.0, 0.0, 0.0};
+    previous.Volume.InverseView.Elements[12] = 512.0F;
+    auto result = MakeCloudTemporalReprojection(current, previous, true);
+    REQUIRE(result);
+    CHECK(result->ScenePositionOffset.X == 0.0F);
+    current.Volume.InverseView.Elements[12] = 0.015625F;
+    result = MakeCloudTemporalReprojection(current, previous, true);
+    REQUIRE(result);
+    CHECK(result->ScenePositionOffset.X == 0.015625F);
+    current.WorldOrigin.X = std::numeric_limits<double>::infinity();
+    CHECK_FALSE(MakeCloudTemporalReprojection(current, previous, true));
+    current.WorldOrigin.X = -1e15;
+    CHECK_FALSE(MakeCloudTemporalReprojection(current, previous, true));
+}
+
 TEST_CASE("Cloud reprojection separates horizontal wind from camera motion and crosses phase wraps")
 {
     auto previous = View(10);

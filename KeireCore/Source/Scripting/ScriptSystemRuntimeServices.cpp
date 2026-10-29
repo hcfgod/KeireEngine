@@ -1,9 +1,81 @@
 #include "KeireInternal/Scripting/ScriptSystemInternal.h"
 
 #include <cmath>
+#include <cstddef>
+#include <limits>
 
 namespace Keire
 {
+    static_assert(sizeof(Vector3d) == 24);
+    static_assert(offsetof(Vector3d, X) == 0);
+    static_assert(offsetof(Vector3d, Y) == 8);
+    static_assert(offsetof(Vector3d, Z) == 16);
+
+    std::uint8_t ScriptSystem::Impl::RuntimeGetPrecisePositionV1(const std::uint64_t world, const std::uint64_t high,
+                                                                 const std::uint64_t low, const std::uint8_t worldSpace,
+                                                                 Vector3d* destination,
+                                                                 const std::uint32_t size) noexcept
+    {
+        if (!destination || size != sizeof(Vector3d) || worldSpace > 1)
+        {
+            return 0;
+        }
+        try
+        {
+            const auto entity = ResolveRuntimeEntity(world, high, low);
+            const auto transform = entity ? entity.GetComponent<TransformComponent>() : Ref<TransformComponent>{};
+            if (!transform)
+            {
+                return 0;
+            }
+            const auto position = worldSpace ? transform->WorldPositionPrecise() : transform->LocalPositionPrecise();
+            if (!Math::IsFinite(position))
+            {
+                return 0;
+            }
+            *destination = position;
+            return 1;
+        }
+        catch (...)
+        {
+            // Never unwind through the managed ABI or publish a partially evaluated position.
+            return 0;
+        }
+    }
+
+    std::uint8_t ScriptSystem::Impl::RuntimeSetPrecisePositionV1(const std::uint64_t world, const std::uint64_t high,
+                                                                 const std::uint64_t low, const std::uint8_t worldSpace,
+                                                                 const Vector3d* value,
+                                                                 const std::uint32_t size) noexcept
+    {
+        if (!value || size != sizeof(Vector3d) || worldSpace > 1 || !Math::IsFinite(*value))
+        {
+            return 0;
+        }
+        try
+        {
+            const auto entity = ResolveRuntimeEntity(world, high, low);
+            const auto transform = entity ? entity.GetComponent<TransformComponent>() : Ref<TransformComponent>{};
+            if (!transform)
+            {
+                return 0;
+            }
+            if (worldSpace)
+            {
+                transform->SetWorldPositionPrecise(*value);
+            }
+            else
+            {
+                transform->SetLocalPositionPrecise(*value);
+            }
+            return 1;
+        }
+        catch (...)
+        {
+            return 0;
+        }
+    }
+
     std::uint8_t ScriptSystem::Impl::RuntimeGetFixedPresentationInterpolation(const std::uint64_t world,
                                                                               const std::uint64_t high,
                                                                               const std::uint64_t low) noexcept
@@ -62,18 +134,34 @@ namespace Keire
                                                                       const std::uint64_t high,
                                                                       const std::uint64_t low) noexcept
     {
-        const auto entity = ResolveRuntimeEntity(world, high, low);
-        const auto transform = entity ? entity.GetComponent<TransformComponent>() : Ref<TransformComponent>{};
-        return transform ? transform->WorldPosition() : Vector3{};
+        try
+        {
+            const auto entity = ResolveRuntimeEntity(world, high, low);
+            const auto transform = entity ? entity.GetComponent<TransformComponent>() : Ref<TransformComponent>{};
+            return transform ? transform->WorldPosition() : Vector3{};
+        }
+        catch (...)
+        {
+            const auto invalid = std::numeric_limits<float>::quiet_NaN();
+            return {invalid, invalid, invalid};
+        }
     }
 
     [[nodiscard]] Vector3 ScriptSystem::Impl::RuntimeGetPresentationWorldPosition(const std::uint64_t world,
                                                                                   const std::uint64_t high,
                                                                                   const std::uint64_t low) noexcept
     {
-        const auto entity = ResolveRuntimeEntity(world, high, low);
-        const auto transform = entity ? entity.GetComponent<TransformComponent>() : Ref<TransformComponent>{};
-        return transform ? transform->PresentationWorldPosition() : Vector3{};
+        try
+        {
+            const auto entity = ResolveRuntimeEntity(world, high, low);
+            const auto transform = entity ? entity.GetComponent<TransformComponent>() : Ref<TransformComponent>{};
+            return transform ? transform->PresentationWorldPosition() : Vector3{};
+        }
+        catch (...)
+        {
+            const auto invalid = std::numeric_limits<float>::quiet_NaN();
+            return {invalid, invalid, invalid};
+        }
     }
 
     [[nodiscard]] Quaternion ScriptSystem::Impl::RuntimeGetPresentationWorldRotation(const std::uint64_t world,

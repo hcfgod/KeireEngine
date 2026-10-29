@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Keire/Scenes/Scene.h"
+#include "KeireInternal/Scenes/VfxPhysicsCollision.h"
 
 #include "Keire/Animation/AnimationSystem.h"
 #include "Keire/Animation/RiggingSystem.h"
@@ -266,6 +267,8 @@ namespace Keire
             std::uint32_t Generation = 0;
             Matrix4 PreviousPresentationWorld;
             Matrix4 CurrentPresentationWorld;
+            Vector3d PreviousPresentationPosition;
+            Vector3d CurrentPresentationPosition;
             std::uint64_t PresentationResetRevision = 0;
             bool HasPresentationSamples = false;
         };
@@ -317,20 +320,36 @@ namespace Keire
 
         template <typename Callback> void Invoke(const char* callback, Callback&& operation)
         {
+            struct CallbackScope final
+            {
+                bool& Active;
+                bool Previous;
+
+                ~CallbackScope() { Active = Previous; }
+            };
+            const CallbackScope scope{InvokingCallback, std::exchange(InvokingCallback, true)};
             try
             {
                 std::forward<Callback>(operation)();
             }
             catch (const std::exception& exception)
             {
-                PlayState = ScenePlayState::Faulted;
-                Failure = {callback, exception.what()};
+                RecordFailure(callback, exception.what());
             }
             catch (...)
             {
-                PlayState = ScenePlayState::Faulted;
-                Failure = {callback, "Component callback threw a non-standard exception."};
+                RecordFailure(callback, "Component callback threw a non-standard exception.");
             }
+        }
+
+        void RecordFailure(const char* callback, const char* message)
+        {
+            if (PlayState == ScenePlayState::Playing || PlayState == ScenePlayState::Paused)
+            {
+                StateBeforeFailure = PlayState;
+            }
+            PlayState = ScenePlayState::Faulted;
+            Failure = {callback, message};
         }
 
         [[nodiscard]] Ref<const AnimationClipAsset> ResolveClip(AnimationRuntimeState& state, const AssetId id);
@@ -451,15 +470,8 @@ namespace Keire
         {
             if (!PhysicsWorldService)
                 return std::nullopt;
-            const Vector3 delta{end.X - start.X, end.Y - start.Y, end.Z - start.Z};
-            const auto distance = std::sqrt(delta.X * delta.X + delta.Y * delta.Y + delta.Z * delta.Z);
-            if (distance <= 0.000001F)
-                return std::nullopt;
-            const Vector3 direction{delta.X / distance, delta.Y / distance, delta.Z / distance};
-            const auto hits = PhysicsWorldService->RayCast({start, direction, distance, ~0U, true, 1});
-            if (hits.empty())
-                return std::nullopt;
-            return VfxCollisionHit{hits.front().Position, hits.front().Normal};
+            return Detail::QueryVfxPhysicsCollision(
+                *PhysicsWorldService, VfxWorldService ? VfxWorldService->WorldOrigin() : Vector3d{}, start, end);
         }
 
         [[nodiscard]] static std::uint32_t HashVfxSample(std::uint32_t value) noexcept
@@ -575,7 +587,7 @@ namespace Keire
         void InitializePhysics();
         void SynchronizePhysicsBodies(bool queryOnly = false);
         void SynchronizePhysicsQueries();
-        static void MoveTransformInWorld(const Entity& entity, TransformComponent& transform, Vector3 displacement);
+        static void MoveTransformInWorld(TransformComponent& transform, Vector3 displacement);
         void ApplyCharacterMovement(float deltaSeconds);
         void UpdateCharacterGrounding();
         [[nodiscard]] std::optional<EntityId> EntityForBody(PhysicsBodyId body) const noexcept;
@@ -598,6 +610,11 @@ namespace Keire
         bool DeterministicSimulation = false;
         std::thread::id OwnerThread;
         ScenePlayState PlayState = ScenePlayState::Stopped;
+        ScenePlayState StateBeforeFailure = ScenePlayState::Playing;
+        bool InvokingCallback = false;
+        Entity SimulationFocus;
+        double OriginRebaseDistanceMetres = 8192.0;
+        double OriginGridSpacingMetres = 1024.0;
         SceneRuntimeDiagnostic Failure;
         Ref<ScenePresentationRuntime> Presentation;
         Detail::NamedIkDiagnostics NamedIkInspection;

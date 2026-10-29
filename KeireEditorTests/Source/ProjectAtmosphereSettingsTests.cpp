@@ -1,9 +1,11 @@
+#include "Keire/Core.h"
 #include "KeireClient/Editor/ProjectSettingsDocument.h"
-#include "KeireTests/TestSupport.h"
+#include "KeireClientInternal/Editor/AtmosphereControls.h"
 
 #include <doctest/doctest.h>
 
 #include <filesystem>
+#include <initializer_list>
 #include <limits>
 #include <stdexcept>
 #include <string_view>
@@ -12,7 +14,8 @@ namespace
 {
     struct AtmosphereDocumentFixture final
     {
-        std::filesystem::path Root = KeireTests::MakeTestDirectory("ProjectAtmosphereSettings");
+        std::filesystem::path Root = std::filesystem::temp_directory_path() /
+                                     ("Keire-ProjectAtmosphereSettings-" + Keire::AssetId::Generate().ToString());
 
         ~AtmosphereDocumentFixture()
         {
@@ -183,4 +186,92 @@ TEST_CASE("Resetting atmosphere clouds and stars is undoable without resetting e
     CHECK(document.Settings().Clouds == Keire::CloudSettings{});
     CHECK(document.Settings().Stars == Keire::StarFieldSettings{});
     CHECK(document.EnvironmentTime() == savedTime);
+}
+
+TEST_CASE("Atmosphere appearance reset preserves distant placement and small planet geometry")
+{
+    for (const bool enabled : {false, true})
+    {
+        for (const double height : {100.0, 100000.0})
+        {
+            auto settings = AuthoredSky();
+            settings.Atmosphere.Enabled = enabled;
+            settings.Atmosphere.PlanetRadius = height * 10.0;
+            settings.Atmosphere.Height = height;
+            const auto before = settings.Atmosphere;
+            settings.Atmosphere = KeireEditor::Detail::ResetAtmosphereAppearance(before);
+            CHECK(settings.Atmosphere.Enabled == before.Enabled);
+            CHECK(settings.Atmosphere.PlanetCenter == before.PlanetCenter);
+            CHECK(settings.Atmosphere.PlanetRadius == before.PlanetRadius);
+            CHECK(settings.Atmosphere.Height == before.Height);
+            CHECK(settings.Atmosphere.MieAnisotropy == Keire::AtmosphereSettings{}.MieAnisotropy);
+            CHECK(settings.Atmosphere.RayleighScaleHeight <= height);
+            CHECK(settings.Atmosphere.AbsorptionHalfWidth <= height);
+            CHECK_NOTHROW(Keire::ValidateRenderEnvironmentSettings(settings));
+        }
+    }
+}
+
+TEST_CASE("Atmosphere appearance reset saves and undoes without relocating the planet")
+{
+    AtmosphereDocumentFixture fixture;
+    auto service = Keire::CreateRef<Keire::UndoService>();
+    auto history = service->CreateContext({.Name = "Atmosphere appearance reset"});
+    KeireEditor::ProjectSettingsDocument document;
+    document.Open(fixture.Root, {}, history);
+    const auto authored = AuthoredSky();
+    document.Update(authored);
+    document.Save();
+    const auto undoCount = history->UndoCount();
+
+    auto reset = authored;
+    reset.Atmosphere = KeireEditor::Detail::ResetAtmosphereAppearance(authored.Atmosphere);
+    document.Update(reset);
+    document.CommitEdit("Reset Atmosphere Appearance");
+    CHECK(history->UndoCount() == undoCount + 1);
+    CHECK(document.Dirty());
+    CHECK(document.Settings().Atmosphere.PlanetCenter == authored.Atmosphere.PlanetCenter);
+    REQUIRE(history->Undo());
+    CHECK(document.Settings() == authored);
+    CHECK_FALSE(document.Dirty());
+    REQUIRE(history->Redo());
+    CHECK(document.Settings() == reset);
+    document.Save();
+    CHECK_FALSE(document.Dirty());
+
+    const auto persisted = Keire::LoadRenderEnvironmentSettings(fixture.Root);
+    CHECK(persisted == reset);
+    CHECK(persisted.Atmosphere.PlanetCenter == authored.Atmosphere.PlanetCenter);
+    CHECK(persisted.Clouds == authored.Clouds);
+    CHECK(persisted.Stars == authored.Stars);
+}
+
+TEST_CASE("Planetary fog authoring preserves placement through history and persistence")
+{
+    AtmosphereDocumentFixture fixture;
+    auto service = Keire::CreateRef<Keire::UndoService>();
+    auto history = service->CreateContext({.Name = "Planetary fog"});
+    KeireEditor::ProjectSettingsDocument document;
+    document.Open(fixture.Root, {}, history);
+    const auto baseline = AuthoredSky();
+    document.Update(baseline);
+    document.Save();
+
+    auto authored = baseline;
+    authored.Fog.Enabled = true;
+    authored.Fog.PlanetaryHeight = true;
+    authored.Fog.BaseHeightMeters = 125.0;
+    document.Update(authored);
+    document.CommitEdit("Planet-relative Height");
+    CHECK(document.Dirty());
+    REQUIRE(history->Undo());
+    CHECK(document.Settings() == baseline);
+    REQUIRE(history->Redo());
+    CHECK(document.Settings() == authored);
+    document.Save();
+    CHECK_FALSE(document.Dirty());
+    const auto persisted = Keire::LoadRenderEnvironmentSettings(fixture.Root);
+    CHECK(persisted.Fog == authored.Fog);
+    CHECK(persisted.Atmosphere == baseline.Atmosphere);
+    CHECK(persisted.Clouds == baseline.Clouds);
 }

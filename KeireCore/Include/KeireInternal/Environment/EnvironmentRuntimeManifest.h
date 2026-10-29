@@ -7,13 +7,16 @@
 #include "KeireInternal/Environment/EnvironmentLightingRecord.h"
 #include "KeireInternal/Environment/FogDensityRecord.h"
 #include "KeireInternal/Environment/StarFieldRecord.h"
+#include "KeireInternal/Spatial/PlanetProjectSettingsRecord.h"
 
 namespace Keire::Detail
 {
     class EnvironmentRuntimeManifest final
     {
       public:
-        static constexpr unsigned CurrentSchema = 10;
+        static constexpr unsigned CurrentSchema = 12;
+        static constexpr unsigned PlanetSchema = 12;
+        static constexpr unsigned GravitySchema = 11;
         static constexpr unsigned FogSchema = 10;
         static constexpr unsigned StarSchema = 9;
         static constexpr unsigned BloomSchema = 8;
@@ -29,6 +32,7 @@ namespace Keire::Detail
             BloomSettings Bloom;
             StarFieldSettings Stars;
             FogSettings Fog;
+            PlanetProjectSettings Planets;
         };
 
         [[nodiscard]] static EnvironmentClockState Decode(const nlohmann::json& manifest)
@@ -56,6 +60,10 @@ namespace Keire::Detail
             if (schema < LightingSchema && manifest.contains("environmentLighting"))
             {
                 throw std::invalid_argument("Runtime environment lighting requires manifest schema 6.");
+            }
+            if (schema < PlanetSchema && manifest.contains("planets"))
+            {
+                throw std::invalid_argument("Runtime planet settings require manifest schema 12.");
             }
             const auto rendering = manifest.find("rendering");
             if (schema < SkySchema && rendering != manifest.end() && rendering->is_object() &&
@@ -134,6 +142,14 @@ namespace Keire::Detail
                     throw std::invalid_argument("Runtime manifest schema 10 requires fog settings.");
                 }
                 result.Fog = DecodeFogDensity(rendering->at("fog"));
+            }
+            if (schema >= PlanetSchema)
+            {
+                if (!manifest.contains("planets"))
+                {
+                    throw std::invalid_argument("Runtime manifest schema 12 requires planet settings.");
+                }
+                result.Planets = PlanetProjectSettingsRecord::Decode(manifest.at("planets"));
             }
             return result;
         }
