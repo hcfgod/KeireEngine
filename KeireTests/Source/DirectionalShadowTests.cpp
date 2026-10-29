@@ -6,6 +6,35 @@
 #include <cstddef>
 #include <stdexcept>
 
+TEST_CASE("shadow slices remain finite with planetary camera clipping distances")
+{
+    const Keire::Matrix4 view{};
+    const auto ordinary = Keire::Math::Perspective(90.0F, 1.0F, 0.05F, 1000.0F);
+    const auto planetary = Keire::Math::Perspective(90.0F, 1.0F, 0.05F, 10000000.0F);
+    const auto expected = Keire::RenderBackend::BuildShadowSliceCorners(ordinary, view, 100.0F);
+    const auto actual = Keire::RenderBackend::BuildShadowSliceCorners(planetary, view, 100.0F);
+    for (std::size_t index = 0; index < actual.size(); ++index)
+    {
+        CHECK(std::isfinite(actual[index].X));
+        CHECK(std::isfinite(actual[index].Y));
+        CHECK(actual[index].X == doctest::Approx(expected[index].X));
+        CHECK(actual[index].Y == doctest::Approx(expected[index].Y));
+        CHECK(actual[index].Z == doctest::Approx(100.0F));
+        CHECK(std::abs(actual[index].X) == doctest::Approx(100.0F));
+    }
+
+    const auto orthographic = Keire::Math::Orthographic(20.0F, 1.0F, 0.05F, 10000000.0F);
+    const auto parallel = Keire::RenderBackend::BuildShadowSliceCorners(orthographic, view, 100.0F);
+    CHECK(std::abs(parallel.front().X) == doctest::Approx(10.0F));
+    CHECK(std::abs(parallel.front().Y) == doctest::Approx(10.0F));
+    CHECK(parallel.front().Z == doctest::Approx(100.0F));
+
+    const auto elevatedView = Keire::Math::LookAt({0.0F, 150000.0F, 0.0F}, {0.0F, 150000.0F, 1.0F}, {0.0F, 1.0F, 0.0F});
+    const auto elevated = Keire::RenderBackend::BuildShadowSliceCorners(planetary, elevatedView, 100.0F);
+    CHECK(elevated.front().Y == doctest::Approx(149900.0F));
+    CHECK(elevated.front().Z == doctest::Approx(100.0F));
+}
+
 TEST_CASE("practical directional cascade splits are bounded and deterministic")
 {
     const auto uniform = Keire::RenderBackend::BuildPracticalCascadeSplits(0.1F, 100.0F, 4, 0.0F);

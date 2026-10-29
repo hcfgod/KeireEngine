@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased
+- Preserve compatible material importer aliases during startup and apply published compatible assets after a partial refresh.
+- Construct directional shadow slices without unprojecting the far clip endpoint, avoiding invalid shadow bounds with planetary viewing distances.
 - Add development planetary settings, sector-relative environment capture, spherical clouds, explicit gravity
   modes, and cooked manifest schema 12. Preview and runtime own separate paused simulation clocks; replay
   restores planet time. Live rotating physics-frame transfers and integrated travel acceptance remain unfinished.

@@ -255,21 +255,10 @@ namespace Keire::RenderBackend
                 std::max(packet.Environment.DirectionalShadowDistance, nearPlane + 0.0001F), packet.Camera.FarPlane);
             const auto splits = BuildPracticalCascadeSplits(nearPlane, shadowDistance, cascadeCount,
                                                             packet.Environment.DirectionalShadowSplitLambda);
-            const auto inverseViewProjection =
-                Math::Inverse(Math::Multiply(packet.UnjitteredProjection, packet.Camera.View));
-            std::array<Vector3, 4> nearCorners{};
-            std::array<Vector3, 4> farCorners{};
-            constexpr std::array<Vector2, 4> coordinates{Vector2{-1.0F, -1.0F}, Vector2{1.0F, -1.0F},
-                                                         Vector2{1.0F, 1.0F}, Vector2{-1.0F, 1.0F}};
-            for (std::size_t index = 0; index < coordinates.size(); ++index)
-            {
-                const auto nearClip =
-                    TransformClip(inverseViewProjection, {coordinates[index].X, coordinates[index].Y, 0.0F});
-                const auto farClip =
-                    TransformClip(inverseViewProjection, {coordinates[index].X, coordinates[index].Y, 1.0F});
-                nearCorners[index] = {nearClip.X / nearClip.W, nearClip.Y / nearClip.W, nearClip.Z / nearClip.W};
-                farCorners[index] = {farClip.X / farClip.W, farClip.Y / farClip.W, farClip.Z / farClip.W};
-            }
+            const auto nearCorners =
+                BuildShadowSliceCorners(packet.UnjitteredProjection, packet.Camera.View, nearPlane);
+            const auto farCorners =
+                BuildShadowSliceCorners(packet.UnjitteredProjection, packet.Camera.View, shadowDistance);
             const auto direction = Normalize(
                 Vector3{packet.Lighting.Direction.X, packet.Lighting.Direction.Y, packet.Lighting.Direction.Z});
             const auto up = std::abs(direction.Y) > 0.95F ? Vector3{0.0F, 0.0F, 1.0F} : Vector3{0.0F, 1.0F, 0.0F};
@@ -278,8 +267,8 @@ namespace Keire::RenderBackend
             float previousSplit = nearPlane;
             for (std::uint32_t cascade = 0; cascade < cascadeCount; ++cascade)
             {
-                const float nearRatio = (previousSplit - nearPlane) / (packet.Camera.FarPlane - nearPlane);
-                const float farRatio = (splits[cascade] - nearPlane) / (packet.Camera.FarPlane - nearPlane);
+                const float nearRatio = (previousSplit - nearPlane) / (shadowDistance - nearPlane);
+                const float farRatio = (splits[cascade] - nearPlane) / (shadowDistance - nearPlane);
                 std::array<Vector3, 8> corners{};
                 for (std::size_t corner = 0; corner < 4; ++corner)
                 {

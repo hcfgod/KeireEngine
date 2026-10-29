@@ -239,7 +239,13 @@ float3 StarRadiance(float3 direction)
     const float solarElevation = degrees(asin(clamp(dot(AtmosphereSunHeight.xyz, up), -1.0F, 1.0F)));
     const float nightFraction =
         saturate((StarTwinkleFade.z - solarElevation) / max(StarTwinkleFade.z - StarTwinkleFade.w, 1.0e-4F));
-    const float nightVisibility = nightFraction * nightFraction * (3.0F - 2.0F * nightFraction);
+    const float atmosphereHeight = max(AtmosphereSunHeight.w, 1.0F);
+    const float spaceVisibility = AtmosphereControls.x > 0.5F
+        ? smoothstep(AtmosphereObserverRadius.w + atmosphereHeight * 0.8F,
+                     AtmosphereObserverRadius.w + atmosphereHeight, length(AtmosphereObserverRadius.xyz))
+        : 0.0F;
+    const float nightVisibility = max(
+        nightFraction * nightFraction * (3.0F - 2.0F * nightFraction), spaceVisibility);
     if (nightVisibility <= 0.0F)
     {
         return 0.0F;

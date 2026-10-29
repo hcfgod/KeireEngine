@@ -891,6 +891,29 @@ void EditorWorkspaceLayer::UpdateAssetOperations()
                     m_MaterialDocument->MarkCatalogRefreshApplied(generation);
                 continue;
             }
+            // A published development catalog can contain successful assets alongside failed imports.
+            // Apply that compatible subset before reporting errors so unrelated failures do not strand
+            // recovered scene materials behind the startup mount's exclusions.
+            const bool hasPublishedImport =
+                (completion->Kind == Keire::Detail::AssetWorkerOperationKind::ImportAll ||
+                 completion->Kind == Keire::Detail::AssetWorkerOperationKind::ImportAssets) &&
+                !completion->Result.Import.CatalogPath.empty();
+            if (hasPublishedImport)
+            {
+                try
+                {
+                    (void)Keire::Detail::AssetDatabaseWorkerAccess::ReloadSourceIndex(*m_AssetDatabase,
+                                                                                      completion->SourceIndexPath);
+                    ApplyAssetImportResult(completion->Result.Import,
+                                           completion->Kind == Keire::Detail::AssetWorkerOperationKind::ImportAll,
+                                           completion->Context.ReloadAsset);
+                }
+                catch (const std::exception& error)
+                {
+                    SetAssetError(std::string("Published partial asset refresh could not be applied: ") + error.what());
+                    continue;
+                }
+            }
             if (m_PendingMaterialAssignment && completion->Context.ReloadAsset == m_PendingMaterialAssignment->Source)
             {
                 m_PendingMaterialAssignment.reset();

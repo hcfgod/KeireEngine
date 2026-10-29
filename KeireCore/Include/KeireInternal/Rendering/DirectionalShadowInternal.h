@@ -2,6 +2,7 @@
 
 #include "Keire/Math/Math.h"
 
+#include <array>
 #include <cstdint>
 #include <span>
 #include <vector>
@@ -10,6 +11,9 @@ namespace Keire::RenderBackend
 {
     inline constexpr float DirectionalShadowDepthBiasConstant = 2.0F;
     inline constexpr float DirectionalShadowDepthBiasSlope = 2.0F;
+
+    [[nodiscard]] std::array<Vector3, 4> BuildShadowSliceCorners(const Matrix4& projection, const Matrix4& view,
+                                                                 float viewDepth);
 
     [[nodiscard]] std::vector<float> BuildPracticalCascadeSplits(float nearPlane, float shadowDistance,
                                                                  std::uint32_t cascadeCount, float splitLambda);

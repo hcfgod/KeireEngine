@@ -8,6 +8,8 @@
 Editor startup opens the saved source scene while asset refresh runs in the background. Incompatible cooked assets
 use pending or fallback presentation; Play waits for the scene's compatible dependency closure. Refresh preserves
 open document edits and camera state. Cold, warm, and importer-migration startup timing validation is in progress.
+Supported legacy importer names remain compatible, including older material metadata. A partial refresh applies
+compatible published assets while retaining diagnostics and excluding incompatible artifacts.
 
 Large-world support is undergoing a development migration. Native transforms now store double-precision translation;
 C# provides `Transform.LocalPositionPrecise` and `Transform.PositionPrecise` (`Vector3d`) for precise positions in the

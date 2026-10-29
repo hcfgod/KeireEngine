@@ -24,7 +24,10 @@ namespace KeireEditor
             }
             const auto importer = database.FindImporterForPath(record.RelativePath);
             const auto status = database.ImportStatus(record.Id).State;
-            if (!importer || importer->Name != record.Importer || importer->Version != record.ImporterVersion ||
+            if (!importer ||
+                (importer->Name != record.Importer &&
+                 std::ranges::find(importer->PreviousNames, record.Importer) == importer->PreviousNames.end()) ||
+                importer->Version != record.ImporterVersion ||
                 (status != Keire::AssetImportState::Imported && status != Keire::AssetImportState::CacheHit))
             {
                 excluded.push_back(record.Id);

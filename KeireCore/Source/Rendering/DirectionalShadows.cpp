@@ -1,10 +1,38 @@
 #include "KeireInternal/Rendering/DirectionalShadowInternal.h"
+#include "KeireInternal/Rendering/RenderGeometryMathInternal.h"
 
 #include <cmath>
 #include <stdexcept>
 
 namespace Keire::RenderBackend
 {
+    std::array<Vector3, 4> BuildShadowSliceCorners(const Matrix4& projection, const Matrix4& view,
+                                                   const float viewDepth)
+    {
+        const auto inverseProjection = Math::Inverse(projection);
+        const auto inverseView = Math::Inverse(view);
+        constexpr std::array<Vector2, 4> coordinates{{{-1.0F, -1.0F}, {1.0F, -1.0F}, {1.0F, 1.0F}, {-1.0F, 1.0F}}};
+        std::array<Vector3, 4> corners{};
+        for (std::size_t index = 0; index < corners.size(); ++index)
+        {
+            // The far clip point can be at infinity after float projection rounding.
+            // Two interior points define the same ray without dividing by its zero W.
+            const auto nearClip =
+                GeometryDetail::TransformClip(inverseProjection, {coordinates[index].X, coordinates[index].Y, 0.0F});
+            const auto middleClip =
+                GeometryDetail::TransformClip(inverseProjection, {coordinates[index].X, coordinates[index].Y, 0.5F});
+            const Vector3 nearPoint{nearClip.X / nearClip.W, nearClip.Y / nearClip.W, nearClip.Z / nearClip.W};
+            const Vector3 middlePoint{middleClip.X / middleClip.W, middleClip.Y / middleClip.W,
+                                      middleClip.Z / middleClip.W};
+            const float ratio = (viewDepth - nearPoint.Z) / (middlePoint.Z - nearPoint.Z);
+            const Vector3 viewPoint{std::lerp(nearPoint.X, middlePoint.X, ratio),
+                                    std::lerp(nearPoint.Y, middlePoint.Y, ratio), viewDepth};
+            const auto world = GeometryDetail::TransformClip(inverseView, viewPoint);
+            corners[index] = {world.X / world.W, world.Y / world.W, world.Z / world.W};
+        }
+        return corners;
+    }
+
     std::vector<float> BuildPracticalCascadeSplits(const float nearPlane, const float shadowDistance,
                                                    const std::uint32_t cascadeCount, const float splitLambda)
     {
