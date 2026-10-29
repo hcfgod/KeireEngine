@@ -1,0 +1,476 @@
+{
+  "bakedLighting": null,
+  "entities": [
+    {
+      "active": true,
+      "components": [
+        {
+          "data": {
+            "position": [
+              0.0,
+              10.0,
+              -5.0
+            ],
+            "rotation": [
+              0.8806508779525757,
+              0.11315198242664337,
+              -0.376103937625885,
+              0.26494598388671875
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "enabled": true,
+          "type": "4b454952-4554-5241-4e53-464f524d0001",
+          "version": 2
+        },
+        {
+          "data": {
+            "bakeMode": 0,
+            "color": [
+              1.0,
+              0.9399999976158142,
+              0.8600000143051147,
+              1.0
+            ],
+            "contactShadows": true,
+            "cookie": null,
+            "cookieOffset": [
+              0.0,
+              0.0
+            ],
+            "cookieRotation": 0.0,
+            "cookieScale": [
+              1.0,
+              1.0
+            ],
+            "indirectMultiplier": 1.0,
+            "intensity": 4.0,
+            "shadowBias": 0.03500000014901161,
+            "shadowResolution": 2,
+            "shadowStrength": 1.0,
+            "shadows": 2,
+            "temperature": 6200.0,
+            "useTemperature": false
+          },
+          "enabled": true,
+          "type": "4b454952-4544-4952-4c49-474854000001",
+          "version": 2
+        }
+      ],
+      "id": "d34bafce-f978-530f-9662-8d3dca2b3321",
+      "layer": 0,
+      "name": "Key Directional Light",
+      "parent": null,
+      "tags": []
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "data": {
+            "position": [
+              0.0,
+              -0.800000011920929,
+              2.0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              8,
+              0.1,
+              8
+            ]
+          },
+          "enabled": true,
+          "type": "4b454952-4554-5241-4e53-464f524d0001",
+          "version": 2
+        },
+        {
+          "data": {
+            "alwaysVisible": false,
+            "castShadows": true,
+            "giReceive": 0,
+            "lightmapScale": 1.0,
+            "material": "d22ab141-adbb-53e9-a556-f07c5baf89be",
+            "mesh": "4b454952-4543-5542-454d-455348000001",
+            "preserveLightmapUvs": true,
+            "receiveShadows": true,
+            "staticLighting": false,
+            "tint": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ],
+            "visible": true
+          },
+          "enabled": true,
+          "type": "4b454952-454d-4553-4852-454e44455201",
+          "version": 4
+        }
+      ],
+      "id": "bf07fbe9-140f-5f08-a698-428855727be5",
+      "layer": 0,
+      "name": "Showcase Plinth",
+      "parent": null,
+      "tags": []
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "data": {
+            "position": [
+              0,
+              -6360000,
+              0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              12720000,
+              12720000,
+              12720000
+            ]
+          },
+          "enabled": true,
+          "type": "4b454952-4554-5241-4e53-464f524d0001",
+          "version": 2
+        },
+        {
+          "data": {
+            "alwaysVisible": false,
+            "castShadows": true,
+            "giReceive": 0,
+            "lightmapScale": 1.0,
+            "material": null,
+            "mesh": "4b454952-4553-5048-4552-454d45534801",
+            "preserveLightmapUvs": true,
+            "receiveShadows": true,
+            "staticLighting": false,
+            "tint": [
+              0.04,
+              0.19,
+              0.32,
+              1
+            ],
+            "visible": true
+          },
+          "enabled": true,
+          "type": "4b454952-454d-4553-4852-454e44455201",
+          "version": 4
+        }
+      ],
+      "id": "1b4da05b-c858-4114-a2a8-732399f42849",
+      "layer": 0,
+      "name": "Earth Surface",
+      "parent": null,
+      "tags": []
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "data": {
+            "position": [
+              0,
+              12,
+              0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              1,
+              1,
+              1
+            ]
+          },
+          "enabled": true,
+          "type": "4b454952-4554-5241-4e53-464f524d0001",
+          "version": 2
+        }
+      ],
+      "id": "de2d6c4c-c87b-4328-8c13-66f1c51d5939",
+      "layer": 0,
+      "name": "Spacecraft",
+      "parent": null,
+      "tags": []
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "data": {
+            "position": [
+              0,
+              7,
+              -22
+            ],
+            "rotation": [
+              -0.04143970459699631,
+              0.0,
+              0.0,
+              0.9991410970687866
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "enabled": true,
+          "type": "4b454952-4554-5241-4e53-464f524d0001",
+          "version": 2
+        },
+        {
+          "data": {
+            "clearColor": [
+              0.00800000037997961,
+              0.012000000104308128,
+              0.024000000208616257,
+              1.0
+            ],
+            "clearMode": 0,
+            "effectAfterTonemapping": null,
+            "effectAfterUi": null,
+            "effectBeforeTonemapping": null,
+            "farPlane": 10000000,
+            "fieldOfView": 56.0,
+            "nearPlane": 0.05000000074505806,
+            "orthographicSize": 10.0,
+            "primary": true,
+            "priority": 100,
+            "projection": 0
+          },
+          "enabled": true,
+          "type": "4b454952-4543-414d-4552-410000000001",
+          "version": 1
+        },
+        {
+          "type": "eb170000-2026-4000-8000-000000000001",
+          "version": 1,
+          "enabled": true,
+          "data": {
+            "managedState": "{\"fields\":[],\"version\":1}"
+          }
+        },
+        {
+          "type": "4b454952-4555-4944-4f43-554d454e5401",
+          "version": 1,
+          "enabled": true,
+          "data": {
+            "sortingOrder": 100,
+            "visualTree": "6a100001-1111-4000-8000-000000000002",
+            "receivesInput": true,
+            "panelSettings": "6a100001-1111-4000-8000-000000000003"
+          }
+        }
+      ],
+      "id": "245d3602-ba1e-55d6-afa0-074c2b9bdb51",
+      "layer": 0,
+      "name": "Flight Camera",
+      "parent": "de2d6c4c-c87b-4328-8c13-66f1c51d5939",
+      "tags": []
+    },
+    {
+      "id": "b45bf998-6f1f-4a41-b10f-a55e22786a64",
+      "name": "Hull",
+      "parent": "de2d6c4c-c87b-4328-8c13-66f1c51d5939",
+      "active": true,
+      "layer": 0,
+      "tags": [],
+      "components": [
+        {
+          "data": {
+            "position": [
+              0,
+              0,
+              0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              2,
+              1,
+              6
+            ]
+          },
+          "enabled": true,
+          "type": "4b454952-4554-5241-4e53-464f524d0001",
+          "version": 2
+        },
+        {
+          "data": {
+            "alwaysVisible": false,
+            "castShadows": true,
+            "giReceive": 0,
+            "lightmapScale": 1.0,
+            "material": null,
+            "mesh": "4b454952-4543-5542-454d-455348000001",
+            "preserveLightmapUvs": true,
+            "receiveShadows": true,
+            "staticLighting": false,
+            "tint": [
+              0.65,
+              0.75,
+              0.85,
+              1
+            ],
+            "visible": true
+          },
+          "enabled": true,
+          "type": "4b454952-454d-4553-4852-454e44455201",
+          "version": 4
+        }
+      ]
+    },
+    {
+      "id": "a8d0568b-7395-4939-b119-966bfae12c10",
+      "name": "Wings",
+      "parent": "de2d6c4c-c87b-4328-8c13-66f1c51d5939",
+      "active": true,
+      "layer": 0,
+      "tags": [],
+      "components": [
+        {
+          "data": {
+            "position": [
+              0,
+              -0.2,
+              -0.8
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              7,
+              0.15,
+              2
+            ]
+          },
+          "enabled": true,
+          "type": "4b454952-4554-5241-4e53-464f524d0001",
+          "version": 2
+        },
+        {
+          "data": {
+            "alwaysVisible": false,
+            "castShadows": true,
+            "giReceive": 0,
+            "lightmapScale": 1.0,
+            "material": null,
+            "mesh": "4b454952-4543-5542-454d-455348000001",
+            "preserveLightmapUvs": true,
+            "receiveShadows": true,
+            "staticLighting": false,
+            "tint": [
+              0.18,
+              0.28,
+              0.4,
+              1
+            ],
+            "visible": true
+          },
+          "enabled": true,
+          "type": "4b454952-454d-4553-4852-454e44455201",
+          "version": 4
+        }
+      ]
+    },
+    {
+      "id": "e2cb236b-34d9-48fc-aaac-969e471ec9e1",
+      "name": "Engine",
+      "parent": "de2d6c4c-c87b-4328-8c13-66f1c51d5939",
+      "active": true,
+      "layer": 0,
+      "tags": [],
+      "components": [
+        {
+          "data": {
+            "position": [
+              0,
+              0,
+              -3.2
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              1.2,
+              0.6,
+              0.8
+            ]
+          },
+          "enabled": true,
+          "type": "4b454952-4554-5241-4e53-464f524d0001",
+          "version": 2
+        },
+        {
+          "data": {
+            "alwaysVisible": false,
+            "castShadows": true,
+            "giReceive": 0,
+            "lightmapScale": 1.0,
+            "material": null,
+            "mesh": "4b454952-4543-5542-454d-455348000001",
+            "preserveLightmapUvs": true,
+            "receiveShadows": true,
+            "staticLighting": false,
+            "tint": [
+              0.08,
+              0.65,
+              1,
+              1
+            ],
+            "visible": true
+          },
+          "enabled": true,
+          "type": "4b454952-454d-4553-4852-454e44455201",
+          "version": 4
+        }
+      ]
+    }
+  ],
+  "lighting": {
+    "backend": 0,
+    "bakeAmbientOcclusion": true,
+    "denoise": true,
+    "indirectBounceCount": 2,
+    "lightmapResolution": 1024,
+    "maximumLightmapResolution": 4096,
+    "paddingTexels": 4,
+    "quality": 1,
+    "samplesPerTexel": 64,
+    "texelsPerUnit": 32
+  },
+  "name": "Earth Space Flight",
+  "prefabInstances": [],
+  "prefabOverrides": [],
+  "schemaVersion": 6
+}

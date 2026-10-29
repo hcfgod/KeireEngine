@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 4,
+  "id": "62aad7b5-0e6b-4de0-9120-94bc154ac41b",
+  "name": "Earth Space Flight",
+  "createdWithEngineVersion": "0.1.0",
+  "minimumEngineVersion": "0.3.0",
+  "createdAt": "2026-01-01T00:00:00Z",
+  "lastSavedWithEngineVersion": "0.3.0",
+  "template": {
+    "id": "keire.sandbox",
+    "version": "1.3.0"
+  },
+  "startupScene": "200d16bc-6971-4c20-82e0-fb405a17c25a",
+  "defaultInput": "97b38693-6dc3-4f06-a228-44ba5786e8d1",
+  "defaultInputMap": "a6b6db76-6436-4aa4-b96a-a72a0f987101",
+  "requiredModules": []
+}

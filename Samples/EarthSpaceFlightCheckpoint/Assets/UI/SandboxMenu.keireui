@@ -1,0 +1,14 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<ui schemaVersion="1" name="Earth Space Flight" id="9006b143-20c7-41a5-a3e8-be42931db65b">
+  <style src="6a100001-1111-4000-8000-000000000001" />
+  <VisualElement name="flight-hud" class="screen" id="06595f2f-5f2b-455c-92d5-ef357ed1a9e1">
+    <VisualElement class="menu-card" id="68fbaf42-adf7-41e5-9991-9464b6e9fca0">
+      <Label class="title" text="EARTH / SPACE FLIGHT" id="b6503b1d-a3e9-481d-9541-82d7696b7b07" />
+      <Label name="status" class="subtitle" text="READY / 150 SECOND ROUND TRIP" id="66b50ff4-5356-451c-9d34-97dab13237ab" />
+      <Button name="launch" class="primary" text="Launch / Restart [Enter]" id="df1b1332-6406-4750-a53e-27a1fcdfb99c" />
+      <Button name="view" class="primary" text="Cockpit view [V]" id="6cd274bb-6202-42a4-8afa-2381919db3d0" />
+      <Button name="pause" class="primary" text="Pause / Resume [P]" id="f0336048-8186-4ea5-a1dc-b03fc8bf0c9b" />
+      <Button name="return" class="primary" text="Return to Earth [R]" id="ae58c228-9ca6-4c00-8d89-521c635ee14f" />
+    </VisualElement>
+  </VisualElement>
+</ui>

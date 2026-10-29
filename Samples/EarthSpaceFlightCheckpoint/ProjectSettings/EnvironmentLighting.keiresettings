@@ -1,0 +1,254 @@
+{
+  "lighting": {
+    "keyframes": [
+      {
+        "ambient": {
+          "color": [
+            0.07999999821186066,
+            0.11999999731779099,
+            0.25
+          ],
+          "intensity": 0.07999999821186066
+        },
+        "azimuth": 0.0,
+        "color": [
+          0.15,
+          0.2,
+          0.4
+        ],
+        "elevation": -60.0,
+        "intensity": 0.0,
+        "phase": 0.0
+      },
+      {
+        "ambient": {
+          "color": [
+            0.07999999821186066,
+            0.11999999731779099,
+            0.25
+          ],
+          "intensity": 0.07999999821186066
+        },
+        "azimuth": 72.0,
+        "color": [
+          0.5,
+          0.2,
+          0.1
+        ],
+        "elevation": -12.0,
+        "intensity": 0.0,
+        "phase": 0.2
+      },
+      {
+        "ambient": {
+          "color": [
+            0.10199999809265137,
+            0.14299999177455902,
+            0.27000001072883606
+          ],
+          "intensity": 0.1469999998807907
+        },
+        "azimuth": 90.0,
+        "color": [
+          1.0,
+          0.35,
+          0.12
+        ],
+        "elevation": 0.0,
+        "intensity": 0.5,
+        "phase": 0.25
+      },
+      {
+        "ambient": {
+          "color": [
+            0.2120000123977661,
+            0.257999986410141,
+            0.3700000047683716
+          ],
+          "intensity": 0.4820000231266022
+        },
+        "azimuth": 120.0,
+        "color": [
+          1.0,
+          0.75,
+          0.5
+        ],
+        "elevation": 30.0,
+        "intensity": 3.0,
+        "phase": 0.33
+      },
+      {
+        "ambient": {
+          "color": [
+            0.30000001192092896,
+            0.3499999940395355,
+            0.44999998807907104
+          ],
+          "intensity": 0.75
+        },
+        "azimuth": 180.0,
+        "color": [
+          1.0,
+          0.95,
+          0.85
+        ],
+        "elevation": 65.0,
+        "intensity": 5.0,
+        "phase": 0.5
+      },
+      {
+        "ambient": {
+          "color": [
+            0.2120000123977661,
+            0.257999986410141,
+            0.3700000047683716
+          ],
+          "intensity": 0.4820000231266022
+        },
+        "azimuth": 240.0,
+        "color": [
+          1.0,
+          0.7,
+          0.4
+        ],
+        "elevation": 30.0,
+        "intensity": 3.0,
+        "phase": 0.67
+      },
+      {
+        "ambient": {
+          "color": [
+            0.10199999809265137,
+            0.14299999177455902,
+            0.27000001072883606
+          ],
+          "intensity": 0.1469999998807907
+        },
+        "azimuth": 270.0,
+        "color": [
+          1.0,
+          0.25,
+          0.08
+        ],
+        "elevation": 0.0,
+        "intensity": 0.5,
+        "phase": 0.75
+      },
+      {
+        "ambient": {
+          "color": [
+            0.07999999821186066,
+            0.11999999731779099,
+            0.25
+          ],
+          "intensity": 0.07999999821186066
+        },
+        "azimuth": 288.0,
+        "color": [
+          0.4,
+          0.15,
+          0.2
+        ],
+        "elevation": -12.0,
+        "intensity": 0.0,
+        "phase": 0.8
+      }
+    ],
+    "ownership": "environment",
+    "shadows": {
+      "bias": 0.004999999888241291,
+      "quality": 2,
+      "resolution": 2,
+      "strength": 1.0
+    },
+    "sky": {
+      "enabled": true,
+      "exponent": 1.0,
+      "horizon": {
+        "keys": [
+          {
+            "color": [
+              0.008,
+              0.012,
+              0.03
+            ],
+            "interpolation": 0,
+            "phase": 0.0
+          },
+          {
+            "color": [
+              0.8,
+              0.18,
+              0.06
+            ],
+            "interpolation": 0,
+            "phase": 0.25
+          },
+          {
+            "color": [
+              0.6,
+              0.85,
+              1.2
+            ],
+            "interpolation": 0,
+            "phase": 0.5
+          },
+          {
+            "color": [
+              0.9,
+              0.15,
+              0.04
+            ],
+            "interpolation": 0,
+            "phase": 0.75
+          }
+        ],
+        "version": 1
+      },
+      "weight": 1.0,
+      "zenith": {
+        "keys": [
+          {
+            "color": [
+              0.001,
+              0.002,
+              0.008
+            ],
+            "interpolation": 0,
+            "phase": 0.0
+          },
+          {
+            "color": [
+              0.04,
+              0.08,
+              0.2
+            ],
+            "interpolation": 0,
+            "phase": 0.25
+          },
+          {
+            "color": [
+              0.04,
+              0.2,
+              0.65
+            ],
+            "interpolation": 0,
+            "phase": 0.5
+          },
+          {
+            "color": [
+              0.04,
+              0.02,
+              0.12
+            ],
+            "interpolation": 0,
+            "phase": 0.75
+          }
+        ],
+        "version": 1
+      }
+    },
+    "version": 4
+  },
+  "schemaVersion": 1
+}

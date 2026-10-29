@@ -1,0 +1,11 @@
+{
+  "initialTime": {
+    "day": "0",
+    "dayFraction": 0.4,
+    "paused": true,
+    "rate": 1,
+    "secondsPerDay": 2400.0,
+    "version": 1
+  },
+  "schemaVersion": 1
+}

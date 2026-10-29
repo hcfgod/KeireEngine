@@ -1,0 +1,13 @@
+{
+  "dependencies": [
+    "6a100001-1111-4000-8000-000000000002",
+    "6a100001-1111-4000-8000-000000000003",
+    "d22ab141-adbb-53e9-a556-f07c5baf89be"
+  ],
+  "id": "200d16bc-6971-4c20-82e0-fb405a17c25a",
+  "importer": "Keire.Scene",
+  "importerVersion": 10,
+  "schemaVersion": 1,
+  "subAssets": [],
+  "type": "4b454952-4553-4345-4e45-415353455401"
+}

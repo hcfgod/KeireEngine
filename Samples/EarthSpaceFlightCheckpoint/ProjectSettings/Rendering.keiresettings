@@ -1,0 +1,206 @@
+{
+  "ambientColor": [
+    1.0,
+    1.0,
+    1.0,
+    1.0
+  ],
+  "ambientIntensity": 0.41600000858306885,
+  "antiAliasing": "none",
+  "atmosphere": {
+    "absorptionExtinction": [
+      6.5E-07,
+      1.881E-06,
+      8.5E-08
+    ],
+    "absorptionHalfWidth": 15000.0,
+    "absorptionPeakAltitude": 25000.0,
+    "enabled": true,
+    "groundIntensity": 0.5,
+    "groundReflectance": [
+      0.18,
+      0.18,
+      0.18
+    ],
+    "height": 100000.0,
+    "lightSamples": 8,
+    "mieAnisotropy": 0.8,
+    "mieExtinction": 4.44E-06,
+    "mieScaleHeight": 1200.0,
+    "mieScattering": 3.996E-06,
+    "planetCenter": [
+      0.0,
+      -6360000.0,
+      0.0
+    ],
+    "planetRadius": 6360000.0,
+    "rayleighScaleHeight": 8000.0,
+    "rayleighScattering": [
+      5.802E-06,
+      1.3558E-05,
+      3.31E-05
+    ],
+    "schemaVersion": 3,
+    "solarIrradiance": [
+      20.0,
+      20.0,
+      20.0
+    ],
+    "sunAngularRadius": 0.004675,
+    "viewSamples": 24
+  },
+  "bloom": {
+    "enabled": true,
+    "intensity": 0.1,
+    "radius": 2.0,
+    "softKnee": 0.5,
+    "threshold": 1.0,
+    "version": 1
+  },
+  "clouds": {
+    "layers": [
+      {
+        "altitudeMeters": 2000.0,
+        "appearance": "natural-lit",
+        "coverage": 0.5,
+        "edgeSoftness": 0.15,
+        "enabled": false,
+        "horizonFade": 0.1,
+        "linearColor": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "opacity": 0.8,
+        "patternSizeMeters": 12000.0,
+        "seed": 1,
+        "windMetersPerSecond": [
+          5.0,
+          0.0
+        ]
+      },
+      {
+        "altitudeMeters": 2000.0,
+        "appearance": "legacy-unlit",
+        "coverage": 0.5,
+        "edgeSoftness": 0.15,
+        "enabled": false,
+        "horizonFade": 0.1,
+        "linearColor": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "opacity": 0.8,
+        "patternSizeMeters": 12000.0,
+        "seed": 1,
+        "windMetersPerSecond": [
+          5.0,
+          0.0
+        ]
+      }
+    ],
+    "version": 3,
+    "volume": {
+      "ambientOcclusionStrength": 0.0,
+      "anisotropy": 0.65,
+      "baseHeightMeters": 1500.0,
+      "baseHeightVariationMeters": 500.0,
+      "cloudType": 1.0,
+      "coverage": 0.6,
+      "densityContrast": 1.0,
+      "detailAmount": 0.2,
+      "detailFrequency": 4,
+      "enabled": true,
+      "erosionAmount": 0.2,
+      "extinctionPerMeter": 0.004,
+      "heightProfile": [
+        0.0,
+        0.15,
+        0.7,
+        1.0
+      ],
+      "independentWeather": true,
+      "maximumDistanceMeters": 100000.0,
+      "multipleScatteringContribution": 0.5,
+      "multipleScatteringOcclusion": 0.5,
+      "patternSizeMeters": 3000.0,
+      "regionalCoveragePeriod": 2,
+      "regionalCoverageStrength": 1.0,
+      "scatteringAlbedo": [
+        0.95,
+        0.95,
+        0.95
+      ],
+      "seed": 1,
+      "shadowSteps": 6,
+      "thicknessMeters": 1200.0,
+      "typeVariation": 0.5,
+      "variationPeriod": 64,
+      "variationStrength": 0.75,
+      "version": 9,
+      "viewSteps": 48,
+      "windMetersPerSecond": [
+        8,
+        0,
+        3
+      ]
+    }
+  },
+  "directionalShadowCascadeCount": 4,
+  "directionalShadowDistance": 100.0,
+  "directionalShadowResolution": 2048,
+  "directionalShadowSplitLambda": 0.6499999761581421,
+  "dynamicResolution": "disabled",
+  "dynamicResolutionTargetMilliseconds": 16.66699981689453,
+  "environment": "",
+  "environmentDiffuseIntensity": 1.0,
+  "environmentRotationDegrees": 0.0,
+  "environmentSpecularIntensity": 1.0,
+  "exposure": 1.0,
+  "fog": {
+    "albedo": [
+      0.9,
+      0.9,
+      0.9
+    ],
+    "anisotropy": 0.2,
+    "baseHeight": 0.0,
+    "enabled": true,
+    "exclusionRegions": [],
+    "extinction": 0.00015,
+    "heightFalloff": 0.003,
+    "localVolumes": [],
+    "maximumDistance": 10000.0,
+    "planetaryHeight": true,
+    "viewSteps": 64
+  },
+  "globalIllumination": "realtime",
+  "gpuOcclusion": "automatic",
+  "irradynQuality": "balanced",
+  "maximumDynamicResolutionScale": 1.0,
+  "minimumDynamicResolutionScale": 0.6700000166893005,
+  "renderPath": "deferredHybrid",
+  "renderScale": 1.0,
+  "schemaVersion": 9,
+  "skyVisible": true,
+  "stars": {
+    "angularRadius": 0.00015,
+    "colorVariation": 0.5,
+    "density": 0.35,
+    "enabled": true,
+    "fadeStartElevation": -2.0,
+    "fullVisibilityElevation": -12.0,
+    "intensity": 1.0,
+    "rotationDegrees": 0.0,
+    "seed": 1,
+    "tint": [
+      1.0,
+      1.0,
+      1.0
+    ],
+    "twinkleAmplitude": 0.1,
+    "twinkleFrequency": 0.5,
+    "version": 1
+  }
+}

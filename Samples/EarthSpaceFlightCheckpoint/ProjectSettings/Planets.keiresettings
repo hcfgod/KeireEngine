@@ -1,0 +1,39 @@
+{
+  "geometry": "planetary",
+  "gravity": "uniform",
+  "planets": [
+    {
+      "angularVelocity": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "epochSeconds": 0.0,
+      "frame": 2,
+      "gravitationalParameter": 398600441800000.0,
+      "offsets": [
+        0,
+        -3008,
+        0
+      ],
+      "orientation": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "parentFrame": 1,
+      "planet": "8546d07d-0afd-48ac-8082-9a91bccbfb28",
+      "radiusMetres": 6360000.0,
+      "sectors": [
+        0,
+        -97,
+        0
+      ],
+      "version": 1,
+      "world": 1
+    }
+  ],
+  "schemaVersion": 1,
+  "selectedPlanet": "8546d07d-0afd-48ac-8082-9a91bccbfb28"
+}
