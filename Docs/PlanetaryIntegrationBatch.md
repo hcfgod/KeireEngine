@@ -243,3 +243,23 @@ After repair the same editor dry run schedules two steps, not 233. Final build/t
 Final follow-up: DevDist runtime build passed (7 steps). With the dependency repair, the editor-test rebuild
 actually completed in 2 steps and the focused suite passed 25 cases / 403 assertions, including NearestSurface
 undo/save/reload. Runtime benchmark invocation and rendered performance remain unverified.
+Standalone acceptance checkpoint (2026-10-29): rebuilt DevDist AssetTool successfully (7 steps), then cooked
+EarthSpaceFlight successfully: 8 assets / 1 pack. Ran the freshly built DevDist KeireRuntime directly against
+that cook, avoiding the older packaged BuildSupport binaries. Observed ascent, space at 150 km, cockpit and
+follow button changes, and COMPLETE at 150/150 seconds and 0.0 km. Sparse captures do not establish absence
+of brief flicker throughout the route. The runtime was closed normally after completion.
+
+A separate stationary landed benchmark completed 300 warmup + 2000 measured frames with immediate present
+on D3D12 / RTX 3060 / i7-12700F. Median / p95 milliseconds: owner update 0.294 / 0.383; capture 0.077 / 0.108;
+render CPU 1.185 / 1.417; admission wait 13.762 / 15.285; GPU retirement latency 27.686 / 28.958. Retirement
+latency includes queued work and is not GPU execution time. Two frames were allowed/in flight; renderer queue
+high-water mark was one. This is a landed baseline, not a full-flight performance acceptance or a before/after
+comparison. Viewport dimensions are not recorded by this benchmark yet; record them before comparisons.
+Local raw evidence: Build/Validation/earth-space-landed-devdist.json (generated, intentionally untracked).
+The report identifies DevDist c82b32be dirty: the benchmark guard was built before the later checkpoint commit.
+The original CloudIsolation20261026 GravityAcceptanceQA scene SHA-256 remains
+A85D25F5CE5A5073B1684BDF1889A48B95B694ABAF7A3F98D603E440F98CAB7C.
+
+Next: measure GPU pass costs and fixed-resolution flight phases; finish multi-visible-planet atmosphere
+composition and transactional rotating physics-frame migration. Do not label the whole system production-ready
+from the single-planet standalone trip or existing translation-rebase tests.
