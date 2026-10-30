@@ -96,6 +96,7 @@ namespace Keire
             Ref<SceneRuntimeSession> Runtime;
             std::set<EntityId> PersistentRoots;
             Detail::FrameAttachment SpatialAttachment;
+            std::uint64_t OwnerFrame = Detail::SceneRuntimeSpatialAccess::RootFrame;
             bool Loaded = true;
             bool Persistent = false;
         };
@@ -337,6 +338,44 @@ namespace Keire
             {
                 throw std::overflow_error("Planet simulation time exceeded its finite local epoch.");
             }
+            std::vector<std::pair<Ref<SceneRuntimeSession>, Detail::SceneFrameMotion>> motions;
+            if (deltaSeconds > 0.0 &&
+                std::ranges::any_of(Entries, [](const Entry& entry)
+                                    { return entry.OwnerFrame != Detail::SceneRuntimeSpatialAccess::RootFrame; }))
+            {
+                const auto root = Spatial->Find(Detail::SceneRuntimeSpatialAccess::RootFrame);
+                std::vector<Detail::LiveFrame> owners;
+                const auto previous = PublishPlanetFrames(PlanetSimulationTime);
+                for (const auto& entry : Entries)
+                {
+                    if (!entry.Runtime || entry.OwnerFrame == Detail::SceneRuntimeSpatialAccess::RootFrame)
+                    {
+                        continue;
+                    }
+                    Detail::SceneRuntimeSpatialAccess::ValidateFrameFollowing(*entry.Runtime);
+                    const auto owner = Spatial->Find(entry.OwnerFrame);
+                    const Detail::SpatialMotion zero{Detail::SectorPosition(Spatial->Identity(owner), {}, {}), {}, {}};
+                    const auto previousOrigin =
+                        Detail::ConvertFrameMotion(*Spatial, owner, root, zero, previous, PlanetSimulationTime)
+                            .Position;
+                    const auto previousRotation =
+                        Detail::ConvertFrameRotation(*Spatial, owner, root, previous, PlanetSimulationTime);
+                    motions.emplace_back(entry.Runtime, Detail::SceneFrameMotion{previousOrigin, previousOrigin,
+                                                                                 previousRotation, previousRotation});
+                    owners.push_back(owner);
+                }
+                const auto nextTime = PlanetSimulationTime + deltaSeconds;
+                const auto next = PublishPlanetFrames(nextTime);
+                for (std::size_t index = 0; index < motions.size(); ++index)
+                {
+                    const auto owner = owners[index];
+                    const Detail::SpatialMotion zero{Detail::SectorPosition(Spatial->Identity(owner), {}, {}), {}, {}};
+                    motions[index].second.NextOrigin =
+                        Detail::ConvertFrameMotion(*Spatial, owner, root, zero, next, nextTime).Position;
+                    motions[index].second.NextRotation =
+                        Detail::ConvertFrameRotation(*Spatial, owner, root, next, nextTime);
+                }
+            }
             // Every source is projected and validated before any session is changed.
             if (PlanetSettings.Gravity != Detail::PlanetGravityMode::Uniform)
             {
@@ -357,6 +396,10 @@ namespace Keire
                         physics->SetGravity({});
                     }
                 }
+            }
+            for (const auto& [session, motion] : motions)
+            {
+                Detail::SceneRuntimeSpatialAccess::PrepareFrameMotion(*session, motion);
             }
         }
 
@@ -498,7 +541,13 @@ namespace Keire
     Detail::PlanetRuntimeCheckpoint Detail::SceneRuntimePlanetAccess::CaptureCheckpoint(const SceneRuntimeWorld& world)
     {
         world.m_Impl->RequireOwner("CapturePlanetCheckpoint");
-        return {world.m_Impl->PlanetSettings, world.m_Impl->PlanetSimulationTime, world.m_Impl->Environment.State()};
+        PlanetRuntimeCheckpoint checkpoint{
+            world.m_Impl->PlanetSettings, world.m_Impl->PlanetSimulationTime, world.m_Impl->Environment.State(), {}};
+        for (const auto& entry : world.m_Impl->Entries)
+        {
+            checkpoint.SceneOwners.push_back({entry.Instance, entry.OwnerFrame});
+        }
+        return checkpoint;
     }
 
     void Detail::SceneRuntimePlanetAccess::RestoreCheckpoint(SceneRuntimeWorld& world,
@@ -522,6 +571,38 @@ namespace Keire
         for (const auto& planet : state.Planets)
         {
             (void)EvaluatePlanetFrame(planet, checkpoint.SimulationTime, state.Spatial->Revision());
+        }
+        std::vector<std::pair<SceneRuntimeWorld::Impl::Entry*, FrameAttachment>> attachments;
+        std::vector<std::uint64_t> ownerFrames;
+        std::set<AssetId> instances;
+        if (!checkpoint.SceneOwners.empty() && checkpoint.SceneOwners.size() != state.Entries.size())
+        {
+            throw std::invalid_argument("Planet checkpoint must bind every runtime scene instance.");
+        }
+        for (auto& entry : state.Entries)
+        {
+            std::uint64_t frame = SceneRuntimeSpatialAccess::RootFrame;
+            if (!checkpoint.SceneOwners.empty())
+            {
+                const auto owner =
+                    std::ranges::find(checkpoint.SceneOwners, entry.Instance, &ScenePlanetOwner::Instance);
+                if (owner == checkpoint.SceneOwners.end() || !instances.insert(owner->Instance).second)
+                {
+                    throw std::invalid_argument("Planet checkpoint scene instance is missing or duplicated.");
+                }
+                frame = owner->Frame;
+            }
+            if (frame != SceneRuntimeSpatialAccess::RootFrame)
+            {
+                SceneRuntimeSpatialAccess::ValidateFrameFollowing(*entry.Runtime);
+            }
+            attachments.emplace_back(&entry, state.Spatial->Attach(state.Spatial->Find(frame)));
+            ownerFrames.push_back(frame);
+        }
+        for (std::size_t index = 0; index < attachments.size(); ++index)
+        {
+            attachments[index].first->SpatialAttachment = std::move(attachments[index].second);
+            attachments[index].first->OwnerFrame = ownerFrames[index];
         }
         state.Environment = clock;
         state.PlanetSimulationTime = checkpoint.SimulationTime;
@@ -660,6 +741,50 @@ namespace Keire
             }
         }
         throw std::invalid_argument("The entity does not belong to this runtime spatial world.");
+    }
+
+    Detail::LiveFrame Detail::SceneRuntimeSpatialAccess::OwnerFrameForEntity(const SceneRuntimeWorld& world,
+                                                                             const Entity& entity)
+    {
+        (void)FrameForEntity(world, entity);
+        for (const auto& entry : world.m_Impl->Entries)
+        {
+            const auto scene = entry.Runtime ? entry.Runtime->RuntimeScene() : Ref<Scene>{};
+            if (scene && scene->FindEntity(entity.Id()) == entity)
+            {
+                return world.m_Impl->Spatial->Find(entry.OwnerFrame);
+            }
+        }
+        throw std::invalid_argument("The entity does not belong to this runtime spatial world.");
+    }
+
+    void Detail::SceneRuntimeSpatialAccess::TransferSceneOwner(SceneRuntimeWorld& world, const SceneHandle scene,
+                                                               const LiveFrame& destination, const double snapshotTime)
+    {
+        auto& state = *world.m_Impl;
+        state.RequireOwner("TransferSceneOwner");
+        if (state.Stepping || state.Processing)
+        {
+            throw std::logic_error("Scene owner transfer requires a runtime safe boundary.");
+        }
+        if (!std::isfinite(snapshotTime) || snapshotTime != state.PlanetSimulationTime)
+        {
+            throw std::invalid_argument("Scene owner transfer requires the current simulation epoch.");
+        }
+        const auto entry = state.Find(scene);
+        if (entry == state.Entries.end() || !entry->Runtime)
+        {
+            throw std::invalid_argument("Scene owner transfer requires an owned runtime scene.");
+        }
+        const auto identity = state.Spatial->Identity(destination);
+        ValidateFrameFollowing(*entry->Runtime, identity.Frame != RootFrame);
+        const auto root = state.Spatial->Find(RootFrame);
+        const auto snapshots = state.PublishPlanetFrames(snapshotTime);
+        (void)ConvertFrameRotation(*state.Spatial, destination, root, snapshots, snapshotTime);
+        auto attachment = state.Spatial->Attach(destination);
+        // The solver and Transform storage stay inertial. Only subsequent non-dynamic motion follows this owner.
+        entry->SpatialAttachment = std::move(attachment);
+        entry->OwnerFrame = identity.Frame;
     }
 
     std::vector<Detail::SceneRuntimeIdentityBinding>

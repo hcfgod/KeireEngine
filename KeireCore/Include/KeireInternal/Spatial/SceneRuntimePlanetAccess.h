@@ -4,16 +4,24 @@
 #include "KeireInternal/Spatial/PlanetFrameResolution.h"
 #include "KeireInternal/Spatial/PlanetProjectSettings.h"
 
+#include <cstdint>
 #include <optional>
 #include <vector>
 
 namespace Keire::Detail
 {
+    struct ScenePlanetOwner
+    {
+        AssetId Instance;
+        std::uint64_t Frame = 1;
+    };
+
     struct PlanetRuntimeCheckpoint
     {
         PlanetProjectSettings Settings;
         double SimulationTime = 0.0;
         EnvironmentClockState Clock;
+        std::vector<ScenePlanetOwner> SceneOwners;
     };
 
     class SceneRuntimePlanetAccess final

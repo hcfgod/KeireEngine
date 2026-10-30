@@ -38,6 +38,7 @@
 #include <limits>
 #include <map>
 #include <mutex>
+#include <numbers>
 #include <ranges>
 #include <set>
 #include <stdexcept>
@@ -1164,6 +1165,46 @@ namespace Keire
         found->second.Definition.Position = state.Position;
         found->second.Definition.Rotation = rotation;
         found->second.Definition.LinearVelocity = state.LinearVelocity;
+    }
+
+    void Detail::PhysicsFrameAccess::ValidateKinematicMove(const PhysicsWorld& world, const PhysicsBodyId body,
+                                                           const Vector3 position, const Quaternion rotation,
+                                                           const float deltaSeconds)
+    {
+        world.m_Impl->RequireOwner("ValidateKinematicMove");
+        const auto found = world.m_Impl->Bodies.find(body.m_Value);
+        if (found == world.m_Impl->Bodies.end() || found->second.Definition.Motion != PhysicsMotionType::Kinematic ||
+            !Math::IsFinite(position) || !Math::IsFinite(rotation) || !std::isfinite(deltaSeconds) ||
+            deltaSeconds <= 0.0F || deltaSeconds > 1.0F)
+        {
+            throw std::invalid_argument("Kinematic motion requires a valid body, target and step duration.");
+        }
+        const auto normalized = Math::Normalize(rotation);
+        auto& bodies = world.m_Impl->Native.GetBodyInterface();
+        const auto native = found->second.Native;
+        const auto targetCenter = ToJolt(position) + ToJolt(normalized) * bodies.GetShape(native)->GetCenterOfMass();
+        const auto currentCenter = bodies.GetCenterOfMassPosition(native);
+        const auto velocity = (targetCenter - currentCenter) / deltaSeconds;
+        // Jolt computes angular velocity from the shortest rotation (at most pi radians).
+        // Bound the division before mutation, including tiny positive step durations.
+        if (!std::isfinite(velocity.GetX()) || !std::isfinite(velocity.GetY()) || !std::isfinite(velocity.GetZ()) ||
+            std::numbers::pi / static_cast<double>(deltaSeconds) > std::numeric_limits<float>::max())
+        {
+            throw std::out_of_range("Kinematic target velocity exceeds the solver range.");
+        }
+    }
+
+    void Detail::PhysicsFrameAccess::MoveKinematic(PhysicsWorld& world, const PhysicsBodyId body,
+                                                   const Vector3 position, const Quaternion rotation,
+                                                   const float deltaSeconds)
+    {
+        ValidateKinematicMove(world, body, position, rotation, deltaSeconds);
+        const auto normalized = Math::Normalize(rotation);
+        const auto found = world.m_Impl->Bodies.find(body.m_Value);
+        world.m_Impl->Native.GetBodyInterface().MoveKinematic(found->second.Native, ToJolt(position),
+                                                              ToJolt(normalized), deltaSeconds);
+        found->second.Definition.Position = position;
+        found->second.Definition.Rotation = normalized;
     }
 
     std::optional<Vector3> Detail::PhysicsFrameAccess::TryGetCenterOfMassPosition(const PhysicsWorld& world,

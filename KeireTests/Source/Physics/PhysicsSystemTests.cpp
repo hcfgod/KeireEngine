@@ -25,6 +25,74 @@ namespace
     }
 } // namespace
 
+TEST_CASE("planetary kinematic motion supplies velocity without teleporting before the solver step")
+{
+    using Keire::Detail::PhysicsFrameAccess;
+    const auto system = CreatePhysics();
+    const auto world = system->CreateWorld({1.0e12, 0.0, 0.0});
+    Keire::PhysicsBodyDefinition definition;
+    definition.Motion = Keire::PhysicsMotionType::Kinematic;
+    const auto body = world->CreateBody(definition);
+    constexpr float step = 0.25F;
+    PhysicsFrameAccess::ValidateKinematicMove(*world, body, {1.0F, 0.0F, 0.0F}, {}, step);
+    REQUIRE(world->TryGetBody(body));
+    CHECK(world->TryGetBody(body)->Position == Keire::Vector3{});
+    CHECK(world->TryGetBody(body)->LinearVelocity == Keire::Vector3{});
+    PhysicsFrameAccess::MoveKinematic(*world, body, {1.0F, 0.0F, 0.0F}, {}, step);
+    REQUIRE(world->TryGetBody(body));
+    CHECK(world->TryGetBody(body)->Position == Keire::Vector3{});
+    CHECK(world->TryGetBody(body)->LinearVelocity.X == doctest::Approx(4.0F));
+    CHECK_THROWS_AS(PhysicsFrameAccess::MoveKinematic(*world, body, {2.0F, 0.0F, 0.0F}, {}, 0.0F),
+                    std::invalid_argument);
+    CHECK_THROWS_AS(PhysicsFrameAccess::MoveKinematic(*world, body, {2.0F, 0.0F, 0.0F}, {},
+                                                      std::numeric_limits<float>::denorm_min()),
+                    std::out_of_range);
+    CHECK(world->TryGetBody(body)->LinearVelocity.X == doctest::Approx(4.0F));
+    world->Step(step);
+    CHECK(world->TryGetBody(body)->Position.X == doctest::Approx(1.0F));
+    PhysicsFrameAccess::MoveKinematic(*world, body, {1.0F, 0.0F, 0.0F}, {}, step);
+    CHECK(world->TryGetBody(body)->LinearVelocity == Keire::Vector3{});
+    definition.Motion = Keire::PhysicsMotionType::Static;
+    const auto stationary = world->CreateBody(definition);
+    CHECK_THROWS_AS(PhysicsFrameAccess::MoveKinematic(*world, stationary, {}, {}, step), std::invalid_argument);
+    world->Close();
+    CHECK_THROWS_AS(PhysicsFrameAccess::MoveKinematic(*world, body, {}, {}, step), std::logic_error);
+}
+
+TEST_CASE("planetary kinematic support lifts a contacting dynamic body at a far origin")
+{
+    using Keire::Detail::PhysicsFrameAccess;
+    const auto system = CreatePhysics();
+    const auto world = system->CreateWorld({1.0e12, 0.0, 0.0});
+    Keire::PhysicsBodyDefinition support;
+    support.Motion = Keire::PhysicsMotionType::Kinematic;
+    support.Position = {0.0F, -0.5F, 0.0F};
+    support.HalfExtent = {4.0F, 0.5F, 4.0F};
+    const auto platform = world->CreateBody(support);
+    Keire::PhysicsBodyDefinition passenger;
+    passenger.Motion = Keire::PhysicsMotionType::Dynamic;
+    passenger.Shape = Keire::ColliderShape::Sphere;
+    passenger.Position = {0.0F, 0.5F, 0.0F};
+    const auto body = world->CreateBody(passenger);
+    constexpr float step = 1.0F / 60.0F;
+    for (int tick = 0; tick < 120; ++tick)
+    {
+        world->Step(step);
+    }
+    for (int tick = 1; tick <= 60; ++tick)
+    {
+        const float height = -0.5F + 0.5F * static_cast<float>(tick) / 60.0F;
+        PhysicsFrameAccess::MoveKinematic(*world, platform, {0.0F, height, 0.0F}, {}, step);
+        world->Step(step);
+    }
+    REQUIRE(world->TryGetBody(body));
+    REQUIRE(world->TryGetBody(platform));
+    CHECK(world->TryGetBody(platform)->Position.Y == doctest::Approx(0.0F).epsilon(0.001));
+    CHECK(world->TryGetBody(body)->Position.Y > 0.9F);
+    CHECK(world->TryGetBody(body)->Position.Y < 1.1F);
+    CHECK(world->TryGetBody(body)->Body == body);
+}
+
 TEST_CASE("physics frame conversion queries the actual offset center of mass without changing motion")
 {
     using Keire::Detail::PhysicsFrameAccess;
@@ -56,6 +124,14 @@ TEST_CASE("physics frame conversion queries the actual offset center of mass wit
     REQUIRE(world->TryGetBody(body));
     CHECK(world->TryGetBody(body)->Position == definition.Position);
     CHECK(world->TryGetBody(body)->LinearVelocity == definition.LinearVelocity);
+    definition.Motion = Keire::PhysicsMotionType::Kinematic;
+    const auto rotating = world->CreateBody(definition);
+    const auto quarterTurn = Keire::Math::Normalize(Keire::Quaternion{0.0F, 0.0F, 1.0F, 1.0F});
+    PhysicsFrameAccess::MoveKinematic(*world, rotating, definition.Position, quarterTurn, 0.25F);
+    REQUIRE(world->TryGetBody(rotating));
+    CHECK(world->TryGetBody(rotating)->LinearVelocity.X == doctest::Approx(-8.0F));
+    CHECK(world->TryGetBody(rotating)->LinearVelocity.Y == doctest::Approx(8.0F));
+    CHECK(world->TryGetBody(rotating)->AngularVelocity.Z == doctest::Approx(2.0F * std::numbers::pi_v<float>));
     world->RebaseOrigin({1.0e12 + 128.0, 0.0, 0.0});
     const auto rebased = PhysicsFrameAccess::TryGetCenterOfMassPosition(*world, body);
     REQUIRE(rebased);

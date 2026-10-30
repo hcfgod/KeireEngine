@@ -8,6 +8,7 @@
 #include <doctest/doctest.h>
 
 #include <atomic>
+#include <cmath>
 #include <limits>
 #include <stdexcept>
 #include <thread>
@@ -307,4 +308,109 @@ TEST_CASE("Runtime nearest planet selection matches preview for nested far-origi
     REQUIRE(view);
     CHECK(view->Planet == moon.Planet);
     CHECK(view->ObserverFromCenterPlanetMetres[1] == doctest::Approx(101.0));
+}
+
+TEST_CASE("Scene owner transfer advances kinematic roots while dynamic bodies remain inertial")
+{
+    using namespace Keire;
+    using namespace Keire::Detail;
+    PlanetRuntimeFixture fixture;
+    auto planet = TestPlanet();
+    planet.ParentCenter = SectorPosition({1, 1}, {}, {});
+    planet.AngularVelocity = {0.0, 0.5, 0.0};
+    SceneRuntimePlanetAccess::Configure(*fixture.World, {planet});
+    auto scene = CreateRef<Scene>(AssetId::Generate(), SceneAsset::EmptyDefinition());
+    auto support = scene->CreateEntity("Kinematic support");
+    support.GetComponent<TransformComponent>()->SetLocalPosition({10.0F, 0.0F, 0.0F});
+    support.AddComponent<ColliderComponent>();
+    support.AddComponent<RigidBodyComponent>()->SetMotion(PhysicsMotionType::Kinematic);
+    auto moving = scene->CreateEntity("Inertial body");
+    moving.GetComponent<TransformComponent>()->SetLocalPosition({0.0F, 10.0F, 0.0F});
+    moving.AddComponent<ColliderComponent>();
+    moving.AddComponent<RigidBodyComponent>()->SetUseGravity(false);
+    const auto marker = scene->CreateEntity("Frame marker");
+    marker.GetComponent<TransformComponent>()->SetLocalPosition({20.0F, 0.0F, 0.0F});
+    auto session = CreateRef<SceneRuntimeSession>(scene, fixture.Assets, Ref<AudioSystem>{}, fixture.Physics);
+    const auto handle = fixture.World->Adopt(session);
+    session->Play();
+    REQUIRE(session->State() == ScenePlayState::Playing);
+    fixture.World->Pause();
+    const auto runtimeSupport = session->RuntimeScene()->FindEntity(support.Id());
+    const auto runtimeMoving = session->RuntimeScene()->FindEntity(moving.Id());
+    auto runtimeMarker = session->RuntimeScene()->FindEntity(marker.Id());
+    const auto& frames = SceneRuntimeSpatialAccess::Frames(*fixture.World);
+    const auto original = runtimeSupport.GetComponent<TransformComponent>()->WorldPositionPrecise();
+    const auto hits = session->Physics()->RayCast({.Origin = {10.0F, 4.0F, 0.0F}, .Direction = {0.0F, -1.0F, 0.0F}});
+    REQUIRE(hits.size() == 1);
+    const auto body = hits.front().Body;
+    SceneRuntimeSpatialAccess::TransferSceneOwner(*fixture.World, handle, frames.Find(2), 0.0);
+    CHECK(runtimeSupport.GetComponent<TransformComponent>()->WorldPositionPrecise() == original);
+    CHECK(frames.Identity(SceneRuntimeSpatialAccess::OwnerFrameForEntity(*fixture.World, runtimeSupport)).Frame == 2);
+    CHECK(frames.Identity(SceneRuntimeSpatialAccess::FrameForEntity(*fixture.World, runtimeSupport)).Frame == 1);
+    REQUIRE(fixture.World->Step(0.25F));
+    const auto position = runtimeSupport.GetComponent<TransformComponent>()->WorldPositionPrecise();
+    CHECK(position.X == doctest::Approx(10.0 * std::cos(0.125)));
+    CHECK(position.Z == doctest::Approx(-10.0 * std::sin(0.125)));
+    CHECK(runtimeMarker.GetComponent<TransformComponent>()->WorldPositionPrecise().X ==
+          doctest::Approx(position.X * 2.0));
+    CHECK(runtimeMoving.GetComponent<TransformComponent>()->WorldPositionPrecise().Y == doctest::Approx(10.0));
+    const auto state = session->Physics()->TryGetBody(body);
+    REQUIRE(state);
+    CHECK(state->Position.X == doctest::Approx(position.X).epsilon(1e-5));
+    CHECK(state->Position.Z == doctest::Approx(position.Z).epsilon(1e-5));
+    CHECK(state->LinearVelocity.Z < -4.0F);
+
+    const auto checkpoint = PlanetRuntimeCheckpointRecord::Decode(
+        PlanetRuntimeCheckpointRecord::Encode(SceneRuntimePlanetAccess::CaptureCheckpoint(*fixture.World)));
+    REQUIRE(checkpoint.SceneOwners.size() == 1);
+    CHECK(checkpoint.SceneOwners.front().Frame == 2);
+    auto legacy = PlanetRuntimeCheckpointRecord::Encode(checkpoint);
+    legacy["schemaVersion"] = 1;
+    legacy.erase("sceneOwners");
+    CHECK(PlanetRuntimeCheckpointRecord::Decode(legacy).SceneOwners.empty());
+    legacy["schemaVersion"] = 3;
+    CHECK_THROWS_AS(PlanetRuntimeCheckpointRecord::Decode(legacy), std::invalid_argument);
+    SceneRuntimeSpatialAccess::TransferSceneOwner(*fixture.World, handle, frames.Find(1), 0.25);
+    SceneRuntimePlanetAccess::RestoreCheckpoint(*fixture.World, checkpoint);
+    CHECK(frames.Identity(SceneRuntimeSpatialAccess::OwnerFrameForEntity(*fixture.World, runtimeSupport)).Frame == 2);
+    auto invalid = checkpoint;
+    invalid.SceneOwners.front().Frame = 999;
+    CHECK_THROWS(SceneRuntimePlanetAccess::RestoreCheckpoint(*fixture.World, invalid));
+    CHECK(frames.Identity(SceneRuntimeSpatialAccess::OwnerFrameForEntity(*fixture.World, runtimeSupport)).Frame == 2);
+
+    CHECK_THROWS_AS(SceneRuntimeSpatialAccess::TransferSceneOwner(*fixture.World, handle, frames.Find(1), 0.0),
+                    std::invalid_argument);
+    runtimeMarker.AddComponent<ColliderComponent>();
+    CHECK_THROWS_AS(SceneRuntimeSpatialAccess::TransferSceneOwner(*fixture.World, handle, frames.Find(2), 0.25),
+                    std::invalid_argument);
+    CHECK_NOTHROW(SceneRuntimeSpatialAccess::TransferSceneOwner(*fixture.World, handle, frames.Find(1), 0.25));
+    REQUIRE(fixture.World->Step(0.25F));
+    CHECK(runtimeSupport.GetComponent<TransformComponent>()->WorldPositionPrecise() == position);
+    CHECK(session->Physics()->TryGetBody(body)->LinearVelocity == Vector3{});
+}
+
+TEST_CASE("Scene owner transfer rejects unsupported content before changing attachments")
+{
+    using namespace Keire;
+    using namespace Keire::Detail;
+    PlanetRuntimeFixture fixture;
+    auto planet = TestPlanet();
+    planet.ParentCenter = SectorPosition({1, 1}, {}, {});
+    SceneRuntimePlanetAccess::Configure(*fixture.World, {planet});
+    auto scene = CreateRef<Scene>(AssetId::Generate(), SceneAsset::EmptyDefinition());
+    auto entity = scene->CreateEntity("Static support");
+    entity.AddComponent<ColliderComponent>();
+    auto session = CreateRef<SceneRuntimeSession>(scene, fixture.Assets, Ref<AudioSystem>{}, fixture.Physics);
+    const auto handle = fixture.World->Adopt(session);
+    session->Play();
+    const auto& frames = SceneRuntimeSpatialAccess::Frames(*fixture.World);
+    const auto count = frames.AttachmentCount(frames.Find(2));
+    CHECK_THROWS_AS(SceneRuntimeSpatialAccess::TransferSceneOwner(*fixture.World, handle, frames.Find(2), 0.0),
+                    std::invalid_argument);
+    CHECK(frames.AttachmentCount(frames.Find(2)) == count);
+    const auto live = session->RuntimeScene()->FindEntity(entity.Id());
+    CHECK(frames.Identity(SceneRuntimeSpatialAccess::OwnerFrameForEntity(*fixture.World, live)).Frame == 1);
+    FrameRegistry other(1);
+    CHECK_THROWS_AS(SceneRuntimeSpatialAccess::TransferSceneOwner(*fixture.World, handle, other.Find(1), 0.0),
+                    std::invalid_argument);
 }

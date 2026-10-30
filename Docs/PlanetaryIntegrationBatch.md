@@ -296,3 +296,28 @@ mAllowDynamicOrKinematic, so preserve-or-reject rules require inspection before 
 COM prerequisite validation completed: exec session 83020 exited 0 after 202 build steps. The targeted
 "physics frame conversion queries*" regression passed 1 case / 12 assertions. This validates the local COM
 query and offset-convex/rebase/lifecycle behavior only, not full scene ownership transfer. No builds remain active.
+Kinematic prerequisite: PhysicsFrameAccess::MoveKinematic now uses Jolt velocity targets without teleporting,
+validates finite pose/duration and representable velocity, and only accepts existing kinematic bodies. Build86649
+completed in 6 steps, and COM plus motion tests passed 2 cases / 22 assertions. A further off-center rotating COM
+velocity assertion was added after that run and awaits the next batch build. Scene ownership agent is now
+implementing root-storage ownership and actual non-dynamic frame-follow ticks; do not start a build until its
+source mutations stop. Initial static-collider transfers must reject before mutation until a safe backend
+conversion exists; that is an intermediate limitation, not completed planetary support.
+Further prerequisite coverage added (not yet built): a far-origin kinematic platform lifts a contacting dynamic
+sphere over 60 solver steps after settling; off-center convex rotation checks the required COM linear and angular
+velocities. These will run with the scene-owner batch. Two implementation agents are active: physics_migration
+owns actual scene owner/tick/checkpoint integration; planet_composition owns a new reference transport helper
+and analytical tests. Do not build until both stop source mutations. Full GPU multi-atmosphere composition,
+static-support conversion, and broad scene-content transfer remain open requirements.
+Combined owner/composition batch is now building in exec session 3405, log
+Build/Validation/planet-owner-composition-build.log (192 steps after Scene.h changes). Both agents have released
+files; no source mutations until terminal. The command then runs focused scene-owner, kinematic/COM, runtime
+planet and atmosphere composition cases. New ValidateKinematicMove preflights all velocity targets before any
+mutation; reference geometry now rejects overflowing finite coordinates and preserves first opaque ties.
+Do not claim test completion yet. Changes remain uncommitted pending the build/test result.
+Combined validation: initial build3405 stopped on const test entities in SceneRuntimePlanetTests; fixed those
+fixture declarations. Incremental rebuild47441 completed its remaining 23 steps and all selected tests passed:
+22 cases / 215 assertions (scene owner motion/persistence, kinematic support/COM, runtime planet selection and
+multi-atmosphere reference transport). No build remains active. These are native focused tests, not editor/GPU
+multi-planet acceptance. Scene-owner transfer is internal and rejects static colliders, characters and parented
+physics; ordinary tick faults retain existing semantics. Numerical composition is not yet wired into rendering.

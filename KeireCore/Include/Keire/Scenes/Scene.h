@@ -27,7 +27,8 @@ namespace Keire
     namespace Detail
     {
         class SceneState;
-    }
+        class SceneRuntimeSpatialAccess;
+    } // namespace Detail
 
     class KEIRE_API SceneObjectHandle final
     {
@@ -294,6 +295,7 @@ namespace Keire
 
       private:
         void AdvanceSimulationOrigin();
+        friend class Detail::SceneRuntimeSpatialAccess;
         void RestorePhysicsCheckpointState(std::span<const ScenePhysicsCheckpointBody> bodies,
                                            std::optional<Vector3> gravity,
                                            const std::vector<PhysicsGravitySource>* sources = nullptr);

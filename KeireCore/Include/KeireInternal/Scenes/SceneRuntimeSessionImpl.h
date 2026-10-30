@@ -30,6 +30,7 @@
 #include "KeireInternal/Scenes/FootMeshSurface.h"
 #include "KeireInternal/Scenes/NamedIkDiagnostics.h"
 #include "KeireInternal/Scenes/SettledFootPlant.h"
+#include "KeireInternal/Spatial/SceneRuntimeSpatialAccess.h"
 
 #include <algorithm>
 #include <array>
@@ -620,6 +621,8 @@ namespace Keire
         Detail::NamedIkDiagnostics NamedIkInspection;
         std::map<EntityId, std::unique_ptr<AnimationRuntimeState>> Animators;
         std::map<EntityId, PhysicsRuntimeState> PhysicsBodies;
+        std::optional<Detail::SceneFrameMotion> PendingFrameMotion;
+        bool FrameDrivenKinematics = false;
         std::uint64_t PhysicsQueryRevision = 0;
         std::map<EntityId, VfxRuntimeState> VfxEmitters;
         std::map<AssetId, AssetHandle<VfxSubgraphAsset>> VfxSubgraphs;

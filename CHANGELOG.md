@@ -1,6 +1,12 @@
 # Changelog
 
 ## Unreleased
+- Add internal scene-owner frame following for non-dynamic roots and kinematic supports, preserving inertial
+  dynamic bodies and checkpoint owner bindings. Static/parented physics and characters remain unsupported.
+- Add a double-precision multi-atmosphere transport reference with overlap and opaque-body tests; GPU composition
+  integration remains unfinished.
+- Add a private velocity-aware kinematic target path for planetary supports; unlike teleport targets, it advances
+  through the solver step. Scene-owner integration is still in progress.
 - Add an internal center-of-mass position query for COM-aware planetary motion conversion, with offset-convex
   and far-origin rebase regression coverage. Live rotating scene transfer remains unfinished.
 - Record drawable dimensions in runtime benchmarks and reject resolution changes during a capture.

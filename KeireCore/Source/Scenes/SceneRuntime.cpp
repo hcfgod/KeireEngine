@@ -58,6 +58,47 @@ namespace Keire
     Ref<PhysicsWorld> SceneRuntimeSession::Physics() const noexcept { return m_Impl->PhysicsWorldService; }
     Ref<VfxWorld> SceneRuntimeSession::Vfx() const noexcept { return m_Impl->VfxWorldService; }
 
+    void Detail::SceneRuntimeSpatialAccess::ValidateFrameFollowing(const SceneRuntimeSession& session,
+                                                                   const bool validateContent)
+    {
+        const auto& state = *session.m_Impl;
+        state.RequireOwner("ValidateFrameFollowing");
+        if (state.InvokingCallback || !state.Runtime || !state.PhysicsWorldService ||
+            (state.PlayState != ScenePlayState::Playing && state.PlayState != ScenePlayState::Paused))
+        {
+            throw std::logic_error("Frame following requires an active session outside callbacks.");
+        }
+        if (!validateContent)
+        {
+            return;
+        }
+        for (const auto& entity : state.Runtime->Entities())
+        {
+            const auto character = entity.GetComponent<CharacterControllerComponent>();
+            if (character && character->Enabled())
+            {
+                throw std::invalid_argument("Planet owner transfer does not yet support character controllers.");
+            }
+            const auto collider = entity.GetComponent<ColliderComponent>();
+            if (!collider || !collider->Enabled())
+            {
+                continue;
+            }
+            const auto body = entity.GetComponent<RigidBodyComponent>();
+            if (entity.Parent() || !body || !body->Enabled() || body->Motion() == PhysicsMotionType::Static)
+            {
+                throw std::invalid_argument(
+                    "Planet owner transfer requires unparented dynamic or kinematic colliders.");
+            }
+        }
+    }
+
+    void Detail::SceneRuntimeSpatialAccess::PrepareFrameMotion(SceneRuntimeSession& session,
+                                                               const SceneFrameMotion& motion)
+    {
+        session.m_Impl->PendingFrameMotion = motion;
+    }
+
     std::vector<ScenePhysicsCheckpointBody> SceneRuntimeSession::CapturePhysicsCheckpoint() const
     {
         m_Impl->RequireOwner("CapturePhysicsCheckpoint");

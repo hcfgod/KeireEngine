@@ -1,3 +1,4 @@
+#include "KeireInternal/Physics/PhysicsFrameAccess.h"
 #include "KeireInternal/Scenes/SceneRuntimeSessionImpl.h"
 
 #include <algorithm>
@@ -5,6 +6,7 @@
 #include <limits>
 #include <numeric>
 #include <optional>
+#include <utility>
 
 namespace Keire
 {
@@ -796,8 +798,15 @@ namespace Keire
 
     void SceneRuntimeSession::Impl::StepPhysics(const float deltaSeconds)
     {
+        auto frameMotion = std::exchange(PendingFrameMotion, std::nullopt);
         if (!PhysicsWorldService)
+        {
+            if (frameMotion)
+            {
+                throw std::logic_error("Frame following currently requires an active physics world.");
+            }
             return;
+        }
         // Gameplay may move or disable a support this tick. Movement and grounding
         // must query the same current authored geometry, including kinematic targets.
         SynchronizePhysicsBodies();
@@ -816,7 +825,129 @@ namespace Keire
         // Controller movement also moves descendant colliders through the Transform hierarchy.
         // Refresh those bodies before contact generation, as the original post-movement pass did.
         SynchronizePhysicsBodies();
+        struct RootTarget
+        {
+            Ref<TransformComponent> Transform;
+            Vector3d Position;
+            Quaternion Rotation;
+        };
+        struct BodyTarget
+        {
+            PhysicsBodyId Body;
+            Vector3 Position;
+            Quaternion Rotation;
+            PhysicsRuntimeState* Runtime = nullptr;
+        };
+        std::vector<RootTarget> rootTargets;
+        std::vector<BodyTarget> bodyTargets;
+        if (frameMotion)
+        {
+            const auto rotation = frameMotion->NextRotation.Compose(frameMotion->PreviousRotation.Inverse());
+            const auto movePosition = [&](const Vector3d position)
+            {
+                const Detail::SectorPosition source(frameMotion->PreviousOrigin.Identity(), {},
+                                                    {position.X, position.Y, position.Z});
+                const auto local = source.RelativeTo(frameMotion->PreviousOrigin);
+                const auto target = frameMotion->NextOrigin.Translated(rotation.Apply(local));
+                const Detail::SectorPosition root(target.Identity(), {}, {});
+                const auto value = target.RelativeTo(root);
+                for (const auto error : root.Translated(value).RelativeTo(target))
+                {
+                    if (std::abs(error) > MaximumPhysicsPositionErrorMetres)
+                    {
+                        throw std::out_of_range("Frame motion exceeds root-coordinate precision.");
+                    }
+                }
+                return Vector3d{value[0], value[1], value[2]};
+            };
+            const auto moveRotation = [&](const Quaternion value)
+            {
+                const auto target =
+                    rotation.Compose(Detail::FrameRotation::Normalize(value.X, value.Y, value.Z, value.W));
+                const auto& components = target.Components();
+                return Quaternion{static_cast<float>(components[0]), static_cast<float>(components[1]),
+                                  static_cast<float>(components[2]), static_cast<float>(components[3])};
+            };
+            for (const auto& entity : Runtime->Entities())
+            {
+                const auto collider = entity.GetComponent<ColliderComponent>();
+                const auto character = entity.GetComponent<CharacterControllerComponent>();
+                const auto rigid = entity.GetComponent<RigidBodyComponent>();
+                if ((character && character->Enabled()) ||
+                    (collider && collider->Enabled() &&
+                     (entity.Parent() || !rigid || !rigid->Enabled() || rigid->Motion() == PhysicsMotionType::Static)))
+                {
+                    throw std::invalid_argument("Unsupported physics was added to a frame-following scene.");
+                }
+                if (entity.Parent() || (rigid && rigid->Enabled() && rigid->Motion() == PhysicsMotionType::Dynamic))
+                {
+                    continue;
+                }
+                const auto transform = entity.GetComponent<TransformComponent>();
+                if (transform)
+                {
+                    rootTargets.push_back({transform, movePosition(transform->WorldPositionPrecise()),
+                                           moveRotation(transform->WorldRotation())});
+                }
+            }
+            for (auto& [entity, body] : PhysicsBodies)
+            {
+                (void)entity;
+                if (!body.Body || body.Definition.Motion != PhysicsMotionType::Kinematic)
+                {
+                    continue;
+                }
+                const auto current = PhysicsWorldService->TryGetBody(body.Body);
+                if (!current)
+                {
+                    throw std::logic_error("Frame motion lost a kinematic body.");
+                }
+                const auto position = movePosition(PhysicsWorldService->ToWorldPosition(current->Position));
+                bodyTargets.push_back(
+                    {body.Body, PhysicsWorldService->ToLocalPosition(position, MaximumPhysicsPositionErrorMetres),
+                     moveRotation(current->Rotation), &body});
+            }
+            // Prepare every target before issuing velocity changes. Synchronization above must not teleport targets.
+            for (const auto& target : bodyTargets)
+            {
+                Detail::PhysicsFrameAccess::ValidateKinematicMove(*PhysicsWorldService, target.Body, target.Position,
+                                                                  target.Rotation, deltaSeconds);
+            }
+            for (const auto& target : bodyTargets)
+            {
+                Detail::PhysicsFrameAccess::MoveKinematic(*PhysicsWorldService, target.Body, target.Position,
+                                                          target.Rotation, deltaSeconds);
+            }
+            FrameDrivenKinematics = !bodyTargets.empty();
+        }
+        else if (FrameDrivenKinematics)
+        {
+            for (const auto& [entity, body] : PhysicsBodies)
+            {
+                (void)entity;
+                if (body.Body && body.Definition.Motion == PhysicsMotionType::Kinematic)
+                {
+                    const auto current = PhysicsWorldService->TryGetBody(body.Body);
+                    if (current)
+                    {
+                        Detail::PhysicsFrameAccess::MoveKinematic(*PhysicsWorldService, body.Body, current->Position,
+                                                                  current->Rotation, deltaSeconds);
+                    }
+                }
+            }
+            FrameDrivenKinematics = false;
+        }
         PhysicsWorldService->Step(deltaSeconds);
+        for (const auto& target : bodyTargets)
+        {
+            target.Runtime->Definition.Position = target.Position;
+            target.Runtime->Definition.Rotation = target.Rotation;
+        }
+        for (const auto& target : rootTargets)
+        {
+            target.Transform->SetWorldPositionPrecise(target.Position);
+            target.Transform->SetWorldRotation(target.Rotation);
+        }
         PullDynamicBodies();
         UpdateCharacterGrounding();
         DispatchPhysicsContacts();
@@ -911,6 +1042,8 @@ namespace Keire
 
     void SceneRuntimeSession::Impl::ClearPhysics() noexcept
     {
+        PendingFrameMotion.reset();
+        FrameDrivenKinematics = false;
         PhysicsBodies.clear();
         PhysicsQueryRevision = 0;
         if (PhysicsWorldService)
