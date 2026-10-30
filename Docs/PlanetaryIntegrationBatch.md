@@ -171,3 +171,21 @@ Flight startup diagnosis: stderr reports invalid directional cascade stabilizati
 October 29 flight verification checkpoint: the shadow-slice fix is built and the demo now opens reliably. Focused directional-shadow tests passed (4 cases, 49 assertions), and startup importer-alias tests passed (1 case, 16 assertions). The initial alias test fixture used an unsupported .txt extension; changing it to the registered .cs extension corrected the fixture. Client and editor test builds passed.
 
 The external flight demo completed its 150-second loop. Clickable cockpit/follow transitions were exercised in both directions, with stars and the atmospheric limb visible above the cloud layer. User reports of severe cloud and Earth flicker remain an open acceptance item. Raising the near clip diagnostically reduced visible cloud breakup; the demo now smoothly adjusts it from 0.2 m near the surface to 10 m above 5 km. This is a demo mitigation, not a general engine depth-buffer solution. The simple Earth sphere still needs ground/shadow stability inspection, and temporal flicker has not been conclusively ruled out. Do not call planetary rendering production-ready from these snapshots. The original QA scene is preserved. Early-return behavior and default-input catalog readiness remain follow-ups.
+
+## Current continuation checkpoint — October 29
+
+The EarthSpaceFlight user acceptance now passes the 150-second route and camera transitions;
+the user watched the rebuilt flight and confirmed cloud/Earth flicker is gone. This supersedes
+the older flight-specific pending notes above. See Samples/EarthSpaceFlightCheckpoint/README.md.
+
+Remaining integration order:
+1. Measure startup readiness and ground/ascent/orbit/landing CPU/GPU frame-time distributions.
+2. Add an explicit per-view planet-selection policy with persisted backward-compatible settings,
+   deterministic overlap behavior and matching editor/player behavior. Current selection is manual.
+3. Implement multiple visible atmosphere composition with bounded cost; selection alone is insufficient.
+4. Implement transactional live physics-frame migration, preserving constraints, velocities, sleeping
+   bodies and failure rollback. Mathematical frame conversion tests do not establish solver migration.
+5. Exercise far-origin collision workloads, standalone save/reload parity and long-session stability.
+
+Runtime planet-frame snapshot reuse is implemented. DevDist KeireTests build passes; focused frame and runtime planet tests pass 10 cases / 243 assertions. Clang-format validation passes.
+No end-to-end frame-time improvement is claimed before measurement.

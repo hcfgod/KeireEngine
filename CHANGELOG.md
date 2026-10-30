@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased
+- Reuse current runtime planetary frame evaluations across same-time view and gravity queries, with invalidation
+  on time, topology, publication or definition changes.
 - Anchor planet-scale shadow and sampled-depth vertex transforms near the render origin to reduce cancellation;
   retain the ordinary path for small or singular transforms. Five shadow cases pass; ground and landed captures
   retain the ship shadow without the previous self-shadow pattern. Continuous temporal acceptance remains open.

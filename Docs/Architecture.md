@@ -2959,3 +2959,7 @@ simulation frame. The focused native selection passed 26 cases / 455 assertions,
 Editor cameras retain double-precision focus and store it as the render origin; their view matrix is relative to that focus. Scene cameras use the presented transform position as the origin and invert its relative matrix. Projection, selection, placement, gizmo overlays, and rigging overlays must consume that same frame.
 
 World UI submissions carry the origin of their World matrix. Projection and input unprojection share this origin; frame capture translates the submitted matrix into the current render camera frame. Camera-overlay identity checks compare both origin and view-projection matrices. The appended origin defaults to zero for existing absolute-world submissions. Native and editor validation of these integrations remains pending.
+
+Runtime planetary frame evaluations are cached per owning world while planet definitions remain immutable.
+Reuse requires current registry ownership, publication epoch, topology revision and simulation time; replacing
+planet definitions resets the cache. Returned spans are consumed synchronously before the next publication.

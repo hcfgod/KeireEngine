@@ -5,6 +5,7 @@
 #include "KeireInternal/Physics/GravityField.h"
 #include "KeireInternal/Scenes/SceneRuntimeIdentityAccess.h"
 #include "KeireInternal/Spatial/FrameRegistry.h"
+#include "KeireInternal/Spatial/PlanetFrameCache.h"
 #include "KeireInternal/Spatial/SceneRuntimePlanetAccess.h"
 #include "KeireInternal/Spatial/SceneRuntimeSpatialAccess.h"
 
@@ -274,15 +275,9 @@ namespace Keire
             return result;
         }
 
-        [[nodiscard]] std::vector<Detail::BoundFrameSnapshot> PublishPlanetFrames(const double time)
+        [[nodiscard]] std::span<const Detail::BoundFrameSnapshot> PublishPlanetFrames(const double time)
         {
-            std::vector<Detail::FrameSnapshot> evaluations;
-            evaluations.reserve(Planets.size());
-            for (const auto& planet : Planets)
-            {
-                evaluations.push_back(Detail::EvaluatePlanetFrame(planet, time, Spatial->Revision()));
-            }
-            return Spatial->Publish(evaluations, time);
+            return PlanetFrames.Resolve(*Spatial, Planets, time);
         }
 
         [[nodiscard]] std::vector<PhysicsGravitySource> BuildPlanetGravity(const double time)
@@ -373,6 +368,7 @@ namespace Keire
         std::vector<Detail::PlanetDefinition> Planets;
         std::vector<Detail::FrameAttachment> PlanetAttachments;
         Detail::PlanetProjectSettings PlanetSettings;
+        Detail::PlanetFrameCache PlanetFrames;
         double PlanetSimulationTime = 0.0;
         std::thread::id OwnerThread;
         std::vector<Entry> Entries;
@@ -449,6 +445,7 @@ namespace Keire
         environment.Restore(environment.State());
         state.Spatial.swap(registry);
         state.Planets.swap(planets);
+        state.PlanetFrames = {};
         state.PlanetAttachments.swap(attachments);
         state.Environment = environment;
         state.PlanetSettings = {};

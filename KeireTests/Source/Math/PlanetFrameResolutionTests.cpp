@@ -1,4 +1,5 @@
 #include "KeireInternal/Spatial/PlanetDefinitionRecord.h"
+#include "KeireInternal/Spatial/PlanetFrameCache.h"
 #include "KeireInternal/Spatial/PlanetFrameResolution.h"
 
 #include <doctest/doctest.h>
@@ -10,6 +11,42 @@
 #include <numbers>
 #include <stdexcept>
 #include <vector>
+
+TEST_CASE("Planet frame cache reuses an epoch and invalidates on time topology and publication changes")
+{
+    using namespace Keire::Detail;
+    FrameRegistry registry(1);
+    (void)registry.Create(2, registry.Find(1));
+    PlanetDefinition planet;
+    planet.Planet = Keire::AssetId(1, 2);
+    planet.Frame = 2;
+    planet.AngularVelocity = {0.0, 0.25, 0.0};
+    const std::array planets{planet};
+    PlanetFrameCache cache;
+    const auto initial = cache.Resolve(registry, planets, 0.0).front();
+    const auto reused = cache.Resolve(registry, planets, 0.0).front();
+    CHECK(registry.IsCurrent(initial, 0.0));
+    CHECK(registry.IsCurrent(reused, 0.0));
+
+    const auto advanced = cache.Resolve(registry, planets, 1.0).front();
+    CHECK_FALSE(registry.IsCurrent(initial, 0.0));
+    CHECK(registry.IsCurrent(advanced, 1.0));
+    CHECK(advanced.Evaluation().Rotation().Apply({1.0, 0.0, 0.0})[0] == doctest::Approx(std::cos(0.25)));
+
+    const auto temporaryFrame = registry.Create(3, registry.Find(1));
+    registry.Remove(temporaryFrame);
+    const auto topology = cache.Resolve(registry, planets, 1.0).front();
+    CHECK_FALSE(registry.IsCurrent(advanced, 1.0));
+    CHECK(registry.IsCurrent(topology, 1.0));
+
+    const std::array evaluations{EvaluatePlanetFrame(planet, 1.0, registry.Revision())};
+    (void)registry.Publish(evaluations, 1.0);
+    CHECK_FALSE(registry.IsCurrent(topology, 1.0));
+    const auto refreshed = cache.Resolve(registry, planets, 1.0).front();
+    CHECK(registry.IsCurrent(refreshed, 1.0));
+    CHECK_THROWS_AS(cache.Resolve(registry, planets, std::numeric_limits<double>::infinity()), std::invalid_argument);
+    CHECK(registry.IsCurrent(refreshed, 1.0));
+}
 
 TEST_CASE("Planet resolution cancels translated and sector-scale placement before narrowing")
 {
