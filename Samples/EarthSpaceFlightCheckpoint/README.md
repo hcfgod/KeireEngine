@@ -26,8 +26,22 @@ Native shadow tests: 5 cases / 57 assertions. Material startup regression: 1 cas
 UI isolation identified Earth self-shadowing as a source of the ground pattern: disabling only
 Earth's shadow casting removed it while retaining the ship shadow. The anchored depth-transform
 fix passes native regressions. Rebuilt ground and landed captures with casting restored no longer
-show the pattern and retain the ship shadow. Sparse captures do not rule out brief temporal flicker.
+show the pattern and retain the ship shadow. The user subsequently watched the flight and confirmed no flicker on October 29. This accepts this route and configuration; it does not establish every altitude, planet or graphics backend.
+The Environment panel's scattering fields were visually verified in the rebuilt editor as decimal
+values (for example, 0.000005802). UI regressions pass: 15 cases / 413 assertions.
 
-Remaining: cloud/Earth temporal flicker acceptance, planet-scale ground shadow artifacts,
+Remaining: broader planet-scale shadow and cloud coverage across configurations,
 input readiness before background refresh completes, and a portable self-contained sample.
 The near-clip change is a demo mitigation, not proof of a general large-world depth fix.
+
+## Next acceptance and performance work
+
+Prioritize measured cold/warm startup and asset readiness, then CPU/GPU frame-time captures
+for stationary ground, ascent, orbit and landing with identical viewport and quality settings.
+Report median, p95 and worst frame times separately; do not infer performance from screenshots.
+Optimize the measured bottleneck and compare the same route without reducing accepted visual quality.
+
+Production acceptance still includes multiple-planet selection/composition, rotating physics-frame
+transfers, far-origin physics under sustained workloads, save/reload and standalone player parity,
+backend coverage and long-session stability. The scripted flight is one acceptance scenario.
+
