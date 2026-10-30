@@ -17,6 +17,10 @@
 namespace Keire
 {
     class JobSystem;
+    namespace Detail
+    {
+        class PhysicsFrameAccess;
+    }
 
     enum class PhysicsMode : std::uint8_t
     {
@@ -94,6 +98,7 @@ namespace Keire
 
       private:
         friend class PhysicsWorld;
+        friend class Detail::PhysicsFrameAccess;
         explicit constexpr PhysicsBodyId(const std::uint64_t value) noexcept : m_Value(value) {}
         std::uint64_t m_Value = 0;
     };
@@ -313,6 +318,7 @@ namespace Keire
 
       private:
         friend class PhysicsSystem;
+        friend class Detail::PhysicsFrameAccess;
         template <typename T, typename... Args> friend Ref<T> CreateRef(Args&&... args);
         explicit PhysicsWorld(std::unique_ptr<Impl> implementation);
         std::unique_ptr<Impl> m_Impl;

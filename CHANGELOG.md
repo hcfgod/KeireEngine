@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased
+- Add an internal center-of-mass position query for COM-aware planetary motion conversion, with offset-convex
+  and far-origin rebase regression coverage. Live rotating scene transfer remains unfinished.
 - Record drawable dimensions in runtime benchmarks and reject resolution changes during a capture.
 - Treat runtime asset-worker prerequisites as order-only for generated Ninja compile edges, avoiding editor-test
   recompilation when only the worker executable relinks; genuine source/header and link dependencies remain.

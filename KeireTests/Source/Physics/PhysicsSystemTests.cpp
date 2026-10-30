@@ -1,6 +1,7 @@
 #include "Keire/Core.h"
 #include "KeireInternal/Math/RelativePositionTranslation.h"
 #include "KeireInternal/Physics/GravityField.h"
+#include "KeireInternal/Physics/PhysicsFrameAccess.h"
 #include "KeireInternal/Spatial/SimulationOriginPolicy.h"
 
 #include <doctest/doctest.h>
@@ -11,6 +12,7 @@
 #include <numbers>
 #include <stdexcept>
 #include <thread>
+#include <utility>
 #include <vector>
 
 namespace
@@ -22,6 +24,48 @@ namespace
         return Keire::CreateRef<Keire::PhysicsSystem>(specification);
     }
 } // namespace
+
+TEST_CASE("physics frame conversion queries the actual offset center of mass without changing motion")
+{
+    using Keire::Detail::PhysicsFrameAccess;
+    const auto system = CreatePhysics();
+    const auto world = system->CreateWorld({1.0e12, 0.0, 0.0});
+    Keire::CollisionCookInput mesh;
+    for (const float x : {1.0F, 3.0F})
+    {
+        for (const float y : {-1.0F, 1.0F})
+        {
+            for (const float z : {-1.0F, 1.0F})
+            {
+                mesh.Vertices.push_back({x, y, z});
+            }
+        }
+    }
+    Keire::PhysicsBodyDefinition definition;
+    definition.Motion = Keire::PhysicsMotionType::Dynamic;
+    definition.Shape = Keire::ColliderShape::ConvexMesh;
+    definition.Collision = Keire::CookCollisionMesh(std::move(mesh));
+    definition.Position = {10.0F, 20.0F, 30.0F};
+    definition.LinearVelocity = {1.0F, 2.0F, 3.0F};
+    const auto body = world->CreateBody(definition);
+    const auto center = PhysicsFrameAccess::TryGetCenterOfMassPosition(*world, body);
+    REQUIRE(center);
+    CHECK(center->X == doctest::Approx(12.0F));
+    CHECK(center->Y == doctest::Approx(20.0F));
+    CHECK(center->Z == doctest::Approx(30.0F));
+    REQUIRE(world->TryGetBody(body));
+    CHECK(world->TryGetBody(body)->Position == definition.Position);
+    CHECK(world->TryGetBody(body)->LinearVelocity == definition.LinearVelocity);
+    world->RebaseOrigin({1.0e12 + 128.0, 0.0, 0.0});
+    const auto rebased = PhysicsFrameAccess::TryGetCenterOfMassPosition(*world, body);
+    REQUIRE(rebased);
+    CHECK(rebased->X == doctest::Approx(-116.0F));
+    CHECK(world->TryGetBody(body)->LinearVelocity == definition.LinearVelocity);
+    world->DestroyBody(body);
+    CHECK_FALSE(PhysicsFrameAccess::TryGetCenterOfMassPosition(*world, body));
+    world->Close();
+    CHECK_THROWS_AS(PhysicsFrameAccess::TryGetCenterOfMassPosition(*world, body), std::logic_error);
+}
 
 TEST_CASE("physics project gravity defaults affect new worlds without replacing world overrides")
 {

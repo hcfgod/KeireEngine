@@ -284,3 +284,15 @@ StepPhysics and presentation interpolation in SceneRuntimePhysics.cpp together. 
 and checkpoint consumers. Preserve inertial body IDs/contacts/sleep, reject stale epochs before mutation, test
 COM-offset bodies and round-trip motion, and publish attachment plus scene changes atomically. No live migration
 API was added in this audit; it remains required work.
+Active COM migration prerequisite batch: added private PhysicsFrameAccess::TryGetCenterOfMassPosition and an
+offset-convex-collider test covering far-origin rebasing, body removal and closed-world rejection. DevDist
+KeireTests build/test is live in exec session 83020 (202 steps after the central physics header change); do not
+start a duplicate or edit its sources until terminal. Changes are not yet validated or committed.
+The subsequent scene-owner implementation will preserve root-oriented transform/solver storage, apply evaluated
+frame motion to owned non-dynamic entities, and keep dynamic bodies inertial. It must not be merely an ownership
+label change. Existing SetKinematicTarget teleports; add a velocity-aware Jolt MoveKinematic path and a validated
+motion-type transition before moving planetary supports. Current static bodies are not created with explicit
+mAllowDynamicOrKinematic, so preserve-or-reject rules require inspection before changing backend motion type.
+COM prerequisite validation completed: exec session 83020 exited 0 after 202 build steps. The targeted
+"physics frame conversion queries*" regression passed 1 case / 12 assertions. This validates the local COM
+query and offset-convex/rebase/lifecycle behavior only, not full scene ownership transfer. No builds remain active.

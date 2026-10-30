@@ -3,6 +3,7 @@
 #include "Keire/Jobs/JobSystem.h"
 #include "KeireInternal/Physics/GravityField.h"
 #include "KeireInternal/Physics/MotionSettings.h"
+#include "KeireInternal/Physics/PhysicsFrameAccess.h"
 #include "KeireInternal/Physics/PhysicsOriginTranslation.h"
 
 #include <Jolt/Jolt.h>
@@ -1163,6 +1164,19 @@ namespace Keire
         found->second.Definition.Position = state.Position;
         found->second.Definition.Rotation = rotation;
         found->second.Definition.LinearVelocity = state.LinearVelocity;
+    }
+
+    std::optional<Vector3> Detail::PhysicsFrameAccess::TryGetCenterOfMassPosition(const PhysicsWorld& world,
+                                                                                  const PhysicsBodyId body)
+    {
+        world.m_Impl->RequireOwner("TryGetCenterOfMassPosition");
+        const auto found = world.m_Impl->Bodies.find(body.m_Value);
+        if (found == world.m_Impl->Bodies.end())
+        {
+            return std::nullopt;
+        }
+        const auto& bodies = world.m_Impl->Native.GetBodyInterface();
+        return FromJoltPosition(bodies.GetCenterOfMassPosition(found->second.Native));
     }
 
     std::optional<PhysicsBodyState> PhysicsWorld::TryGetBody(const PhysicsBodyId body) const
