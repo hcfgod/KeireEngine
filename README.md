@@ -5,6 +5,10 @@
 
 **Build worlds. Keep control.**
 
+Environment scalar controls show common scattering coefficients and planet dimensions as decimals.
+Ctrl-click a numeric field for exact entry or an arithmetic expression; display formatting does not
+reduce the stored precision. Extreme magnitudes still use scientific notation.
+
 Editor startup opens the saved source scene while asset refresh runs in the background. Incompatible cooked assets
 use pending or fallback presentation; Play waits for the scene's compatible dependency closure. Refresh preserves
 open document edits and camera state. Cold, warm, and importer-migration startup timing validation is in progress.

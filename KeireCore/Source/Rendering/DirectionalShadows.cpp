@@ -6,6 +6,65 @@
 
 namespace Keire::RenderBackend
 {
+    AnchoredDepthTransform BuildAnchoredDepthTransform(const Matrix4& viewProjection, const Matrix4& model)
+    {
+        AnchoredDepthTransform result{Math::Multiply(viewProjection, model), {}};
+        constexpr float anchorMagnitudeThreshold = 65536.0F;
+        bool requiresAnchor = false;
+        for (const float element : model.Elements)
+        {
+            requiresAnchor |= std::abs(element) > anchorMagnitudeThreshold;
+        }
+        if (!requiresAnchor)
+        {
+            return result;
+        }
+
+        // Move the vertex arithmetic near the render origin before projection. A planet-sized
+        // model otherwise subtracts huge clip coordinates to produce a tiny cascade depth.
+        Matrix4 inverseModel;
+        try
+        {
+            inverseModel = Math::Inverse(model);
+        }
+        catch (const std::invalid_argument&)
+        {
+            // A zero-scale object must not abort the entire shadow pass.
+            return result;
+        }
+        const auto anchor = GeometryDetail::TransformClip(inverseModel, {});
+        if (!std::isfinite(anchor.X) || !std::isfinite(anchor.Y) || !std::isfinite(anchor.Z) ||
+            !std::isfinite(anchor.W) || std::abs(anchor.W) < 1.0e-8F)
+        {
+            return result;
+        }
+        result.LocalAnchor = {anchor.X / anchor.W, anchor.Y / anchor.W, anchor.Z / anchor.W, 0.0F};
+        const std::array<double, 4> localAnchor{result.LocalAnchor.X, result.LocalAnchor.Y, result.LocalAnchor.Z, 1.0};
+        std::array<double, 16> combined{};
+        for (std::size_t column = 0; column < 4; ++column)
+        {
+            for (std::size_t row = 0; row < 4; ++row)
+            {
+                for (std::size_t inner = 0; inner < 4; ++inner)
+                {
+                    combined[column * 4 + row] += static_cast<double>(viewProjection.Elements[inner * 4 + row]) *
+                                                  model.Elements[column * 4 + inner];
+                }
+                result.Transform.Elements[column * 4 + row] = static_cast<float>(combined[column * 4 + row]);
+            }
+        }
+        for (std::size_t row = 0; row < 4; ++row)
+        {
+            double translation = 0.0;
+            for (std::size_t column = 0; column < 4; ++column)
+            {
+                translation += combined[column * 4 + row] * localAnchor[column];
+            }
+            result.Transform.Elements[12 + row] = static_cast<float>(translation);
+        }
+        return result;
+    }
+
     std::array<Vector3, 4> BuildShadowSliceCorners(const Matrix4& projection, const Matrix4& view,
                                                    const float viewDepth)
     {

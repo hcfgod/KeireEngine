@@ -1,5 +1,6 @@
 #include "Keire/Ui.h"
 #include "KeireInternal/UiNumericExpression.h"
+#include "KeireInternal/UiScalarFormat.h"
 
 #include <imgui.h>
 #include <imgui_internal.h>
@@ -204,7 +205,8 @@ namespace Keire
             [&](auto& candidate)
             {
                 return ImGui::DragScalar(safeLabel.c_str(), ImGuiDataType_Double, &candidate, static_cast<float>(speed),
-                                         minimumValue, maximumValue, "%.6g");
+                                         minimumValue, maximumValue, Detail::ScalarDisplayFormat(candidate),
+                                         ImGuiSliderFlags_NoRoundToFormat);
             });
     }
 

@@ -1,5 +1,6 @@
 #include "Keire/Ui.h"
 #include "KeireInternal/UiNumericExpression.h"
+#include "KeireInternal/UiScalarFormat.h"
 
 #include <imgui.h>
 #include <imgui_internal.h>
@@ -466,12 +467,13 @@ namespace Keire
         if (label.empty() || !std::isfinite(minimum) || !std::isfinite(maximum) || minimum >= maximum)
             throw std::invalid_argument("SliderScalar requires a label and a finite increasing range.");
         const std::string safeLabel(label);
-        return Detail::DrawNumericExpression(safeLabel.c_str(), value, ImGuiDataType_Double, "%.6g", &minimum, &maximum,
-                                             [&](auto& candidate)
-                                             {
-                                                 return ImGui::SliderScalar(safeLabel.c_str(), ImGuiDataType_Double,
-                                                                            &candidate, &minimum, &maximum, "%.6g");
-                                             });
+        return Detail::DrawNumericExpression(
+            safeLabel.c_str(), value, ImGuiDataType_Double, "%.6g", &minimum, &maximum,
+            [&](auto& candidate)
+            {
+                return ImGui::SliderScalar(safeLabel.c_str(), ImGuiDataType_Double, &candidate, &minimum, &maximum,
+                                           Detail::ScalarDisplayFormat(candidate), ImGuiSliderFlags_NoRoundToFormat);
+            });
     }
 
     bool UiFrame::InputTextMultiline(const std::string_view label, std::string& value, const std::uint32_t visibleLines)

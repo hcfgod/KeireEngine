@@ -6,11 +6,12 @@ struct VertexInput
 cbuffer ShadowObjectData : register(b0, space1)
 {
     float4x4 LightViewProjection;
+    float4 LocalAnchor;
 };
 
 float4 VSMain(VertexInput input) : SV_Position
 {
-    return mul(LightViewProjection, float4(input.Position, 1.0F));
+    return mul(LightViewProjection, float4(input.Position - LocalAnchor.xyz, 1.0F));
 }
 
 void PSMain()

@@ -52,7 +52,7 @@ namespace Keire::RenderBackend
             const auto& mesh = ResolveMesh(item.Mesh);
             if (boundItem != draw.Item)
             {
-                const auto object = Math::Multiply(viewProjection, item.World);
+                const auto object = BuildAnchoredDepthTransform(viewProjection, item.World);
                 SDL_PushGPUVertexUniformData(commands, 0, &object, sizeof(object));
                 boundItem = draw.Item;
             }
@@ -181,6 +181,7 @@ namespace Keire::RenderBackend
                 const auto& item = *caster.Item;
                 const auto& mesh = *caster.Mesh;
                 const auto object = Math::Multiply(lightMatrix, item.World);
+                const auto anchoredObject = BuildAnchoredDepthTransform(lightMatrix, item.World);
                 const auto frustum = BuildFrustumPlanes(object);
                 if (caster.Cullable && caster.CoarseCullable && !IntersectsFrustum(frustum, caster.Bounds))
                 {
@@ -201,7 +202,7 @@ namespace Keire::RenderBackend
                     }
                     if (!objectBound)
                     {
-                        SDL_PushGPUVertexUniformData(commands, 0, &object, sizeof(object));
+                        SDL_PushGPUVertexUniformData(commands, 0, &anchoredObject, sizeof(anchoredObject));
                         auto* vertices = item.SkinnedAssetVertices ? item.SkinnedAssetVertices : mesh.AssetVertices;
                         if (vertices != boundVertices)
                         {

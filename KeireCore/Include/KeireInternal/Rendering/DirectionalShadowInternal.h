@@ -12,6 +12,15 @@ namespace Keire::RenderBackend
     inline constexpr float DirectionalShadowDepthBiasConstant = 2.0F;
     inline constexpr float DirectionalShadowDepthBiasSlope = 2.0F;
 
+    struct AnchoredDepthTransform
+    {
+        Matrix4 Transform;
+        Vector4 LocalAnchor;
+    };
+
+    [[nodiscard]] AnchoredDepthTransform BuildAnchoredDepthTransform(const Matrix4& viewProjection,
+                                                                     const Matrix4& model);
+
     [[nodiscard]] std::array<Vector3, 4> BuildShadowSliceCorners(const Matrix4& projection, const Matrix4& view,
                                                                  float viewDepth);
 

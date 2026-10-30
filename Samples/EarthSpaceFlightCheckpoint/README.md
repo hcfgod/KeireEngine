@@ -20,8 +20,13 @@ Atmosphere, volumetric clouds, height fog, stars and environment timelines are c
 Verified October 29: original showcase materials restored (also confirmed by the user),
 150-second round trip, launch/pause buttons, cockpit/follow buttons in both directions,
 stars and atmospheric limb at altitude. Script compilation passes without warnings.
-The final early-return correction compiles but still needs a dedicated UI acceptance pass.
-Native shadow tests: 4 cases / 49 assertions. Material startup regression: 1 case / 16 assertions.
+The final early-return correction was exercised during ascent: the route switched to descent,
+returned to the landed state, and both camera buttons worked during descent.
+Native shadow tests: 5 cases / 57 assertions. Material startup regression: 1 case / 16 assertions.
+UI isolation identified Earth self-shadowing as a source of the ground pattern: disabling only
+Earth's shadow casting removed it while retaining the ship shadow. The anchored depth-transform
+fix passes native regressions. Rebuilt ground and landed captures with casting restored no longer
+show the pattern and retain the ship shadow. Sparse captures do not rule out brief temporal flicker.
 
 Remaining: cloud/Earth temporal flicker acceptance, planet-scale ground shadow artifacts,
 input readiness before background refresh completes, and a portable self-contained sample.

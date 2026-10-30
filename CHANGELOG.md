@@ -1,6 +1,11 @@
 # Changelog
 
 ## Unreleased
+- Anchor planet-scale shadow and sampled-depth vertex transforms near the render origin to reduce cancellation;
+  retain the ordinary path for small or singular transforms. Five shadow cases pass; ground and landed captures
+  retain the ship shadow without the previous self-shadow pattern. Continuous temporal acceptance remains open.
+- Display common atmosphere coefficients and planet dimensions in decimal notation in scalar controls, without
+  rounding stored values to the display precision. Extreme magnitudes retain compact scientific notation.
 - Preserve compatible material importer aliases during startup and apply published compatible assets after a partial refresh.
 - Construct directional shadow slices without unprojecting the far clip endpoint, avoiding invalid shadow bounds with planetary viewing distances.
 - Add development planetary settings, sector-relative environment capture, spherical clouds, explicit gravity

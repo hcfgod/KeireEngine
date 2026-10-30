@@ -6,6 +6,34 @@
 #include <cstddef>
 #include <stdexcept>
 
+TEST_CASE("planet scale shadow transforms retain surface depth near the render origin")
+{
+    Keire::Matrix4 model;
+    model.Elements[0] = 12720000.0F;
+    model.Elements[5] = 12720000.0F;
+    model.Elements[10] = 12720000.0F;
+    model.Elements[13] = -6360000.0F;
+    Keire::Matrix4 light;
+    light.Elements[5] = 0.00317F;
+    light.Elements[13] = 0.413F;
+    const auto anchored = Keire::RenderBackend::BuildAnchoredDepthTransform(light, model);
+    CHECK(anchored.LocalAnchor.Y == doctest::Approx(0.5F));
+    // The north-pole vertex must retain the small translation instead of cancelling
+    // two planet-sized projected values in the GPU's float arithmetic.
+    const float surfaceY =
+        anchored.Transform.Elements[5] * (0.5F - anchored.LocalAnchor.Y) + anchored.Transform.Elements[13];
+    CHECK(surfaceY == doctest::Approx(0.413F).epsilon(0.000001));
+    const auto ordinary = Keire::RenderBackend::BuildAnchoredDepthTransform(light, Keire::Matrix4{});
+    CHECK(ordinary.LocalAnchor.X == 0.0F);
+    CHECK(ordinary.LocalAnchor.Y == 0.0F);
+    CHECK(ordinary.LocalAnchor.Z == 0.0F);
+    CHECK(ordinary.Transform.Elements == light.Elements);
+    model.Elements[0] = 0.0F;
+    const auto singular = Keire::RenderBackend::BuildAnchoredDepthTransform(light, model);
+    CHECK(singular.LocalAnchor.Y == 0.0F);
+    CHECK(singular.Transform.Elements == Keire::Math::Multiply(light, model).Elements);
+}
+
 TEST_CASE("shadow slices remain finite with planetary camera clipping distances")
 {
     const Keire::Matrix4 view{};

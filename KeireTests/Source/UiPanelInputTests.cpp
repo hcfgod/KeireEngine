@@ -2,6 +2,7 @@
 #include "KeireInternal/NumericExpression.h"
 #include "KeireInternal/UiInputInternal.h"
 #include "KeireInternal/UiNumericExpression.h"
+#include "KeireInternal/UiScalarFormat.h"
 #include "KeireInternal/UiStickySection.h"
 
 #include <SDL3/SDL.h>
@@ -10,11 +11,29 @@
 #include <imgui_internal.h>
 
 #include <cstdint>
+#include <cstdio>
 #include <limits>
 #include <memory>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+
+TEST_CASE("physical scalar displays avoid scientific notation at environment magnitudes")
+{
+    const auto formatted = [](const double value)
+    {
+        char buffer[64]{};
+        std::snprintf(buffer, sizeof(buffer), Keire::Detail::ScalarDisplayFormat(value), value);
+        return std::string(buffer);
+    };
+    CHECK(formatted(6360000.0) == "6360000.000");
+    CHECK(formatted(-6360000.0) == "-6360000.000");
+    CHECK(formatted(0.0000058) == "0.000005800");
+    CHECK(formatted(0.0000000001) == "0.000000000100");
+    CHECK(formatted(0.4) == "0.4");
+    CHECK(formatted(0.0) == "0");
+    CHECK(formatted(1.0e-20) != "0.000000000000");
+}
 
 TEST_CASE("Inspector cards forward wheel scrolling to their parent without removing child scrollbars")
 {
