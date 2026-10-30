@@ -125,3 +125,34 @@ TEST_CASE(
     CHECK_THROWS_AS(resolver.Configure(invalid), std::invalid_argument);
     CHECK(resolver.Resolve(observer, 1.0, remoteClock, 2)->RadiusMetres == 99.0);
 }
+
+TEST_CASE("Nearest surface planet selection is per observer and legacy records remain manual")
+{
+    using namespace Keire::Detail;
+    PlanetDefinition first;
+    first.Planet = Keire::AssetId(1, 2);
+    first.Frame = 2;
+    first.RadiusMetres = 100.0;
+    PlanetDefinition second = first;
+    second.Planet = Keire::AssetId(1, 3);
+    second.Frame = 3;
+    second.ParentCenter = SectorPosition({1, 1}, {}, {1000.0, 0.0, 0.0});
+    PlanetProjectSettings settings;
+    settings.Geometry = PlanetGeometryMode::Planetary;
+    settings.SelectedPlanet = first.Planet;
+    settings.Planets = {second, first};
+    settings.Selection = PlanetSelectionMode::NearestSurface;
+    auto record = PlanetProjectSettingsRecord::Encode(settings);
+    CHECK(PlanetProjectSettingsRecord::Decode(record) == settings);
+    record["schemaVersion"] = 1;
+    record.erase("selection");
+    CHECK(PlanetProjectSettingsRecord::Decode(record).Selection == PlanetSelectionMode::Manual);
+    PlanetProjectFrameResolver resolver;
+    resolver.Configure(settings);
+    CHECK(resolver.Resolve(SectorPosition({1, 1}, {}, {101.0, 0.0, 0.0}), 0.0, {})->Planet == first.Planet);
+    CHECK(resolver.Resolve(SectorPosition({1, 1}, {}, {899.0, 0.0, 0.0}), 0.0, {})->Planet == second.Planet);
+    CHECK(resolver.Resolve(SectorPosition({1, 1}, {}, {500.0, 0.0, 0.0}), 0.0, {})->Planet == first.Planet);
+    settings.Selection = PlanetSelectionMode::Manual;
+    resolver.Configure(settings);
+    CHECK(resolver.Resolve(SectorPosition({1, 1}, {}, {899.0, 0.0, 0.0}), 0.0, {})->Planet == first.Planet);
+}

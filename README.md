@@ -15,6 +15,10 @@ open document edits and camera state. Cold, warm, and importer-migration startup
 Supported legacy importer names remain compatible, including older material metadata. A partial refresh applies
 compatible published assets while retaining diagnostics and excluding incompatible artifacts.
 
+Environment > Planet Placement offers manual selection or **Nearest surface per camera**. The latter selects
+the closest spherical surface independently for each view, with stable identity tie-breaking. Existing projects
+remain manual. This selects one planet; it does not blend multiple atmospheres or change physics ownership.
+
 Large-world support is undergoing a development migration. Native transforms now store double-precision translation;
 C# provides `Transform.LocalPositionPrecise` and `Transform.PositionPrecise` (`Vector3d`) for precise positions in the
 parent and scene frames. These APIs are not yet an end-to-end planetary travel workflow: camera/render matrices,

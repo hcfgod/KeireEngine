@@ -5,6 +5,7 @@
 #include "KeireInternal/Physics/GravityField.h"
 #include "KeireInternal/Scenes/SceneRuntimeIdentityAccess.h"
 #include "KeireInternal/Spatial/FrameRegistry.h"
+#include "KeireInternal/Spatial/PlanetEnvironmentSelection.h"
 #include "KeireInternal/Spatial/PlanetFrameCache.h"
 #include "KeireInternal/Spatial/SceneRuntimePlanetAccess.h"
 #include "KeireInternal/Spatial/SceneRuntimeSpatialAccess.h"
@@ -475,9 +476,13 @@ namespace Keire
         {
             return std::nullopt;
         }
-        return Resolve(world, state.PlanetSettings.SelectedPlanet,
-                       state.Spatial->Find(SceneRuntimeSpatialAccess::RootFrame), rootObserverPosition,
-                       state.PlanetSimulationTime);
+        return SelectPlanetEnvironment(state.PlanetSettings,
+                                       [&](const AssetId identity)
+                                       {
+                                           return Resolve(world, identity,
+                                                          state.Spatial->Find(SceneRuntimeSpatialAccess::RootFrame),
+                                                          rootObserverPosition, state.PlanetSimulationTime);
+                                       });
     }
 
     void Detail::SceneRuntimePlanetAccess::InitializeGravity(SceneRuntimeWorld& world)

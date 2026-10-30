@@ -22,7 +22,8 @@ namespace Keire::Detail
             {
                 planets.push_back(PlanetDefinitionRecord::Encode(planet));
             }
-            return {{"schemaVersion", 1},
+            return {{"schemaVersion", 2},
+                    {"selection", settings.Selection == PlanetSelectionMode::Manual ? "manual" : "nearest-surface"},
                     {"geometry", settings.Geometry == PlanetGeometryMode::Flat ? "flat" : "planetary"},
                     {"gravity", settings.Gravity == PlanetGravityMode::Uniform  ? "uniform"
                                 : settings.Gravity == PlanetGravityMode::Radial ? "radial"
@@ -36,13 +37,24 @@ namespace Keire::Detail
         {
             try
             {
-                if (!record.is_object() || record.size() != 5 || !record.at("schemaVersion").is_number_integer() ||
-                    record.at("schemaVersion") != 1 || !record.at("planets").is_array() ||
-                    record.at("planets").size() > 64)
+                if (!record.is_object() || !record.at("schemaVersion").is_number_integer() ||
+                    !((record.at("schemaVersion") == 1 && record.size() == 5) ||
+                      (record.at("schemaVersion") == 2 && record.size() == 6)) ||
+                    !record.at("planets").is_array() || record.at("planets").size() > 64)
                 {
                     throw std::invalid_argument("Unsupported planet project settings record.");
                 }
                 PlanetProjectSettings settings;
+                if (record.at("schemaVersion") == 2)
+                {
+                    const auto selection = record.at("selection").get<std::string>();
+                    if (selection != "manual" && selection != "nearest-surface")
+                    {
+                        throw std::invalid_argument("Unknown planet selection mode.");
+                    }
+                    settings.Selection =
+                        selection == "manual" ? PlanetSelectionMode::Manual : PlanetSelectionMode::NearestSurface;
+                }
                 const auto geometry = record.at("geometry").get<std::string>();
                 const auto gravity = record.at("gravity").get<std::string>();
                 if ((geometry != "flat" && geometry != "planetary") ||

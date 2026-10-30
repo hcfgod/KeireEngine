@@ -90,9 +90,25 @@ namespace KeireEditor::Detail
         constexpr std::array gravityLabels{"Uniform", "Radial", "Combined"};
         if (settings.Geometry == PlanetGeometryMode::Planetary)
         {
+            constexpr std::array selectionLabels{"Selected planet", "Nearest surface per camera"};
+            if (auto combo =
+                    ui.BeginCombo("Environment Planet", selectionLabels[static_cast<std::size_t>(settings.Selection)]);
+                combo)
+            {
+                for (std::size_t index = 0; index < selectionLabels.size(); ++index)
+                {
+                    if (ui.Selectable(selectionLabels[index], static_cast<std::size_t>(settings.Selection) == index))
+                    {
+                        settings.Selection = static_cast<PlanetSelectionMode>(index);
+                        changed = true;
+                        commit = true;
+                    }
+                }
+            }
             ui.TextColoredWrapped(
                 theme.MutedText,
-                "The selected planet supplies the environment center and surface radius. The atmosphere center and "
+                "Each camera uses the selected planet or the nearest planet surface. Atmosphere appearance is shared; "
+                "this does not blend multiple atmospheres. The atmosphere center and "
                 "radius below remain saved for Flat mode.");
         }
         if (auto combo = ui.BeginCombo("Gravity Mode", gravityLabels[static_cast<std::size_t>(settings.Gravity)]);

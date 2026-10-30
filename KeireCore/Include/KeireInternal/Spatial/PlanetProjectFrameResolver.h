@@ -1,5 +1,6 @@
 #pragma once
 
+#include "KeireInternal/Spatial/PlanetEnvironmentSelection.h"
 #include "KeireInternal/Spatial/PlanetFrameResolution.h"
 #include "KeireInternal/Spatial/PlanetProjectSettings.h"
 
@@ -58,11 +59,16 @@ namespace Keire::Detail
                 state.Snapshots = state.Registry.Publish(evaluations, snapshotTime);
                 state.SnapshotTime = snapshotTime;
             }
-            const auto selected =
-                std::ranges::find(state.Settings.Planets, state.Settings.SelectedPlanet, &PlanetDefinition::Planet);
-            return ResolvePlanetFrame(state.Registry, state.Registry.Find(selected->Frame), state.Registry.Find(1),
-                                      observerPosition, state.Snapshots, snapshotTime, clock, selected->Planet,
-                                      selected->RadiusMetres, m_DiscontinuityRevision);
+            return SelectPlanetEnvironment(
+                state.Settings,
+                [&](const AssetId identity)
+                {
+                    const auto selected =
+                        std::ranges::find(state.Settings.Planets, identity, &PlanetDefinition::Planet);
+                    return ResolvePlanetFrame(state.Registry, state.Registry.Find(selected->Frame),
+                                              state.Registry.Find(1), observerPosition, state.Snapshots, snapshotTime,
+                                              clock, selected->Planet, selected->RadiusMetres, m_DiscontinuityRevision);
+                });
         }
 
       private:

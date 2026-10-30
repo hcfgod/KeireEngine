@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased
+- Add opt-in nearest-surface planetary environment selection per camera in editor and runtime. Planet settings
+  schema 2 persists the policy; schema 1 loads with manual selection.
 - Reuse current runtime planetary frame evaluations across same-time view and gravity queries, with invalidation
   on time, topology, publication or definition changes.
 - Anchor planet-scale shadow and sampled-depth vertex transforms near the render origin to reduce cancellation;

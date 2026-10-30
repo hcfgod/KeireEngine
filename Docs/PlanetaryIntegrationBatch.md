@@ -189,3 +189,14 @@ Remaining integration order:
 
 Runtime planet-frame snapshot reuse is implemented. DevDist KeireTests build passes; focused frame and runtime planet tests pass 10 cases / 243 assertions. Clang-format validation passes.
 No end-to-end frame-time improvement is claimed before measurement.
+
+Nearest-surface selection batch: optional per-camera selection is implemented in editor preview and runtime.
+Planet settings schema 2 stores the mode; legacy schema 1 remains manual. Distance is absolute distance
+to the spherical surface, and stable planet identity breaks exact ties. Existing shared appearance settings
+remain shared. Multiple visible atmosphere composition and physics ownership transfer are not supplied by
+this selection policy. Native build/test validation is running; editor control validation remains pending.
+
+Selection native checkpoint: DevDist KeireTests built successfully. Focused settings, runtime planet,
+manifest and history tests pass 16 cases / 164 assertions. New coverage verifies nearest selection and ties
+in preview plus legacy manual decoding. Dedicated runtime nearest-mode and nested-frame parity coverage,
+editor build/control testing and visible transitions still remain; the existing runtime tests cover manual mode.

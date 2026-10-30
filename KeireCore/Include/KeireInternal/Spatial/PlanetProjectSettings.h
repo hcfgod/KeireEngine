@@ -24,12 +24,19 @@ namespace Keire::Detail
         Combined
     };
 
+    enum class PlanetSelectionMode
+    {
+        Manual,
+        NearestSurface
+    };
+
     struct PlanetProjectSettings
     {
         PlanetGeometryMode Geometry = PlanetGeometryMode::Flat;
         PlanetGravityMode Gravity = PlanetGravityMode::Uniform;
         AssetId SelectedPlanet;
         std::vector<PlanetDefinition> Planets;
+        PlanetSelectionMode Selection = PlanetSelectionMode::Manual;
 
         bool operator==(const PlanetProjectSettings&) const noexcept = default;
     };
@@ -40,6 +47,8 @@ namespace Keire::Detail
         if ((settings.Geometry != PlanetGeometryMode::Flat && settings.Geometry != PlanetGeometryMode::Planetary) ||
             (settings.Gravity != PlanetGravityMode::Uniform && settings.Gravity != PlanetGravityMode::Radial &&
              settings.Gravity != PlanetGravityMode::Combined) ||
+            (settings.Selection != PlanetSelectionMode::Manual &&
+             settings.Selection != PlanetSelectionMode::NearestSurface) ||
             settings.Planets.size() > maximumPlanets)
         {
             throw std::invalid_argument("Planet project mode or planet count is unsupported.");
