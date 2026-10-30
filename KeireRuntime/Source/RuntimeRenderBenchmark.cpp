@@ -90,6 +90,25 @@ namespace KeireRuntime
         {
             if (Output.empty() || Complete)
                 return;
+            const auto window = application.MainWindow();
+            if (!window)
+            {
+                throw std::runtime_error("Render benchmark requires a main window.");
+            }
+            const auto pixels = window->PixelSize();
+            if (pixels.Width == 0 || pixels.Height == 0)
+            {
+                throw std::runtime_error("Render benchmark requires a nonzero drawable resolution.");
+            }
+            if (!BaselineInitialized)
+            {
+                PixelWidth = pixels.Width;
+                PixelHeight = pixels.Height;
+            }
+            else if (pixels.Width != PixelWidth || pixels.Height != PixelHeight)
+            {
+                throw std::runtime_error("Render benchmark resolution changed; repeat with a fixed window size.");
+            }
             if (!renderer || renderer->Mode() != Keire::RenderMode::Rendered)
                 throw std::runtime_error("Render benchmark requires the rendered GPU backend.");
             if (Keire::RenderSystemInternalAccess::PresentMode(*renderer) != SdlPresentMode(PresentMode))
@@ -155,7 +174,9 @@ namespace KeireRuntime
                               {"status", "passed"},
                               {"workload",
                                {{"warmupFrames", RuntimeRenderBenchmark::WarmupFrames},
-                                {"measuredFrames", RuntimeRenderBenchmark::MeasuredFrames}}},
+                                {"measuredFrames", RuntimeRenderBenchmark::MeasuredFrames},
+                                {"pixelWidth", PixelWidth},
+                                {"pixelHeight", PixelHeight}}},
                               {"presentMode", std::string(PresentModeName(PresentMode))},
                               {"build",
                                {{"version", std::string(build.Version)},
@@ -192,6 +213,8 @@ namespace KeireRuntime
         Keire::RenderPresentMode PresentMode = Keire::RenderPresentMode::VSync;
         std::vector<Keire::RenderFrameTimeline> Timelines;
         std::uint64_t BaselineFrame = 0;
+        std::uint32_t PixelWidth = 0;
+        std::uint32_t PixelHeight = 0;
         bool BaselineInitialized = false;
         bool Complete = false;
     };

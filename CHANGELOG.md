@@ -1,6 +1,7 @@
 # Changelog
 
 ## Unreleased
+- Record drawable dimensions in runtime benchmarks and reject resolution changes during a capture.
 - Treat runtime asset-worker prerequisites as order-only for generated Ninja compile edges, avoiding editor-test
   recompilation when only the worker executable relinks; genuine source/header and link dependencies remain.
 - Allow optimized DevDist runtime benchmark captures, with build configuration retained in each report.

@@ -68,7 +68,8 @@ and non-monotonic frame IDs before publishing median/p95/p99 results beneath ign
 ### Render benchmark evidence schema
 
 The benchmark publishes schema-1 JSON for each presentation mode and a schema-1 `render-matrix.json` that contains both
-runs. Each run must identify the workload (`warmupFrames=300`, `measuredFrames=2000`), presentation mode, and these
+runs. Each run must identify the workload (`warmupFrames=300`, `measuredFrames=2000`, drawable `pixelWidth` and
+`pixelHeight`), presentation mode, and these
 evidence groups:
 
 - `build`: version, Git commit, dirty-worktree flag, Release configuration, compiler, platform, and architecture;
@@ -84,6 +85,11 @@ The launcher compares the recorded build identity and dirty flag with the invoki
 immediate runs, and rejects a frame or high-water count outside the configured 1–3 frame bound. A JSON file merely
 existing under `Build/Benchmarks` is not evidence: only a launcher-completed matrix from named graphics hardware is a
 passing characterization.
+
+Keep the drawable resolution fixed throughout warmup and measurement. The runtime rejects zero-sized drawables
+and resolution changes rather than combining incomparable frames. Older reports without pixel dimensions cannot
+establish a resolution-matched performance comparison. GPU retirement latency includes queued work; it is not a
+GPU timestamp measurement of individual render passes.
 
 Input changes additionally run canonical schema/import tests, an SDL-dummy outer-frame keyboard action test, cursor
 focus restoration, public dependency isolation/`KEIRE_API` assertions, and headless UI facade tests. Packages must

@@ -263,3 +263,24 @@ A85D25F5CE5A5073B1684BDF1889A48B95B694ABAF7A3F98D603E440F98CAB7C.
 Next: measure GPU pass costs and fixed-resolution flight phases; finish multi-visible-planet atmosphere
 composition and transactional rotating physics-frame migration. Do not label the whole system production-ready
 from the single-planet standalone trip or existing translation-rebase tests.
+Performance measurement follow-up: RuntimeRenderBenchmark now records drawable pixelWidth/pixelHeight and
+rejects nonpositive or changing resolution. The Release matrix launcher requires positive integral dimensions
+and equal resolution across presentation modes. DevDist runtime rebuilt in 4 steps. A direct D3D12 immediate
+capture passed 300 warmup + 2000 measured frames at 1280x720; median owner 0.282 ms, capture 0.080 ms,
+render CPU 1.142 ms, admission wait 11.337 ms, retirement latency 22.502 ms. This is not a demonstrated speedup:
+no rendering optimization changed and the earlier report omitted resolution. A second run was maximized through
+Windows control; the runtime exited and produced no benchmark JSON. Its redirected log was empty, so no exception
+text was verified. PowerShell launcher parses successfully; the full Release matrix was not rebuilt/rerun.
+
+Rotating-physics implementation audit: do not apply ConvertFrameBodyState directly to PhysicsWorld state.
+Jolt linear velocity belongs to the center of mass whereas exposed body position is the object origin; off-center
+shapes require COM-aware velocity conversion. Rotating solver axes also require continuous Coriolis, centrifugal,
+Euler and accelerating-origin terms. Velocity setters and sleep restoration can change motion. The coherent next
+batch should retain a root-oriented inertial solver and transactionally transfer scene ownership, converting at
+scene/solver boundaries. SceneRuntimeWorld.cpp Entry currently stores FrameAttachment without explicit coordinate
+frame; Add attaches root and SceneRuntimeSpatialAccess::FrameForEntity always returns root. Coordinate changes
+must update PhysicsRelativeTransform, BuildPhysicsDefinition, SynchronizePhysicsBodies, PullDynamicBodies,
+StepPhysics and presentation interpolation in SceneRuntimePhysics.cpp together. Include animation, VFX, gravity
+and checkpoint consumers. Preserve inertial body IDs/contacts/sleep, reject stale epochs before mutation, test
+COM-offset bodies and round-trip motion, and publish attachment plus scene changes atomically. No live migration
+API was added in this audit; it remains required work.

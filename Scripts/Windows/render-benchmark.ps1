@@ -203,6 +203,14 @@ try {
         Assert-RequiredProperties $report.build @("version", "gitCommit", "dirty", "configuration", "compiler",
                                                   "platform", "architecture") `
             "Release $presentMode build identity"
+        Assert-RequiredProperties $report.workload @("warmupFrames", "measuredFrames", "pixelWidth", "pixelHeight") `
+            "Release $presentMode workload"
+        foreach ($dimension in @("pixelWidth", "pixelHeight")) {
+            $value = Assert-NonNegativeNumber $report.workload.$dimension "Release $presentMode workload.$dimension"
+            if ($value -lt 1 -or $value -ne [math]::Floor($value)) {
+                throw "Release $presentMode workload.$dimension must be a positive integer."
+            }
+        }
         Assert-RequiredProperties $report.hardware @("operatingSystemDescription", "operatingSystemVersion", "cpuModel",
                                                      "logicalProcessorCount", "physicalMemoryBytes", "rendererBackend",
                                                      "gpuAdapter", "driverName", "driverVersion", "driverInformation",
@@ -278,6 +286,10 @@ try {
     }
     if ($reports.Count -ne 2 -or $reports[0].presentMode -eq $reports[1].presentMode) {
         throw "Render benchmark skipped a required VSync mode."
+    }
+    if ($reports[0].workload.pixelWidth -ne $reports[1].workload.pixelWidth -or
+        $reports[0].workload.pixelHeight -ne $reports[1].workload.pixelHeight) {
+        throw "Render benchmark presentation modes used different drawable resolutions."
     }
     $matrix = [ordered]@{
         schemaVersion = 1
