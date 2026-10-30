@@ -41,24 +41,8 @@ namespace Keire::Detail
             {
                 return std::nullopt;
             }
-            if (clockDiscontinuityRevision != m_ClockRevision)
-            {
-                RequireRevisionCapacity();
-                m_ClockRevision = clockDiscontinuityRevision;
-                ++m_DiscontinuityRevision;
-            }
+            PrepareSnapshots(snapshotTime, clockDiscontinuityRevision);
             auto& state = *m_State;
-            if (!state.SnapshotTime || *state.SnapshotTime != snapshotTime)
-            {
-                std::vector<FrameSnapshot> evaluations;
-                evaluations.reserve(state.Settings.Planets.size());
-                for (const auto& planet : state.Settings.Planets)
-                {
-                    evaluations.push_back(EvaluatePlanetFrame(planet, snapshotTime, state.Registry.Revision()));
-                }
-                state.Snapshots = state.Registry.Publish(evaluations, snapshotTime);
-                state.SnapshotTime = snapshotTime;
-            }
             return SelectPlanetEnvironment(
                 state.Settings,
                 [&](const AssetId identity)
@@ -69,6 +53,29 @@ namespace Keire::Detail
                                               state.Registry.Find(1), observerPosition, state.Snapshots, snapshotTime,
                                               clock, selected->Planet, selected->RadiusMetres, m_DiscontinuityRevision);
                 });
+        }
+
+        [[nodiscard]] std::vector<ResolvedPlanetFrame> ResolveAll(const SectorPosition& observerPosition,
+                                                                  const double snapshotTime,
+                                                                  const EnvironmentClockState& clock,
+                                                                  const std::uint64_t clockDiscontinuityRevision = 0)
+        {
+            if (!m_State || m_State->Settings.Geometry == PlanetGeometryMode::Flat)
+            {
+                return {};
+            }
+            PrepareSnapshots(snapshotTime, clockDiscontinuityRevision);
+            auto& state = *m_State;
+            std::vector<ResolvedPlanetFrame> result;
+            result.reserve(state.Settings.Planets.size());
+            for (const auto& planet : state.Settings.Planets)
+            {
+                result.push_back(ResolvePlanetFrame(
+                    state.Registry, state.Registry.Find(planet.Frame), state.Registry.Find(1), observerPosition,
+                    state.Snapshots, snapshotTime, clock, planet.Planet, planet.RadiusMetres, m_DiscontinuityRevision));
+            }
+            std::ranges::sort(result, {}, &ResolvedPlanetFrame::Planet);
+            return result;
         }
 
       private:
@@ -97,6 +104,28 @@ namespace Keire::Detail
             std::optional<double> SnapshotTime;
             std::vector<BoundFrameSnapshot> Snapshots;
         };
+
+        void PrepareSnapshots(const double snapshotTime, const std::uint64_t clockDiscontinuityRevision)
+        {
+            if (clockDiscontinuityRevision != m_ClockRevision)
+            {
+                RequireRevisionCapacity();
+                m_ClockRevision = clockDiscontinuityRevision;
+                ++m_DiscontinuityRevision;
+            }
+            auto& state = *m_State;
+            if (!state.SnapshotTime || *state.SnapshotTime != snapshotTime)
+            {
+                std::vector<FrameSnapshot> evaluations;
+                evaluations.reserve(state.Settings.Planets.size());
+                for (const auto& planet : state.Settings.Planets)
+                {
+                    evaluations.push_back(EvaluatePlanetFrame(planet, snapshotTime, state.Registry.Revision()));
+                }
+                state.Snapshots = state.Registry.Publish(evaluations, snapshotTime);
+                state.SnapshotTime = snapshotTime;
+            }
+        }
 
         void RequireRevisionCapacity() const
         {

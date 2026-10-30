@@ -7,6 +7,7 @@
 #include "KeireInternal/Rendering/RenderShaderDataInternal.h"
 
 #include <array>
+#include <span>
 
 namespace Keire::RenderBackend
 {
@@ -21,7 +22,8 @@ namespace Keire::RenderBackend
                     const std::array<std::array<double, 2>, MaximumCloudLayers>& cloudPhase, const bool cloudsEnabled,
                     const float textureLayout, const double starPhase, const SkyColorUniforms& skyColors,
                     const Vector3d renderOrigin = {}, const Vector3d environmentAnchor = {},
-                    const Detail::ResolvedPlanetFrame* planetFrame = nullptr)
+                    const Detail::ResolvedPlanetFrame* planetFrame = nullptr,
+                    const std::span<const Detail::ResolvedPlanetFrame> planetAtmospheres = {})
     {
         const auto atmosphere =
             planetFrame
@@ -51,6 +53,9 @@ namespace Keire::RenderBackend
                 planetFrame ? MakePlanetaryCloudUniforms(*planetFrame, 0.0) : PlanetaryCloudUniforms{},
                 planetFrame ? MakePlanetaryCloudLayerPhases(environment.Clouds, *planetFrame)
                             : std::array<Vector4, MaximumCloudLayers>{},
-                MakeStarFieldOrientation(planetFrame ? planetFrame->RootToObserver : Detail::FrameRotation{})};
+                MakeStarFieldOrientation(planetFrame ? planetFrame->RootToObserver : Detail::FrameRotation{}),
+                MakePlanetAtmosphereSetUniforms(environment.Atmosphere,
+                                                {lighting.Direction.X, lighting.Direction.Y, lighting.Direction.Z},
+                                                planetAtmospheres)};
     }
 } // namespace Keire::RenderBackend

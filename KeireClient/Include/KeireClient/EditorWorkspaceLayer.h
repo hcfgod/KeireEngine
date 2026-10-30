@@ -204,6 +204,8 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     [[nodiscard]] std::optional<Keire::EnvironmentLightingSnapshot> SceneViewportEnvironmentLighting() override;
     [[nodiscard]] std::optional<Keire::PlanetEnvironmentView>
     SceneViewportPlanetEnvironment(const Keire::RenderCamera& camera) override;
+    [[nodiscard]] std::vector<Keire::PlanetEnvironmentView>
+    SceneViewportPlanetAtmospheres(const Keire::RenderCamera& camera) override;
     [[nodiscard]] Keire::Ref<Keire::WindowSystem> SceneViewportWindows() const noexcept override;
     [[nodiscard]] Keire::WindowId SceneViewportWindow() const noexcept override;
     [[nodiscard]] float SceneViewportDisplayScale() const noexcept override;

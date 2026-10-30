@@ -3,12 +3,22 @@
 #include "Keire/Physics/PhysicsSystem.h"
 
 #include <optional>
+#include <span>
 
 namespace Keire::Detail
 {
     class PhysicsFrameAccess final
     {
       public:
+        // Scene statics retain motion storage so owner changes never replace their body identity.
+        [[nodiscard]] static KEIRE_API PhysicsBodyId CreateFrameBody(PhysicsWorld& world,
+                                                                    const PhysicsBodyDefinition& definition);
+
+        static KEIRE_API void ValidateFrameKinematics(const PhysicsWorld& world,
+                                                      std::span<const PhysicsBodyId> bodies);
+        static KEIRE_API void SetFrameKinematics(PhysicsWorld& world, std::span<const PhysicsBodyId> bodies,
+                                                 bool enabled);
+
         // Validate every target in a batch before changing any body velocity.
         static KEIRE_API void ValidateKinematicMove(const PhysicsWorld& world, PhysicsBodyId body, Vector3 position,
                                                     Quaternion rotation, float deltaSeconds);

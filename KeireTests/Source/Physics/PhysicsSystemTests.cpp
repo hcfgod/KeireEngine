@@ -7,6 +7,7 @@
 #include <doctest/doctest.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <limits>
 #include <numbers>
@@ -1211,4 +1212,109 @@ TEST_CASE("physics fast flight and impact remain continuous across repeated orig
             previousPosition = position;
         }
     }
+}
+
+TEST_CASE("Frame-capable static support preserves identity and resting contacts through motion and detach")
+{
+    using namespace Keire;
+    using Keire::Detail::PhysicsFrameAccess;
+    const auto system = CreatePhysics();
+    const auto world = system->CreateWorld();
+    PhysicsBodyDefinition ground;
+    ground.Position = {0.0F, -0.5F, 0.0F};
+    ground.HalfExtent = {10.0F, 0.5F, 10.0F};
+    const auto support = PhysicsFrameAccess::CreateFrameBody(*world, ground);
+    PhysicsBodyDefinition dynamic;
+    dynamic.Motion = PhysicsMotionType::Dynamic;
+    dynamic.Position = {0.0F, 0.5F, 0.0F};
+    const auto rider = world->CreateBody(dynamic);
+    constexpr float step = 1.0F / 60.0F;
+    for (int index = 0; index < 180; ++index)
+    {
+        world->Step(step);
+    }
+    REQUIRE(world->TryGetBody(rider));
+    CHECK(world->TryGetBody(rider)->Sleeping);
+    (void)world->DrainContactEvents();
+    const std::array supports{support};
+    PhysicsFrameAccess::SetFrameKinematics(*world, supports, true);
+    PhysicsFrameAccess::MoveKinematic(*world, support, ground.Position, {}, step);
+    world->Step(step);
+    const auto contacts = world->DrainContactEvents();
+    REQUIRE_FALSE(contacts.empty());
+    CHECK(std::ranges::all_of(contacts, [](const auto& contact) { return contact.Phase == ContactPhase::Stay; }));
+    for (int index = 0; index < 12; ++index)
+    {
+        auto target = world->TryGetBody(support)->Position;
+        target.X += 0.02F;
+        PhysicsFrameAccess::MoveKinematic(*world, support, target, {}, step);
+        world->Step(step);
+    }
+    CHECK(world->TryGetBody(rider)->Position.X > 0.01F);
+    CHECK_FALSE(world->TryGetBody(rider)->Sleeping);
+    (void)world->DrainContactEvents();
+    PhysicsFrameAccess::SetFrameKinematics(*world, supports, false);
+    CHECK(world->TryGetBody(support)->LinearVelocity == Vector3{});
+    world->Step(step);
+    const auto detached = world->DrainContactEvents();
+    REQUIRE_FALSE(detached.empty());
+    CHECK(std::ranges::all_of(detached, [](const auto& contact) { return contact.Phase == ContactPhase::Stay; }));
+    const auto hits = world->RayCast({.Origin = {5.0F, 3.0F, 0.0F}, .Direction = {0.0F, -1.0F, 0.0F}});
+    REQUIRE(hits.size() == 1);
+    CHECK(hits.front().Body == support);
+    world->Close();
+    system->Close();
+}
+
+TEST_CASE("Static frame promotion validates the whole batch before changing any native motion")
+{
+    using namespace Keire;
+    using Keire::Detail::PhysicsFrameAccess;
+    const auto system = CreatePhysics();
+    const auto world = system->CreateWorld();
+    const auto eligible = PhysicsFrameAccess::CreateFrameBody(*world, {});
+    PhysicsBodyDefinition ordinary;
+    ordinary.Position = {10.0F, 0.0F, 0.0F};
+    const auto unsupported = world->CreateBody(ordinary);
+    const std::array batch{eligible, unsupported};
+    CHECK_THROWS_AS(PhysicsFrameAccess::SetFrameKinematics(*world, batch, true), std::invalid_argument);
+    CHECK_THROWS_AS(PhysicsFrameAccess::ValidateKinematicMove(*world, eligible, {1.0F, 0.0F, 0.0F}, {}, 0.1F),
+                    std::invalid_argument);
+    CHECK(world->TryGetBody(eligible)->Position == Vector3{});
+    CHECK(world->TryGetBody(eligible)->Sleeping);
+    const std::array supported{eligible};
+    PhysicsFrameAccess::SetFrameKinematics(*world, supported, true);
+    CHECK_NOTHROW(PhysicsFrameAccess::ValidateKinematicMove(*world, eligible, {1.0F, 0.0F, 0.0F}, {}, 0.1F));
+    world->Close();
+    system->Close();
+}
+
+TEST_CASE("Triangle mesh frame supports can move kinematically without dynamic mass assumptions")
+{
+    using namespace Keire;
+    using Keire::Detail::PhysicsFrameAccess;
+    const auto system = CreatePhysics();
+    const auto world = system->CreateWorld();
+    CollisionCookInput input;
+    input.Kind = CollisionMeshKind::Triangle;
+    input.Vertices = {{-2.0F, 0.0F, -2.0F}, {0.0F, 0.0F, 2.0F}, {2.0F, 0.0F, -2.0F}};
+    input.Indices = {0, 1, 2};
+    PhysicsBodyDefinition definition;
+    definition.Shape = ColliderShape::TriangleMesh;
+    definition.Collision = CookCollisionMesh(std::move(input));
+    const auto support = PhysicsFrameAccess::CreateFrameBody(*world, definition);
+    const std::array supports{support};
+    PhysicsFrameAccess::SetFrameKinematics(*world, supports, true);
+    PhysicsFrameAccess::MoveKinematic(*world, support, {0.0F, 1.0F, 0.0F}, {}, 0.25F);
+    world->Step(0.25F);
+    CHECK(world->TryGetBody(support)->Position.Y == doctest::Approx(1.0F));
+    const auto hits = world->RayCast({.Origin = {0.0F, 3.0F, 0.0F}, .Direction = {0.0F, -1.0F, 0.0F}});
+    REQUIRE(hits.size() == 1);
+    CHECK(hits.front().Body == support);
+    CHECK(hits.front().Position.Y == doctest::Approx(1.0F));
+    PhysicsFrameAccess::SetFrameKinematics(*world, supports, false);
+    definition.Motion = PhysicsMotionType::Dynamic;
+    CHECK_THROWS_AS(PhysicsFrameAccess::CreateFrameBody(*world, definition), std::invalid_argument);
+    world->Close();
+    system->Close();
 }

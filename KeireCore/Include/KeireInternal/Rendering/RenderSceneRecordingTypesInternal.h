@@ -14,12 +14,14 @@
 
 #include <SDL3/SDL.h>
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <map>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace Keire::RenderBackend
@@ -165,6 +167,7 @@ namespace Keire::RenderBackend
         Vector3d WorldOrigin;
         Vector3d EnvironmentAnchor;
         std::optional<PlanetEnvironmentHistoryKey> PlanetEnvironment;
+        std::vector<std::pair<PlanetEnvironmentHistoryKey, std::array<double, 3>>> PlanetAtmospheres;
 
         [[nodiscard]] bool HasContinuousEnvironment(const CameraMotionHistoryEntry& next) const noexcept
         {
@@ -172,7 +175,8 @@ namespace Keire::RenderBackend
                    EnvironmentDirectional == next.EnvironmentDirectional && Atmosphere == next.Atmosphere &&
                    Clouds == next.Clouds && Bloom == next.Bloom && Stars == next.Stars &&
                    EnvironmentSecondsPerDay == next.EnvironmentSecondsPerDay &&
-                   EnvironmentAnchor == next.EnvironmentAnchor && PlanetEnvironment == next.PlanetEnvironment;
+                   EnvironmentAnchor == next.EnvironmentAnchor && PlanetEnvironment == next.PlanetEnvironment &&
+                   PlanetAtmospheres == next.PlanetAtmospheres;
         }
     };
 

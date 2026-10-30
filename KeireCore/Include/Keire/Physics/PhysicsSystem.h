@@ -321,6 +321,8 @@ namespace Keire
         friend class Detail::PhysicsFrameAccess;
         template <typename T, typename... Args> friend Ref<T> CreateRef(Args&&... args);
         explicit PhysicsWorld(std::unique_ptr<Impl> implementation);
+        [[nodiscard]] PhysicsBodyId CreateBodyWithFrameSupport(const PhysicsBodyDefinition& definition,
+                                                              bool frameSupport);
         std::unique_ptr<Impl> m_Impl;
     };
 

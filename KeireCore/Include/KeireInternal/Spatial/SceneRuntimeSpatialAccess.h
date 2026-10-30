@@ -46,12 +46,13 @@ namespace Keire
             [[nodiscard]] static KEIRE_API LiveFrame OwnerFrameForEntity(const SceneRuntimeWorld& world,
                                                                          const Entity& entity);
 
-            // Preserves current poses and solver state. Static colliders and parented physics are currently rejected.
+            // Preserves current poses and body identity. Scene-static supports become kinematic while attached.
             static KEIRE_API void TransferSceneOwner(SceneRuntimeWorld& world, SceneHandle scene,
                                                      const LiveFrame& destination, double snapshotTime);
 
             static KEIRE_API void ValidateFrameFollowing(const SceneRuntimeSession& session,
                                                          bool validateContent = true);
+            static KEIRE_API void SetFrameFollowing(SceneRuntimeSession& session, bool enabled);
             static KEIRE_API void PrepareFrameMotion(SceneRuntimeSession& session, const SceneFrameMotion& motion);
         };
     } // namespace Detail

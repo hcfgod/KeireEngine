@@ -12,6 +12,7 @@
 #include "KeireInternal/Rendering/EnvironmentLightingApplication.h"
 #include "KeireInternal/Rendering/EnvironmentLightingValidation.h"
 #include "KeireInternal/Rendering/MaterialPropertyValidation.h"
+#include "KeireInternal/Rendering/PlanetAtmosphereSetUniforms.h"
 #include "KeireInternal/Rendering/PlanetEnvironmentCapture.h"
 #include "KeireInternal/Rendering/RenderGeometryMathInternal.h"
 #include "KeireInternal/Rendering/TemporalAntiAliasingInternal.h"
@@ -499,6 +500,37 @@ namespace Keire::RenderBackend
 #endif
         const auto preparationStarted = std::chrono::steady_clock::now();
         auto request = std::move(pending.Request);
+        if (!request.Environment.Atmosphere.Enabled)
+        {
+            request.PlanetAtmospheres.clear();
+        }
+        if (request.PlanetAtmospheres.size() > MaximumPlanetAtmospheres)
+        {
+            throw std::length_error("Planet atmosphere rendering supports at most eight candidates per view.");
+        }
+        std::ranges::sort(request.PlanetAtmospheres, {}, &PlanetEnvironmentView::Planet);
+        std::vector<Detail::ResolvedPlanetFrame> atmosphereFrames;
+        atmosphereFrames.reserve(request.PlanetAtmospheres.size());
+        for (const auto& atmosphere : request.PlanetAtmospheres)
+        {
+            if (!atmosphereFrames.empty() && atmosphereFrames.back().Planet == atmosphere.Planet)
+            {
+                throw std::invalid_argument("Planet atmosphere candidates contain a duplicate identity.");
+            }
+            if (!atmosphereFrames.empty())
+            {
+                const auto& first = atmosphereFrames.front();
+                if (first.ObserverFrame.World != atmosphere.World ||
+                    first.ObserverFrame.Frame != atmosphere.ObserverFrame ||
+                    first.SnapshotTime != atmosphere.SnapshotTime ||
+                    first.TopologyRevision != atmosphere.TopologyRevision)
+                {
+                    throw std::invalid_argument(
+                        "Planet atmosphere candidates require one observer frame and evaluation epoch.");
+                }
+            }
+            atmosphereFrames.push_back(Detail::CapturePlanetEnvironment(atmosphere));
+        }
         if (request.PlanetEnvironment && request.EvaluatedEnvironment)
         {
             const auto planet = Detail::CapturePlanetEnvironment(*request.PlanetEnvironment);
@@ -659,6 +691,11 @@ namespace Keire::RenderBackend
         cameraHistory.WorldOrigin = camera.WorldOrigin;
         cameraHistory.EnvironmentAnchor = camera.EnvironmentAnchor;
         cameraHistory.PlanetEnvironment = MakePlanetEnvironmentHistoryKey(request.PlanetEnvironment);
+        for (const auto& atmosphere : request.PlanetAtmospheres)
+        {
+            cameraHistory.PlanetAtmospheres.emplace_back(*MakePlanetEnvironmentHistoryKey(atmosphere),
+                                                         atmosphere.ObserverFromCenterPlanetMetres);
+        }
         const bool environmentDirectional = request.EvaluatedEnvironment && request.EvaluatedEnvironment->Directional;
         packet.TemporalHistoryContinuous = previousCamera != CameraMotionHistory.end() && acceptedFrameId != 0U &&
                                            previousCamera->second.Frame == acceptedFrameId - 1U &&
@@ -670,6 +707,7 @@ namespace Keire::RenderBackend
         packet.PreviousWorldOrigin =
             packet.TemporalHistoryContinuous ? previousCamera->second.WorldOrigin : camera.WorldOrigin;
         packet.Environment = request.Environment;
+        packet.PlanetAtmospheres = std::move(atmosphereFrames);
         if (request.PlanetEnvironment)
         {
             packet.PlanetFrame = Detail::CapturePlanetEnvironment(*request.PlanetEnvironment);

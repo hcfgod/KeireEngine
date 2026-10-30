@@ -621,10 +621,11 @@ namespace Keire::RenderBackend
                 const float textureLayout = environment.Empty() ? -1.0F
                                                                 : static_cast<float>(environment.EnvironmentLayout) +
                                                                       (environment.HdrEncoded ? 16.0F : 0.0F);
-                const auto sky = MakeSkyUniforms(
-                    camera, packet.Environment, lighting, observer, packet.CloudAdvectionPhase, cloudsEnabled,
-                    textureLayout, packet.StarTwinklePhase, packet.SkyColors, camera.WorldOrigin,
-                    camera.EnvironmentAnchor, packet.PlanetFrame ? &*packet.PlanetFrame : nullptr);
+                const auto sky =
+                    MakeSkyUniforms(camera, packet.Environment, lighting, observer, packet.CloudAdvectionPhase,
+                                    cloudsEnabled, textureLayout, packet.StarTwinklePhase, packet.SkyColors,
+                                    camera.WorldOrigin, camera.EnvironmentAnchor,
+                                    packet.PlanetFrame ? &*packet.PlanetFrame : nullptr, packet.PlanetAtmospheres);
                 const SDL_GPUTextureSamplerBinding binding{
                     environment.Empty() ? WhiteTexture.Texture : environment.Texture,
                     environment.Empty() ? WhiteTexture.Sampler : environment.Sampler};

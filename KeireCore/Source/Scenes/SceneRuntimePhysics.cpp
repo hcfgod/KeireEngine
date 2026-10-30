@@ -347,7 +347,12 @@ namespace Keire
                             } // Preserve an installation failure during rollback.
                         }
                     }
-                } replacement{*PhysicsWorldService, PhysicsWorldService->CreateBody(*definition)};
+                } replacement{*PhysicsWorldService, Detail::PhysicsFrameAccess::CreateFrameBody(*PhysicsWorldService, *definition)};
+                if (FrameFollowing && definition->Motion == PhysicsMotionType::Static)
+                {
+                    const std::array support{replacement.Body};
+                    Detail::PhysicsFrameAccess::SetFrameKinematics(*PhysicsWorldService, support, true);
+                }
                 if (state.Body)
                     PhysicsWorldService->DestroyBody(state.Body);
                 state.Body = replacement.Body;
@@ -874,8 +879,7 @@ namespace Keire
                 const auto character = entity.GetComponent<CharacterControllerComponent>();
                 const auto rigid = entity.GetComponent<RigidBodyComponent>();
                 if ((character && character->Enabled()) ||
-                    (collider && collider->Enabled() &&
-                     (entity.Parent() || !rigid || !rigid->Enabled() || rigid->Motion() == PhysicsMotionType::Static)))
+                    (collider && collider->Enabled() && entity.Parent()))
                 {
                     throw std::invalid_argument("Unsupported physics was added to a frame-following scene.");
                 }
@@ -893,7 +897,7 @@ namespace Keire
             for (auto& [entity, body] : PhysicsBodies)
             {
                 (void)entity;
-                if (!body.Body || body.Definition.Motion != PhysicsMotionType::Kinematic)
+                if (!body.Body || body.Definition.Motion == PhysicsMotionType::Dynamic)
                 {
                     continue;
                 }
@@ -1044,6 +1048,8 @@ namespace Keire
     {
         PendingFrameMotion.reset();
         FrameDrivenKinematics = false;
+        FrameFollowing = false;
+        FrameSupportBodies.clear();
         PhysicsBodies.clear();
         PhysicsQueryRevision = 0;
         if (PhysicsWorldService)

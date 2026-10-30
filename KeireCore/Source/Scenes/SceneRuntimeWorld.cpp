@@ -528,6 +528,34 @@ namespace Keire
                                        });
     }
 
+    std::vector<Detail::ResolvedPlanetFrame>
+    Detail::SceneRuntimePlanetAccess::ResolveAll(SceneRuntimeWorld& world, const SectorPosition& rootObserverPosition)
+    {
+        auto& state = *world.m_Impl;
+        state.RequireOwner("ResolveAllPlanets");
+        if (state.PlanetSettings.Geometry == PlanetGeometryMode::Flat)
+        {
+            return {};
+        }
+        const auto root = state.Spatial->Find(SceneRuntimeSpatialAccess::RootFrame);
+        if (state.Spatial->Identity(root) != rootObserverPosition.Identity())
+        {
+            throw std::invalid_argument("Planet observer position does not match the runtime root frame.");
+        }
+        const auto snapshots = state.PublishPlanetFrames(state.PlanetSimulationTime);
+        std::vector<ResolvedPlanetFrame> candidates;
+        candidates.reserve(state.Planets.size());
+        for (const auto& planet : state.Planets)
+        {
+            candidates.push_back(ResolvePlanetFrame(*state.Spatial, state.Spatial->Find(planet.Frame), root,
+                                                    rootObserverPosition, snapshots, state.PlanetSimulationTime,
+                                                    state.Environment.State(), planet.Planet, planet.RadiusMetres,
+                                                    state.Environment.DiscontinuityRevision()));
+        }
+        std::ranges::sort(candidates, {}, &ResolvedPlanetFrame::Planet);
+        return candidates;
+    }
+
     void Detail::SceneRuntimePlanetAccess::InitializeGravity(SceneRuntimeWorld& world)
     {
         world.m_Impl->RequireOwner("InitializePlanetGravity");
@@ -596,11 +624,20 @@ namespace Keire
             {
                 SceneRuntimeSpatialAccess::ValidateFrameFollowing(*entry.Runtime);
             }
+            else if (entry.Runtime && entry.Runtime->Physics())
+            {
+                SceneRuntimeSpatialAccess::ValidateFrameFollowing(*entry.Runtime, false);
+            }
             attachments.emplace_back(&entry, state.Spatial->Attach(state.Spatial->Find(frame)));
             ownerFrames.push_back(frame);
         }
         for (std::size_t index = 0; index < attachments.size(); ++index)
         {
+            if (attachments[index].first->Runtime && attachments[index].first->Runtime->Physics())
+            {
+                SceneRuntimeSpatialAccess::SetFrameFollowing(*attachments[index].first->Runtime,
+                    ownerFrames[index] != SceneRuntimeSpatialAccess::RootFrame);
+            }
             attachments[index].first->SpatialAttachment = std::move(attachments[index].second);
             attachments[index].first->OwnerFrame = ownerFrames[index];
         }
@@ -782,6 +819,7 @@ namespace Keire
         const auto snapshots = state.PublishPlanetFrames(snapshotTime);
         (void)ConvertFrameRotation(*state.Spatial, destination, root, snapshots, snapshotTime);
         auto attachment = state.Spatial->Attach(destination);
+        SetFrameFollowing(*entry->Runtime, identity.Frame != RootFrame);
         // The solver and Transform storage stay inertial. Only subsequent non-dynamic motion follows this owner.
         entry->SpatialAttachment = std::move(attachment);
         entry->OwnerFrame = identity.Frame;

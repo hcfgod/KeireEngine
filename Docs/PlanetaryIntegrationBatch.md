@@ -321,3 +321,23 @@ fixture declarations. Incremental rebuild47441 completed its remaining 23 steps 
 multi-atmosphere reference transport). No build remains active. These are native focused tests, not editor/GPU
 multi-planet acceptance. Scene-owner transfer is internal and rejects static colliders, characters and parented
 physics; ordinary tick faults retain existing semantics. Numerical composition is not yet wired into rendering.
+Next batch underway after 7ce20c17: runtime ResolveAll now resolves every configured atmosphere candidate from one
+published epoch, sorts by planet identity, and validates root-coordinate observer identity. Added nested far-origin
+ordering/epoch/selection-parity and invalid-frame assertions (not built). planet_composition agent owns renderer
+candidate capture, uniforms/shaders and editor resolver integration; physics_migration owns static-support
+creation/promotion and scene ownership integration. Shared World.cpp/test edits are region-separated; defer
+whole-file formatting and builds until both agents release sources. Full multi-planet cloud/fog volumes and
+unrestricted content transfers remain requirements, not established by the current batch.
+Review during active integration: added Flat-mode ResolveAll empty-result regression. Flagged promotion/contact
+stability and cross-scene prevalidation/commit allocations for physics agent. Renderer sky union transport is
+being wired first; surface aerial/cloud/fog ABI, remote GPU angular precision and visibility-budget culling remain
+required subsequent integration. A normalized/relative float representation alone does not prove arbitrary
+astronomical precision. Preview all-candidate preparation should avoid resolving nearest candidates twice.
+No build started while agents are editing; no new validation result is claimed.
+Sky increment source freeze: editor/runtime candidate collection, stable capture/history, eight-candidate uniforms
+and multi-medium sky shader are drafted with native tests. Shader validation is live in exec session75041,
+log Build/Validation/planet-multi-sky-shaders.log. Do not start duplicate generation or native build while it runs.
+Physics static-support batch is still editing: preallocated motion state permits stable-ID promotion and triangle
+mesh kinematics; live-added-support and contact tests drafted. Checkpoint reconstruction ordering must restore
+owner promotion before body velocity state; agent is correcting this before source release. No native validation
+yet. Surface/cloud/fog union transport, perplanet volumes and distant GPU precision/culling remain unfinished.

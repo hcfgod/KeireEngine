@@ -527,6 +527,7 @@ namespace Keire::RenderBackend
         Vector3d PreviousWorldOrigin;
         RenderEnvironmentSettings Environment;
         std::optional<Detail::ResolvedPlanetFrame> PlanetFrame;
+        std::vector<Detail::ResolvedPlanetFrame> PlanetAtmospheres;
         std::array<std::array<double, 2>, MaximumCloudLayers> CloudAdvectionPhase{};
         double StarTwinklePhase = 0.0;
         SkyColorUniforms SkyColors;

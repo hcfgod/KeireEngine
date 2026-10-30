@@ -38,6 +38,10 @@ namespace Keire::Detail
         [[nodiscard]] static KEIRE_API std::optional<ResolvedPlanetFrame>
         ResolveSelected(SceneRuntimeWorld& world, const SectorPosition& rootObserverPosition);
 
+        // Same evaluation epoch for all candidates; stable planet identity order also defines opaque-hit ties.
+        [[nodiscard]] static KEIRE_API std::vector<ResolvedPlanetFrame>
+        ResolveAll(SceneRuntimeWorld& world, const SectorPosition& rootObserverPosition);
+
         static KEIRE_API void InitializeGravity(SceneRuntimeWorld& world);
 
         [[nodiscard]] static KEIRE_API PlanetRuntimeCheckpoint CaptureCheckpoint(const SceneRuntimeWorld& world);

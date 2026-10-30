@@ -306,6 +306,7 @@ void KeireEditor::SceneViewportPanel::Draw(Keire::UiFrame& ui)
         renderRequest.Grid = m_Gizmos->Settings().Grid;
         renderRequest.EvaluatedEnvironment = m_Controller.SceneViewportEnvironmentLighting();
         renderRequest.PlanetEnvironment = m_Controller.SceneViewportPlanetEnvironment(camera);
+        renderRequest.PlanetAtmospheres = m_Controller.SceneViewportPlanetAtmospheres(camera);
         const auto& materialTime = m_Controller.SceneViewportTime();
         renderRequest.MaterialTimeSeconds = static_cast<float>(materialTime.TimeSinceStartup().Seconds());
         renderRequest.MaterialDeltaSeconds = static_cast<float>(materialTime.DeltaTime().Seconds());
@@ -501,6 +502,7 @@ void KeireEditor::SceneViewportPanel::Draw(Keire::UiFrame& ui)
             Keire::SceneRenderRequest renderRequest{renderScene, m_CameraPreviewView, false, environment};
             renderRequest.EvaluatedEnvironment = m_Controller.SceneViewportEnvironmentLighting();
             renderRequest.PlanetEnvironment = m_Controller.SceneViewportPlanetEnvironment(previewCamera);
+            renderRequest.PlanetAtmospheres = m_Controller.SceneViewportPlanetAtmospheres(previewCamera);
             const auto& materialTime = m_Controller.SceneViewportTime();
             renderRequest.MaterialTimeSeconds = static_cast<float>(materialTime.TimeSinceStartup().Seconds());
             renderRequest.MaterialDeltaSeconds = static_cast<float>(materialTime.DeltaTime().Seconds());

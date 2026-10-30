@@ -513,6 +513,9 @@ namespace Keire
         /// Omission retains legacy flat cloud geometry and the authored atmosphere placement.
         std::optional<PlanetEnvironmentView> PlanetEnvironment;
         SceneGridSettings Grid;
+        /// Additional resolved atmosphere candidates, including the selected planet. Empty preserves legacy rendering.
+        /// Renderer currently accepts at most eight; overflow is rejected, never silently truncated.
+        std::vector<PlanetEnvironmentView> PlanetAtmospheres;
     };
 
     struct RenderCapabilities

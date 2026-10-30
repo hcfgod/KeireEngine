@@ -1,12 +1,39 @@
 #include "KeireInternal/Rendering/AtmosphereUniforms.h"
 #include "KeireInternal/Rendering/EnvironmentViewCoordinates.h"
 #include "KeireInternal/Rendering/FogViewUniforms.h"
+#include "KeireInternal/Rendering/PlanetAtmosphereSetUniforms.h"
 
 #include <doctest/doctest.h>
 
 #include <array>
 #include <limits>
 #include <stdexcept>
+#include <vector>
+
+TEST_CASE("Multiple planet atmosphere packing retains relative centers and rejects candidate overflow")
+{
+    using namespace Keire::RenderBackend;
+    Keire::AtmosphereSettings settings;
+    settings.Enabled = true;
+    std::vector<Keire::Detail::ResolvedPlanetFrame> frames(2);
+    frames[0].RadiusMetres = 6'360'000.0;
+    frames[0].ObserverFromCenterPlanetMetres = {0.125, 6'360'100.0, 0.0};
+    frames[1].RadiusMetres = 1'000'000.0;
+    frames[1].ObserverFromCenterPlanetMetres = {2'000'000.0, 0.0, 0.0};
+    const auto packed = MakePlanetAtmosphereSetUniforms(settings, {0.0F, -1.0F, 0.0F}, frames);
+    CHECK(packed.Controls[0] == 2);
+    CHECK(packed.Media[0].ObserverRadius.X == doctest::Approx(0.000125));
+    CHECK(packed.Media[1].ObserverRadius.X == doctest::Approx(2000.0));
+    CHECK(packed.Media[1].ObserverRadius.W == doctest::Approx(1000.0));
+    CHECK(packed.Media[0].SunHeight == packed.Media[1].SunHeight);
+    frames.resize(MaximumPlanetAtmospheres + 1, frames[0]);
+    CHECK_THROWS_AS(MakePlanetAtmosphereSetUniforms(settings, {}, frames), std::length_error);
+    settings.Enabled = false;
+    CHECK(MakePlanetAtmosphereSetUniforms(settings, {}, frames).Controls[0] == 0);
+    settings.Enabled = true;
+    frames.resize(1);
+    CHECK(MakePlanetAtmosphereSetUniforms(settings, {}, frames).Controls[0] == 0);
+}
 
 TEST_CASE("Atmosphere and fog retain local observer detail around distant environment anchors")
 {

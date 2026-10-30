@@ -15,9 +15,27 @@
 #include <map>
 #include <optional>
 #include <string>
+#include <vector>
 
 namespace Keire::Internal
 {
+    [[nodiscard]] inline std::vector<PlanetEnvironmentView> CaptureRuntimePlanetAtmospheres(SceneRuntimeWorld& world,
+                                                                                            const RenderCamera& camera)
+    {
+        const auto localObserver = Math::TransformPoint(Math::Inverse(camera.View), {});
+        const Detail::SectorPosition origin({1, 1}, {},
+                                            {camera.WorldOrigin.X, camera.WorldOrigin.Y, camera.WorldOrigin.Z});
+        const auto observer = origin.Translated({localObserver.X, localObserver.Y, localObserver.Z});
+        const auto frames = Detail::SceneRuntimePlanetAccess::ResolveAll(world, observer);
+        std::vector<PlanetEnvironmentView> result;
+        result.reserve(frames.size());
+        for (const auto& frame : frames)
+        {
+            result.push_back(Detail::ToPlanetEnvironmentView(frame));
+        }
+        return result;
+    }
+
     [[nodiscard]] inline std::optional<PlanetEnvironmentView>
     CaptureRuntimePlanetEnvironment(SceneRuntimeWorld& world, const RenderCamera& camera)
     {
@@ -170,6 +188,7 @@ namespace Keire::Internal
             request->DrawSceneContributions = drawSceneContributions;
             request->EvaluatedEnvironment = Detail::SceneRuntimeEnvironmentAccess::CaptureLighting(*world);
             request->PlanetEnvironment = CaptureRuntimePlanetEnvironment(*world, view->Camera());
+            request->PlanetAtmospheres = CaptureRuntimePlanetAtmospheres(*world, view->Camera());
         }
         return request;
     }

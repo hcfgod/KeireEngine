@@ -1295,7 +1295,7 @@ namespace
                      }
                      state->Session->RestorePhysicsWorldCheckpoint(checkpoint);
                  },
-                 .RestoreAfter = {"runtime.scene"}});
+                 .RestoreAfter = {"runtime.world.planets"}});
             Replay()->RegisterSerializer(
                 {.Id = "runtime.world.planets",
                  .Version = 1,
@@ -1328,7 +1328,7 @@ namespace
                      const auto checkpoint = Keire::Detail::PlanetRuntimeCheckpointRecord::Decode(record);
                      Keire::Detail::SceneRuntimePlanetAccess::RestoreCheckpoint(*world, checkpoint);
                  },
-                 .RestoreAfter = {"runtime.scene.physics"}});
+                 .RestoreAfter = {"runtime.scene"}});
             Replay()->RegisterSerializer(
                 {.Id = "runtime.scene.presentation",
                  .Version = 1,

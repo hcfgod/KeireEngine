@@ -1,5 +1,6 @@
 #include "Keire/Core.h"
 #include "KeireInternal/Scenes/SceneRuntimeRenderingInternal.h"
+#include "KeireInternal/Scenes/SceneRuntimeIdentityAccess.h"
 #include "KeireInternal/Spatial/PlanetProjectFrameResolver.h"
 #include "KeireInternal/Spatial/PlanetRuntimeCheckpointRecord.h"
 #include "KeireInternal/Spatial/SceneRuntimePlanetAccess.h"
@@ -295,7 +296,17 @@ TEST_CASE("Runtime nearest planet selection matches preview for nested far-origi
         CHECK(runtime->Planet == editor->Planet);
         CHECK(runtime->ObserverFromCenterPlanetMetres == editor->ObserverFromCenterPlanetMetres);
         CHECK(runtime->Planet == (offset <= 500.0 ? primary.Planet : moon.Planet));
+        const auto candidates = SceneRuntimePlanetAccess::ResolveAll(*fixture.World, observer);
+        REQUIRE(candidates.size() == 2);
+        CHECK(candidates[0].Planet == primary.Planet);
+        CHECK(candidates[1].Planet == moon.Planet);
+        CHECK(candidates[0].SnapshotTime == candidates[1].SnapshotTime);
+        CHECK(candidates[0].TopologyRevision == candidates[1].TopologyRevision);
+        const auto& selected = candidates[runtime->Planet == primary.Planet ? 0 : 1];
+        CHECK(selected.ObserverFromCenterPlanetMetres == runtime->ObserverFromCenterPlanetMetres);
     }
+    CHECK_THROWS_AS(SceneRuntimePlanetAccess::ResolveAll(*fixture.World, SectorPosition({1, 2}, {}, {})),
+                    std::invalid_argument);
     auto checkpoint = SceneRuntimePlanetAccess::CaptureCheckpoint(*fixture.World);
     checkpoint = PlanetRuntimeCheckpointRecord::Decode(PlanetRuntimeCheckpointRecord::Encode(checkpoint));
     CHECK(checkpoint.Settings.Selection == PlanetSelectionMode::NearestSurface);
@@ -308,6 +319,9 @@ TEST_CASE("Runtime nearest planet selection matches preview for nested far-origi
     REQUIRE(view);
     CHECK(view->Planet == moon.Planet);
     CHECK(view->ObserverFromCenterPlanetMetres[1] == doctest::Approx(101.0));
+    settings.Geometry = PlanetGeometryMode::Flat;
+    SceneRuntimePlanetAccess::ConfigureProject(*fixture.World, settings);
+    CHECK(SceneRuntimePlanetAccess::ResolveAll(*fixture.World, observer).empty());
 }
 
 TEST_CASE("Scene owner transfer advances kinematic roots while dynamic bodies remain inertial")
@@ -323,7 +337,13 @@ TEST_CASE("Scene owner transfer advances kinematic roots while dynamic bodies re
     auto support = scene->CreateEntity("Kinematic support");
     support.GetComponent<TransformComponent>()->SetLocalPosition({10.0F, 0.0F, 0.0F});
     support.AddComponent<ColliderComponent>();
-    support.AddComponent<RigidBodyComponent>()->SetMotion(PhysicsMotionType::Kinematic);
+    SUBCASE("Authored kinematic support")
+    {
+        support.AddComponent<RigidBodyComponent>()->SetMotion(PhysicsMotionType::Kinematic);
+    }
+    SUBCASE("Authored static support without a rigid body")
+    {
+    }
     auto moving = scene->CreateEntity("Inertial body");
     moving.GetComponent<TransformComponent>()->SetLocalPosition({0.0F, 10.0F, 0.0F});
     moving.AddComponent<ColliderComponent>();
@@ -380,10 +400,11 @@ TEST_CASE("Scene owner transfer advances kinematic roots while dynamic bodies re
 
     CHECK_THROWS_AS(SceneRuntimeSpatialAccess::TransferSceneOwner(*fixture.World, handle, frames.Find(1), 0.0),
                     std::invalid_argument);
-    runtimeMarker.AddComponent<ColliderComponent>();
+    const auto unsupportedController = runtimeMarker.AddComponent<CharacterControllerComponent>();
     CHECK_THROWS_AS(SceneRuntimeSpatialAccess::TransferSceneOwner(*fixture.World, handle, frames.Find(2), 0.25),
                     std::invalid_argument);
     CHECK_NOTHROW(SceneRuntimeSpatialAccess::TransferSceneOwner(*fixture.World, handle, frames.Find(1), 0.25));
+    unsupportedController->SetEnabled(false);
     REQUIRE(fixture.World->Step(0.25F));
     CHECK(runtimeSupport.GetComponent<TransformComponent>()->WorldPositionPrecise() == position);
     CHECK(session->Physics()->TryGetBody(body)->LinearVelocity == Vector3{});
@@ -400,6 +421,8 @@ TEST_CASE("Scene owner transfer rejects unsupported content before changing atta
     auto scene = CreateRef<Scene>(AssetId::Generate(), SceneAsset::EmptyDefinition());
     auto entity = scene->CreateEntity("Static support");
     entity.AddComponent<ColliderComponent>();
+    auto parent = scene->CreateEntity("Unsupported physics parent");
+    entity.GetComponent<TransformComponent>()->SetParent(parent);
     auto session = CreateRef<SceneRuntimeSession>(scene, fixture.Assets, Ref<AudioSystem>{}, fixture.Physics);
     const auto handle = fixture.World->Adopt(session);
     session->Play();
@@ -413,4 +436,80 @@ TEST_CASE("Scene owner transfer rejects unsupported content before changing atta
     FrameRegistry other(1);
     CHECK_THROWS_AS(SceneRuntimeSpatialAccess::TransferSceneOwner(*fixture.World, handle, other.Find(1), 0.0),
                     std::invalid_argument);
+}
+
+TEST_CASE("New and replacement static supports join an already following scene")
+{
+    using namespace Keire;
+    using namespace Keire::Detail;
+    PlanetRuntimeFixture fixture;
+    auto planet = TestPlanet();
+    planet.ParentCenter = SectorPosition({1, 1}, {}, {});
+    planet.AngularVelocity = {0.0, 0.5, 0.0};
+    SceneRuntimePlanetAccess::Configure(*fixture.World, {planet});
+    auto scene = CreateRef<Scene>(AssetId::Generate(), SceneAsset::EmptyDefinition());
+    auto session = CreateRef<SceneRuntimeSession>(scene, fixture.Assets, Ref<AudioSystem>{}, fixture.Physics);
+    const auto handle = fixture.World->Adopt(session);
+    session->Play();
+    fixture.World->Pause();
+    const auto& frames = SceneRuntimeSpatialAccess::Frames(*fixture.World);
+    SceneRuntimeSpatialAccess::TransferSceneOwner(*fixture.World, handle, frames.Find(2), 0.0);
+    auto support = session->RuntimeScene()->CreateEntity("Live added support");
+    support.GetComponent<TransformComponent>()->SetLocalPosition({10.0F, 0.0F, 0.0F});
+    const auto collider = support.AddComponent<ColliderComponent>();
+    REQUIRE(fixture.World->Step(0.25F));
+    const auto first = support.GetComponent<TransformComponent>()->WorldPositionPrecise();
+    CHECK(first.X == doctest::Approx(10.0 * std::cos(0.125)));
+    collider->SetHalfExtent({1.0F, 0.5F, 1.0F});
+    REQUIRE(fixture.World->Step(0.25F));
+    const auto second = support.GetComponent<TransformComponent>()->WorldPositionPrecise();
+    CHECK(second.X == doctest::Approx(10.0 * std::cos(0.25)));
+    CHECK(second.Z == doctest::Approx(-10.0 * std::sin(0.25)));
+    const auto hits = session->Physics()->RayCast({.Origin = {static_cast<float>(second.X), 4.0F, static_cast<float>(second.Z)},
+                                                  .Direction = {0.0F, -1.0F, 0.0F}});
+    REQUIRE(hits.size() == 1);
+    CHECK(session->Physics()->TryGetBody(hits.front().Body)->LinearVelocity.Z < -4.0F);
+}
+
+TEST_CASE("Reconstructed planet owner restores static support motion before body velocity checkpoint")
+{
+    using namespace Keire;
+    using namespace Keire::Detail;
+    PlanetRuntimeFixture source;
+    auto planet = TestPlanet();
+    planet.ParentCenter = SectorPosition({1, 1}, {}, {});
+    planet.AngularVelocity = {0.0, 0.5, 0.0};
+    SceneRuntimePlanetAccess::Configure(*source.World, {planet});
+    auto scene = CreateRef<Scene>(AssetId::Generate(), SceneAsset::EmptyDefinition());
+    auto support = scene->CreateEntity("Static support");
+    support.GetComponent<TransformComponent>()->SetLocalPosition({10.0F, 0.0F, 0.0F});
+    support.AddComponent<ColliderComponent>();
+    auto session = CreateRef<SceneRuntimeSession>(scene, source.Assets, Ref<AudioSystem>{}, source.Physics);
+    const auto handle = source.World->Adopt(session);
+    session->Play();
+    source.World->Pause();
+    const auto& frames = SceneRuntimeSpatialAccess::Frames(*source.World);
+    SceneRuntimeSpatialAccess::TransferSceneOwner(*source.World, handle, frames.Find(2), 0.0);
+    REQUIRE(source.World->Step(0.25F));
+    const auto planets = PlanetRuntimeCheckpointRecord::Decode(
+        PlanetRuntimeCheckpointRecord::Encode(SceneRuntimePlanetAccess::CaptureCheckpoint(*source.World)));
+    const auto physics = session->CapturePhysicsWorldCheckpoint();
+    REQUIRE(physics.Bodies.size() == 1);
+    CHECK(physics.Bodies.front().LinearVelocity.Z < -4.0F);
+
+    PlanetRuntimeFixture restored;
+    SceneRuntimePlanetAccess::Configure(*restored.World, {planet});
+    auto restoredSession = CreateRef<SceneRuntimeSession>(scene, restored.Assets, Ref<AudioSystem>{}, restored.Physics);
+    const auto restoredHandle = restored.World->Adopt(restoredSession);
+    restoredSession->Play();
+    restored.World->Pause();
+    const std::array identities{SceneRuntimeIdentityBinding{restoredHandle, planets.SceneOwners.front().Instance}};
+    SceneRuntimeIdentityAccess::Rebind(*restored.World, identities);
+    SceneRuntimePlanetAccess::RestoreCheckpoint(*restored.World, planets);
+    restoredSession->RestorePhysicsWorldCheckpoint(physics);
+    const auto recaptured = restoredSession->CapturePhysicsWorldCheckpoint();
+    REQUIRE(recaptured.Bodies.size() == 1);
+    CHECK(recaptured.Bodies.front().Position == physics.Bodies.front().Position);
+    CHECK(recaptured.Bodies.front().LinearVelocity == physics.Bodies.front().LinearVelocity);
+    CHECK(recaptured.Bodies.front().AngularVelocity == physics.Bodies.front().AngularVelocity);
 }

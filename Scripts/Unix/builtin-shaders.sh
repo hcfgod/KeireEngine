@@ -23,6 +23,7 @@ include_files=("$ROOT/KeireCore/Shaders/BuiltinLighting.hlsli" "$ROOT/KeireCore/
                "$ROOT/KeireCore/Shaders/GridAppearance.hlsli"
                "$ROOT/KeireCore/Shaders/AtmosphereMedium.hlsli"
                "$ROOT/KeireCore/Shaders/AtmosphereGround.hlsli"
+               "$ROOT/KeireCore/Shaders/PlanetAtmosphereSet.hlsli"
                "$ROOT/KeireCore/Shaders/CloudNoiseBuffer.hlsli" "$ROOT/KeireCore/Shaders/CloudVolume.hlsli" "$ROOT/KeireCore/Shaders/CloudVolumeGeometry.hlsli"
                "$ROOT/KeireCore/Shaders/PlanetaryCloudIntersections.hlsli"
                "$ROOT/KeireCore/Shaders/PlanetaryCloudGeometry.hlsli"

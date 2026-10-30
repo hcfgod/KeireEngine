@@ -623,6 +623,8 @@ namespace Keire
         std::map<EntityId, PhysicsRuntimeState> PhysicsBodies;
         std::optional<Detail::SceneFrameMotion> PendingFrameMotion;
         bool FrameDrivenKinematics = false;
+        bool FrameFollowing = false;
+        std::vector<PhysicsBodyId> FrameSupportBodies;
         std::uint64_t PhysicsQueryRevision = 0;
         std::map<EntityId, VfxRuntimeState> VfxEmitters;
         std::map<AssetId, AssetHandle<VfxSubgraphAsset>> VfxSubgraphs;

@@ -478,6 +478,7 @@ namespace Keire
             JPH::BodyID Native;
             Vector3 PendingGravityAcceleration;
             bool GravitySupported = false;
+            bool FrameCapable = false;
         };
 
         struct ContactData final
@@ -905,6 +906,12 @@ namespace Keire
 
     PhysicsBodyId PhysicsWorld::CreateBody(const PhysicsBodyDefinition& definition)
     {
+        return CreateBodyWithFrameSupport(definition, false);
+    }
+
+    PhysicsBodyId PhysicsWorld::CreateBodyWithFrameSupport(const PhysicsBodyDefinition& definition,
+                                                           const bool frameSupport)
+    {
         m_Impl->RequireOwner("CreateBody");
         if (!ValidBody(definition) || (definition.Motion == PhysicsMotionType::Dynamic && definition.Mass <= 0.0F))
             throw std::invalid_argument("Physics body definition contains invalid or non-finite values.");
@@ -952,6 +959,7 @@ namespace Keire
         JPH::BodyCreationSettings settings(shape, ToJolt(definition.Position),
                                            ToJolt(Math::Normalize(definition.Rotation)), motion, objectLayer);
         settings.mIsSensor = definition.Trigger;
+        settings.mAllowDynamicOrKinematic = frameSupport && definition.Motion == PhysicsMotionType::Static;
         settings.mMotionQuality =
             definition.Continuous ? JPH::EMotionQuality::LinearCast : JPH::EMotionQuality::Discrete;
         settings.mUserData = id.m_Value;
@@ -968,6 +976,14 @@ namespace Keire
             settings.mOverrideMassProperties = JPH::EOverrideMassProperties::CalculateInertia;
             settings.mMassPropertiesOverride.mMass = definition.Mass;
         }
+        else if (definition.Shape == ColliderShape::TriangleMesh &&
+                 (settings.mAllowDynamicOrKinematic || motion == JPH::EMotionType::Kinematic))
+        {
+            // Meshes have no volume-derived inertia. Kinematic bodies have infinite effective mass, but Jolt
+            // requires valid stored properties when allocating motion state. Dynamic meshes remain forbidden.
+            settings.mOverrideMassProperties = JPH::EOverrideMassProperties::MassAndInertiaProvided;
+            settings.mMassPropertiesOverride.SetMassAndInertiaOfSolidBox(JPH::Vec3::sOne(), 1.0F);
+        }
 
         auto& bodyInterface = m_Impl->Native.GetBodyInterface();
         const auto native = bodyInterface.CreateAndAddBody(
@@ -978,7 +994,8 @@ namespace Keire
             native, JPH::Vec3(definition.LinearVelocity.X, definition.LinearVelocity.Y, definition.LinearVelocity.Z));
         try
         {
-            m_Impl->Bodies.emplace(id.m_Value, Impl::Body{std::move(runtimeDefinition), native});
+            m_Impl->Bodies.emplace(id.m_Value, Impl::Body{std::move(runtimeDefinition), native, {}, false,
+                                                         frameSupport && definition.Motion == PhysicsMotionType::Static});
         }
         catch (...)
         {
@@ -1165,6 +1182,52 @@ namespace Keire
         found->second.Definition.Position = state.Position;
         found->second.Definition.Rotation = rotation;
         found->second.Definition.LinearVelocity = state.LinearVelocity;
+    }
+
+    PhysicsBodyId Detail::PhysicsFrameAccess::CreateFrameBody(PhysicsWorld& world,
+                                                            const PhysicsBodyDefinition& definition)
+    {
+        return world.CreateBodyWithFrameSupport(definition, true);
+    }
+
+    void Detail::PhysicsFrameAccess::ValidateFrameKinematics(const PhysicsWorld& world,
+                                                            const std::span<const PhysicsBodyId> bodies)
+    {
+        world.m_Impl->RequireOwner("ValidateFrameKinematics");
+        for (const auto body : bodies)
+        {
+            const auto found = world.m_Impl->Bodies.find(body.m_Value);
+            if (!body || found == world.m_Impl->Bodies.end() || !found->second.FrameCapable)
+            {
+                throw std::invalid_argument("Frame support requires live scene-static bodies with motion storage.");
+            }
+        }
+    }
+
+    void Detail::PhysicsFrameAccess::SetFrameKinematics(PhysicsWorld& world,
+                                                       const std::span<const PhysicsBodyId> bodies, const bool enabled)
+    {
+        ValidateFrameKinematics(world, bodies);
+        auto& nativeBodies = world.m_Impl->Native.GetBodyInterface();
+        for (const auto body : bodies)
+        {
+            auto& state = world.m_Impl->Bodies.at(body.m_Value);
+            const auto motion = enabled || state.Definition.Trigger ? JPH::EMotionType::Kinematic : JPH::EMotionType::Static;
+            const auto definitionMotion = enabled ? PhysicsMotionType::Kinematic : PhysicsMotionType::Static;
+            if (state.Definition.Motion == definitionMotion)
+            {
+                continue;
+            }
+            nativeBodies.SetLinearAndAngularVelocity(state.Native, JPH::Vec3::sZero(), JPH::Vec3::sZero());
+            nativeBodies.SetMotionType(state.Native, motion, JPH::EActivation::DontActivate);
+            nativeBodies.SetObjectLayer(state.Native, motion == JPH::EMotionType::Static ? NonMovingLayer : MovingLayer);
+            if (enabled)
+            {
+                nativeBodies.ActivateBody(state.Native);
+            }
+            state.Definition.Motion = definitionMotion;
+            state.Definition.LinearVelocity = {};
+        }
     }
 
     void Detail::PhysicsFrameAccess::ValidateKinematicMove(const PhysicsWorld& world, const PhysicsBodyId body,

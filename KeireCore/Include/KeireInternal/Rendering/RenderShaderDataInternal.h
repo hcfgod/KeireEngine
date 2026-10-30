@@ -7,6 +7,7 @@
 #include "KeireInternal/Rendering/CloudUniforms.h"
 #include "KeireInternal/Rendering/CloudVolumeViewUniforms.h"
 #include "KeireInternal/Rendering/IrradynSceneCacheInternal.h"
+#include "KeireInternal/Rendering/PlanetAtmosphereSetUniforms.h"
 #include "KeireInternal/Rendering/PlanetaryCloudUniforms.h"
 #include "KeireInternal/Rendering/SkyColorUniforms.h"
 #include "KeireInternal/Rendering/StarFieldUniforms.h"
@@ -414,9 +415,10 @@ namespace Keire::RenderBackend
         PlanetaryCloudUniforms PlanetaryCloud;
         std::array<Vector4, MaximumCloudLayers> PlanetaryCloudPhase;
         std::array<float, 4> StarOrientation;
+        PlanetAtmosphereSetUniforms PlanetAtmospheres;
     };
 
-    static_assert(sizeof(SkyUniforms) == 688U);
+    static_assert(sizeof(SkyUniforms) == 1600U);
     static_assert(offsetof(SkyUniforms, SkyColors) == 496);
 
     struct GridUniforms final

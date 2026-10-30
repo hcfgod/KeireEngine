@@ -16,6 +16,7 @@
 #include "Keire/Vfx/VfxSystem.h"
 #include "Keire/Vfx/VfxVolumeAsset.h"
 #include "KeireInternal/Physics/GravityField.h"
+#include "KeireInternal/Physics/PhysicsFrameAccess.h"
 #include "KeireInternal/Physics/MotionSettings.h"
 #include "KeireInternal/Physics/PhysicsOriginTranslation.h"
 #include "KeireInternal/Scenes/SceneRuntimeSessionImpl.h"
@@ -61,13 +62,25 @@ namespace Keire
     void Detail::SceneRuntimeSpatialAccess::ValidateFrameFollowing(const SceneRuntimeSession& session,
                                                                    const bool validateContent)
     {
-        const auto& state = *session.m_Impl;
+        auto& state = *session.m_Impl;
         state.RequireOwner("ValidateFrameFollowing");
         if (state.InvokingCallback || !state.Runtime || !state.PhysicsWorldService ||
             (state.PlayState != ScenePlayState::Playing && state.PlayState != ScenePlayState::Paused))
         {
             throw std::logic_error("Frame following requires an active session outside callbacks.");
         }
+        std::vector<PhysicsBodyId> supports;
+        supports.reserve(state.PhysicsBodies.size());
+        for (const auto& [entity, body] : state.PhysicsBodies)
+        {
+            (void)entity;
+            if (body.Body && body.Definition.Motion == PhysicsMotionType::Static)
+            {
+                supports.push_back(body.Body);
+            }
+        }
+        PhysicsFrameAccess::ValidateFrameKinematics(*state.PhysicsWorldService, supports);
+        state.FrameSupportBodies.swap(supports);
         if (!validateContent)
         {
             return;
@@ -84,18 +97,28 @@ namespace Keire
             {
                 continue;
             }
-            const auto body = entity.GetComponent<RigidBodyComponent>();
-            if (entity.Parent() || !body || !body->Enabled() || body->Motion() == PhysicsMotionType::Static)
+            if (entity.Parent())
             {
                 throw std::invalid_argument(
-                    "Planet owner transfer requires unparented dynamic or kinematic colliders.");
+                    "Planet owner transfer currently requires unparented colliders.");
             }
         }
+    }
+
+    void Detail::SceneRuntimeSpatialAccess::SetFrameFollowing(SceneRuntimeSession& session, const bool enabled)
+    {
+        auto& state = *session.m_Impl;
+        PhysicsFrameAccess::SetFrameKinematics(*state.PhysicsWorldService, state.FrameSupportBodies, enabled);
+        state.FrameFollowing = enabled;
     }
 
     void Detail::SceneRuntimeSpatialAccess::PrepareFrameMotion(SceneRuntimeSession& session,
                                                                const SceneFrameMotion& motion)
     {
+        if (!session.m_Impl->FrameFollowing)
+        {
+            SetFrameFollowing(session, true);
+        }
         session.m_Impl->PendingFrameMotion = motion;
     }
 

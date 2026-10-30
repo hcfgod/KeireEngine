@@ -1,4 +1,5 @@
 #include "AtmosphereGround.hlsli"
+#include "PlanetAtmosphereSet.hlsli"
 #include "CloudLayered.hlsl"
 #include "SkyColorGradient.hlsli"
 
@@ -41,6 +42,7 @@ cbuffer SkyConstants : register(b0, space3)
     PlanetaryCloudGeometry PlanetaryCloud;
     float4 PlanetaryCloudPhase[2];
     float4 StarOrientation;
+    PlanetAtmosphereSet PlanetAtmospheres;
 };
 
 Texture2D EnvironmentTexture : register(t0, space2);
@@ -178,6 +180,36 @@ float3 AtmosphereSunTransmission(float3 position)
 
 float3 AtmosphereRadiance(float3 direction, out float3 backgroundTransmission, out float3 sunRadiance)
 {
+    if (PlanetAtmospheres.Controls.x > 1U)
+    {
+        uint ground;
+        float endDistance;
+        const AtmosphereTransport air = IntegratePlanetAtmosphereSet(0.0F, direction, 3.0e30F,
+            PlanetAtmospheres, true, true, ground, endDistance);
+        sunRadiance = 0.0F;
+        backgroundTransmission = ground == KEIRE_MAX_PLANET_ATMOSPHERES ? air.Transmission : 0.0F;
+        float3 radiance = air.Radiance;
+        if (ground < KEIRE_MAX_PLANET_ATMOSPHERES)
+        {
+            const AtmosphereMedium medium = PlanetAtmospheres.Media[ground];
+            const float3 groundOffset = direction * endDistance;
+            const float3 normal = normalize(medium.ObserverRadius.xyz + groundOffset);
+            const float3 direct = medium.SolarWidth.xyz * saturate(dot(normal, medium.SunHeight.xyz)) *
+                PlanetAtmosphereSunTransmission(groundOffset + normal * 0.001F, PlanetAtmospheres);
+            const float3 boundary = GroundReflectance.xyz * GroundReflectance.w *
+                (direct * 0.31830988618F + CloudAmbientLight.xyz);
+            return radiance + air.Transmission * boundary;
+        }
+        const float coverage = AtmosphereSunCoverage(direction, AtmosphereControls.w);
+        if (coverage > 0.0F)
+        {
+            const float sineHalfRadius = sin(AtmosphereControls.w * 0.5F);
+            sunRadiance = air.Transmission * AtmosphereSolarWidth.xyz *
+                (coverage / (12.5663706144F * sineHalfRadius * sineHalfRadius));
+            radiance += sunRadiance;
+        }
+        return radiance;
+    }
     sunRadiance = 0.0F;
     backgroundTransmission = 0.0F;
     const float pi = 3.14159265359F;
