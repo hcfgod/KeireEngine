@@ -200,3 +200,20 @@ Selection native checkpoint: DevDist KeireTests built successfully. Focused sett
 manifest and history tests pass 16 cases / 164 assertions. New coverage verifies nearest selection and ties
 in preview plus legacy manual decoding. Dedicated runtime nearest-mode and nested-frame parity coverage,
 editor build/control testing and visible transitions still remain; the existing runtime tests cover manual mode.
+
+Runtime selection and physics checkpoint: DevDist build passed; settings, runtime, manifest and physics suite
+passes 42 cases / 276310 assertions. New tests compare nested far-origin planet selection against preview,
+checkpoint round-trip, and the runtime render-camera capture. Existing physics tests cover resting/sleeping
+stacks, collision/query behavior and repeated translation rebasing up to 1e15 metres. These establish local
+simulation translation behavior, not rotating solver-frame migration or a standalone player launch.
+Editor test build remains active under exec session 5626 (233 steps); do not launch a duplicate.
+
+Standalone preparation found and fixed the external demo's inherited sandbox build-scene list: it omitted
+the flight startup scene. Only the separate EarthSpaceFlight project was changed, with backups. BuildScenes,
+BuildProfiles and Player settings are now included in the source checkpoint. AssetTool validate-project passes.
+The active editor build remains session 5626; do not run competing imports while native compilation is active.
+
+Player/runtime audit: Release, Dist and Debug player binaries are dated October 25 and cannot validate the
+new selection behavior. Use a newly built DevDist KeireRuntime with --content after cooking the flight scene.
+RuntimeRenderBenchmark now permits DevDist (reports already preserve configuration); this independent runtime
+source is not in the active editor-test target. Compilation/CLI acceptance and timing runs remain pending.

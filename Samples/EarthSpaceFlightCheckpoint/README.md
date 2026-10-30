@@ -44,3 +44,9 @@ Optimize the measured bottleneck and compare the same route without reducing acc
 Production acceptance still includes multiple-planet selection/composition, rotating physics-frame
 transfers, far-origin physics under sustained workloads, save/reload and standalone player parity,
 backend coverage and long-session stability. The scripted flight is one acceptance scenario.
+
+Player preparation: BuildScenes now includes only the flight startup scene (the inherited sandbox list
+omitted it). Player settings identify Earth Space Flight. Original external settings are backed up under
+ValidationBackups/BeforeFlightPlayerSettings. Project validation passes; a newly built standalone executable
+and its full flight still require acceptance. Export/import is deferred until native compilation completes
+to avoid recreating the shader compiler contention seen earlier.

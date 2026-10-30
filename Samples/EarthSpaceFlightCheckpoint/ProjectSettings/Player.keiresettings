@@ -1,0 +1,10 @@
+{
+  "applicationIdentifier": "com.keire.qa.earthspaceflight",
+  "linuxIcon": null,
+  "macOSIcon": null,
+  "productName": "Earth Space Flight",
+  "schemaVersion": 1,
+  "version": "0.1.0",
+  "windowTitle": "Earth Space Flight",
+  "windowsIcon": null
+}

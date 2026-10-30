@@ -47,6 +47,7 @@ namespace
 TEST_CASE("Runtime planet manifests preserve authored identity sector placement rotation and gravity")
 {
     auto planets = AuthoredPlanets();
+    planets.Selection = PlanetSelectionMode::NearestSurface;
     for (const auto gravity : {PlanetGravityMode::Uniform, PlanetGravityMode::Radial, PlanetGravityMode::Combined})
     {
         planets.Gravity = gravity;

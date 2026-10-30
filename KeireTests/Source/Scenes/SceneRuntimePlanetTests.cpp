@@ -1,5 +1,6 @@
 #include "Keire/Core.h"
 #include "KeireInternal/Scenes/SceneRuntimeRenderingInternal.h"
+#include "KeireInternal/Spatial/PlanetProjectFrameResolver.h"
 #include "KeireInternal/Spatial/PlanetRuntimeCheckpointRecord.h"
 #include "KeireInternal/Spatial/SceneRuntimePlanetAccess.h"
 #include "KeireInternal/Spatial/SceneRuntimeSpatialAccess.h"
@@ -264,4 +265,46 @@ TEST_CASE("Planet replay checkpoint restores simulation time and split environme
     REQUIRE(reapplied);
     CHECK(reapplied->DiscontinuityRevision > before->DiscontinuityRevision);
     CHECK(reapplied->ObserverFromCenterPlanetMetres == before->ObserverFromCenterPlanetMetres);
+}
+
+TEST_CASE("Runtime nearest planet selection matches preview for nested far-origin planets and checkpoint replay")
+{
+    using namespace Keire::Detail;
+    PlanetRuntimeFixture fixture;
+    const auto primary = TestPlanet();
+    auto moon = primary;
+    moon.Planet = Keire::AssetId(1, 3);
+    moon.Frame = 3;
+    moon.ParentCenter = SectorPosition({1, 2}, {}, {1000.0, 0.0, 0.0});
+    PlanetProjectSettings settings;
+    settings.Planets = {moon, primary};
+    settings.SelectedPlanet = primary.Planet;
+    settings.Geometry = PlanetGeometryMode::Planetary;
+    settings.Selection = PlanetSelectionMode::NearestSurface;
+    SceneRuntimePlanetAccess::ConfigureProject(*fixture.World, settings);
+    PlanetProjectFrameResolver preview;
+    preview.Configure(settings);
+    for (const auto offset : {0.0, 500.0, 1000.0})
+    {
+        const auto observer = primary.ParentCenter.Translated({offset, 101.0, 0.0});
+        const auto runtime = SceneRuntimePlanetAccess::ResolveSelected(*fixture.World, observer);
+        const auto editor = preview.Resolve(observer, 0.0, {});
+        REQUIRE(runtime);
+        REQUIRE(editor);
+        CHECK(runtime->Planet == editor->Planet);
+        CHECK(runtime->ObserverFromCenterPlanetMetres == editor->ObserverFromCenterPlanetMetres);
+        CHECK(runtime->Planet == (offset <= 500.0 ? primary.Planet : moon.Planet));
+    }
+    auto checkpoint = SceneRuntimePlanetAccess::CaptureCheckpoint(*fixture.World);
+    checkpoint = PlanetRuntimeCheckpointRecord::Decode(PlanetRuntimeCheckpointRecord::Encode(checkpoint));
+    CHECK(checkpoint.Settings.Selection == PlanetSelectionMode::NearestSurface);
+    SceneRuntimePlanetAccess::RestoreCheckpoint(*fixture.World, checkpoint);
+    const auto observer = primary.ParentCenter.Translated({1000.0, 101.0, 0.0});
+    CHECK(SceneRuntimePlanetAccess::ResolveSelected(*fixture.World, observer)->Planet == moon.Planet);
+    Keire::RenderCamera camera;
+    camera.WorldOrigin = {1.0e12 + 1000.0, 1.0, 0.0};
+    const auto view = Keire::Internal::CaptureRuntimePlanetEnvironment(*fixture.World, camera);
+    REQUIRE(view);
+    CHECK(view->Planet == moon.Planet);
+    CHECK(view->ObserverFromCenterPlanetMetres[1] == doctest::Approx(101.0));
 }
