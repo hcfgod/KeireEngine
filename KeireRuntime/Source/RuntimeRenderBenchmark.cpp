@@ -79,8 +79,11 @@ namespace KeireRuntime
         Impl(std::filesystem::path output, const Keire::RenderPresentMode presentMode)
             : Output(std::move(output)), PresentMode(presentMode)
         {
-            if (!Output.empty() && Keire::GetBuildInfo().Configuration != "Release")
-                throw Keire::CommandLineError("Render benchmark requires a Release runtime build.");
+            const auto configuration = Keire::GetBuildInfo().Configuration;
+            if (!Output.empty() && configuration != "Release" && configuration != "DevDist")
+            {
+                throw Keire::CommandLineError("Render benchmark requires a Release or DevDist runtime build.");
+            }
         }
 
         void Update(Keire::Application& application, const Keire::Ref<Keire::RenderSystem>& renderer)

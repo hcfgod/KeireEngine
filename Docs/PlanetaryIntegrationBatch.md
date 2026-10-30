@@ -217,3 +217,29 @@ Player/runtime audit: Release, Dist and Debug player binaries are dated October 
 new selection behavior. Use a newly built DevDist KeireRuntime with --content after cooking the flight scene.
 RuntimeRenderBenchmark now permits DevDist (reports already preserve configuration); this independent runtime
 source is not in the active editor-test target. Compilation/CLI acceptance and timing runs remain pending.
+
+Composition implementation requirements (not implemented): resolve candidate planet centers in double precision
+relative to each view, intersect atmosphere/ground intervals, and composite radiance with accumulated
+transmittance in ray order. Opaque planet hits must stop background transport; overlapping media require
+combined extinction/in-scattering rather than independently blending sky colors. Extend sky, opaque aerial
+perspective, cloud/fog integration and history identity together. Test two visible limbs, occlusion ordering,
+inside/outside transitions and overlap against a numerical reference before visual acceptance. Bound work
+using visibility culling and declared quality budgets, with diagnostics for any exceeded candidate limit.
+Reference for segment radiance/transmittance contracts: Eric Bruneton's primary implementation,
+https://ebruneton.github.io/precomputed_atmospheric_scattering/atmosphere/functions.glsl .
+
+Editor checkpoint: session 5626 completed successfully. Focused project planet, lighting preview, camera
+persistence, environment lighting/time suite passed 25 cases / 403 assertions. The existing undo/save/reload
+case is now extended to NearestSurface; its follow-up rebuild/test remains pending. Sequential batch session
+81280 builds KeireRuntime DevDist (including the benchmark guard) then KeireEditorTests. Do not duplicate it.
+
+Rebuild root cause and correction: the runtime build passed, but the editor follow-up scheduled 233 steps.
+Ninja -d explain identified the relinked KeireAssetWorker.exe as a timestamp input of every editor-test object.
+Stopped verified Ninja PID 6460 and its compiler children; session 81280 exited 1 deliberately. The generated
+Ninja repair now moves only recognized runtime asset-worker prerequisites on C/C++ compile edges to order-only
+dependencies. It preserves other inputs and link edges. Five Python regressions pass, including Unix-style edges.
+After repair the same editor dry run schedules two steps, not 233. Final build/test session 87679 is active.
+
+Final follow-up: DevDist runtime build passed (7 steps). With the dependency repair, the editor-test rebuild
+actually completed in 2 steps and the focused suite passed 25 cases / 403 assertions, including NearestSurface
+undo/save/reload. Runtime benchmark invocation and rendered performance remain unverified.

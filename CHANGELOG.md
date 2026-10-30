@@ -1,6 +1,9 @@
 # Changelog
 
 ## Unreleased
+- Treat runtime asset-worker prerequisites as order-only for generated Ninja compile edges, avoiding editor-test
+  recompilation when only the worker executable relinks; genuine source/header and link dependencies remain.
+- Allow optimized DevDist runtime benchmark captures, with build configuration retained in each report.
 - Add opt-in nearest-surface planetary environment selection per camera in editor and runtime. Planet settings
   schema 2 persists the policy; schema 1 loads with manual selection.
 - Reuse current runtime planetary frame evaluations across same-time view and gravity queries, with invalidation

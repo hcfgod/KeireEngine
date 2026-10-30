@@ -648,3 +648,9 @@ Before handing work to another maintainer:
 
 Do not claim a check passed unless it actually ran. Do not stage, commit, push, or create a pull request unless the user
 explicitly requests that Git operation.
+
+For local planetary iteration, the runtime also accepts --render-benchmark with an optimized DevDist build.
+The report records its configuration; compare like-for-like builds and do not label DevDist measurements
+as Release evidence. The standard render-benchmark.ps1 workflow remains Release. Direct cooked-content
+validation uses KeireRuntime --content <cooked-directory>; refresh both runtime and asset tool before testing
+new environment schemas. Keep asset imports and measured runs separate from native compilation.

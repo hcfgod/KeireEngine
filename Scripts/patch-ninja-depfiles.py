@@ -9,6 +9,31 @@ from pathlib import Path
 
 
 MSVC_PCH_PATH = re.compile(r"/Fp(?:\.\./)+Build/")
+COMPILE_EDGE = re.compile(r"^build .+\.(?:obj|o): (?:cxx|cc|c)_\w+ ")
+ASSET_WORKER = re.compile(r"Build/Bin/[^\s]+/([^/\s]+AssetWorker)/\1(?:\.exe)?$")
+
+
+def patch_companion_dependency(line: str) -> str:
+    """Runtime import workers must exist, but their timestamps cannot invalidate C++ objects."""
+    if not COMPILE_EDGE.match(line):
+        return line
+    content = line.rstrip("\r\n")
+    ending = line[len(content):]
+    before_order, separator, order = content.partition(" || ")
+    explicit, implicit_separator, implicit = before_order.partition(" | ")
+    if not implicit_separator:
+        return line
+    dependencies = implicit.split()
+    workers = [dependency for dependency in dependencies if ASSET_WORKER.fullmatch(dependency)]
+    if not workers:
+        return line
+    retained = [dependency for dependency in dependencies if dependency not in workers]
+    ordered = order.split() if separator else []
+    ordered.extend(worker for worker in workers if worker not in ordered)
+    result = explicit
+    if retained:
+        result += " | " + " ".join(retained)
+    return result + " || " + " ".join(ordered) + ending
 
 
 def patch_rule_block(block: list[str], source: Path) -> int:
@@ -55,6 +80,7 @@ def patch_project(path: Path) -> int:
         rule_start = index
     for index, line in enumerate(lines):
         repaired = MSVC_PCH_PATH.sub("/FpBuild/", line)
+        repaired = patch_companion_dependency(repaired)
         if repaired != line:
             lines[index] = repaired
             patched += 1

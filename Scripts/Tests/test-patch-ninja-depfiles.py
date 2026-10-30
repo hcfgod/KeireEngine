@@ -15,6 +15,32 @@ SCRIPT = ROOT / "Scripts" / "patch-ninja-depfiles.py"
 
 
 class NinjaDepfileTests(unittest.TestCase):
+    def test_unix_worker_dependency_is_order_only(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "build.ninja").write_text("subninja project.ninja\n", encoding="utf-8")
+            worker = "Build/Bin/DevDist-linux-x86_64/KeireAssetWorker/KeireAssetWorker"
+            project = root / "project.ninja"
+            project.write_text(f"build test.o: cxx_gcc test.cpp | {worker}\n", encoding="utf-8")
+            subprocess.run([sys.executable, str(SCRIPT), str(root)], check=True, capture_output=True)
+            self.assertEqual(project.read_text(encoding="utf-8"), f"build test.o: cxx_gcc test.cpp || {worker}\n")
+
+    def test_runtime_worker_is_order_only_without_changing_real_inputs_or_linking(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "build.ninja").write_text("subninja project.ninja\n", encoding="utf-8")
+            worker = "Build/Bin/DevDist-windows-x86_64/KeireAssetWorker/KeireAssetWorker.exe"
+            compile_edge = f"build test.obj: cxx_msc test.cpp | generated.h {worker} || ready.stamp\n"
+            link_edge = f"build test.exe: link_msc test.obj | engine.lib {worker}\n"
+            project = root / "project.ninja"
+            project.write_text(compile_edge + link_edge, encoding="utf-8")
+            for _ in range(2):
+                subprocess.run([sys.executable, str(SCRIPT), str(root)], check=True, capture_output=True)
+            self.assertEqual(
+                project.read_text(encoding="utf-8"),
+                f"build test.obj: cxx_msc test.cpp | generated.h || ready.stamp {worker}\n" + link_edge,
+            )
+
     def test_repairs_gcc_style_rule_and_is_idempotent(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

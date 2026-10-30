@@ -39,6 +39,7 @@ TEST_CASE("Planet document shares undo cancel persistence and external-change pr
     settings.SelectedPlanet = planet.Planet;
     settings.Geometry = PlanetGeometryMode::Planetary;
     settings.Gravity = PlanetGravityMode::Radial;
+    settings.Selection = PlanetSelectionMode::NearestSurface;
     document.UpdatePlanets(settings);
     document.CommitEdit("Configure Planet");
     CHECK(document.Dirty());
