@@ -5,9 +5,9 @@
 
 **Build worlds. Keep control.**
 
-Environment scalar controls show common scattering coefficients and planet dimensions as decimals.
+Environment scalar controls show scattering coefficients and planet dimensions as decimals without exponent notation.
 Ctrl-click a numeric field for exact entry or an arithmetic expression; display formatting does not
-reduce the stored precision. Extreme magnitudes still use scientific notation.
+reduce the stored precision. Long values use an explicit middle ellipsis in narrow fields; hover for the full value or edit it with horizontally scrolling text.
 
 Editor startup opens the saved source scene while asset refresh runs in the background. Incompatible cooked assets
 use pending or fallback presentation; Play waits for the scene's compatible dependency closure. Refresh preserves

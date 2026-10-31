@@ -396,9 +396,13 @@ namespace Keire
         if (!(minimum < maximum))
             throw std::invalid_argument("SliderFloat minimum must be less than maximum.");
         const std::string safeLabel(label);
-        return Detail::DrawNumericExpression(
-            safeLabel.c_str(), value, ImGuiDataType_Float, "%.3f", &minimum, &maximum,
-            [&](auto& candidate) { return ImGui::SliderFloat(safeLabel.c_str(), &candidate, minimum, maximum); });
+        return Detail::DrawNumericExpression(safeLabel.c_str(), value, ImGuiDataType_Float, "%.3f", &minimum, &maximum,
+                                             [&](auto& candidate)
+                                             {
+                                                 return ImGui::SliderFloat(
+                                                     safeLabel.c_str(), &candidate, minimum, maximum, "%g",
+                                                     ImGuiSliderFlags_NoInput | ImGuiSliderFlags_NoRoundToFormat);
+                                             });
     }
 
     bool UiFrame::SliderInt(std::string_view label, int& value, const int minimum, const int maximum)
@@ -472,7 +476,7 @@ namespace Keire
             [&](auto& candidate)
             {
                 return ImGui::SliderScalar(safeLabel.c_str(), ImGuiDataType_Double, &candidate, &minimum, &maximum,
-                                           Detail::ScalarDisplayFormat(candidate), ImGuiSliderFlags_NoRoundToFormat);
+                                           "%g", ImGuiSliderFlags_NoInput | ImGuiSliderFlags_NoRoundToFormat);
             });
     }
 

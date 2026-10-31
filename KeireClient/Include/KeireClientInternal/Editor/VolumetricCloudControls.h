@@ -122,7 +122,7 @@ namespace KeireEditor::Detail
             const auto variationLabel = [&](const std::uint32_t period)
             {
                 const double meters = settings.PatternSizeMeters * 4.0 * period;
-                return meters < 1000.0 ? std::format("{:.3g} m", meters) : std::format("{:.3g} km", meters / 1000.0);
+                return meters < 1000.0 ? std::format("{:.3f} m", meters) : std::format("{:.3f} km", meters / 1000.0);
             };
             const auto periodLabel = variationLabel(settings.VariationPeriod);
             ui.TextWrapped("Variation Scale");
@@ -167,7 +167,7 @@ namespace KeireEditor::Detail
             {
                 const double scale = settings.IndependentWeather ? 1.0 : 4.0;
                 const double meters = settings.PatternSizeMeters * scale * period;
-                return meters < 1000.0 ? std::format("{:.3g} m", meters) : std::format("{:.3g} km", meters / 1000.0);
+                return meters < 1000.0 ? std::format("{:.3f} m", meters) : std::format("{:.3f} km", meters / 1000.0);
             };
             ui.TextWrapped("Region Scale");
             ui.SetNextItemWidth(-1.0F);

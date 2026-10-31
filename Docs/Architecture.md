@@ -180,6 +180,13 @@ Explicit asset reveal prepares folder and search state together before selection
 even when the source revision is unchanged. Shader Graph pane sizing reserves preview space only when the canvas fits;
 opening a document schedules one initial frame operation without changing serialized node positions.
 
+Generated surface shader passes share material inputs and fixed binding/interpolator contracts. Depth/velocity
+and deferred G-buffer exclude full lighting and volumetric composition; pixel-depth offset remains available to
+both. A separate cold ABI-retention accumulator references required inputs and bindings without depending on
+final lit color. Forward and transparent color passes retain lighting and volume evaluation. Generator version
+changes invalidate cached generated programs. Graphics program metadata alone does not prove optimized DXIL
+binding compatibility: `Scripts/Validation/inspect-dxil.ps1` inspects actual binaries and compares declared resource
+bindings and input/output signatures, ignoring compiler-local resource IDs and used-component flags.
 Shader Graph activates its document undo context when its panel or child controls have focus, matching the editor's
 other document panels. Keyboard commands then use the existing context router rather than whichever asset operation
 was previously active. Output-node value controls expose connected/unconnected input defaults, not the unused master

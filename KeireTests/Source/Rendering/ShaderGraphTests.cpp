@@ -1468,7 +1468,11 @@ TEST_CASE("Shader Graph preserves seven material textures within the portable sa
 
 TEST_CASE("Seven-texture volume material compiles through the production shader importer")
 {
-    auto graph = Keire::CreateDefaultShaderGraph();
+    auto output = Keire::ShaderGraphOutput::Surface;
+    SUBCASE("Opaque") { output = Keire::ShaderGraphOutput::Surface; }
+    SUBCASE("Unlit with pixel depth offset") { output = Keire::ShaderGraphOutput::Unlit; }
+    SUBCASE("Transparent") { output = Keire::ShaderGraphOutput::Transparent; }
+    auto graph = Keire::CreateDefaultShaderGraph(output);
     std::optional<Keire::ShaderGraphNode> accumulated;
     for (std::uint32_t index = 0; index < 7U; ++index)
     {
@@ -1494,11 +1498,16 @@ TEST_CASE("Seven-texture volume material compiles through the production shader 
             accumulated = sample;
         }
     }
-    Connect(graph, *accumulated, "Result", graph.Nodes.front(), "BaseColor");
-    SUBCASE("Opaque") { graph.Output = Keire::ShaderGraphOutput::Surface; }
-    SUBCASE("Transparent")
+    Connect(graph, *accumulated, "Result", graph.Nodes.front(),
+            output == Keire::ShaderGraphOutput::Unlit ? "Color" : "BaseColor");
+    if (output == Keire::ShaderGraphOutput::Unlit)
     {
-        graph.Output = Keire::ShaderGraphOutput::Transparent;
+        auto depthOffset = Parameter("DepthOffset", Keire::ShaderGraphValueType::Scalar, 0.1F);
+        graph.Nodes.push_back(depthOffset);
+        Connect(graph, depthOffset, "Value", graph.Nodes.front(), "PixelDepthOffset");
+    }
+    if (output == Keire::ShaderGraphOutput::Transparent)
+    {
         Pin(graph.Nodes.front(), "Opacity").DefaultValue = 0.5F;
     }
     Keire::ShaderGraphCompileOptions options;
@@ -1507,7 +1516,8 @@ TEST_CASE("Seven-texture volume material compiles through the production shader 
     REQUIRE(compilation.Succeeded());
     REQUIRE(compilation.Variants.size() == 1);
     const auto& variant = compilation.Variants.front();
-    REQUIRE(nlohmann::json::parse(variant.Manifest).at("volumeLightingAbiVersion") == 14U);
+    const std::uint32_t expectedVolumeAbi = output == Keire::ShaderGraphOutput::Unlit ? 13U : 14U;
+    REQUIRE(nlohmann::json::parse(variant.Manifest).at("volumeLightingAbiVersion") == expectedVolumeAbi);
 
     // Opt-in source fixture for the separate interactive renderer acceptance pass. Never overwrite
     // an existing destination or make ordinary unit-test runs publish files into a user's project.
@@ -1517,6 +1527,8 @@ TEST_CASE("Seven-texture volume material compiles through the production shader 
         const std::filesystem::path destination(fixtureRoot);
         REQUIRE(destination.is_absolute());
         REQUIRE_FALSE(std::filesystem::exists(destination));
+        // Preserve the exact generated source for offline compiler timing and binary reflection checks.
+        WriteText(destination / "SevenTextureVolume.hlsl", variant.Hlsl);
         const auto graphBytes = Keire::ShaderGraphAsset::EncodeSource(graph);
         WriteText(destination / "SevenTextureVolume.keireshadergraph",
                   std::string_view(reinterpret_cast<const char*>(graphBytes.data()), graphBytes.size()));
@@ -1544,7 +1556,7 @@ TEST_CASE("Seven-texture volume material compiles through the production shader 
     const auto importer = Keire::CreateShaderAssetImporter();
     const auto imported = importer.ContextualImport(context, ReadBytes(manifest));
     const auto shader = Keire::ShaderAsset::Decode(imported.Bytes);
-    CHECK(shader->Definition().VolumeLightingAbiVersion == 14U);
+    CHECK(shader->Definition().VolumeLightingAbiVersion == expectedVolumeAbi);
     const bool transparent = graph.Output == Keire::ShaderGraphOutput::Transparent;
     CHECK(shader->Definition().Blend == transparent);
     CHECK(shader->Definition().DepthWrite == !transparent);

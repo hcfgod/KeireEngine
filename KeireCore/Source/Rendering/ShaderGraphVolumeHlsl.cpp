@@ -26,19 +26,20 @@ namespace Keire::Detail
 
     std::string ShaderGraphVolumeEvaluationHlsl(const std::string_view depthOffset, const bool unlit)
     {
-        std::string source;
+        // Depth offset belongs to every geometry pass; volume composition only belongs to color passes.
+        std::string source = "    const float graphSurfaceDepth = ";
+        source += depthOffset.empty() ? "input.Position.z"
+                                      : "saturate(input.Position.z + (" + std::string(depthOffset) +
+                                            ") * max(fwidth(input.Position.z), 1.0e-7F))";
+        source += ";\n#if !defined(KEIRE_PASS_DEPTH_VELOCITY) && !defined(KEIRE_PASS_DEFERRED_GBUFFER_STANDARD)\n";
         if (unlit)
         {
             source += "    if (SurfaceParameters.y < 3.5F || SurfaceParameters.y > 4.5F)\n"
                       "        graphColor *= DirectionalDirectionExposure.w;\n";
         }
-        source += "    const float graphSurfaceDepth = ";
-        source += depthOffset.empty() ? "input.Position.z"
-                                      : "saturate(input.Position.z + (" + std::string(depthOffset) +
-                                            ") * max(fwidth(input.Position.z), 1.0e-7F))";
-        source += ";\n    const float4 graphSurfaceColor = ComposeGraphVolumeSurface(graphColor, alpha, "
+        source += "    const float4 graphSurfaceColor = ComposeGraphVolumeSurface(graphColor, alpha, "
                   "SurfaceParameters.y, input.Position.xy, graphSurfaceDepth, SurfaceCloudVolume);\n"
-                  "    graphColor = graphSurfaceColor.rgb;\n";
+                  "    graphColor = graphSurfaceColor.rgb;\n#endif\n";
         return source;
     }
 

@@ -1288,7 +1288,11 @@ ShaderGraphFragmentOutput PSMain(VertexOutput input)
         source << "    const float3 graphEmission = (" << emission << ").rgb;\n";
         source << "    const float graphOpacity = saturate(" << opacity << ");\n";
         if (unlit)
+        {
+            source << "#if !defined(KEIRE_PASS_DEPTH_VELOCITY) && !defined(KEIRE_PASS_DEFERRED_GBUFFER_STANDARD)\n";
             source << "    float3 graphColor = graphBaseColor.rgb + graphEmission;\n";
+            source << "#endif\n";
+        }
         else
         {
             source << "    const float graphMetallic = saturate(" << metallic << ");\n";
@@ -1313,7 +1317,8 @@ ShaderGraphFragmentOutput PSMain(VertexOutput input)
             else
                 source << "    const float3 graphNormal = SafeNormalize(" << normal << ", input.Normal);\n";
             source << "    const float ao = saturate(" << occlusion << ");\n";
-            source << R"HLSL(    const float3 viewDirection = SafeNormalize(input.ViewDirection, graphNormal);
+            source << R"HLSL(#if !defined(KEIRE_PASS_DEPTH_VELOCITY) && !defined(KEIRE_PASS_DEFERRED_GBUFFER_STANDARD)
+    const float3 viewDirection = SafeNormalize(input.ViewDirection, graphNormal);
     const float3 lightDirection =
 SafeNormalize(-DirectionalDirectionExposure.xyz, float3(0.0F, 1.0F, 0.0F));
     const float2 lightmapUv = input.UV1 * LightmapScaleOffset.xy + LightmapScaleOffset.zw;
@@ -1394,8 +1399,10 @@ graphBaseColor.rgb * (1.0F - graphMetallic) * AmbientColorIntensity.rgb * Ambien
  transmittedEnvironment * EnvironmentParameters.y) * ao;
     float3 graphColor =
 (ambientLighting + directLighting + graphEmission) * DirectionalDirectionExposure.w;
+#endif
 )HLSL";
         }
+        source << "    float3 graphAbiColor = 0.0F.xxx;\n";
         source << "    // Keep the fixed interpolator ABI dense for DXIL PSO validation on D3D12.\n";
         source << "    if (!all(isfinite(float4(input.Normal, input.ViewDirection.x))) ||\n";
         source << "        !all(isfinite(float4(input.ViewDirection.yz, input.Tangent.xy))) ||\n";
@@ -1403,11 +1410,11 @@ graphBaseColor.rgb * (1.0F - graphMetallic) * AmbientColorIntensity.rgb * Ambien
         source << "        !all(isfinite(float4(input.Color.zw, input.WorldPosition.xy))) ||\n";
         source << "        !all(isfinite(float4(input.WorldPosition.z, input.ObjectPosition))) ||\n";
         source << "        !isfinite(input.ViewDepth))\n";
-        source << "        graphColor += input.Normal + input.Tangent + input.Bitangent + input.ViewDirection + "
+        source << "        graphAbiColor += input.Normal + input.Tangent + input.Bitangent + input.ViewDirection + "
                   "input.Color.xyz + input.WorldPosition + input.ObjectPosition + "
                   "float3(input.UV0 + input.UV1, 0.0F);\n";
         source << "    if (!all(isfinite(" << materialBindingSentinel << ")))\n";
-        source << "        graphColor += " << materialBindingSentinel << ".xyz;\n";
+        source << "        graphAbiColor += " << materialBindingSentinel << ".xyz + input.Position.xyz;\n";
         if (!unlit)
         {
             source << R"HLSL(
@@ -1426,15 +1433,119 @@ graphBaseColor.rgb * (1.0F - graphMetallic) * AmbientColorIntensity.rgb * Ambien
             ShadowMaskTexture.SampleLevel(ShadowMaskSampler, float3(retentionUv, 0.0F), 0.0F);
         const float4 retainedReflection = ReflectionProbeTexture.SampleLevel(
             ReflectionProbeSampler, float4(float3(0.0F, 0.0F, 1.0F), 0.0F), 0.0F);
-        graphColor += retentionShadow.xxx +
+        graphAbiColor += retentionShadow.xxx +
                       EnvironmentTexture.SampleLevel(EnvironmentSampler, retentionUv, 0.0F).rgb +
                       BrdfIntegrationLut.SampleLevel(BrdfIntegrationSampler, retentionUv, 0.0F).rrr +
                       retainedLightmap.rgb + retainedDirectionality.rgb + retainedMask.rgb +
                       retainedReflection.rgb +
                       CookieAtlasTexture.SampleLevel(CookieAtlasSampler, retentionUv, 0.0F).rgb;
+        // Retain resource layout without evaluating shadows, light loops, or volume transport.
+        graphAbiColor += DirectionalShadowParameters.xyz +
+                         ForwardPlusLights[0].ColorIntensity.rgb +
+                         float3(ForwardPlusTiles[0].xyz) +
+                         float3(ForwardPlusLightIndices[0].xyz) +
+                         SpatialSelectionRecords[0].ProbeIrradiance[0].rgb;
     }
 )HLSL";
         }
+        if (!screenSpace)
+        {
+            source << R"HLSL(
+    if (!all(isfinite(SurfaceCloudVolume.CameraControls)))
+    {
+#ifdef KEIRE_CLOUD_NOISE_BUFFER
+        graphAbiColor += float(VolumeCloudNoiseBuffer[0]).xxx;
+#else
+        graphAbiColor += VolumeCloudNoiseTexture.SampleLevel(
+            VolumeCloudNoiseSampler, float3(0.5F, 0.5F, 0.5F), 0.0F).rgb;
+#endif
+    }
+)HLSL";
+        }
+        // Non-color passes must retain declared resources even when their material lobe is unused.
+        // This cold path is independent of final lighting and does not invoke graph evaluation helpers.
+        source << "#if defined(KEIRE_PASS_DEPTH_VELOCITY) || defined(KEIRE_PASS_DEFERRED_GBUFFER_STANDARD)\n";
+        source << "    if (!all(isfinite(FrameParameters)))\n    {\n";
+        std::string retainedTexture;
+        std::string retainedTextureCoordinates;
+        for (const auto& property : m_Properties)
+        {
+            if (property.Type != ShaderPropertyType::Texture2D)
+            {
+                continue;
+            }
+            const auto symbol = ShaderGraphPropertySymbol(property.Name);
+            source << "        graphAbiColor += " << symbol << ".SampleLevel(" << symbol
+                   << "Sampler, input.UV0, 0.0F).rgb;\n";
+            if (retainedTexture.empty())
+            {
+                retainedTexture = symbol;
+                retainedTextureCoordinates = "input.UV0";
+            }
+        }
+        for (const auto& resource : m_Definition.Resources)
+        {
+            const auto& symbol = resource.Symbol;
+            switch (resource.Kind)
+            {
+            case ShaderGraphResourceKind::Sampler:
+                break;
+            case ShaderGraphResourceKind::StructuredBuffer:
+                source << "        graphAbiColor += float3(" << symbol << "[0].xyz);\n";
+                break;
+            case ShaderGraphResourceKind::ByteAddressBuffer:
+                source << "        graphAbiColor += float(" << symbol << ".Load(0)).xxx;\n";
+                break;
+            case ShaderGraphResourceKind::Texture2DArray:
+            case ShaderGraphResourceKind::Texture3D:
+                source << "        {\n            uint width;\n            uint height;\n            uint depth;\n";
+                source << "            " << symbol << ".GetDimensions(width, height, depth);\n";
+                source << "            graphAbiColor += float3(width, height, depth);\n        }\n";
+                if (retainedTexture.empty())
+                {
+                    retainedTexture = symbol;
+                    retainedTextureCoordinates = "float3(input.UV0, 0.0F)";
+                }
+                break;
+            case ShaderGraphResourceKind::TextureCube:
+                source << "        {\n            uint width;\n            uint height;\n";
+                source << "            " << symbol << ".GetDimensions(width, height);\n";
+                source << "            graphAbiColor += float3(width, height, 0U);\n        }\n";
+                if (retainedTexture.empty())
+                {
+                    retainedTexture = symbol;
+                    retainedTextureCoordinates = "float3(0.0F, 0.0F, 1.0F)";
+                }
+                break;
+            }
+        }
+        if (retainedTexture.empty() && !unlit)
+        {
+            retainedTexture = "DirectionalShadowTexture";
+            retainedTextureCoordinates = "float3(input.UV0, 0.0F)";
+        }
+        for (const auto& resource : m_Definition.Resources)
+        {
+            if (resource.Kind != ShaderGraphResourceKind::Sampler)
+            {
+                continue;
+            }
+            if (!retainedTexture.empty())
+            {
+                source << "        graphAbiColor += " << retainedTexture << ".SampleLevel(" << resource.Symbol << ", "
+                       << retainedTextureCoordinates << ", 0.0F).xxx;\n";
+            }
+            else if (!screenSpace)
+            {
+                source << "#ifndef KEIRE_CLOUD_NOISE_BUFFER\n";
+                source << "        graphAbiColor += VolumeCloudNoiseTexture.SampleLevel(" << resource.Symbol
+                       << ", float3(0.5F, 0.5F, 0.5F), 0.0F).rgb;\n#endif\n";
+            }
+        }
+        source << "    }\n#endif\n";
+        source << "#if !defined(KEIRE_PASS_DEPTH_VELOCITY) && !defined(KEIRE_PASS_DEFERRED_GBUFFER_STANDARD)\n";
+        source << "    graphColor += graphAbiColor;\n";
+        source << "#endif\n";
         if (screenSpace && !ui)
         {
             // Keep the reserved scene sampler in the ABI even for effects that only generate a color.
@@ -1451,10 +1562,18 @@ graphBaseColor.rgb * (1.0F - graphMetallic) * AmbientColorIntensity.rgb * Ambien
                << ");\n";
         source << "    if (SurfaceParameters.y > 0.5F && SurfaceParameters.y < 1.5F)\n";
         source << "        clip(alpha - SurfaceParameters.x);\n";
+
         if (!screenSpace)
+        {
             source << ShaderGraphVolumeEvaluationHlsl(hasPixelDepthOffset ? pixelDepthOffset : "", unlit);
+        }
+
+        source << "#if defined(KEIRE_PASS_DEPTH_VELOCITY) || defined(KEIRE_PASS_DEFERRED_GBUFFER_STANDARD)\n";
+        source << "    const float graphAbiRetention = dot(graphAbiColor, 1.0F.xxx);\n";
+        source << "#else\n";
         source << "    const float graphAbiRetention =\n";
         source << "        all(isfinite(float4(graphColor, alpha))) ? 0.0F : graphColor.x;\n";
+        source << "#endif\n";
         const bool premultiplied =
             m_Definition.Output == ShaderGraphOutput::Transparent || m_Definition.Output == ShaderGraphOutput::Decal;
         source << "#if defined(KEIRE_PASS_DEFERRED_GBUFFER_STANDARD)\n";

@@ -3,11 +3,22 @@
 This coordination plan supplements [the large-world acceptance plan](LargeWorldAndEnvironmentPlan.md).
 It does not replace its requirements or establish that planetary travel is ready.
 
+## Current status — October 31
+
+This section summarizes current evidence; dated notes below are historical checkpoints, not current completion claims.
+
+- Implemented: multi-planet sky candidate composition, planetary scene ownership and frame-following rigid-body support, pass-specific Shader Graph generation, and decimal numeric editor fields.
+- Verified this batch: UI integration (35 cases / 1,477 assertions), focused UI/physics (10 cases / 3,193 assertions), and planetary integration (24 cases / 470 assertions). The reconstruction regression resumes contacts at both the origin and a distant translation.
+- Shader investigation: expensive final-lighting ABI retention caused the depth/G-buffer compile slowdown. Separately, cloud-density loop expansion caused forward compilation to exceed the importer deadline. Keeping the same cloud samples in a loop measured approximately 12 seconds instead of 37 seconds. Combined importer tests and exact DXIL binding comparisons are still required.
+- Outstanding: additive-scene replay consistency; character and parented-collider transfer support; multi-planet surface/cloud/fog composition; distant GPU precision and atmosphere visibility admission; authoring, standalone parity, long-session and measured transition performance acceptance.
+- The updated decimal controls still need visual editor validation. Passing component tests does not establish production readiness for planetary travel.
+
+The user's later instructions authorize committing and pushing tested work on master and continuing beyond the earlier account-usage checkpoint. Preserve user QA content and avoid full production packaging for this development batch.
 ## Order and ownership
 
 Finish the current fog editor checkpoint first. Then implement a coordinated code batch on `master`,
-followed by native/GPU checks and editor testing. Do not create branches, commit, or publish as part of
-this batch without separate authorization. Preserve the existing staged work and user QA scenes.
+followed by native/GPU checks and editor testing. The original instruction was not to create branches, commit, or publish as part of
+this batch without separate authorization. Commit/push authorization has since been given; production publishing is not part of this checkpoint. Preserve the existing staged work and user QA scenes.
 
 | Owner | Proposed work | Boundaries |
 | --- | --- | --- |
@@ -341,3 +352,55 @@ Physics static-support batch is still editing: preallocated motion state permits
 mesh kinematics; live-added-support and contact tests drafted. Checkpoint reconstruction ordering must restore
 owner promotion before body velocity state; agent is correcting this before source release. No native validation
 yet. Surface/cloud/fog union transport, perplanet volumes and distant GPU precision/culling remain unfinished.
+
+## 2026-10-31 shader compilation blocker
+
+User requested verification before changing the generator. Repeated captured DXIL fragment compiles with identical compiler/source inputs except the final ABI-retention addition: depth/velocity 48.8037 s versus 0.9364 s; G-buffer 43.6121 s versus 1.6928 s. All exited zero. This confirms the final-lit-color dependency keeps unnecessary work observable; removing retention altogether is not production-safe. Actual DXIL reflection of the diagnostic depth shortcut loses inputs (13 to 3) and resources (41 to 4).
+
+Generator fix is drafted: separate cheap ABI accumulator; exclude full lighting and volume composition from depth/G-buffer; keep pixel depth offset independent; bump generated shader version40. Added unlit seven-texture depth-offset importer coverage and opt-in generated-source capture. New Scripts/Validation/inspect-dxil.ps1 compares actual compiled resource and input/output signatures.
+
+DevDist KeireTests build is running in session45673, log Build/Validation/shader-pass-isolation-build.log. No updated production-fix tests or reflection parity claimed yet. After build: run generated-HLSL importer, seven-texture and Starter regressions, compile exported HLSL directly for both passes and inspect actual reflection. Do not run competing builds. Preserve existing local FogDensity loop hint and ShaderCompilerJobs diagnostic changes until reviewed.
+
+Follow-up audit: custom resource declarations already require AllowOfflineResourceDeclarations; normal runtime compilation rejects them explicitly. The sampler-only edge is therefore outside the supported runtime importer path, not a new production blocker. Preserve that rejection. Planetary completion scope remains unchanged and unfinished; prioritize this shader-import blocker before returning to it.
+
+Checkpoint audit against committed10f1dce2: runtime physics RestoreAfter runtime.world.planets, which depends on runtime.scene, is present; reconstructed-owner velocity test also exists. Remaining validation is full saved-scene reconstruction followed by ticks/contact checks at far origin, Replay rollback chain, and additive-scene save/restore (runtime serializers currently capture primary session while planet owners include all entries). This is source evidence, not a new test pass. Build45673 remains live; do not restart it because the pass needs a provenance-triggered621-step rebuild.
+
+Decimal Environment UI request (2026-10-31): verified g-format fallback and separate expression-edit path; cloud distance summaries also used general notation. Reviewed seven-file implementation is staged only as scratch copies under Build/Validation/DecimalUiDraft (not applied to actual sources). It renders bounded decimal presentation with explicit middle elision/full tooltip and edits full fixed-decimal round-trip values, preserving storage and drag precision. Standalone formatter checks passed extremes, promoted-float readability and GM. Headless ImGui harness passed25cases: drag keyboard/Ctrl/doubleclick and slider keyboard/Ctrl across -0,1e-20,1e30,denorm_min,max, with edit→Escape and Enter preservation. Actual UiFrame/engine tests and visual checks remain pending after application.
+
+A near/1e12 full scene→owner→physics restoration/contact test is drafted in Build/Validation/SceneRuntimePlanetTests.next.cpp; original test file SHA256938EBCCE18111F8B2940935D1D63CA254AB83918470B980893648F9B4D1C8409. It is not applied/built yet. Generator's missing SV_Position cold retention remains a probable exact-reflection mismatch to check after currentbuild.
+
+Prepared Build/Validation/run-shader-pass-isolation.ps1 runs importer regressions, captures actual Starter-generated HLSL during project creation, times both fixed DXIL passes, and compares against captured original binaries. Run only after build45673 successfully terminates. Its strict comparison may reveal the expected SV_Position difference; fix then rerun rather than weakening the gate.
+
+Build45673 completed621steps successfully. Applied the reviewed decimal UI and far-origin reconstruction drafts, corrected Unlit test construction to create the proper Color pin, and explicitly retained SV_Position through the existing cold material-sentinel branch. First incremental29908 passed7steps; copied draft timestamps hid two test recompiles, so refreshed destination timestamps and removed duplicate-local warnings. Rebuild7303 passed6steps and explicitly compiled both UiPanelInputTests and SceneRuntimePlanetTests.
+
+Focused validation passed10cases/3193assertions: decimal display/edit arithmetic and activation, far-origin frame-following full reconstruction with resumed support contacts at0 and1e12, static support promotion/identity, triangle mesh support, live-added supports, and owner-before-body restore. Log Build/Validation/ui-planet-focused-tests.log. This does not establish arbitrary scene-content migration or additive-world replay parity.
+
+Shader importer/capture/timing/reflection harness now running session82465. Logs under Build/Validation/ShaderPassIsolation. No corrected-DXIL parity/timing claimed until terminal.
+
+Shader harness82465 terminated failure: generated-HLSL importer andStarter schema passed, seven-texture opaque+transparent forwardDXIL timed out30s; unlit subcase had incorrect lit-ABI14 expectation (corrected to13, notyetrebuilt). Corrected-depth/Gbuffer timing/reflection stillpending because harnessstopped beforeStartercapture. Agent shader_abi_audit investigating forwardretention A/B in scratch. Broad UI integration35cases/1477assertions passed. No shaderproduction completion claimed.
+
+### Shader compilation and decimal-field verification
+
+The forward-pass slowdown was independently isolated to cloud-density expansion: the unchanged forward-retention baseline took 37.173 seconds, while preserving the three-sample density loop reduced current-generator compilation to 12.584 seconds. Removing the earlier fog-loop diagnostic annotation further measured 11.842 seconds. The production change preserves sample count, order, and effects; it does not raise the importer timeout. Final combined importer and binary ABI checks remain pending.
+
+Decimal UI integration passed 35 cases / 1,477 assertions, and targeted planetary integration passed 24 cases / 470 assertions. Numeric fields display decimal notation and retain exact round-trip editing, with full tooltips for abbreviated long values. Editor visual acceptance remains pending.
+
+## Earth and Mars playable showcase — requested October 31
+
+Create a separate self-contained sample project; do not overwrite CloudIsolation or EarthSpaceFlight QA content. Reuse validated flight/controller code where suitable, but replace the geometric acceptance fixture with authored presentation and complete player workflows.
+
+Required experience:
+
+- An Earth surface launch site with convincing materials, terrain silhouettes, atmospheric depth, volumetric clouds, configurable day/night lighting, and visible stars in space.
+- A distinct Mars destination with authored surface materials, atmosphere configuration, and a landing site; preserve physically meaningful world coordinates while offering accelerated travel for testing.
+- FPS walking, ship boarding, manual flight, smooth cockpit/follow camera switching, landing, and safe disembarking. Retain an optional 2–3 minute guided demonstration route for repeatable comparisons.
+- Clear controls and accessible UI, useful defaults and quality settings, recoverable errors, and no hidden dependence on unrelated QA assets.
+- Test surface-to-space transitions, both destinations, repeated boarding/landing, save/reload, collisions and gravity, and standalone parity. Capture frame-time distributions at fixed quality/resolution; do not substitute screenshots for temporal or performance acceptance.
+
+Sequence: complete current shader/UI verification; establish the separate project and minimal end-to-end playable route; fix planetary integration exposed by that route; then refine assets/lighting and perform visual and standalone acceptance. The existing procedural flight is a reference implementation, not a completed showcase or proof of production readiness.
+
+October 31 combined checkpoint: built-in shader regeneration and the 13-step DevDist KeireTests build completed successfully. Combined importer/Starter/DXIL reflection validation is now running; no passing result claimed yet. The separate PlanetaryExplorer bootstrap now includes 63 selected authored files, NASA texture sources, new project/scene identities and physics/audio settings. Static dependency validation passed 51 known asset references and 26 metadata/source pairs. Engine import, gameplay and visual acceptance remain pending.
+
+Replay audit additionally confirmed missing persisted scene-instance rebinding on fresh-process replay, including root-owned flat worlds. A complete fix must restore the loaded/persistent scene roster before planet ownership and per-scene physics, and map managed world IDs through stable scene identities. See the scratch implementation contract in Build/Validation/PlanetReplayAudit.md; no production replay fix is claimed yet.
+
+Final shader validation, October 31: production importer regressions passed 3 cases / 289 assertions, including seven-texture opaque/unlit/transparent permutations. Starter project creation passed 1 case / 93 assertions. Direct compilation initially failed only on the non-ASCII absolute source path; rerunning with relative filenames passed. Corrected depth/velocity and deferred G-buffer compiled in approximately 0.20 and 0.22 seconds, respectively. Actual DXIL disassembly matched original resource binding and declared input/output signature contracts for both passes. Results: Build/Validation/ShaderPassIsolation/timings.json and per-pass reflection directories. Editor visual/GPU acceptance remains pending.

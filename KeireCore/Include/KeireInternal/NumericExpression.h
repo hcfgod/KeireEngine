@@ -2,6 +2,7 @@
 
 #include <charconv>
 #include <cmath>
+#include <cstddef>
 #include <limits>
 #include <optional>
 #include <string_view>
@@ -10,6 +11,8 @@
 
 namespace Keire::Detail
 {
+    inline constexpr std::size_t MaximumNumericLiteralCharacters = 768;
+
     // A deliberately bounded arithmetic grammar; never executes scripts or accepts non-finite results.
     class NumericExpressionParser final
     {
@@ -131,6 +134,30 @@ namespace Keire::Detail
             const auto parsed = std::from_chars(expression.data(), expression.data() + expression.size(), exact);
             if (parsed.ec == std::errc{} && parsed.ptr == expression.data() + expression.size())
                 return exact;
+        }
+        if constexpr (std::is_floating_point_v<T>)
+        {
+            // Fixed-decimal extreme values exceed the bounded arithmetic grammar, but remain bounded literals.
+            const auto first = expression.find_first_not_of(" \t");
+            if (first == std::string_view::npos)
+            {
+                return std::nullopt;
+            }
+            expression = expression.substr(first, expression.find_last_not_of(" \t") - first + 1);
+            if (expression.starts_with('+'))
+            {
+                expression.remove_prefix(1);
+            }
+            if (expression.size() <= MaximumNumericLiteralCharacters)
+            {
+                T exact{};
+                const auto parsed = std::from_chars(expression.data(), expression.data() + expression.size(), exact);
+                if (parsed.ec == std::errc{} && parsed.ptr == expression.data() + expression.size() &&
+                    std::isfinite(exact))
+                {
+                    return exact;
+                }
+            }
         }
         const auto result = EvaluateNumericExpression(expression);
         if (!result)

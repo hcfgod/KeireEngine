@@ -205,8 +205,8 @@ namespace Keire
             [&](auto& candidate)
             {
                 return ImGui::DragScalar(safeLabel.c_str(), ImGuiDataType_Double, &candidate, static_cast<float>(speed),
-                                         minimumValue, maximumValue, Detail::ScalarDisplayFormat(candidate),
-                                         ImGuiSliderFlags_NoRoundToFormat);
+                                         minimumValue, maximumValue, "%g",
+                                         ImGuiSliderFlags_NoInput | ImGuiSliderFlags_NoRoundToFormat);
             });
     }
 
@@ -251,8 +251,12 @@ namespace Keire
                 const auto id = std::string("##") + axis;
                 return Detail::DrawNumericExpression(
                     id.c_str(), component, type, format, static_cast<const Scalar*>(nullptr),
-                    static_cast<const Scalar*>(nullptr), [&](auto& candidate)
-                    { return ImGui::DragScalar(id.c_str(), type, &candidate, speed, nullptr, nullptr, format); });
+                    static_cast<const Scalar*>(nullptr),
+                    [&](auto& candidate)
+                    {
+                        return ImGui::DragScalar(id.c_str(), type, &candidate, speed, nullptr, nullptr, "%g",
+                                                 ImGuiSliderFlags_NoInput | ImGuiSliderFlags_NoRoundToFormat);
+                    });
             };
 
             const auto& style = ImGui::GetStyle();

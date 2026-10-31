@@ -194,7 +194,9 @@ float VolumeCloudDensity(float3 position, float3 direction, float sampleSpacing,
 {
     const float subSpacing = sampleSpacing / 3.0F;
     float density = 0.0F;
-    [unroll]
+    // Keep the three samples ordered without cloning the nested software-noise and lighting kernel.
+    // ShaderCross preserves this loop hint through its SPIR-V roundtrip into DXIL.
+    [loop]
     for (uint sampleIndex = 0U; sampleIndex < 3U; ++sampleIndex)
     {
         const float offset = (float(sampleIndex) - 1.0F) * subSpacing;

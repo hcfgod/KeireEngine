@@ -10,6 +10,7 @@
 #include <imgui.h>
 #include <imgui_internal.h>
 
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <limits>
@@ -18,21 +19,36 @@
 #include <string>
 #include <string_view>
 
-TEST_CASE("physical scalar displays avoid scientific notation at environment magnitudes")
+TEST_CASE("physical scalar displays use decimal text without changing stored precision")
 {
-    const auto formatted = [](const double value)
+    using Keire::Detail::ScalarDisplayText;
+    using Keire::Detail::ScalarEditText;
+    CHECK(ScalarDisplayText(6360000.0) == "6360000");
+    CHECK(ScalarDisplayText(-6360000.0) == "-6360000");
+    CHECK(ScalarDisplayText(0.0000058) == "0.0000058");
+    CHECK(ScalarDisplayText(0.0000000001) == "0.0000000001");
+    CHECK(ScalarDisplayText(0.4) == "0.4");
+    CHECK(ScalarDisplayText(0.0) == "0");
+    CHECK(ScalarDisplayText(-0.0) == "0");
+    CHECK(ScalarDisplayText(1.0e-20) == "0.00000000000000000001");
+    for (const auto value :
+         {1.0e-320, 1.0e-20, 1.0e-12, 1.0e-9, 1.0e-4, 1.0e6, 1.0e15, 1.0e30, std::numeric_limits<double>::denorm_min(),
+          std::numeric_limits<double>::min(), std::numeric_limits<double>::max(), std::nextafter(0.4, 1.0)})
     {
-        char buffer[64]{};
-        std::snprintf(buffer, sizeof(buffer), Keire::Detail::ScalarDisplayFormat(value), value);
-        return std::string(buffer);
-    };
-    CHECK(formatted(6360000.0) == "6360000.000");
-    CHECK(formatted(-6360000.0) == "-6360000.000");
-    CHECK(formatted(0.0000058) == "0.000005800");
-    CHECK(formatted(0.0000000001) == "0.000000000100");
-    CHECK(formatted(0.4) == "0.4");
-    CHECK(formatted(0.0) == "0");
-    CHECK(formatted(1.0e-20) != "0.000000000000");
+        CAPTURE(value);
+        const auto display = ScalarDisplayText(value);
+        const auto exact = ScalarEditText(value);
+        CHECK(display.find_first_of("eE") == std::string::npos);
+        CHECK(exact.find_first_of("eE") == std::string::npos);
+        CHECK(display.find_first_of("123456789") != std::string::npos);
+        const auto parsed = Keire::Detail::EvaluateNumericField<double>(exact);
+        REQUIRE(parsed);
+        CHECK(*parsed == value);
+    }
+    CHECK(ScalarDisplayText(static_cast<double>(0.4F)) == "0.4");
+    CHECK(ScalarDisplayText(1.0e20F) == "100000000000000000000");
+    CHECK(ScalarDisplayText(static_cast<double>(1.0e20F)) == "100000000000000000000");
+    CHECK(ScalarDisplayText(3.986004418e14) == "398600000000000");
 }
 
 TEST_CASE("Inspector cards forward wheel scrolling to their parent without removing child scrollbars")
@@ -1107,5 +1123,132 @@ TEST_CASE("item context menus restore keyboard focus to their owning panel")
         (void)application.PushLayer(std::make_unique<ContextFocusLayer>(dismissWithEscape, checked));
         CHECK(application.Run() == 0);
         CHECK(checked);
+    }
+}
+
+TEST_CASE("decimal numeric text activation preserves extreme values and complete editable text")
+{
+    const auto previous = ImGui::GetCurrentContext();
+    const auto context = ImGui::CreateContext();
+    struct Cleanup
+    {
+        ImGuiContext* Context;
+        ImGuiContext* Previous;
+        ~Cleanup()
+        {
+            ImGui::DestroyContext(Context);
+            ImGui::SetCurrentContext(Previous);
+        }
+    } cleanup{context, previous};
+    auto& io = ImGui::GetIO();
+    io.IniFilename = nullptr;
+    io.DisplaySize = {640, 480};
+    io.BackendFlags |= ImGuiBackendFlags_RendererHasTextures;
+    for (const bool slider : {false, true})
+    {
+        for (const int activation : {0, 1, 2})
+        {
+            if (slider && activation == 2)
+            {
+                continue;
+            }
+            for (const double original :
+                 {-0.0, 1.0e-20, 1.0e30, std::numeric_limits<double>::denorm_min(), std::numeric_limits<double>::max()})
+            {
+                CAPTURE(activation);
+                CAPTURE(original);
+                double value = original;
+                ImGuiID field = 0;
+                ImVec2 center{};
+                const auto frame = [&](const bool activate)
+                {
+                    Keire::Detail::UiBackendNewFrame();
+                    ImGui::SetNextWindowPos({0, 0});
+                    ImGui::SetNextWindowSize({400, 200});
+                    ImGui::Begin("Decimal fixture");
+                    field = ImGui::GetID("Value");
+                    if (activate)
+                    {
+                        context->NavActivateId = field;
+                        context->NavActivateFlags = ImGuiActivateFlags_PreferInput;
+                    }
+                    (void)Keire::Detail::DrawNumericExpression(
+                        "Value", value, ImGuiDataType_Double, "", static_cast<const double*>(nullptr),
+                        static_cast<const double*>(nullptr),
+                        [&](auto& candidate)
+                        {
+                            if (slider)
+                            {
+                                constexpr double minimum = -1.0e30;
+                                constexpr double maximum = 1.0e30;
+                                return ImGui::SliderScalar("Value", ImGuiDataType_Double, &candidate, &minimum,
+                                                           &maximum, "%g",
+                                                           ImGuiSliderFlags_NoInput | ImGuiSliderFlags_NoRoundToFormat);
+                            }
+                            return ImGui::DragScalar("Value", ImGuiDataType_Double, &candidate, 0.1F, nullptr, nullptr,
+                                                     "%g", ImGuiSliderFlags_NoInput | ImGuiSliderFlags_NoRoundToFormat);
+                        });
+                    const auto minimum = ImGui::GetItemRectMin();
+                    center = {minimum.x + 20, minimum.y + 10};
+                    ImGui::End();
+                    ImGui::EndFrame();
+                };
+                frame(false);
+                if (activation == 0)
+                {
+                    frame(true);
+                }
+                else
+                {
+                    io.AddMousePosEvent(center.x, center.y);
+                    frame(false);
+                    if (activation == 1)
+                    {
+                        io.AddKeyEvent(ImGuiMod_Ctrl, true);
+                    }
+                    io.AddMouseButtonEvent(ImGuiMouseButton_Left, true);
+                    frame(false);
+                    if (activation == 2)
+                    {
+                        io.AddMouseButtonEvent(ImGuiMouseButton_Left, false);
+                        frame(false);
+                        io.AddMouseButtonEvent(ImGuiMouseButton_Left, true);
+                        frame(false);
+                    }
+                }
+                const auto* input = ImGui::GetInputTextState(field);
+                REQUIRE(input);
+                CHECK(std::string(input->TextA.Data, input->TextLen) == Keire::Detail::ScalarEditText(original));
+                CHECK(value == original);
+                CHECK(std::signbit(value) == std::signbit(original));
+                io.AddMouseButtonEvent(ImGuiMouseButton_Left, false);
+                io.AddKeyEvent(ImGuiMod_Ctrl, false);
+                frame(false);
+                // Let modifier/button releases drain before synthesizing text input.
+                frame(false);
+                // Escape restores the activation value, including its signed-zero representation.
+                ImGui::GetInputTextState(field)->SelectAll();
+                io.AddInputCharactersUTF8("2");
+                frame(false);
+                CHECK(value == 2.0);
+                io.AddKeyEvent(ImGuiKey_Escape, true);
+                frame(false);
+                io.AddKeyEvent(ImGuiKey_Escape, false);
+                frame(false);
+                CHECK(value == original);
+                CHECK(std::signbit(value) == std::signbit(original));
+                frame(true);
+                io.AddKeyEvent(ImGuiKey_Enter, true);
+                frame(false);
+                io.AddKeyEvent(ImGuiKey_Enter, false);
+                frame(false);
+                CHECK(value == original);
+                CHECK(std::signbit(value) == std::signbit(original));
+                ImGui::ClearActiveID();
+                context->TempInputId = 0;
+                // Keep independent double-click trials outside the previous trial's click window.
+                context->Time += io.MouseDoubleClickTime + 0.1;
+            }
+        }
     }
 }

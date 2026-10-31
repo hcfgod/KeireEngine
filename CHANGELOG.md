@@ -1,6 +1,13 @@
 # Changelog
 
 ## Unreleased
+- Display and edit scalar/vector Environment values as decimals without exponent notation, preserving stored
+  precision and exposing complete extreme values through editable text and tooltips.
+- Validate frame-following static support contacts across full scene/planet/physics reconstruction at a
+  trillion-metre origin, including resumed simulation and stable body identities.
+- Separate Shader Graph depth/velocity and deferred G-buffer evaluation from full lighting and volumetric
+  composition, retaining depth offset and explicit shader bindings without a final-lit-color dependency.
+- Add a Windows DXIL inspection helper for comparing compiled resource and graphics signature contracts.
 - Add internal scene-owner frame following for non-dynamic roots and kinematic supports, preserving inertial
   dynamic bodies and checkpoint owner bindings. Static/parented physics and characters remain unsupported.
 - Add a double-precision multi-atmosphere transport reference with overlap and opaque-body tests; GPU composition

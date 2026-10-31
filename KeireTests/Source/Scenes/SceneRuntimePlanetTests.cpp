@@ -1,6 +1,6 @@
 #include "Keire/Core.h"
-#include "KeireInternal/Scenes/SceneRuntimeRenderingInternal.h"
 #include "KeireInternal/Scenes/SceneRuntimeIdentityAccess.h"
+#include "KeireInternal/Scenes/SceneRuntimeRenderingInternal.h"
 #include "KeireInternal/Spatial/PlanetProjectFrameResolver.h"
 #include "KeireInternal/Spatial/PlanetRuntimeCheckpointRecord.h"
 #include "KeireInternal/Spatial/SceneRuntimePlanetAccess.h"
@@ -8,9 +8,12 @@
 
 #include <doctest/doctest.h>
 
+#include <algorithm>
+#include <array>
 #include <atomic>
 #include <cmath>
 #include <limits>
+#include <memory>
 #include <stdexcept>
 #include <thread>
 #include <utility>
@@ -341,9 +344,7 @@ TEST_CASE("Scene owner transfer advances kinematic roots while dynamic bodies re
     {
         support.AddComponent<RigidBodyComponent>()->SetMotion(PhysicsMotionType::Kinematic);
     }
-    SUBCASE("Authored static support without a rigid body")
-    {
-    }
+    SUBCASE("Authored static support without a rigid body") {}
     auto moving = scene->CreateEntity("Inertial body");
     moving.GetComponent<TransformComponent>()->SetLocalPosition({0.0F, 10.0F, 0.0F});
     moving.AddComponent<ColliderComponent>();
@@ -465,8 +466,9 @@ TEST_CASE("New and replacement static supports join an already following scene")
     const auto second = support.GetComponent<TransformComponent>()->WorldPositionPrecise();
     CHECK(second.X == doctest::Approx(10.0 * std::cos(0.25)));
     CHECK(second.Z == doctest::Approx(-10.0 * std::sin(0.25)));
-    const auto hits = session->Physics()->RayCast({.Origin = {static_cast<float>(second.X), 4.0F, static_cast<float>(second.Z)},
-                                                  .Direction = {0.0F, -1.0F, 0.0F}});
+    const auto hits =
+        session->Physics()->RayCast({.Origin = {static_cast<float>(second.X), 4.0F, static_cast<float>(second.Z)},
+                                     .Direction = {0.0F, -1.0F, 0.0F}});
     REQUIRE(hits.size() == 1);
     CHECK(session->Physics()->TryGetBody(hits.front().Body)->LinearVelocity.Z < -4.0F);
 }
@@ -512,4 +514,217 @@ TEST_CASE("Reconstructed planet owner restores static support motion before body
     CHECK(recaptured.Bodies.front().Position == physics.Bodies.front().Position);
     CHECK(recaptured.Bodies.front().LinearVelocity == physics.Bodies.front().LinearVelocity);
     CHECK(recaptured.Bodies.front().AngularVelocity == physics.Bodies.front().AngularVelocity);
+}
+
+namespace
+{
+    struct PlanetContactObservations
+    {
+        Keire::EntityId Support;
+        int Enter = 0;
+        int Stay = 0;
+    };
+
+    class PlanetContactProbe final : public Keire::Component
+    {
+      public:
+        explicit PlanetContactProbe(std::shared_ptr<PlanetContactObservations> observations)
+            : Component(StaticType()), m_Observations(std::move(observations))
+        {
+        }
+
+        [[nodiscard]] static constexpr Keire::ComponentTypeId StaticType() noexcept
+        {
+            return Keire::ComponentTypeId(Keire::AssetId(0x74657374706c616eULL, 0x6574636f6e746163ULL));
+        }
+
+      protected:
+        void OnCollisionEnter(const Keire::PhysicsContactMessage& contact) override
+        {
+            if (contact.Other == m_Observations->Support)
+            {
+                ++m_Observations->Enter;
+            }
+        }
+
+        void OnCollisionStay(const Keire::PhysicsContactMessage& contact) override
+        {
+            if (contact.Other == m_Observations->Support)
+            {
+                ++m_Observations->Stay;
+            }
+        }
+
+      private:
+        std::shared_ptr<PlanetContactObservations> m_Observations;
+    };
+
+    Keire::Ref<Keire::ComponentRegistry>
+    PlanetContactRegistry(const std::shared_ptr<PlanetContactObservations>& observations)
+    {
+        auto registry = Keire::ComponentRegistry::CreateDefault();
+        Keire::ComponentRegistration registration;
+        registration.Type = PlanetContactProbe::StaticType();
+        registration.Name = "Planet Contact Probe";
+        registration.Factory = [observations]
+        { return Keire::Ref<Keire::Component>(Keire::CreateRef<PlanetContactProbe>(observations)); };
+        registration.Serialize = [](const Keire::Component&) { return Keire::ComponentPropertyBag{}; };
+        registration.Deserialize = [](Keire::Component&, const Keire::ComponentPropertyBag&, std::uint32_t) {};
+        registry->Register(std::move(registration));
+        return registry;
+    }
+
+    Keire::PhysicsBodyId FindPlanetTestBody(const Keire::SceneRuntimeSession& session, const Keire::EntityId entity,
+                                            const double horizontalOffset)
+    {
+        auto position = session.RuntimeScene()
+                            ->FindEntity(entity)
+                            .GetComponent<Keire::TransformComponent>()
+                            ->WorldPositionPrecise();
+        position.X += horizontalOffset;
+        position.Y += 4.0;
+        const auto hits =
+            session.RayCastPrecise({.Origin = position, .Direction = {0.0F, -1.0F, 0.0F}, .MaximumDistance = 8.0F});
+        const auto hit = std::ranges::find(hits, entity, &Keire::ScenePhysicsQueryHitPrecise::Entity);
+        REQUIRE(hit != hits.end());
+        return hit->Body;
+    }
+
+    void CheckPlanetPosition(const Keire::Vector3d actual, const Keire::Vector3d expected, const double tolerance)
+    {
+        CHECK(std::abs(actual.X - expected.X) <= tolerance);
+        CHECK(std::abs(actual.Y - expected.Y) <= tolerance);
+        CHECK(std::abs(actual.Z - expected.Z) <= tolerance);
+    }
+} // namespace
+
+TEST_CASE("Far-origin frame-following scene resumes support contacts after full reconstruction")
+{
+    using namespace Keire;
+    using namespace Keire::Detail;
+    constexpr float stepSeconds = 1.0F / 60.0F;
+    for (const double originX : {0.0, 1.0e12})
+    {
+        CAPTURE(originX);
+        PlanetRuntimeFixture source;
+        auto planet = TestPlanet();
+        planet.ParentCenter = SectorPosition({1, 1}, {}, {originX, 0.0, 0.0});
+        planet.AngularVelocity = {0.0, 0.1, 0.0};
+        SceneRuntimePlanetAccess::Configure(*source.World, {planet});
+        auto sourceContacts = std::make_shared<PlanetContactObservations>();
+        auto scene =
+            CreateRef<Scene>(AssetId::Generate(), SceneAsset::EmptyDefinition(), PlanetContactRegistry(sourceContacts));
+        auto support = scene->CreateEntity("Frame support");
+        support.GetComponent<TransformComponent>()->SetWorldPositionPrecise({originX + 10.0, -0.5, 0.0});
+        support.AddComponent<ColliderComponent>()->SetHalfExtent({4.0F, 0.5F, 4.0F});
+        sourceContacts->Support = support.Id();
+        auto rider = scene->CreateEntity("Supported rider");
+        rider.GetComponent<TransformComponent>()->SetWorldPositionPrecise({originX + 10.0, 0.5, 0.0});
+        rider.AddComponent<ColliderComponent>();
+        rider.AddComponent<RigidBodyComponent>();
+        rider.AddComponent<PlanetContactProbe>();
+        auto marker = scene->CreateEntity("Frame marker");
+        marker.GetComponent<TransformComponent>()->SetWorldPositionPrecise({originX + 12.0, 0.0, 0.0});
+        auto session = CreateRef<SceneRuntimeSession>(scene, source.Assets, Ref<AudioSystem>{}, source.Physics);
+        const auto handle = source.World->Adopt(session);
+        session->Play();
+        source.World->Pause();
+        for (int tick = 0; tick < 180; ++tick)
+        {
+            REQUIRE(source.World->Step(stepSeconds));
+        }
+        REQUIRE(sourceContacts->Enter > 0);
+        const auto supportBody = FindPlanetTestBody(*session, support.Id(), 3.0);
+        const auto riderBody = FindPlanetTestBody(*session, rider.Id(), 0.0);
+        REQUIRE(supportBody != riderBody);
+        const auto time = SceneRuntimePlanetAccess::CaptureCheckpoint(*source.World).SimulationTime;
+        const auto& frames = SceneRuntimeSpatialAccess::Frames(*source.World);
+        SceneRuntimeSpatialAccess::TransferSceneOwner(*source.World, handle, frames.Find(2), time);
+        sourceContacts->Stay = 0;
+        for (int tick = 0; tick < 60; ++tick)
+        {
+            REQUIRE(source.World->Step(stepSeconds));
+        }
+        REQUIRE(sourceContacts->Stay > 0);
+        CHECK(FindPlanetTestBody(*session, support.Id(), 3.0) == supportBody);
+        CHECK(FindPlanetTestBody(*session, rider.Id(), 0.0) == riderBody);
+        const auto supportState = session->Physics()->TryGetBody(supportBody);
+        REQUIRE(supportState);
+        CHECK(std::abs(supportState->LinearVelocity.Z) > 0.1F);
+        CHECK(std::abs(supportState->AngularVelocity.Y) > 0.05F);
+
+        const auto sceneBytes = SceneAsset::Encode(session->RuntimeScene()->Snapshot());
+        const auto planets = PlanetRuntimeCheckpointRecord::Decode(
+            PlanetRuntimeCheckpointRecord::Encode(SceneRuntimePlanetAccess::CaptureCheckpoint(*source.World)));
+        const auto physics = session->CapturePhysicsWorldCheckpoint();
+        PlanetRuntimeFixture restored;
+        SceneRuntimePlanetAccess::Configure(*restored.World, {planet});
+        auto restoredContacts = std::make_shared<PlanetContactObservations>();
+        restoredContacts->Support = support.Id();
+        auto restoredScene = CreateRef<Scene>(scene->Asset(), SceneAsset::Decode(sceneBytes)->Definition(),
+                                              PlanetContactRegistry(restoredContacts));
+        auto restoredSession =
+            CreateRef<SceneRuntimeSession>(restoredScene, restored.Assets, Ref<AudioSystem>{}, restored.Physics);
+        const auto restoredHandle = restored.World->Adopt(restoredSession);
+        restoredSession->Play();
+        restored.World->Pause();
+        REQUIRE(planets.SceneOwners.size() == 1);
+        const std::array identities{SceneRuntimeIdentityBinding{restoredHandle, planets.SceneOwners.front().Instance}};
+        SceneRuntimeIdentityAccess::Rebind(*restored.World, identities);
+        SceneRuntimePlanetAccess::RestoreCheckpoint(*restored.World, planets);
+        restoredSession->RestorePhysicsWorldCheckpoint(physics);
+        const auto recaptured = restoredSession->CapturePhysicsWorldCheckpoint();
+        REQUIRE(recaptured.Bodies.size() == physics.Bodies.size());
+        for (const auto& expected : physics.Bodies)
+        {
+            const auto actual =
+                std::ranges::find(recaptured.Bodies, expected.Entity, &ScenePhysicsCheckpointBody::Entity);
+            REQUIRE(actual != recaptured.Bodies.end());
+            CheckPlanetPosition({actual->WorldOrigin.X + actual->Position.X, actual->WorldOrigin.Y + actual->Position.Y,
+                                 actual->WorldOrigin.Z + actual->Position.Z},
+                                {expected.WorldOrigin.X + expected.Position.X,
+                                 expected.WorldOrigin.Y + expected.Position.Y,
+                                 expected.WorldOrigin.Z + expected.Position.Z},
+                                0.001);
+            CHECK(actual->LinearVelocity == expected.LinearVelocity);
+            CHECK(actual->AngularVelocity == expected.AngularVelocity);
+        }
+        const auto restoredSupportBody = FindPlanetTestBody(*restoredSession, support.Id(), 3.0);
+        const auto restoredRiderBody = FindPlanetTestBody(*restoredSession, rider.Id(), 0.0);
+        for (int tick = 0; tick < 60; ++tick)
+        {
+            CAPTURE(tick);
+            REQUIRE(source.World->Step(stepSeconds));
+            REQUIRE(restored.World->Step(stepSeconds));
+            for (const auto id : {support.Id(), rider.Id(), marker.Id()})
+            {
+                const auto expected =
+                    session->RuntimeScene()->FindEntity(id).GetComponent<TransformComponent>()->WorldPositionPrecise();
+                const auto actual = restoredSession->RuntimeScene()
+                                        ->FindEntity(id)
+                                        .GetComponent<TransformComponent>()
+                                        ->WorldPositionPrecise();
+                CheckPlanetPosition(actual, expected, id == rider.Id() ? 0.05 : 0.005);
+            }
+            const auto restoredSupport = restoredSession->Physics()->TryGetBody(restoredSupportBody);
+            const auto restoredRider = restoredSession->Physics()->TryGetBody(restoredRiderBody);
+            REQUIRE(restoredSupport);
+            REQUIRE(restoredRider);
+            CHECK(Math::IsFinite(restoredRider->LinearVelocity));
+            CHECK(Math::IsFinite(restoredRider->AngularVelocity));
+            CHECK(std::abs(restoredRider->Position.Y - restoredSupport->Position.Y - 1.0F) < 0.05F);
+            const auto supportPosition = restoredSession->RuntimeScene()
+                                             ->FindEntity(support.Id())
+                                             .GetComponent<TransformComponent>()
+                                             ->WorldPositionPrecise();
+            CheckPlanetPosition(restoredSession->Physics()->ToWorldPosition(restoredSupport->Position), supportPosition,
+                                0.005);
+        }
+        CHECK(restoredContacts->Enter + restoredContacts->Stay > 0);
+        CHECK(restoredContacts->Stay > 0);
+        CHECK(FindPlanetTestBody(*session, support.Id(), 3.0) == supportBody);
+        CHECK(FindPlanetTestBody(*session, rider.Id(), 0.0) == riderBody);
+        CHECK(FindPlanetTestBody(*restoredSession, support.Id(), 3.0) == restoredSupportBody);
+        CHECK(FindPlanetTestBody(*restoredSession, rider.Id(), 0.0) == restoredRiderBody);
+    }
 }

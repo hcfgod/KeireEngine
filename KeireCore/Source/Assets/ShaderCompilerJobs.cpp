@@ -218,17 +218,36 @@ namespace Keire::Detail
                 compilerRoots.push_back(root);
             }
         }
+
         for (const auto& root : compilerRoots)
         {
             arguments.emplace_back("-I");
             arguments.push_back(PathToUtf8(root.lexically_relative(workingDirectory)));
         }
+
         for (const auto& [name, value] : defines)
         {
             arguments.push_back("-D" + name + '=' + value);
         }
-        RunShaderCompilerProcess(compiler, arguments, workingDirectory, specification.Timeout, cancellation,
-                                 statistics);
+
+        try
+        {
+            RunShaderCompilerProcess(compiler, arguments, workingDirectory, specification.Timeout, cancellation,
+                                     statistics);
+        }
+        catch (const AssetOperationCancelled&)
+        {
+            throw;
+        }
+        catch (const std::runtime_error& error)
+        {
+            throw std::runtime_error("Shader compilation failed.\n"
+                                     "Format: " +
+                                     std::string(destination) + "\n" + "Stage: " + std::string(stage) + "\n" +
+                                     "Entry: " + std::string(entry) + "\n" + "Source: " + PathToUtf8(source) + "\n" +
+                                     "Reason: " + error.what());
+        }
+
         return AnchoredFileSystem(output.parent_path(), AnchoredRootPolicy::RejectLink)
             .Read(output.filename(), specification.MaximumOutputBytes);
     }
