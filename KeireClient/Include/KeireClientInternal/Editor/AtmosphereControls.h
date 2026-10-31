@@ -3,6 +3,7 @@
 #include "Keire/Rendering/Atmosphere.h"
 #include "Keire/Ui.h"
 #include "Keire/UiWorkspace.h"
+#include "KeireInternal/Environment/AtmosphereValidation.h"
 
 #include <algorithm>
 #include <array>
@@ -10,6 +11,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <numbers>
+#include <optional>
 #include <string_view>
 
 namespace KeireEditor::Detail
@@ -65,7 +67,8 @@ namespace KeireEditor::Detail
     }
 
     inline bool DrawAtmosphereControls(Keire::UiFrame& ui, const Keire::UiThemeDefinition& theme,
-                                       Keire::AtmosphereSettings& settings, bool& commit)
+                                       Keire::AtmosphereSettings& settings, bool& commit,
+                                       const std::optional<double> physicalRadius = {})
     {
         auto section = ui.BeginSection("Planetary Atmosphere (Experimental)");
         if (!section)
@@ -76,6 +79,13 @@ namespace KeireEditor::Detail
                               "Single-scattering sky follows the selected directional light, including daily "
                               "lighting. Sky visibility still applies. Environment reflections, ambient and baked "
                               "lighting remain independent. This is not volumetric clouds or aerial perspective.");
+        if (physicalRadius && !Keire::Detail::IsSupportedAtmosphereRadius(*physicalRadius))
+        {
+            ui.TextColoredWrapped(theme.MutedText,
+                                  "Atmosphere overrides support surface radii from 1,000 to 1,000,000,000 metres. "
+                                  "Remove the override to author a planet outside this optical range.");
+            return false;
+        }
         bool changed = ui.Checkbox("Enable Atmosphere Sky", settings.Enabled);
         commit |= changed;
         if (ui.Button("Reset Atmosphere Appearance"))
@@ -90,18 +100,26 @@ namespace KeireEditor::Detail
         auto disabled = ui.BeginDisabled(!settings.Enabled);
         if (auto planet = ui.BeginSection("Planet and Density"); planet)
         {
-            constexpr std::array centerLabels{"Planet Center X (m)", "Planet Center Y (m)", "Planet Center Z (m)"};
-            for (std::size_t axis = 0; axis < settings.PlanetCenter.size(); ++axis)
+            if (!physicalRadius)
             {
-                changed |= DrawAtmosphereScalar(ui, centerLabels[axis], settings.PlanetCenter[axis], 100.0, -1.0e15,
-                                                1.0e15, commit);
+                constexpr std::array centerLabels{"Planet Center X (m)", "Planet Center Y (m)", "Planet Center Z (m)"};
+                for (std::size_t axis = 0; axis < settings.PlanetCenter.size(); ++axis)
+                {
+                    changed |= DrawAtmosphereScalar(ui, centerLabels[axis], settings.PlanetCenter[axis], 100.0, -1.0e15,
+                                                    1.0e15, commit);
+                }
+                changed |=
+                    DrawAtmosphereScalar(ui, "Planet Radius (m)", settings.PlanetRadius, 100.0, 1'000.0, 1.0e9, commit);
             }
-            changed |=
-                DrawAtmosphereScalar(ui, "Planet Radius (m)", settings.PlanetRadius, 100.0, 1'000.0, 1.0e9, commit);
-            // Preserve validity when a smaller planet or atmosphere reduces dependent ranges.
-            settings.Height = std::min(settings.Height, settings.PlanetRadius);
+            const double thicknessLimit = physicalRadius.value_or(settings.PlanetRadius);
+            // Legacy radius edits preserve their dependent-field behavior. Planet overrides never rewrite
+            // hidden geometry or existing heights merely because their controls are drawn.
+            if (!physicalRadius)
+            {
+                settings.Height = std::min(settings.Height, thicknessLimit);
+            }
             changed |= DrawAtmosphereScalar(ui, "Atmosphere Thickness (m)", settings.Height, 100.0, 100.0,
-                                            settings.PlanetRadius, commit);
+                                            thicknessLimit, commit);
             settings.RayleighScaleHeight = std::min(settings.RayleighScaleHeight, settings.Height);
             settings.MieScaleHeight = std::min(settings.MieScaleHeight, settings.Height);
             settings.AbsorptionPeakAltitude = std::min(settings.AbsorptionPeakAltitude, settings.Height);

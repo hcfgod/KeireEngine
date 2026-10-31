@@ -20,10 +20,8 @@ internal sealed class ShipCameraRig
         transform.LocalRotation = Quaternion.Euler(18.0f * _blend, 0.0f);
         if (camera is not null)
         {
-            // Preserve altitude-sensitive follow depth precision while blending toward the cockpit.
-            float height = (float)Math.Clamp((altitude - 12.0) / 5000.0, 0.0, 1.0);
-            float smoothHeight = height * height * (3.0f - 2.0f * height);
-            camera.NearPlane = 0.2f + 9.8f * smoothHeight * _blend;
+            // Both views need planetary depth precision. A future cockpit interior needs its own near-field pass.
+            camera.NearPlane = PlanetaryFlightGeometry.CameraNearPlane(altitude);
         }
     }
 }

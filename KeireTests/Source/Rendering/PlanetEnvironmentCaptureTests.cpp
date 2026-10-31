@@ -78,3 +78,30 @@ TEST_CASE("planet atmosphere and fog use selected frame without moving local fog
     CHECK(packed.Local[0].CenterExtinction[0] == doctest::Approx(2.0));
     CHECK(packed.Exclusions[0].CenterExtinction[0] == doctest::Approx(3.0));
 }
+
+TEST_CASE("Planet view samples attach only the atmosphere authored for their stable identity")
+{
+    using namespace Keire::Detail;
+    ResolvedPlanetFrame earth;
+    earth.Planet = Keire::AssetId(50, 1);
+    earth.PlanetFrame = {1, 2};
+    earth.ObserverFrame = {1, 1};
+    earth.TopologyRevision = 1;
+    earth.RadiusMetres = 6'360'000.0;
+    earth.ObserverFromCenterPlanetMetres = {0.0, 6'360'001.0, 0.0};
+    auto mars = earth;
+    mars.Planet = Keire::AssetId(50, 2);
+    mars.PlanetFrame = {1, 3};
+    PlanetProjectSettings settings;
+    Keire::AtmosphereSettings thinAir;
+    thinAir.Enabled = true;
+    thinAir.MieAnisotropy = 0.4;
+    settings.AtmosphereOverrides.push_back({mars.Planet, thinAir});
+    const auto earthView = ToPlanetEnvironmentView(earth, settings);
+    const auto marsView = ToPlanetEnvironmentView(mars, settings);
+    CHECK_FALSE(earthView.AtmosphereOverride.has_value());
+    REQUIRE(marsView.AtmosphereOverride.has_value());
+    CHECK(*marsView.AtmosphereOverride == thinAir);
+    CHECK(CapturePlanetEnvironment(marsView).Planet == mars.Planet);
+    CHECK(ToPlanetEnvironmentView(earth, settings).AtmosphereOverride == earthView.AtmosphereOverride);
+}

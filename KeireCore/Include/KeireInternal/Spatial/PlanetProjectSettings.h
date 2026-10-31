@@ -1,8 +1,10 @@
 #pragma once
 
+#include "KeireInternal/Environment/AtmosphereValidation.h"
 #include "KeireInternal/Spatial/FrameRegistry.h"
 #include "KeireInternal/Spatial/PlanetDefinition.h"
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <set>
@@ -30,6 +32,14 @@ namespace Keire::Detail
         NearestSurface
     };
 
+    struct PlanetAtmosphereOverride
+    {
+        AssetId Planet;
+        AtmosphereSettings Atmosphere;
+
+        bool operator==(const PlanetAtmosphereOverride&) const noexcept = default;
+    };
+
     struct PlanetProjectSettings
     {
         PlanetGeometryMode Geometry = PlanetGeometryMode::Flat;
@@ -37,6 +47,8 @@ namespace Keire::Detail
         AssetId SelectedPlanet;
         std::vector<PlanetDefinition> Planets;
         PlanetSelectionMode Selection = PlanetSelectionMode::Manual;
+        // Missing entries inherit the global atmosphere; an explicit disabled entry is airless.
+        std::vector<PlanetAtmosphereOverride> AtmosphereOverrides;
 
         bool operator==(const PlanetProjectSettings&) const noexcept = default;
     };
@@ -71,6 +83,16 @@ namespace Keire::Detail
         {
             throw std::invalid_argument(
                 "Planetary geometry needs a selected planet; radial gravity needs authored planets.");
+        }
+        std::set<AssetId> overridden;
+        for (const auto& profile : settings.AtmosphereOverrides)
+        {
+            if (!identities.contains(profile.Planet) || !overridden.insert(profile.Planet).second)
+            {
+                throw std::invalid_argument("Planet atmosphere override has a missing or duplicate planet.");
+            }
+            const auto planet = std::ranges::find(settings.Planets, profile.Planet, &PlanetDefinition::Planet);
+            ValidateAtmosphere(profile.Atmosphere, planet->RadiusMetres);
         }
         std::set<std::uint64_t> created{1};
         while (!pending.empty())

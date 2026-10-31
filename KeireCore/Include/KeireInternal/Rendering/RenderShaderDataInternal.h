@@ -418,7 +418,8 @@ namespace Keire::RenderBackend
         PlanetAtmosphereSetUniforms PlanetAtmospheres;
     };
 
-    static_assert(sizeof(SkyUniforms) == 1600U);
+    static_assert(sizeof(SkyUniforms) == 1728U);
+    static_assert(offsetof(SkyUniforms, PlanetAtmospheres) == 688);
     static_assert(offsetof(SkyUniforms, SkyColors) == 496);
 
     struct GridUniforms final

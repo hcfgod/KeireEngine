@@ -2,12 +2,19 @@
 
 #include "Keire/Rendering/Atmosphere.h"
 
+#include <algorithm>
 #include <cmath>
+#include <optional>
 #include <stdexcept>
 
 namespace Keire::Detail
 {
-    inline void ValidateAtmosphere(const AtmosphereSettings& settings)
+    [[nodiscard]] inline bool IsSupportedAtmosphereRadius(const double radius) noexcept
+    {
+        return std::isfinite(radius) && radius >= 1'000.0 && radius <= 1.0e9;
+    }
+
+    inline void ValidateAtmosphere(const AtmosphereSettings& settings, const std::optional<double> physicalRadius = {})
     {
         const auto bounded = [](const double value, const double minimum, const double maximum)
         { return std::isfinite(value) && value >= minimum && value <= maximum; };
@@ -22,8 +29,13 @@ namespace Keire::Detail
                 throw std::invalid_argument("Atmosphere planet center must be finite and within 1e15 metres.");
             }
         }
-        if (!bounded(settings.PlanetRadius, 1'000.0, 1.0e9) ||
-            !bounded(settings.Height, 100.0, settings.PlanetRadius) ||
+        if (physicalRadius && !IsSupportedAtmosphereRadius(*physicalRadius))
+        {
+            throw std::invalid_argument(
+                "Planet atmosphere overrides require a surface radius from 1,000 to 1,000,000,000 metres.");
+        }
+        const double thicknessLimit = physicalRadius.value_or(settings.PlanetRadius);
+        if (!IsSupportedAtmosphereRadius(settings.PlanetRadius) || !bounded(settings.Height, 100.0, thicknessLimit) ||
             !bounded(settings.RayleighScaleHeight, 1.0, settings.Height) ||
             !bounded(settings.MieScaleHeight, 1.0, settings.Height))
         {
@@ -53,5 +65,24 @@ namespace Keire::Detail
         {
             throw std::invalid_argument("Atmosphere sample budgets must be 4..64 view and 2..32 light samples.");
         }
+    }
+    [[nodiscard]] inline AtmosphereSettings CreatePlanetAtmosphereOverride(const AtmosphereSettings& inherited,
+                                                                           const double physicalRadius)
+    {
+        ValidateAtmosphere(inherited);
+        if (!IsSupportedAtmosphereRadius(physicalRadius))
+        {
+            throw std::invalid_argument(
+                "Planet atmosphere overrides require a surface radius from 1,000 to 1,000,000,000 metres.");
+        }
+        auto result = inherited;
+        // Only initialization of a new override bounds copied appearance; existing profiles are never coerced.
+        result.Height = std::min(result.Height, physicalRadius);
+        result.RayleighScaleHeight = std::min(result.RayleighScaleHeight, result.Height);
+        result.MieScaleHeight = std::min(result.MieScaleHeight, result.Height);
+        result.AbsorptionPeakAltitude = std::min(result.AbsorptionPeakAltitude, result.Height);
+        result.AbsorptionHalfWidth = std::min(result.AbsorptionHalfWidth, result.Height);
+        ValidateAtmosphere(result, physicalRadius);
+        return result;
     }
 } // namespace Keire::Detail

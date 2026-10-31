@@ -107,9 +107,8 @@ namespace KeireEditor::Detail
             }
             ui.TextColoredWrapped(
                 theme.MutedText,
-                "Each camera uses the selected planet or the nearest planet surface. Atmosphere appearance is shared; "
-                "this does not blend multiple atmospheres. The atmosphere center and "
-                "radius below remain saved for Flat mode.");
+                "Each camera uses the selected planet or the nearest planet surface. Planets inherit the global "
+                "atmosphere unless overridden below. Cloud and fog appearance remain shared in this release.");
         }
         if (auto combo = ui.BeginCombo("Gravity Mode", gravityLabels[static_cast<std::size_t>(settings.Gravity)]);
             combo)
@@ -157,7 +156,27 @@ namespace KeireEditor::Detail
             }
             ui.TextColoredWrapped(theme.MutedText, "Each sector is 65,536 metres. Offsets retain local detail at "
                                                    "distant placements. Ctrl-click to enter exact values.");
-            changed |= DrawAtmosphereScalar(ui, "Surface Radius (m)", planet.RadiusMetres, 100.0, 1.0, 1.0e12, commit);
+            const auto existingProfile =
+                std::ranges::find(settings.AtmosphereOverrides, planet.Planet, &PlanetAtmosphereOverride::Planet);
+            double radiusCandidate = planet.RadiusMetres;
+            if (DrawAtmosphereScalar(ui, "Surface Radius (m)", radiusCandidate, 100.0, 1.0, 1.0e12, commit))
+            {
+                if (existingProfile == settings.AtmosphereOverrides.end() ||
+                    (IsSupportedAtmosphereRadius(radiusCandidate) &&
+                     radiusCandidate >= existingProfile->Atmosphere.Height))
+                {
+                    planet.RadiusMetres = radiusCandidate;
+                    changed = true;
+                }
+            }
+            if (existingProfile != settings.AtmosphereOverrides.end())
+            {
+                ui.TextColoredWrapped(
+                    theme.MutedText,
+                    "With an atmosphere override, surface radius must be 1,000 to 1,000,000,000 metres and at least "
+                    "the atmosphere thickness. Unsupported edits are rejected; reduce thickness or remove the override "
+                    "first.");
+            }
             changed |= DrawAtmosphereScalar(ui, "Gravity Parameter GM (m^3/s^2)", planet.GravitationalParameter, 1.0,
                                             0.0, 1.0e30, commit);
             ui.TextColoredWrapped(theme.MutedText, "GM defaults to zero. Surface acceleration is GM / radius squared.");
@@ -191,12 +210,61 @@ namespace KeireEditor::Detail
                 commit = true;
             }
             ui.TextColoredWrapped(theme.MutedText, "Rotation reset preserves identity, placement, radius and gravity.");
+            auto profile =
+                std::ranges::find(settings.AtmosphereOverrides, planet.Planet, &PlanetAtmosphereOverride::Planet);
+            bool overrideAtmosphere = profile != settings.AtmosphereOverrides.end();
+            const bool supportedAtmosphere = IsSupportedAtmosphereRadius(planet.RadiusMetres);
+            {
+                auto unsupportedProfile = ui.BeginDisabled(!overrideAtmosphere && !supportedAtmosphere);
+                if (ui.Checkbox("Override this planet's atmosphere", overrideAtmosphere))
+                {
+                    if (overrideAtmosphere)
+                    {
+                        auto initialAtmosphere =
+                            CreatePlanetAtmosphereOverride(document.Settings().Atmosphere, planet.RadiusMetres);
+                        settings.AtmosphereOverrides.push_back({planet.Planet, initialAtmosphere});
+                    }
+                    else
+                    {
+                        settings.AtmosphereOverrides.erase(profile);
+                    }
+                    profile = std::ranges::find(settings.AtmosphereOverrides, planet.Planet,
+                                                &PlanetAtmosphereOverride::Planet);
+                    changed = true;
+                    commit = true;
+                }
+            }
+            if (!supportedAtmosphere)
+            {
+                ui.TextColoredWrapped(
+                    theme.MutedText,
+                    "Atmosphere overrides require a surface radius from 1,000 to 1,000,000,000 metres. "
+                    "Planet geometry and gravity outside that range remain available without an override.");
+            }
+            else
+            {
+                ui.TextColoredWrapped(theme.MutedText, "A new override copies global appearance and bounds its initial "
+                                                       "density heights to this planet's radius. "
+                                                       "Existing overrides are preserved.");
+            }
+            if (profile != settings.AtmosphereOverrides.end())
+            {
+                ui.TextColoredWrapped(
+                    theme.MutedText,
+                    "Appearance belongs to this planet in every view. Disable Atmosphere Sky for an airless planet. "
+                    "Planet placement and surface radius above control geometry. "
+                    "Changes preview in Edit mode; restart Play mode to apply them to the running world.");
+                changed |= DrawAtmosphereControls(ui, theme, profile->Atmosphere, commit, planet.RadiusMetres);
+            }
             const bool hasChildren =
                 std::ranges::any_of(settings.Planets, [&](const auto& other)
                                     { return other.ParentCenter.Identity().Frame == planet.Frame; });
             auto disabled = ui.BeginDisabled(hasChildren);
             if (ui.Button("Remove Selected Planet"))
             {
+                const auto removedPlanet = planet.Planet;
+                std::erase_if(settings.AtmosphereOverrides,
+                              [&](const auto& entry) { return entry.Planet == removedPlanet; });
                 settings.Planets.erase(selected);
                 settings.SelectedPlanet = settings.Planets.empty() ? Keire::AssetId{} : settings.Planets.front().Planet;
                 if (settings.Planets.empty())

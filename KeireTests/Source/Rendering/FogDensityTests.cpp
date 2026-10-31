@@ -1,6 +1,7 @@
 #include "KeireInternal/Environment/FogDensity.h"
 #include "KeireInternal/Environment/FogDensityRecord.h"
 #include "KeireInternal/Rendering/FogViewUniforms.h"
+#include "KeireInternal/Rendering/FogVisibility.h"
 
 #include <doctest/doctest.h>
 
@@ -221,4 +222,40 @@ TEST_CASE("Fog validates disabled records and rejects nonfinite coordinates and 
     }
     CHECK_THROWS_AS((void)Keire::Detail::SampleFogExtinction({}, {std::numeric_limits<double>::quiet_NaN(), 0, 0}),
                     std::invalid_argument);
+}
+
+TEST_CASE("Per-view fog rejection conservatively bounds orbital height fog")
+{
+    Keire::RenderBackend::FogViewUniforms fog;
+    fog.Controls = {2U, 64U, 0U, 0U};
+    fog.HeightDensity = {-127800.0F, 0.003F, 0.00015F, 10000.0F};
+    const auto negligible = [&] { return Keire::RenderBackend::FogViewHasNegligibleOpticalDepth(fog, false); };
+    CHECK(negligible());
+    CHECK_FALSE(Keire::RenderBackend::FogViewHasNegligibleOpticalDepth(fog, true));
+    fog.Controls[0] = 1U;
+    CHECK(negligible());
+    fog.Controls[2] = 1U;
+    CHECK_FALSE(negligible());
+    fog.Controls[2] = 0U;
+    fog.Controls[3] = 1U;
+    CHECK(negligible());
+    for (const float altitude : {0.0F, -100.0F, 100.0F, 10000.0F})
+    {
+        fog.HeightDensity[0] = -altitude;
+        CHECK_FALSE(negligible());
+    }
+    fog.HeightDensity[0] = -127800.0F;
+    fog.HeightDensity[1] = 0.0F;
+    CHECK_FALSE(negligible());
+    fog.HeightDensity[1] = 0.003F;
+    fog.HeightDensity[3] = 200000.0F;
+    CHECK_FALSE(negligible());
+    fog.HeightDensity[3] = 10000.0F;
+    for (std::size_t index = 0; index < 4; ++index)
+    {
+        const float saved = fog.HeightDensity[index];
+        fog.HeightDensity[index] = std::numeric_limits<float>::quiet_NaN();
+        CHECK_FALSE(negligible());
+        fog.HeightDensity[index] = saved;
+    }
 }

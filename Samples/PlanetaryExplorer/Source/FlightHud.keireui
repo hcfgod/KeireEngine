@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ui schemaVersion="1" name="Planetary Explorer" id="bf735fe6-d2c7-4920-a208-069dbf998b8b">
+  <style src="e5208ad4-7632-459f-9e67-b96ce72fc39d" />
+  <VisualElement name="flight-hud" class="flight-screen" id="c74b6edf-0bde-40c7-b0a2-8c64fb9b21d5">
+    <VisualElement class="flight-card" id="51655c4f-3d47-4ef8-a493-6e69b0659bd2">
+      <Label class="flight-title" text="PLANETARY EXPLORER" id="f65c37db-90cf-48ad-b6b0-c31bcbd434b3" />
+      <Label name="status" class="flight-status" text="Ready | Earth surface | Kinematic demo" id="49c41311-62cb-47e4-a2fe-15c491f47774" />
+      <VisualElement class="flight-actions" id="ab82c138-82e0-4849-8287-ed98264b6fe0">
+        <Button name="launch" class="flight-button" text="Round trip [Enter]" id="2f811d45-b526-4d70-a7b4-e034b1f759f4" />
+        <Button name="view" class="flight-button" text="Follow [V]" id="7fda9431-c11b-4a49-9190-a1516c724ee9" />
+      </VisualElement>
+      <VisualElement class="flight-actions" id="b9e2206e-eecd-42d7-9a19-70857939ccaf">
+        <Button name="pause" class="flight-button" text="Pause / Resume [P]" id="6c2be51b-226f-4255-98ce-74edc2e6f93f" />
+        <Button name="return" class="flight-button" text="Manual [R]" id="84717d42-4535-4409-b730-87a7a5429442" />
+      </VisualElement>
+      <Label class="flight-help" text="WASD fly · Arrows steer · Shift boost" id="16be484c-a2ba-4b91-bb30-68dc2d1d9f8d" />
+      <Label class="flight-help" text="Space / Q rise and descend" id="8cc441a1-27d1-47e4-a624-e56dc9197c9c" />
+      <Label class="flight-note" text="150-second trip. Demonstration controls; no physical landing or boarding yet." id="6443396e-e741-4acc-96cf-a2722c8ba22c" />
+    </VisualElement>
+  </VisualElement>
+</ui>

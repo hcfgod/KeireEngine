@@ -146,6 +146,7 @@ TEST_CASE("Nearest surface planet selection is per observer and legacy records r
     CHECK(PlanetProjectSettingsRecord::Decode(record) == settings);
     record["schemaVersion"] = 1;
     record.erase("selection");
+    record.erase("atmosphereOverrides");
     CHECK(PlanetProjectSettingsRecord::Decode(record).Selection == PlanetSelectionMode::Manual);
     PlanetProjectFrameResolver resolver;
     resolver.Configure(settings);
@@ -155,4 +156,63 @@ TEST_CASE("Nearest surface planet selection is per observer and legacy records r
     settings.Selection = PlanetSelectionMode::Manual;
     resolver.Configure(settings);
     CHECK(resolver.Resolve(SectorPosition({1, 1}, {}, {899.0, 0.0, 0.0}), 0.0, {})->Planet == first.Planet);
+}
+
+TEST_CASE("Planet atmosphere overrides round trip and legacy settings inherit without migration loss")
+{
+    using namespace Keire::Detail;
+    PlanetSettingsFixture fixture;
+    PlanetDefinition earth;
+    earth.Planet = Keire::AssetId(100, 1);
+    earth.Frame = 2;
+    PlanetDefinition mars = earth;
+    mars.Planet = Keire::AssetId(100, 2);
+    mars.Frame = 3;
+    PlanetProjectSettings settings;
+    settings.Planets = {earth, mars};
+    Keire::AtmosphereSettings thinAir;
+    thinAir.Enabled = true;
+    thinAir.MieAnisotropy = 0.4;
+    settings.AtmosphereOverrides = {{mars.Planet, thinAir}};
+    PlanetProjectSettingsStore::Save(fixture.Root, settings);
+    CHECK(PlanetProjectSettingsStore::Load(fixture.Root) == settings);
+    auto record = PlanetProjectSettingsRecord::Encode(settings);
+    CHECK(record.at("schemaVersion") == 3);
+    record["schemaVersion"] = 2;
+    record.erase("atmosphereOverrides");
+    CHECK(PlanetProjectSettingsRecord::Decode(record).AtmosphereOverrides.empty());
+    record["schemaVersion"] = 1;
+    record.erase("selection");
+    record.erase("atmosphereOverrides");
+    CHECK(PlanetProjectSettingsRecord::Decode(record).AtmosphereOverrides.empty());
+    settings.AtmosphereOverrides.push_back(settings.AtmosphereOverrides.front());
+    CHECK_THROWS_AS(ValidatePlanetProjectSettings(settings), std::invalid_argument);
+    settings.AtmosphereOverrides.resize(1);
+    settings.AtmosphereOverrides.front().Planet = Keire::AssetId(999, 999);
+    CHECK_THROWS_AS(ValidatePlanetProjectSettings(settings), std::invalid_argument);
+}
+
+TEST_CASE("Planet atmosphere profile thickness follows physical radius through project serialization")
+{
+    using namespace Keire::Detail;
+    PlanetDefinition planet;
+    planet.Planet = Keire::AssetId(101, 1);
+    planet.Frame = 2;
+    planet.RadiusMetres = 100'000'000.0;
+    PlanetProjectSettings settings;
+    settings.Planets = {planet};
+    Keire::AtmosphereSettings appearance;
+    appearance.Height = 10'000'000.0;
+    settings.AtmosphereOverrides = {{planet.Planet, appearance}};
+    const auto authored = settings;
+    const auto record = PlanetProjectSettingsRecord::Encode(settings);
+    CHECK(PlanetProjectSettingsRecord::Decode(record) == authored);
+    CHECK(settings == authored);
+    settings.Planets.front().RadiusMetres = 1'000'000.0;
+    CHECK_THROWS_AS(ValidatePlanetProjectSettings(settings), std::invalid_argument);
+    settings.Planets.front().RadiusMetres = 100.0;
+    CHECK_THROWS_AS(ValidatePlanetProjectSettings(settings), std::invalid_argument);
+    settings.AtmosphereOverrides.clear();
+    CHECK_NOTHROW(ValidatePlanetProjectSettings(settings));
+    CHECK(PlanetProjectSettingsRecord::Decode(PlanetProjectSettingsRecord::Encode(settings)) == settings);
 }

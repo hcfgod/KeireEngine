@@ -5,15 +5,75 @@ It does not replace its requirements or establish that planetary travel is ready
 
 ## Current status — October 31
 
-This section summarizes current evidence; dated notes below are historical checkpoints, not current completion claims.
+This section summarizes current evidence. Dated notes below are historical checkpoints; their pending items
+and usage targets are superseded where this section records a later result or instruction.
 
-- Implemented: multi-planet sky candidate composition, planetary scene ownership and frame-following rigid-body support, pass-specific Shader Graph generation, and decimal numeric editor fields.
-- Verified this batch: UI integration (35 cases / 1,477 assertions), focused UI/physics (10 cases / 3,193 assertions), and planetary integration (24 cases / 470 assertions). The reconstruction regression resumes contacts at both the origin and a distant translation.
-- Shader investigation: expensive final-lighting ABI retention caused the depth/G-buffer compile slowdown. Separately, cloud-density loop expansion caused forward compilation to exceed the importer deadline. Keeping the same cloud samples in a loop measured approximately 12 seconds instead of 37 seconds. Combined importer tests and exact DXIL binding comparisons are still required.
-- Outstanding: additive-scene replay consistency; character and parented-collider transfer support; multi-planet surface/cloud/fog composition; distant GPU precision and atmosphere visibility admission; authoring, standalone parity, long-session and measured transition performance acceptance.
-- The updated decimal controls still need visual editor validation. Passing component tests does not establish production readiness for planetary travel.
+- Implemented: multi-planet sky candidate composition, planetary scene ownership and frame-following rigid-body
+  support, pass-specific Shader Graph generation, decimal numeric editor fields, and opt-in per-planet sky profiles.
+- Verified before the current profile build: UI integration (35 cases / 1,477 assertions), focused UI/physics
+  (10 cases / 3,193 assertions), and planetary integration (24 cases / 470 assertions). Reconstruction resumes
+  contacts at both the origin and a distant translation. These are not results for the new profile implementation.
+- Shader slowdown fix, committed in `d2d5c983`: production importer regressions passed 3 cases / 289 assertions,
+  including seven-texture opaque/unlit/transparent permutations. Starter creation passed 1 case / 93 assertions.
+  Corrected depth/velocity and G-buffer DXIL compiled in approximately 0.20 and 0.22 seconds, with actual compiled
+  resource bindings and declared input/output signatures matching the original binaries. Retaining the same cloud
+  samples in a loop also reduced measured forward compilation from about 37 seconds to about 12 seconds.
+- Decimal controls were visually checked in the editor today, including a screenshot of Rayleigh coefficients in
+  fixed decimal notation. This supplements the display/edit tests; it does not establish all-panel visual coverage.
+- New profile shader regeneration and compiled DXIL/SPIR-V layouts pass; embedded DXIL/SPIR-V/MSL artifacts match
+  the inspected binaries. The DevDist native build passed, followed by 84 focused planet/atmosphere/capture
+  cases and 1,656 assertions. A subsequent fog/planet/atmosphere batch passed 104 cases / 1,903 assertions.
+  GPU/editor profile appearance, eclipsing and transition acceptance remain pending.
+- Outstanding: additive-scene replay consistency; character and parented-collider transfer support; multi-planet
+  surface/cloud/fog composition; distant GPU precision and atmosphere visibility admission; remaining authoring,
+  standalone parity, long-session and measured transition-performance acceptance. Planetary travel is not yet
+  established as production-ready.
 
-The user's later instructions authorize committing and pushing tested work on master and continuing beyond the earlier account-usage checkpoint. Preserve user QA content and avoid full production packaging for this development batch.
+The latest user instruction is to stop before **65% remaining account usage**, save a safe checkpoint, and share
+scene screenshots in the chat for phone review. This supersedes historical 12%/11% targets below. Committing and
+pushing tested work on master is authorized; preserve user QA content and use development builds rather than full
+production packaging for this batch.
+
+## Per-planet sky profile integration — October 31
+
+The reviewed profile implementation is now built and natively tested on master, but has not yet been visually
+accepted. Each authored planet can override its sky atmosphere; absent overrides inherit the unchanged global
+profile. Explicitly disabled media remain opaque reference planets and block sunlight without atmospheric
+extinction. Candidate profiles are copied into each render view and participate in temporal-history invalidation.
+
+Planet settings schema 3 and runtime manifest schema 13 carry these overrides. Project schema 1/2 and runtime
+schema 12 planet records retain inheritance. The AssetTool producer uses CurrentSchema and the runtime consumes
+DecodeState; a schema-3 planet profile is rejected under runtime schema 12 rather than silently dropped.
+
+The bounded override optics contract is a physical surface radius from 1,000 to 1,000,000,000 metres and
+atmosphere thickness from 100 metres through that physical radius. Density/absorption heights retain their
+existing constraints. Controls and serialization use the selected planet's actual radius; hidden legacy
+center/radius fields remain unchanged. A new override copies global appearance and bounds its initial heights
+only when needed. Existing profiles are not coerced. Unsupported radius edits are rejected with guidance;
+planets without overrides keep their existing geometry/gravity acceptance.
+
+This slice covers sky atmosphere only. Independent per-planet cloud/fog appearance, full surface aerial
+perspective, more-than-eight visible candidate admission, distant angular precision, and integrated physics /
+standalone / performance acceptance remain open. Do not call this complete planetary rendering.
+
+Required next validation: rebuild focused profile/manifest/capture tests; regenerate builtin shaders; check DXIL
+and SPIR-V layouts (PlanetAtmosphereSet size 1,040 bytes; SkyUniforms size 1,728; ground array absolute offset
+1,600); visually test Earth and Mars independently enabled/airless, eclipse rays, different view positions,
+far translations, and temporal transitions. The sunlight test includes the production scalar HLSL kernel,
+but CPU execution alone will not prove backend rendering correctness. No native build or shader regeneration
+was started during integration while the coordinator's screenshot session was active.
+
+Profile shader validation checkpoint: the official Windows builtin-shader regeneration completed successfully.
+Actual Sky DXIL disassembly and SPIR-V member/array/type decorations agree on the 1,728-byte sky buffer,
+1,040-byte planet set at offset 688, and ground array at absolute offset 1,600. The reflected binaries match
+the generated embedded DXIL, SPIR-V and MSL artifacts byte-for-byte. Evidence is in
+`Build/Validation/PlanetProfiles/Reflection/`. Visual profile/eclipsing acceptance is still pending.
+
+Native profile checkpoint: the DevDist `KeireTests` build completed, and the focused planet/atmosphere/
+environment-capture run passed 84 test cases and 1,656 assertions. The development editor stage is being
+rebuilt for visual acceptance. This does not establish GPU eclipse correctness, independent cloud/fog
+profiles, or standalone parity.
+
 ## Order and ownership
 
 Finish the current fog editor checkpoint first. Then implement a coordinated code batch on `master`,
@@ -61,8 +121,9 @@ modify inputs being compiled by an active build. Run one coordinated build rathe
    Exercise Edit, Play and standalone player behavior, long sessions and transition frame times.
 
 The numerical fog probes and existing orbital physics tests are component evidence only. They do not replace
-the integrated travel tests above. Keep unresolved items explicit and stop near the user's requested 12%
-remaining account usage, using 11% only to finish a safe checkpoint.
+the integrated travel tests above. Keep unresolved items explicit. Historical usage instruction from the October 29
+checkpoint: stop near 12% remaining, using 11% only to finish safely. The October 31 instruction at the top of this
+document supersedes that historical limit: stop before 65% remaining.
 
 ## Confirmed integration gates
 
@@ -410,3 +471,28 @@ Showcase progress, October 31: separate Earth/Mars scene sources and texture mat
 PlanetaryExplorer managed source check: bundled .NET SDK 10.0.302 compiled all four new flight source files against the actual DevDist Keire.Managed.dll with zero warnings/errors (Build/Validation/planetary-explorer-managed-build.log). Shared nearest-planet geometry passed focused standalone checks. This validates public API compatibility only; import, input, camera, depth and gameplay behavior remain untested. Independent per-planet media implementation contract is saved in Build/Validation/PlanetProfiles/ImplementationContract.md; shared-global atmosphere candidates and missing multi-domain clouds/fog remain real engine gaps.
 
 Windows-control preparation October 31: sky.list_windows timed out on initial call, retry, and one retry after resetting/reinitializing node_repl. No app inputs were issued. Per the computer-use recovery procedure, desktop automation stopped for this attempt. Editor visual acceptance remains pending; this does not block source/CLI work. DevDist KeireClient build session52011 was still live at step231/289.
+
+## Cloud variety and fog checkpoint — October 31
+
+The revised sample-only cloud candidate uses varying 2.1–6 km envelopes, regional base offsets and bounded
+coverage. Editor captures show more distinct gaps and taller formations during ascent, but this is **not an
+accepted default**: near-cloud lighting is washed out and the full-size editor reported approximately 55 ms at
+18.2 km and 36 ms at 128.1 km. These are UI observations, not controlled benchmarks. NVIDIA driver installation
+occurred during the session, so pre/post-driver timings must not be compared as a performance result.
+
+A conservative per-view height-fog optical-depth rejection is implemented and tested (104 focused cases /
+1,903 assertions); the DevDist update staged successfully in 57.1 seconds. It retains local-volume and
+orthographic paths. It does not solve the cost of distant cloud lighting or bound arbitrary HDR radiance.
+
+Next: isolate evaluated timeline ambient and multiple scattering at the same camera pose before increasing
+quality. AO=0 supplies unattenuated ambient throughout cloud interiors. The current planetary cloud lighting
+cache covers approximately 12.5 km for this sample; outside it, occupied samples use direct shadow marches.
+Consider a measured coarse outer cache with continuity/error tests rather than increasing sample counts.
+
+The bright landing wedge has source evidence pointing to the Earth texture's longitude discontinuity at the
+exact north pole: its top row contains a bright final 2% sector. The buried Showcase Plinth does not overlap
+the new launch cap. A pole-continuous sample material or texture treatment remains needed; no fix is claimed.
+
+Phone-review captures are saved outside the repository under the chat workspace screenshots folder:
+planetary-cloud-variety-revised.png and planetary-cloud-variety-orbit-revised.png. The original QA scene remains
+untouched. Two rendering-setting backups preserve both preceding cloud candidates.

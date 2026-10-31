@@ -10,6 +10,15 @@ namespace
 {
     // Compile the scalar shader kernel itself; backend execution is still separately required.
     using std::exp;
+    using std::max;
+
+    [[nodiscard]] float mad(const float left, const float right, const float addend)
+    {
+        return std::fma(left, right, addend);
+    }
+
+#include "../../../KeireCore/Shaders/AtmosphereSunOcclusion.hlsli"
+
 #include "../../../KeireCore/Shaders/VolumeTransport.hlsli"
 
     // Float reference for BuiltinSky.hlsl, not a claim of executing a backend shader in this test.
@@ -125,4 +134,17 @@ TEST_CASE("Atmosphere solar edge coverage is smooth and unresolved discs retain 
     CHECK(tiny > 0.0F);
     CHECK(tiny < 0.001F);
     CHECK(doubled == doctest::Approx(4.0F * tiny));
+}
+
+TEST_CASE("Atmosphere shader sunlight occlusion includes airless planets and surface directions")
+{
+    // Execute the production scalar HLSL kernel: no optical-density parameter may disable solid occlusion.
+    CHECK(AtmosphereSunOccluded(3.0F, -3.0F, 0.0F, 1.0F));
+    CHECK_FALSE(AtmosphereSunOccluded(3.0F, 3.0F, 0.0F, 1.0F));
+    CHECK(AtmosphereSunOccluded(0.5F, 0.5F, 0.0F, 1.0F));
+    CHECK(AtmosphereSunOccluded(1.0F, -1.0F, 0.0F, 1.0F));
+    CHECK_FALSE(AtmosphereSunOccluded(1.0F, 1.0F, 0.0F, 1.0F));
+    CHECK_FALSE(AtmosphereSunOccluded(1.0F, 0.0F, 1.0F, 1.0F));
+    CHECK(AtmosphereSunOccluded(1000000000.0F, -1000000000.0F, 0.999F, 1.0F));
+    CHECK_FALSE(AtmosphereSunOccluded(1000000000.0F, -1000000000.0F, 1.001F, 1.0F));
 }

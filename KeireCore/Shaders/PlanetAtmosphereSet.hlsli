@@ -1,6 +1,7 @@
 #pragma once
 
 #include "AtmosphereMedium.hlsli"
+#include "AtmosphereSunOcclusion.hlsli"
 
 // Host capture sorts by stable planet identity and rejects overflow instead of dropping visible planets.
 #define KEIRE_MAX_PLANET_ATMOSPHERES 8
@@ -8,24 +9,30 @@ struct PlanetAtmosphereSet
 {
     uint4 Controls;
     AtmosphereMedium Media[KEIRE_MAX_PLANET_ATMOSPHERES];
+    float4 Ground[KEIRE_MAX_PLANET_ATMOSPHERES];
 };
 
 float3 PlanetAtmosphereSunTransmission(float3 observerOffset, PlanetAtmosphereSet planets)
 {
-    // All candidates share the current scene's solar direction/irradiance. Per-planet lighting profiles would
-    // require a direction argument here rather than reusing each candidate's packed global sun direction.
+    // All candidates share one celestial direction in the observer frame. Optical coefficients and
+    // irradiance remain attached to each authored planet atmosphere.
     float3 transmission = 1.0F;
     [loop]
     for (uint index = 0U; index < planets.Controls.x; ++index)
     {
         AtmosphereMedium medium = planets.Media[index];
         const float3 position = medium.ObserverRadius.xyz + observerOffset;
-        if (length(position) < medium.ObserverRadius.w)
+        const float along = dot(position, medium.SunHeight.xyz);
+        const float3 closest = mad(-along, medium.SunHeight.xyz, position);
+        if (AtmosphereSunOccluded(length(position), along, dot(closest, closest), medium.ObserverRadius.w))
         {
             return 0.0F;
         }
         // Optical depths add even where atmospheres overlap; independent light-ray attenuation multiplies.
-        transmission *= AtmosphereMediumSunTransmission(position, medium);
+        if (medium.Controls.x > 0.5F)
+        {
+            transmission *= AtmosphereMediumSunTransmission(position, medium);
+        }
     }
     return transmission;
 }
@@ -54,7 +61,8 @@ AtmosphereTransport IntegratePlanetAtmosphereSet(float3 observerOffset, float3 d
         const AtmosphereMedium medium = planets.Media[index];
         const float3 origin = medium.ObserverRadius.xyz + observerOffset;
         float2 interval;
-        if (AtmosphereSphereInterval(origin, direction, medium.ObserverRadius.w + medium.SunHeight.w, interval))
+        if (medium.Controls.x > 0.5F &&
+            AtmosphereSphereInterval(origin, direction, medium.ObserverRadius.w + medium.SunHeight.w, interval))
         {
             intervals[index] = max(interval, 0.0F);
         }

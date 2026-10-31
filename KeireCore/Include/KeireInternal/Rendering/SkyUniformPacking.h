@@ -23,7 +23,8 @@ namespace Keire::RenderBackend
                     const float textureLayout, const double starPhase, const SkyColorUniforms& skyColors,
                     const Vector3d renderOrigin = {}, const Vector3d environmentAnchor = {},
                     const Detail::ResolvedPlanetFrame* planetFrame = nullptr,
-                    const std::span<const Detail::ResolvedPlanetFrame> planetAtmospheres = {})
+                    const std::span<const Detail::ResolvedPlanetFrame> planetAtmospheres = {},
+                    const std::span<const AtmosphereSettings> planetAtmosphereSettings = {})
     {
         const auto atmosphere =
             planetFrame
@@ -56,6 +57,6 @@ namespace Keire::RenderBackend
                 MakeStarFieldOrientation(planetFrame ? planetFrame->RootToObserver : Detail::FrameRotation{}),
                 MakePlanetAtmosphereSetUniforms(environment.Atmosphere,
                                                 {lighting.Direction.X, lighting.Direction.Y, lighting.Direction.Z},
-                                                planetAtmospheres)};
+                                                planetAtmospheres, planetAtmosphereSettings)};
     }
 } // namespace Keire::RenderBackend

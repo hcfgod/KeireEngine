@@ -5,6 +5,7 @@
 #include "KeireInternal/Rendering/CloudLightingUniforms.h"
 #include "KeireInternal/Rendering/CloudTemporalRendering.h"
 #include "KeireInternal/Rendering/EnvironmentViewCoordinates.h"
+#include "KeireInternal/Rendering/FogVisibility.h"
 #include "KeireInternal/Rendering/PlanetAtmosphereUniforms.h"
 #include "KeireInternal/Rendering/PlanetFogViewUniforms.h"
 #include "KeireInternal/Rendering/VolumeShadowUniforms.h"
@@ -35,6 +36,19 @@ namespace Keire::RenderBackend
                       packet.Environment.Atmosphere, observer,
                       {packet.Lighting.Direction.X, packet.Lighting.Direction.Y, packet.Lighting.Direction.Z},
                       camera.WorldOrigin, camera.EnvironmentAnchor);
+        auto fog = packet.PlanetFrame
+                       ? MakePlanetFogViewUniforms(
+                             packet.Environment.Fog,
+                             EnvironmentRelativeObserver(observer, camera.WorldOrigin, camera.EnvironmentAnchor),
+                             *packet.PlanetFrame)
+                       : MakeFogViewUniforms(
+                             packet.Environment.Fog,
+                             EnvironmentRelativeObserver(observer, camera.WorldOrigin, camera.EnvironmentAnchor),
+                             &packet.Environment.Atmosphere);
+        if (FogViewHasNegligibleOpticalDepth(fog, camera.Projection.Elements[15] == 1.0F))
+        {
+            fog = {};
+        }
         const auto light =
             MakeCloudLightingUniforms(packet.Environment.AmbientColor, packet.Environment.AmbientIntensity,
                                       packet.Lighting.ColorAndIntensity, packet.Lighting.Enabled, atmosphere.SunHeight);
@@ -63,14 +77,7 @@ namespace Keire::RenderBackend
                  static_cast<float>(packet.Environment.Clouds.Volume.CloudType),
                  static_cast<float>(packet.Environment.Clouds.Volume.TypeVariation),
                  static_cast<float>(packet.Environment.Clouds.Volume.BaseHeightVariationMeters)},
-                packet.PlanetFrame ? MakePlanetFogViewUniforms(packet.Environment.Fog,
-                                                               EnvironmentRelativeObserver(observer, camera.WorldOrigin,
-                                                                                           camera.EnvironmentAnchor),
-                                                               *packet.PlanetFrame)
-                                   : MakeFogViewUniforms(packet.Environment.Fog,
-                                                         EnvironmentRelativeObserver(observer, camera.WorldOrigin,
-                                                                                     camera.EnvironmentAnchor),
-                                                         &packet.Environment.Atmosphere),
+                fog,
                 packet.PlanetFrame
                     ? MakePlanetaryCloudUniforms(*packet.PlanetFrame, packet.Environment.Clouds.Volume.BaseHeightMeters)
                     : PlanetaryCloudUniforms{}};

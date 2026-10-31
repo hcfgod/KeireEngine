@@ -14,7 +14,7 @@ namespace
 
     nlohmann::json PlanetManifest(const PlanetProjectSettings& planets = {})
     {
-        return {{"schemaVersion", EnvironmentRuntimeManifest::PlanetSchema},
+        return {{"schemaVersion", EnvironmentRuntimeManifest::CurrentSchema},
                 {"environmentTime", EnvironmentClockRecord::Encode({1234567890123456789LL, 0.375})},
                 {"environmentLighting", EnvironmentLightingRecord::Encode(Keire::Detail::EnvironmentLightingProfile{})},
                 {"planets", PlanetProjectSettingsRecord::Encode(planets)},
@@ -141,4 +141,19 @@ TEST_CASE("Cooked runtime planet records originate from persisted project settin
     PlanetProjectSettingsStore::Save(fixture.Root, expected);
     const auto manifest = PlanetManifest(PlanetProjectSettingsStore::Load(fixture.Root));
     CHECK(EnvironmentRuntimeManifest::DecodeState(nlohmann::json::parse(manifest.dump())).Planets == expected);
+}
+
+TEST_CASE("Planet atmosphere profiles require schema 13 while schema 12 retains global inheritance")
+{
+    auto settings = AuthoredPlanets();
+    Keire::AtmosphereSettings atmosphere;
+    atmosphere.Enabled = false;
+    settings.AtmosphereOverrides.push_back({settings.SelectedPlanet, atmosphere});
+    auto record = PlanetManifest(settings);
+    CHECK(EnvironmentRuntimeManifest::DecodeState(record).Planets == settings);
+    record["schemaVersion"] = 12;
+    CHECK_THROWS_AS(EnvironmentRuntimeManifest::DecodeState(record), std::invalid_argument);
+    record["planets"]["schemaVersion"] = 2;
+    record["planets"].erase("atmosphereOverrides");
+    CHECK(EnvironmentRuntimeManifest::DecodeState(record).Planets.AtmosphereOverrides.empty());
 }

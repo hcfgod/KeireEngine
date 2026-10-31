@@ -228,3 +228,49 @@ TEST_CASE("ground intensity migrates and rejects invalid brightness")
         CHECK(Keire::Detail::DecodeAtmosphere(Keire::Detail::EncodeAtmosphere(settings)) == settings);
     }
 }
+
+TEST_CASE("Planet atmosphere optics use authoritative radius while retaining legacy geometry fields")
+{
+    using namespace Keire::Detail;
+    Keire::AtmosphereSettings settings;
+    settings.PlanetCenter = {123.0, -456.0, 789.0};
+    settings.Height = 10'000'000.0;
+    const auto authored = settings;
+    CHECK_THROWS_AS(ValidateAtmosphere(settings), std::invalid_argument);
+    CHECK_NOTHROW(ValidateAtmosphere(settings, 100'000'000.0));
+    const auto record = EncodeAtmosphere(settings, 100'000'000.0);
+    CHECK(DecodeAtmosphere(record, 100'000'000.0) == authored);
+    CHECK(settings == authored);
+    CHECK(record.at("planetRadius") == authored.PlanetRadius);
+    CHECK_THROWS_AS(DecodeAtmosphere(record, 1'000'000.0), std::invalid_argument);
+    for (const double unsupported :
+         {999.0, 1'000'000'001.0, std::numeric_limits<double>::infinity(), std::numeric_limits<double>::quiet_NaN()})
+    {
+        CHECK_FALSE(IsSupportedAtmosphereRadius(unsupported));
+        CHECK_THROWS_AS(ValidateAtmosphere(settings, unsupported), std::invalid_argument);
+    }
+    CHECK(IsSupportedAtmosphereRadius(1'000.0));
+    CHECK(IsSupportedAtmosphereRadius(1'000'000'000.0));
+}
+
+TEST_CASE("New planet atmosphere overrides bound inherited heights without changing authored geometry")
+{
+    using namespace Keire::Detail;
+    Keire::AtmosphereSettings inherited;
+    inherited.Enabled = true;
+    inherited.PlanetCenter = {123.0, 456.0, 789.0};
+    const auto original = inherited;
+    CHECK(CreatePlanetAtmosphereOverride(inherited, inherited.PlanetRadius) == inherited);
+    const auto small = CreatePlanetAtmosphereOverride(inherited, 1'000.0);
+    CHECK(small.Height == 1'000.0);
+    CHECK(small.RayleighScaleHeight == 1'000.0);
+    CHECK(small.MieScaleHeight == 1'000.0);
+    CHECK(small.AbsorptionPeakAltitude == 1'000.0);
+    CHECK(small.AbsorptionHalfWidth == 1'000.0);
+    CHECK(small.PlanetCenter == original.PlanetCenter);
+    CHECK(small.PlanetRadius == original.PlanetRadius);
+    CHECK(inherited == original);
+    CHECK_NOTHROW(ValidateAtmosphere(small, 1'000.0));
+    CHECK_THROWS_AS(CreatePlanetAtmosphereOverride(inherited, 999.0), std::invalid_argument);
+    CHECK_THROWS_AS(CreatePlanetAtmosphereOverride(inherited, 1'000'000'001.0), std::invalid_argument);
+}

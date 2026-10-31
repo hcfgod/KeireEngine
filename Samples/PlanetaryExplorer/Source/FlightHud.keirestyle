@@ -1,0 +1,75 @@
+@keire-style 2;
+
+.flight-screen {
+    width: 100%;
+    height: 100%;
+    padding: 16px;
+    flex-direction: column;
+    align-items: start;
+    justify-content: start;
+}
+
+.flight-card {
+    width: 360px;
+    padding: 16px;
+    gap: 8px;
+    flex-direction: column;
+    align-items: start;
+    background-color: #07111fe8;
+    border-color: #54768fff;
+    border-width: 1px;
+    border-radius: 10px;
+}
+
+.flight-title {
+    width: 328px;
+    height: 28px;
+    color: #e4f4ffff;
+    font-size: 18px;
+    white-space: nowrap;
+}
+
+.flight-status {
+    width: 328px;
+    height: 44px;
+    color: #86d6f7ff;
+    font-size: 14px;
+    white-space: normal;
+}
+
+.flight-actions {
+    width: 328px;
+    height: 34px;
+    gap: 8px;
+    flex-direction: row;
+}
+
+Button.flight-button {
+    width: 160px;
+    height: 34px;
+    font-size: 13px;
+    white-space: nowrap;
+    background-color: #194e70ff;
+    color: #f1f8ffff;
+    border-radius: 6px;
+}
+
+Button.flight-button:hover {
+    background-color: #246d98ff;
+}
+
+.flight-help {
+    width: 328px;
+    height: 20px;
+    color: #cfdee9ff;
+    font-size: 13px;
+    white-space: nowrap;
+}
+
+.flight-note {
+    width: 328px;
+    height: 36px;
+    color: #9aadbaff;
+    font-size: 12px;
+    white-space: normal;
+}

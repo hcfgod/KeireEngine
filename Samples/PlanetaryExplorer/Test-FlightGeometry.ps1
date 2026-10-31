@@ -21,4 +21,19 @@ catch
         throw
     }
 }
-Write-Output 'Actual standalone geometry passed Earth/Mars selection, radial-up, altitude, center guard and NaN rejection.'
+$previousNear = 0.0
+foreach ($altitude in @(-10.0, 12.0, 100.0, 1000.0, 2512.0, 5012.0, 150000.0))
+{
+    $near = [PlanetaryExplorer.PlanetaryFlightGeometry]::CameraNearPlane($altitude)
+    if ($near -lt 0.19999 -or $near -gt 10.0 -or $near -lt $previousNear)
+    {
+        throw 'Camera near plane must remain bounded and increase monotonically with altitude.'
+    }
+    $previousNear = $near
+}
+if ([Math]::Abs([PlanetaryExplorer.PlanetaryFlightGeometry]::CameraNearPlane(2512.0) - 5.1) -gt 0.00001 -or
+    [PlanetaryExplorer.PlanetaryFlightGeometry]::CameraNearPlane(150000.0) -ne 10.0)
+{
+    throw 'Camera depth precision transition or orbital near plane failed.'
+}
+Write-Output 'Geometry passed planet selection, radial-up, altitude, center/NaN guards and altitude-aware camera depth bounds.'

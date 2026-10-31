@@ -500,9 +500,23 @@ namespace Keire::RenderBackend
 #endif
         const auto preparationStarted = std::chrono::steady_clock::now();
         auto request = std::move(pending.Request);
-        if (!request.Environment.Atmosphere.Enabled)
+        // Resolve all inherited candidates before changing the selected per-view environment.
+        const auto inheritedAtmosphere = request.Environment.Atmosphere;
+        const bool hasAtmosphereOverrides =
+            (request.PlanetEnvironment && request.PlanetEnvironment->AtmosphereOverride) ||
+            std::ranges::any_of(request.PlanetAtmospheres,
+                                [](const auto& candidate) { return candidate.AtmosphereOverride.has_value(); });
+        if (!inheritedAtmosphere.Enabled && !hasAtmosphereOverrides)
         {
             request.PlanetAtmospheres.clear();
+        }
+        std::vector<AtmosphereSettings> atmosphereSettings;
+        atmosphereSettings.reserve(request.PlanetAtmospheres.size());
+        if (request.PlanetEnvironment && request.PlanetEnvironment->AtmosphereOverride)
+        {
+            request.Environment.Atmosphere = *request.PlanetEnvironment->AtmosphereOverride;
+            // Only the immutable view copy adopts physical geometry; authored compatibility fields stay intact.
+            request.Environment.Atmosphere.PlanetRadius = request.PlanetEnvironment->RadiusMetres;
         }
         if (request.PlanetAtmospheres.size() > MaximumPlanetAtmospheres)
         {
@@ -530,6 +544,10 @@ namespace Keire::RenderBackend
                 }
             }
             atmosphereFrames.push_back(Detail::CapturePlanetEnvironment(atmosphere));
+            if (hasAtmosphereOverrides)
+            {
+                atmosphereSettings.push_back(atmosphere.AtmosphereOverride.value_or(inheritedAtmosphere));
+            }
         }
         if (request.PlanetEnvironment && request.EvaluatedEnvironment)
         {
@@ -691,6 +709,7 @@ namespace Keire::RenderBackend
         cameraHistory.WorldOrigin = camera.WorldOrigin;
         cameraHistory.EnvironmentAnchor = camera.EnvironmentAnchor;
         cameraHistory.PlanetEnvironment = MakePlanetEnvironmentHistoryKey(request.PlanetEnvironment);
+        cameraHistory.PlanetAtmosphereSettings = atmosphereSettings;
         for (const auto& atmosphere : request.PlanetAtmospheres)
         {
             cameraHistory.PlanetAtmospheres.emplace_back(*MakePlanetEnvironmentHistoryKey(atmosphere),
@@ -708,6 +727,7 @@ namespace Keire::RenderBackend
             packet.TemporalHistoryContinuous ? previousCamera->second.WorldOrigin : camera.WorldOrigin;
         packet.Environment = request.Environment;
         packet.PlanetAtmospheres = std::move(atmosphereFrames);
+        packet.PlanetAtmosphereSettings = std::move(atmosphereSettings);
         if (request.PlanetEnvironment)
         {
             packet.PlanetFrame = Detail::CapturePlanetEnvironment(*request.PlanetEnvironment);

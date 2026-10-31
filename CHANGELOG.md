@@ -1,6 +1,13 @@
 # Changelog
 
 ## Unreleased
+- Skip cloud-pass height-fog marching when a conservative per-view optical-depth bound is negligible; retain
+  local volumes, reachable density and orthographic views. This bounds extinction, not arbitrary HDR radiance.
+- Add opt-in per-planet sky atmosphere profiles with stable identity, preserved global inheritance, airless-planet
+  sun occlusion, and physical-radius-aware authoring. Independent cloud/fog profiles remain unfinished.
+- Persist atmosphere overrides in planet settings schema 3 and cooked runtime manifest schema 13, retaining
+  legacy planet records and rejecting incompatible profile downgrades. Native tests and compiled shader layouts pass;
+  independent planet appearance and transition acceptance remain pending.
 - Display and edit scalar/vector Environment values as decimals without exponent notation, preserving stored
   precision and exposing complete extreme values through editable text and tooltips.
 - Validate frame-following static support contacts across full scene/planet/physics reconstruction at a

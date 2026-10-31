@@ -120,7 +120,7 @@ $player | ConvertTo-Json -Depth 100 | Set-Content -LiteralPath $playerPath -Enco
 $authoringPath = Join-Path $destinationRoot 'ProjectSettings/Authoring.keiresettings'
 $authoring = Get-Content -LiteralPath $authoringPath -Raw | ConvertFrom-Json
 $authoring.externalEditorExecutable = ''
-$authoring.externalEditorId = ''
+$authoring.externalEditorId = 'system'
 $authoring | ConvertTo-Json -Depth 100 | Set-Content -LiteralPath $authoringPath -Encoding UTF8
 $scenePath = Join-Path $destinationRoot 'Assets/GravityAcceptanceQA.keirescene'
 $scene = Get-Content -LiteralPath $scenePath -Raw | ConvertFrom-Json

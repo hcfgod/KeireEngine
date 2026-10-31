@@ -299,6 +299,55 @@ namespace
             request.Environment.Atmosphere.Enabled = false;
             CHECK(capture(205).PlanetAtmospheres.empty());
             state->CaptureRequests.clear();
+
+            // Two actual view surfaces keep independent selected profiles; distant candidates retain theirs.
+            auto earthAppearance = request.Environment.Atmosphere;
+            earthAppearance.Enabled = true;
+            earthAppearance.Height = 1000.0;
+            earthAppearance.RayleighScaleHeight = 1000.0;
+            earthAppearance.MieScaleHeight = 1000.0;
+            earthAppearance.AbsorptionPeakAltitude = 1000.0;
+            earthAppearance.AbsorptionHalfWidth = 1000.0;
+            earthAppearance.GroundReflectance = {0.1, 0.2, 0.4};
+            auto marsAppearance = earthAppearance;
+            marsAppearance.GroundReflectance = {0.6, 0.2, 0.1};
+            marsAppearance.MieAnisotropy = 0.4;
+            nearPlanet.AtmosphereOverride = earthAppearance;
+            farPlanet.AtmosphereOverride = marsAppearance;
+            request.PlanetEnvironment = nearPlanet;
+            request.PlanetAtmospheres = {farPlanet, nearPlanet};
+            packet = capture(206);
+            auto capturedEarth = earthAppearance;
+            capturedEarth.PlanetRadius = nearPlanet.RadiusMetres;
+            CHECK(packet.Environment.Atmosphere == capturedEarth);
+            CHECK(nearPlanet.AtmosphereOverride->PlanetRadius == earthAppearance.PlanetRadius);
+            REQUIRE(packet.PlanetAtmosphereSettings.size() == 2);
+            CHECK(packet.PlanetAtmosphereSettings[0] == earthAppearance);
+            CHECK(packet.PlanetAtmosphereSettings[1] == marsAppearance);
+            CHECK_FALSE(request.Environment.Atmosphere.Enabled);
+            CHECK(capture(207).TemporalHistoryContinuous);
+            request.PlanetAtmospheres[0].AtmosphereOverride->MieAnisotropy = 0.5;
+            CHECK_FALSE(capture(208).TemporalHistoryContinuous);
+            CHECK(capture(209).TemporalHistoryContinuous);
+            auto secondView =
+                Owner().Renderer()->CreateView({.Name = "planet-profile-second-view", .Width = 32, .Height = 32});
+            auto* secondSurface = static_cast<Keire::RenderBackend::RenderSurfaceState*>(
+                Keire::RenderSystemInternalAccess::SurfaceState(*secondView->Surface()));
+            REQUIRE(secondSurface);
+            const Keire::RenderBackend::RenderSurfaceToken secondToken{secondSurface->Id, secondSurface->Epoch,
+                                                                       secondSurface->Lifetime};
+            auto secondRequest = request;
+            secondRequest.View = secondView;
+            secondRequest.PlanetEnvironment = request.PlanetAtmospheres[0];
+            marsAppearance.MieAnisotropy = 0.5;
+            state->CaptureRequests.clear();
+            state->CapturePendingSceneRequest({secondRequest, secondToken}, 209);
+            REQUIRE(state->CaptureRequests.size() == 1);
+            auto capturedMars = marsAppearance;
+            capturedMars.PlanetRadius = farPlanet.RadiusMetres;
+            CHECK(state->CaptureRequests.front().Packet.Environment.Atmosphere == capturedMars);
+            CHECK(capture(210).TemporalHistoryContinuous);
+            CHECK(capture(211).Environment.Atmosphere == capturedEarth);
             scene->Close();
             m_Checked = true;
             Owner().RequestExit();

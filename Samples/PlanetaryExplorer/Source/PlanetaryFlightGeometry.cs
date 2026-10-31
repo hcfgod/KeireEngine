@@ -32,6 +32,18 @@ namespace PlanetaryExplorer
 
     public static class PlanetaryFlightGeometry
     {
+        public static float CameraNearPlane(double altitude)
+        {
+            if (!double.IsFinite(altitude))
+            {
+                throw new ArgumentOutOfRangeException(nameof(altitude));
+            }
+
+            double height = Math.Clamp((altitude - 12.0) / 5000.0, 0.0, 1.0);
+            double smoothHeight = height * height * (3.0 - 2.0 * height);
+            return (float)(0.2 + 9.8 * smoothHeight);
+        }
+
         public static PlanetFlightSample Nearest(double x, double y, double z)
         {
             if (!double.IsFinite(x) || !double.IsFinite(y) || !double.IsFinite(z) ||

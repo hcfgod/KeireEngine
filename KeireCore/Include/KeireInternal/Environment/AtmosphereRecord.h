@@ -4,11 +4,14 @@
 
 #include <nlohmann/json.hpp>
 
+#include <optional>
+
 namespace Keire::Detail
 {
-    [[nodiscard]] inline nlohmann::json EncodeAtmosphere(const AtmosphereSettings& settings)
+    [[nodiscard]] inline nlohmann::json EncodeAtmosphere(const AtmosphereSettings& settings,
+                                                         const std::optional<double> physicalRadius = {})
     {
-        ValidateAtmosphere(settings);
+        ValidateAtmosphere(settings, physicalRadius);
         return {{"schemaVersion", 3},
                 {"groundIntensity", settings.GroundIntensity},
                 {"groundReflectance", settings.GroundReflectance},
@@ -31,7 +34,8 @@ namespace Keire::Detail
                 {"lightSamples", settings.LightSamples}};
     }
 
-    [[nodiscard]] inline AtmosphereSettings DecodeAtmosphere(const nlohmann::json& record)
+    [[nodiscard]] inline AtmosphereSettings DecodeAtmosphere(const nlohmann::json& record,
+                                                             const std::optional<double> physicalRadius = {})
     {
         try
         {
@@ -107,7 +111,7 @@ namespace Keire::Detail
             result.SunAngularRadius = scalar("sunAngularRadius");
             result.ViewSamples = samples("viewSamples", 64);
             result.LightSamples = samples("lightSamples", 32);
-            ValidateAtmosphere(result);
+            ValidateAtmosphere(result, physicalRadius);
             return result;
         }
         catch (const nlohmann::json::exception&)

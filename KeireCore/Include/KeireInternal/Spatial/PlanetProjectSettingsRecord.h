@@ -1,10 +1,12 @@
 #pragma once
 
+#include "KeireInternal/Environment/AtmosphereRecord.h"
 #include "KeireInternal/Spatial/PlanetDefinitionRecord.h"
 #include "KeireInternal/Spatial/PlanetProjectSettings.h"
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -22,7 +24,15 @@ namespace Keire::Detail
             {
                 planets.push_back(PlanetDefinitionRecord::Encode(planet));
             }
-            return {{"schemaVersion", 2},
+            auto overrides = nlohmann::json::array();
+            for (const auto& profile : settings.AtmosphereOverrides)
+            {
+                const auto planet = std::ranges::find(settings.Planets, profile.Planet, &PlanetDefinition::Planet);
+                overrides.push_back({{"planet", profile.Planet.ToString()},
+                                     {"atmosphere", EncodeAtmosphere(profile.Atmosphere, planet->RadiusMetres)}});
+            }
+            return {{"schemaVersion", 3},
+                    {"atmosphereOverrides", std::move(overrides)},
                     {"selection", settings.Selection == PlanetSelectionMode::Manual ? "manual" : "nearest-surface"},
                     {"geometry", settings.Geometry == PlanetGeometryMode::Flat ? "flat" : "planetary"},
                     {"gravity", settings.Gravity == PlanetGravityMode::Uniform  ? "uniform"
@@ -39,13 +49,14 @@ namespace Keire::Detail
             {
                 if (!record.is_object() || !record.at("schemaVersion").is_number_integer() ||
                     !((record.at("schemaVersion") == 1 && record.size() == 5) ||
-                      (record.at("schemaVersion") == 2 && record.size() == 6)) ||
+                      (record.at("schemaVersion") == 2 && record.size() == 6) ||
+                      (record.at("schemaVersion") == 3 && record.size() == 7)) ||
                     !record.at("planets").is_array() || record.at("planets").size() > 64)
                 {
                     throw std::invalid_argument("Unsupported planet project settings record.");
                 }
                 PlanetProjectSettings settings;
-                if (record.at("schemaVersion") == 2)
+                if (record.at("schemaVersion") >= 2)
                 {
                     const auto selection = record.at("selection").get<std::string>();
                     if (selection != "manual" && selection != "nearest-surface")
@@ -77,6 +88,29 @@ namespace Keire::Detail
                 for (const auto& planet : record.at("planets"))
                 {
                     settings.Planets.push_back(PlanetDefinitionRecord::Decode(planet));
+                }
+                if (record.at("schemaVersion") >= 3)
+                {
+                    const auto& overrides = record.at("atmosphereOverrides");
+                    if (!overrides.is_array() || overrides.size() > settings.Planets.size())
+                    {
+                        throw std::invalid_argument("Planet atmosphere override collection is invalid.");
+                    }
+                    for (const auto& profile : overrides)
+                    {
+                        if (!profile.is_object() || profile.size() != 2)
+                        {
+                            throw std::invalid_argument("Planet atmosphere override record is invalid.");
+                        }
+                        const auto identity = AssetId::Parse(profile.at("planet").get<std::string>());
+                        const auto planet = std::ranges::find(settings.Planets, identity, &PlanetDefinition::Planet);
+                        if (planet == settings.Planets.end())
+                        {
+                            throw std::invalid_argument("Planet atmosphere override references a missing planet.");
+                        }
+                        settings.AtmosphereOverrides.push_back(
+                            {identity, DecodeAtmosphere(profile.at("atmosphere"), planet->RadiusMetres)});
+                    }
                 }
                 ValidatePlanetProjectSettings(settings);
                 return settings;

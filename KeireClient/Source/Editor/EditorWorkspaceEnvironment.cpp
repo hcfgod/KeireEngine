@@ -36,7 +36,8 @@ EditorWorkspaceLayer::SceneViewportPlanetEnvironment(const Keire::RenderCamera& 
     const auto clock = m_EnvironmentPreview->State();
     const auto frame = m_PlanetPreviewFrames->Resolve(observer, m_EnvironmentPreview->SimulationTime(), clock,
                                                       m_EnvironmentPreview->Revision());
-    return frame ? std::optional{Keire::Detail::ToPlanetEnvironmentView(*frame)} : std::nullopt;
+    return frame ? std::optional{Keire::Detail::ToPlanetEnvironmentView(*frame, m_ProjectSettingsDocument->Planets())}
+                 : std::nullopt;
 }
 
 std::vector<Keire::PlanetEnvironmentView>
@@ -67,7 +68,7 @@ EditorWorkspaceLayer::SceneViewportPlanetAtmospheres(const Keire::RenderCamera& 
     result.reserve(frames.size());
     for (const auto& frame : frames)
     {
-        result.push_back(Keire::Detail::ToPlanetEnvironmentView(frame));
+        result.push_back(Keire::Detail::ToPlanetEnvironmentView(frame, m_ProjectSettingsDocument->Planets()));
     }
     return result;
 }

@@ -2,6 +2,7 @@
 
 #include "Keire/Rendering/PlanetEnvironmentView.h"
 #include "KeireInternal/Spatial/PlanetFrameResolution.h"
+#include "KeireInternal/Spatial/PlanetProjectSettings.h"
 
 #include <cmath>
 #include <stdexcept>
@@ -22,6 +23,10 @@ namespace Keire::Detail
             {
                 throw std::invalid_argument("Planet environment observer must be finite.");
             }
+        }
+        if (view.AtmosphereOverride)
+        {
+            ValidateAtmosphere(*view.AtmosphereOverride, view.RadiusMetres);
         }
         const EnvironmentClockState clock{view.Clock.Day, view.Clock.DayFraction, view.Clock.SecondsPerDay};
         (void)EnvironmentClock(clock);
@@ -72,5 +77,19 @@ namespace Keire::Detail
                                      frame.RootToObserver.Components()};
         (void)CapturePlanetEnvironment(result);
         return result;
+    }
+    [[nodiscard]] inline PlanetEnvironmentView ToPlanetEnvironmentView(const ResolvedPlanetFrame& frame,
+                                                                       const PlanetProjectSettings& settings)
+    {
+        auto view = ToPlanetEnvironmentView(frame);
+        for (const auto& profile : settings.AtmosphereOverrides)
+        {
+            if (profile.Planet == frame.Planet)
+            {
+                view.AtmosphereOverride = profile.Atmosphere;
+                break;
+            }
+        }
+        return view;
     }
 } // namespace Keire::Detail

@@ -27,11 +27,12 @@ namespace Keire::Internal
                                             {camera.WorldOrigin.X, camera.WorldOrigin.Y, camera.WorldOrigin.Z});
         const auto observer = origin.Translated({localObserver.X, localObserver.Y, localObserver.Z});
         const auto frames = Detail::SceneRuntimePlanetAccess::ResolveAll(world, observer);
+        const auto settings = Detail::SceneRuntimePlanetAccess::Settings(world);
         std::vector<PlanetEnvironmentView> result;
         result.reserve(frames.size());
         for (const auto& frame : frames)
         {
-            result.push_back(Detail::ToPlanetEnvironmentView(frame));
+            result.push_back(Detail::ToPlanetEnvironmentView(frame, settings));
         }
         return result;
     }
@@ -44,7 +45,9 @@ namespace Keire::Internal
                                             {camera.WorldOrigin.X, camera.WorldOrigin.Y, camera.WorldOrigin.Z});
         const auto observer = origin.Translated({localObserver.X, localObserver.Y, localObserver.Z});
         const auto resolved = Detail::SceneRuntimePlanetAccess::ResolveSelected(world, observer);
-        return resolved ? std::optional{Detail::ToPlanetEnvironmentView(*resolved)} : std::nullopt;
+        return resolved ? std::optional{Detail::ToPlanetEnvironmentView(
+                              *resolved, Detail::SceneRuntimePlanetAccess::Settings(world))}
+                        : std::nullopt;
     }
 
     [[nodiscard]] inline RenderCamera BuildPresentedSceneCamera(const CameraComponent& camera,

@@ -180,7 +180,7 @@ float3 AtmosphereSunTransmission(float3 position)
 
 float3 AtmosphereRadiance(float3 direction, out float3 backgroundTransmission, out float3 sunRadiance)
 {
-    if (PlanetAtmospheres.Controls.x > 1U)
+    if (PlanetAtmospheres.Controls.x > 0U)
     {
         uint ground;
         float endDistance;
@@ -196,7 +196,7 @@ float3 AtmosphereRadiance(float3 direction, out float3 backgroundTransmission, o
             const float3 normal = normalize(medium.ObserverRadius.xyz + groundOffset);
             const float3 direct = medium.SolarWidth.xyz * saturate(dot(normal, medium.SunHeight.xyz)) *
                 PlanetAtmosphereSunTransmission(groundOffset + normal * 0.001F, PlanetAtmospheres);
-            const float3 boundary = GroundReflectance.xyz * GroundReflectance.w *
+            const float3 boundary = PlanetAtmospheres.Ground[ground].xyz * PlanetAtmospheres.Ground[ground].w *
                 (direct * 0.31830988618F + CloudAmbientLight.xyz);
             return radiance + air.Transmission * boundary;
         }
@@ -361,7 +361,7 @@ float4 PSMain(VertexOutput input) : SV_Target0
     float3 radiance = 0.0F;
     float3 backgroundTransmission = 1.0F;
     float3 sunRadiance = 0.0F;
-    if (AtmosphereControls.x > 0.5F)
+    if (AtmosphereControls.x > 0.5F || PlanetAtmospheres.Controls.x > 0U)
     {
         radiance = AtmosphereRadiance(direction, backgroundTransmission, sunRadiance);
     }
@@ -465,7 +465,7 @@ float4 PSMain(VertexOutput input) : SV_Target0
     }
     // Keep the atmosphere's finite RGBA16F storage contract after cloud composition and exposure.
     const float3 exposed = radiance * SkyParameters.z;
-    const bool finiteSkyRequired = AtmosphereControls.x > 0.5F || CloudGeometry0.w > 0.0F || CloudGeometry1.w > 0.0F ||
+    const bool finiteSkyRequired = PlanetAtmospheres.Controls.x > 0U || AtmosphereControls.x > 0.5F || CloudGeometry0.w > 0.0F || CloudGeometry1.w > 0.0F ||
                                    StarIdentity.y != 0U || SkyHorizonWeight.w > 0.0F;
     return float4(finiteSkyRequired ? min(exposed, 65504.0F) : exposed, 1.0F);
 }

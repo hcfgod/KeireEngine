@@ -106,3 +106,32 @@ TEST_CASE("Atmosphere shader packing bounds loops and handles degenerate light v
         settings, {}, {std::numeric_limits<float>::infinity(), 0.0F, 0.0F});
     CHECK(invalidDirection.SunHeight.Y == 1.0F);
 }
+
+TEST_CASE("Planet atmosphere candidates pack independent media and ground with a shared celestial direction")
+{
+    using namespace Keire::RenderBackend;
+    Keire::AtmosphereSettings global;
+    global.Enabled = false;
+    std::vector<Keire::Detail::ResolvedPlanetFrame> frames(2);
+    frames[0].RadiusMetres = 6'360'000.0;
+    frames[0].ObserverFromCenterPlanetMetres = {0.125, 6'360'001.0, 0.0};
+    frames[1].RadiusMetres = 3'389'500.0;
+    frames[1].ObserverFromCenterPlanetMetres = {25'000'000.0, 0.0, 0.0};
+    std::vector<Keire::AtmosphereSettings> profiles(2);
+    profiles[0].Enabled = true;
+    profiles[1].Enabled = false;
+    profiles[1].Height = 50'000.0;
+    profiles[1].GroundReflectance = {0.6, 0.2, 0.1};
+    profiles[1].GroundIntensity = 0.75;
+    const auto packed = MakePlanetAtmosphereSetUniforms(global, {0.0F, -1.0F, 0.0F}, frames, profiles);
+    CHECK(packed.Controls[0] == 2);
+    CHECK(packed.Media[0].Controls.X == 1.0F);
+    CHECK(packed.Media[1].Controls.X == 0.0F);
+    CHECK(packed.Media[1].ObserverRadius.W == doctest::Approx(3389.5));
+    CHECK(packed.Media[1].SunHeight.W == doctest::Approx(50.0));
+    CHECK(packed.Media[0].SunHeight.Y == packed.Media[1].SunHeight.Y);
+    CHECK(packed.Ground[1].X == doctest::Approx(0.6));
+    CHECK(packed.Ground[1].W == doctest::Approx(0.75));
+    profiles.pop_back();
+    CHECK_THROWS_AS(MakePlanetAtmosphereSetUniforms(global, {}, frames, profiles), std::invalid_argument);
+}

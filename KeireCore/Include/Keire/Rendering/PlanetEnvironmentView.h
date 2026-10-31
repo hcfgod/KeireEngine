@@ -3,8 +3,11 @@
 #include "Keire/Assets/Asset.h"
 #include "Keire/Rendering/EnvironmentLighting.h"
 
+#include "Keire/Rendering/Atmosphere.h"
+
 #include <array>
 #include <cstdint>
+#include <optional>
 
 namespace Keire
 {
@@ -25,5 +28,6 @@ namespace Keire
         std::array<double, 4> PlanetToObserverRotation{0.0, 0.0, 0.0, 1.0};
         double RadiusMetres = 0.0;
         std::array<double, 4> RootToObserverRotation{0.0, 0.0, 0.0, 1.0};
+        std::optional<AtmosphereSettings> AtmosphereOverride;
     };
 } // namespace Keire

@@ -4,6 +4,7 @@
 
 #include <array>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <span>
 #include <stdexcept>
@@ -16,16 +17,24 @@ namespace Keire::RenderBackend
     {
         std::array<std::uint32_t, 4> Controls{};
         std::array<AtmosphereUniforms, MaximumPlanetAtmospheres> Media{};
+        std::array<Vector4, MaximumPlanetAtmospheres> Ground{};
     };
 
-    static_assert(sizeof(PlanetAtmosphereSetUniforms) == 912);
+    static_assert(sizeof(PlanetAtmosphereSetUniforms) == 1040);
+    static_assert(offsetof(PlanetAtmosphereSetUniforms, Media) == 16);
+    static_assert(offsetof(PlanetAtmosphereSetUniforms, Ground) == 912);
 
     [[nodiscard]] inline PlanetAtmosphereSetUniforms
     MakePlanetAtmosphereSetUniforms(const AtmosphereSettings& settings, const Vector3 lightDirection,
-                                    const std::span<const Detail::ResolvedPlanetFrame> planets)
+                                    const std::span<const Detail::ResolvedPlanetFrame> planets,
+                                    const std::span<const AtmosphereSettings> profiles = {})
     {
         PlanetAtmosphereSetUniforms result;
-        if (!settings.Enabled || planets.size() < 2)
+        if ((!profiles.empty() && profiles.size() != planets.size()))
+        {
+            throw std::invalid_argument("Atmosphere profile and planet candidate counts differ.");
+        }
+        if (planets.empty() || (profiles.empty() && (!settings.Enabled || planets.size() < 2)))
         {
             return result;
         }
@@ -37,7 +46,11 @@ namespace Keire::RenderBackend
         for (std::size_t index = 0; index < planets.size(); ++index)
         {
             auto& medium = result.Media[index];
-            medium = MakePlanetAtmosphereUniforms(settings, lightDirection, planets[index]);
+            const auto& profile = profiles.empty() ? settings : profiles[index];
+            medium = MakePlanetAtmosphereUniforms(profile, lightDirection, planets[index]);
+            result.Ground[index] = {
+                static_cast<float>(profile.GroundReflectance[0]), static_cast<float>(profile.GroundReflectance[1]),
+                static_cast<float>(profile.GroundReflectance[2]), static_cast<float>(profile.GroundIntensity)};
             if (!Math::IsFinite(medium.ObserverRadius))
             {
                 throw std::out_of_range("Planet atmosphere placement exceeds GPU coordinate range.");

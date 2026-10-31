@@ -5,17 +5,41 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+
+function ConvertTo-AssetIdentifier
+{
+    param([string]$Identifier, [string]$Context)
+
+    if ($Identifier -notmatch '^(?:[0-9a-fA-F]{32}|[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12})$')
+    {
+        throw "Malformed asset identifier '$Identifier' in $Context"
+    }
+
+    return ([Guid]::Parse($Identifier)).ToString('D')
+}
+
 $known = @{}
 foreach ($file in Get-ChildItem -LiteralPath (Join-Path $SourceProject 'Assets') -Filter '*.keiremeta' -File -Recurse)
 {
     $metadata = Get-Content -LiteralPath $file.FullName -Raw | ConvertFrom-Json
-    $known[[string]$metadata.id] = $file.FullName
+    $identifier = ConvertTo-AssetIdentifier $metadata.id $file.FullName
+    $known[$identifier] = $file.FullName
 }
 $present = @{}
 foreach ($file in Get-ChildItem -LiteralPath (Join-Path $Project 'Assets') -Filter '*.keiremeta' -File -Recurse)
 {
     $metadata = Get-Content -LiteralPath $file.FullName -Raw | ConvertFrom-Json
-    $present[[string]$metadata.id] = $file.FullName
+    $assetIdentifier = ConvertTo-AssetIdentifier $metadata.id $file.FullName
+    ConvertTo-AssetIdentifier $metadata.type $file.FullName | Out-Null
+    foreach ($dependency in $metadata.dependencies)
+    {
+        ConvertTo-AssetIdentifier $dependency $file.FullName | Out-Null
+    }
+    if ($present.ContainsKey($assetIdentifier))
+    {
+        throw "Duplicate asset identifier '$($metadata.id)' in $($file.FullName)"
+    }
+    $present[$assetIdentifier] = $file.FullName
     $source = $file.FullName.Substring(0, $file.FullName.Length - '.keiremeta'.Length)
     if (-not (Test-Path -LiteralPath $source -PathType Leaf))
     {
@@ -31,12 +55,14 @@ foreach ($folder in @('Assets', 'ProjectSettings'))
         {
             continue
         }
-        foreach ($match in [regex]::Matches((Get-Content -LiteralPath $file.FullName -Raw), '[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}'))
+        $identifierPattern = '(?<![0-9a-fA-F])(?:[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}|[0-9a-fA-F]{32})(?![0-9a-fA-F])'
+        foreach ($match in [regex]::Matches((Get-Content -LiteralPath $file.FullName -Raw), $identifierPattern))
         {
-            if ($known.ContainsKey($match.Value))
+            $identifier = ConvertTo-AssetIdentifier $match.Value $file.FullName
+            if ($known.ContainsKey($identifier))
             {
                 $references++
-                if (-not $present.ContainsKey($match.Value))
+                if (-not $present.ContainsKey($identifier))
                 {
                     throw "Missing known source asset $($match.Value) referenced by $($file.FullName)"
                 }
@@ -45,7 +71,8 @@ foreach ($folder in @('Assets', 'ProjectSettings'))
     }
 }
 $manifest = Get-Content -LiteralPath (Join-Path $Project 'ProjectSettings/Project.keireproject') -Raw | ConvertFrom-Json
-if (-not $present.ContainsKey([string]$manifest.startupScene))
+$startupIdentifier = ConvertTo-AssetIdentifier $manifest.startupScene 'startup scene'
+if (-not $present.ContainsKey($startupIdentifier))
 {
     throw 'Startup scene is absent.'
 }

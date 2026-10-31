@@ -167,6 +167,7 @@ namespace Keire::RenderBackend
         Vector3d WorldOrigin;
         Vector3d EnvironmentAnchor;
         std::optional<PlanetEnvironmentHistoryKey> PlanetEnvironment;
+        std::vector<AtmosphereSettings> PlanetAtmosphereSettings;
         std::vector<std::pair<PlanetEnvironmentHistoryKey, std::array<double, 3>>> PlanetAtmospheres;
 
         [[nodiscard]] bool HasContinuousEnvironment(const CameraMotionHistoryEntry& next) const noexcept
@@ -176,7 +177,8 @@ namespace Keire::RenderBackend
                    Clouds == next.Clouds && Bloom == next.Bloom && Stars == next.Stars &&
                    EnvironmentSecondsPerDay == next.EnvironmentSecondsPerDay &&
                    EnvironmentAnchor == next.EnvironmentAnchor && PlanetEnvironment == next.PlanetEnvironment &&
-                   PlanetAtmospheres == next.PlanetAtmospheres;
+                   PlanetAtmospheres == next.PlanetAtmospheres &&
+                   PlanetAtmosphereSettings == next.PlanetAtmosphereSettings;
         }
     };
 
