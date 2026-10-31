@@ -1,6 +1,7 @@
 #include "KeireInternal/Rendering/CloudLightCacheResources.h"
 
 #include "Keire/BuiltinUnlitShaders.h"
+#include "KeireInternal/Rendering/CloudLightCacheDemand.h"
 #include "KeireInternal/Rendering/CloudLightCacheGrid.h"
 
 #include <cmath>
@@ -129,8 +130,12 @@ namespace Keire::RenderBackend
         {
             InvalidateCloudLightCache(resources);
         }
+        if (!CloudLightCacheHasDemand(view))
+        {
+            return {};
+        }
         auto grid = MakeCloudLightCacheGrid(view.Volume, view.WeatherControls.X > 0.5F ? view.WeatherControls.W : 0.0F);
-        if (view.Volume.Quality[0] == 0U || view.Volume.Density[0] <= 0.0F || view.Volume.Density[1] <= 0.0F || !grid)
+        if (!grid)
         {
             return {};
         }

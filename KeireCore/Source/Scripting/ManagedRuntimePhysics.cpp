@@ -1,5 +1,8 @@
 #include "KeireInternal/Scripting/ManagedRuntimePhysics.h"
 
+#include "Keire/ECS/Components/CharacterControllerComponent.h"
+#include "Keire/ECS/Components/TransformComponent.h"
+#include "Keire/Physics/PhysicsSystem.h"
 #include "Keire/Scenes/Scene.h"
 
 #if defined(_MSC_VER)
@@ -19,6 +22,27 @@
 
 namespace Keire::Detail
 {
+    std::optional<Vector3> QueryManagedCharacterGravity(const Ref<SceneRuntimeSession>& runtime,
+                                                        const std::uint64_t world, const AssetId characterId)
+    {
+        const auto scene = runtime ? runtime->RuntimeScene() : Ref<Scene>{};
+        const auto entity = scene ? scene->FindEntity(EntityId(characterId)) : Entity{};
+        if (!entity || world == 0 || entity.World() != world || !entity.ActiveInHierarchy())
+        {
+            return std::nullopt;
+        }
+        const auto character = entity.GetComponent<CharacterControllerComponent>();
+        const auto transform = entity.GetComponent<TransformComponent>();
+        const auto physics = runtime->Physics();
+        if (!character || !character->Enabled() || !transform || !physics)
+        {
+            return std::nullopt;
+        }
+        constexpr double maximumPositionError = 0.001;
+        return physics->SampleGravity(
+            physics->ToLocalPosition(transform->WorldPositionPrecise(), maximumPositionError));
+    }
+
     namespace
     {
         inline constexpr int MaximumManagedOverlapResults = 256;

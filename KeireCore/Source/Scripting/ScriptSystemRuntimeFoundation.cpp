@@ -2,6 +2,7 @@
 #include "KeireInternal/Scripting/ScriptSystemInternal.h"
 
 #include <algorithm>
+#include <cmath>
 #include <limits>
 
 namespace Keire
@@ -517,6 +518,35 @@ namespace Keire
         *normal = state.GroundNormal;
         *velocity = state.Velocity;
         return 1;
+    }
+
+    std::uint8_t ScriptSystem::Impl::RuntimeGetCharacterGravity(const std::uint64_t world, const std::uint64_t high,
+                                                                const std::uint64_t low, Vector3* acceleration) noexcept
+    {
+        if (!acceleration)
+        {
+            return 0;
+        }
+        *acceleration = {};
+        try
+        {
+            if (!CurrentRuntime || !CurrentRuntime->Specification.RuntimeServices)
+            {
+                return 0;
+            }
+            const auto value =
+                CurrentRuntime->Specification.RuntimeServices->SampleCharacterGravity(world, {high, low});
+            if (!value || !std::isfinite(value->X) || !std::isfinite(value->Y) || !std::isfinite(value->Z))
+            {
+                return 0;
+            }
+            *acceleration = *value;
+            return 1;
+        }
+        catch (...)
+        {
+            return 0;
+        }
     }
 
     [[nodiscard]] Ref<RigidBodyComponent> ScriptSystem::Impl::RuntimeRigidBody(const std::uint64_t world,

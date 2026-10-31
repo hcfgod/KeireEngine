@@ -722,6 +722,9 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     CapsuleCastManaged(const Keire::ManagedCapsuleCastQuery& query) noexcept override;
     [[nodiscard]] std::vector<Keire::AssetId>
     OverlapSphereManaged(const Keire::ManagedSphereOverlapQuery& query) override;
+    [[nodiscard]] std::optional<Keire::Vector3> SampleCharacterGravity(std::uint64_t world,
+                                                                       Keire::AssetId character) override;
+
     [[nodiscard]] std::optional<Keire::ManagedRaycastHitPrecise>
     RaycastManagedPrecise(const Keire::ManagedRaycastQueryPrecise& query) override;
 

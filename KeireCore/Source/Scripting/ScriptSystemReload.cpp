@@ -188,6 +188,8 @@ namespace Keire
                                            reinterpret_cast<void*>(&Impl::RuntimeMoveCharacterController));
                 managedApi.AddInternalCall("Keire.NativeRuntime", "GetCharacterControllerStateIcall",
                                            reinterpret_cast<void*>(&Impl::RuntimeGetCharacterControllerState));
+                managedApi.AddInternalCall("Keire.NativeRuntime", "GetCharacterGravityIcall",
+                                           reinterpret_cast<void*>(&Impl::RuntimeGetCharacterGravity));
                 managedApi.AddInternalCall("Keire.NativeRuntime", "GetRigidBodyPropertiesIcall",
                                            reinterpret_cast<void*>(&Impl::RuntimeGetRigidBodyProperties));
                 managedApi.AddInternalCall("Keire.NativeRuntime", "GetRigidBodyMotionSettingsIcall",

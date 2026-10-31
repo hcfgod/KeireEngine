@@ -1,3 +1,4 @@
+#include "KeireInternal/Rendering/CloudLightCacheDemand.h"
 #include "KeireInternal/Rendering/CloudLightCacheKey.h"
 
 #include <doctest/doctest.h>
@@ -158,4 +159,33 @@ TEST_CASE("A dark sun does not invalidate cloud lighting until its energy return
     }
     night.SunRadiance = {};
     CHECK(Key(night) == darkKey);
+}
+
+TEST_CASE("Cloud light cache skips empty clouds and inactive lighting without suppressing AO")
+{
+    CloudVolumeViewUniforms view{};
+    view.Volume.Quality[0] = 1U;
+    view.Volume.Density[0] = 0.004F;
+    view.Volume.Density[1] = 0.5F;
+    CHECK_FALSE(CloudLightCacheHasDemand(view));
+    view.AmbientRadiance.X = 1.0F;
+    CHECK_FALSE(CloudLightCacheHasDemand(view));
+    view.AmbientRadiance.W = 0.25F;
+    CHECK(CloudLightCacheHasDemand(view));
+    view.AmbientRadiance.W = 0.0F;
+    for (const auto radiance : {Keire::Vector4{1, 0, 0, 0}, Keire::Vector4{0, 1, 0, 0}, Keire::Vector4{0, 0, 1, 0}})
+    {
+        view.SunRadiance = radiance;
+        CHECK(CloudLightCacheHasDemand(view));
+    }
+    view.Volume.Quality[0] = 0U;
+    CHECK_FALSE(CloudLightCacheHasDemand(view));
+    view.Volume.Quality[0] = 1U;
+    view.Volume.Density[0] = 0.0F;
+    CHECK_FALSE(CloudLightCacheHasDemand(view));
+    view.Volume.Density[0] = 0.004F;
+    view.Volume.Density[1] = 0.0F;
+    CHECK_FALSE(CloudLightCacheHasDemand(view));
+    view.Volume.Density[1] = 0.5F;
+    CHECK(CloudLightCacheHasDemand(view));
 }

@@ -14,6 +14,9 @@ namespace Keire
 
 namespace Keire::Detail
 {
+    [[nodiscard]] std::optional<Vector3> QueryManagedCharacterGravity(const Ref<SceneRuntimeSession>& runtime,
+                                                                      std::uint64_t world, AssetId character);
+
     [[nodiscard]] std::optional<ManagedRaycastHitPrecise>
     QueryManagedRayPrecise(const Ref<SceneRuntimeSession>& runtime, const ManagedRaycastQueryPrecise& query);
     [[nodiscard]] std::optional<ManagedRaycastHitPrecise>

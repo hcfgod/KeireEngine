@@ -607,6 +607,12 @@ namespace Keire
             return std::nullopt;
         }
         [[nodiscard]] virtual std::vector<AssetId> OverlapSphereManaged(const ManagedSphereOverlapQuery&) { return {}; }
+        // Unavailable characters and unsupported hosts return no value; zero gravity is a valid field.
+        [[nodiscard]] virtual std::optional<Vector3> SampleCharacterGravity(std::uint64_t, AssetId)
+        {
+            return std::nullopt;
+        }
+
         [[nodiscard]] virtual std::optional<ManagedRaycastHitPrecise>
         RaycastManagedPrecise(const ManagedRaycastQueryPrecise&)
         {

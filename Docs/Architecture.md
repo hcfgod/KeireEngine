@@ -27,6 +27,21 @@ and checkpoint tests pass; orbital accuracy, multi-source workload and fresh-pro
 World checkpoints now include sources, and the in-development physics replay schema advances to 4. This does not implement
 planet authoring, orbital accuracy guarantees, moving reference-frame forces or automatic character gravity alignment.
 
+`PhysicsWorld::SampleGravity(localPosition)` queries uniform plus radial-source acceleration in metres per
+second squared without allocating or copying the source list. The input is local to `WorldOrigin`; convert
+precise world coordinates with `ToLocalPosition` before querying. Source centers are subtracted in double
+precision before local float coordinates are used. Sampling shares the source accumulator with dynamic-body
+simulation, but does not apply forces or move a character. It requires the owning thread and an open world;
+non-finite positions and unrepresentable acceleration are rejected. Focused native sampling/body-parity, distant-origin, rebase and rejection tests pass.
+The managed `CharacterController.TryGetGravityAcceleration(out acceleration)` query resolves the character's
+owning runtime session, rather than the active scene. False with zero output means unavailable, disabled, stale
+or outside the supported local precision domain; true with zero output means a valid zero-gravity field.
+This does not rotate the character or enable automatic gravity on the native kinematic controller.
+
+The stock `FirstPersonMotor` also has an explicit unit-up/effective-gravity overload. Its previous-up state
+preserves velocity when changing frames, and zero gravity does not generate a jump impulse. The existing
+controller still calls the legacy +Y overload. Collision-safe alignment, gravity-policy authoring and moving
+planet owner transfers remain required before claiming complete planetary FPS support.
 Character movement now derives its up direction from the capsule's decomposed world rotation. Desired movement
 remains a world-space displacement; vertical intent is its projection onto capsule up. Ground recovery, slope
 classification, step climbing, snapping and support-edge probes use that same direction. Rotated landing/walking/jump

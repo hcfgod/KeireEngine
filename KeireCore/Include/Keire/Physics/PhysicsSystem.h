@@ -301,6 +301,11 @@ namespace Keire
         /// Changing gravity wakes dynamic bodies that use gravity. Translation rebasing preserves it.
         void SetGravity(Vector3 acceleration);
         [[nodiscard]] Vector3 Gravity() const;
+        /// Effective uniform plus source acceleration (m/s squared), sampled without allocations.
+        /// This query does not apply forces or change any body state.
+        /// Position is local to WorldOrigin(), like body/query positions. Requires an open world on its owner thread.
+        /// Rejects nonfinite positions and acceleration outside the finite float range.
+        [[nodiscard]] Vector3 SampleGravity(Vector3 localPosition) const;
         /// Sources add to uniform gravity. At most 64; changes wake gravity-enabled dynamic bodies.
         void SetGravitySources(std::vector<PhysicsGravitySource> sources);
         [[nodiscard]] std::vector<PhysicsGravitySource> GravitySources() const;
@@ -322,7 +327,7 @@ namespace Keire
         template <typename T, typename... Args> friend Ref<T> CreateRef(Args&&... args);
         explicit PhysicsWorld(std::unique_ptr<Impl> implementation);
         [[nodiscard]] PhysicsBodyId CreateBodyWithFrameSupport(const PhysicsBodyDefinition& definition,
-                                                              bool frameSupport);
+                                                               bool frameSupport);
         std::unique_ptr<Impl> m_Impl;
     };
 

@@ -506,6 +506,15 @@ public sealed class CharacterController : Component
     public Vector3 GroundNormal => State.GroundNormal;
     public Vector3 Velocity => State.Velocity;
 
+    /// <summary>Samples the owning physics world's acceleration at this character's precise position.</summary>
+    /// <remarks>Returns false with zero output when disabled, unavailable, or outside the local precision domain.
+    /// A successful zero result means zero gravity. This query does not apply gravity or align the character.</remarks>
+    public bool TryGetGravityAcceleration(out Vector3 acceleration)
+    {
+        acceleration = default;
+        return IsValid && NativeRuntime.TryGetCharacterGravity(Entity, out acceleration);
+    }
+
     public bool Move(Vector3 displacement)
     {
         if (!float.IsFinite(displacement.X) || !float.IsFinite(displacement.Y) || !float.IsFinite(displacement.Z))

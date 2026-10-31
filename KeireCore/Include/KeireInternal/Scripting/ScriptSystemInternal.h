@@ -274,6 +274,10 @@ namespace Keire
         RuntimeGetCharacterControllerState(const std::uint64_t world, const std::uint64_t high, const std::uint64_t low,
                                            std::uint8_t* grounded, Vector3* normal, Vector3* velocity) noexcept;
 
+        [[nodiscard]] static std::uint8_t RuntimeGetCharacterGravity(const std::uint64_t world,
+                                                                     const std::uint64_t high, const std::uint64_t low,
+                                                                     Vector3* acceleration) noexcept;
+
         [[nodiscard]] static Ref<RigidBodyComponent>
         RuntimeRigidBody(const std::uint64_t world, const std::uint64_t high, const std::uint64_t low) noexcept;
 

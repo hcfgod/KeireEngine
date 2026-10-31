@@ -496,3 +496,37 @@ the new launch cap. A pole-continuous sample material or texture treatment remai
 Phone-review captures are saved outside the repository under the chat workspace screenshots folder:
 planetary-cloud-variety-revised.png and planetary-cloud-variety-orbit-revised.png. The original QA scene remains
 untouched. Two rendering-setting backups preserve both preceding cloud candidates.
+
+## Planetary gravity integration batch — October 31 (build in progress)
+
+Implemented shared native gravity sampling, an owning-world managed character query, and an explicit arbitrary-up
+FPS motor overload. Existing stock controller behavior stays +Y until collision-safe alignment and authored
+policy are integrated. Frame-following character guards remain intact. Managed production tests pass 52 checks;
+focused motor checks pass including zero-G 100 m/s momentum across up changes (terminal cap applies only with
+gravity). Native compilation and the new native regressions remain pending.
+
+The pre-batch far-distance baseline passed 3 cases / 5,771 assertions: rotated distant character support,
+reconstructed planetary support motion and far-origin frame-following contact restoration. These do not prove
+character frame transfers or fresh-process additive-world replay. A real ScriptSystem execution test for the
+new icall remains to be added beyond wrapper ABI tests and native query-helper tests.
+
+Gravity batch validation completed: DevDist KeireTests build passed after correcting a test-only doctest
+CAPTURE macro invocation. The focused gravity/cache/far-physics run passed 12 cases / 5,899 assertions.
+The production ScriptSystem/Coral reload fixture passed 1 case / 1,328 assertions, including six compiled
+managed callbacks through the newly registered gravity icall with exact world/entity and acceleration checks.
+This supersedes the pending native/actual-icall notes immediately above. Editor/player service adapters still
+need their DevDist build and interactive acceptance; complete planetary FPS alignment/transfers remain open.
+
+DevDist editor/player staging passed (557.1 seconds). Strict Windows content cook of the separate Planetary
+Explorer sample passed: 22 assets, one pack, runtime manifest schema 13 and expected startup scene. A 120-frame
+headless startup run exited 0 and loaded Assembly-CSharp and KeireFirstPerson. This is startup/content evidence,
+not complete interactive flight, gravity-character or fresh-process replay acceptance.
+
+Visible standalone baseline completed 300 warm-up + 2,000 measured frames, immediate presentation, fixed
+1280x720, RTX3060/D3D12 driver32.0.16.2101. Median CPU update0.3245ms, CPU render1.0124ms, frame-admission
+wait13.8311ms (p95 16.2633), GPU retirement28.0628ms with two accepted frames in flight. Retirement includes
+queued-frame latency and is NOT per-frame GPU execution time. Initial window occlusion/foreground change is
+an uncontrolled condition; use this as diagnostic evidence, not a clean A/B optimization result or proof of
+10ms performance. Report: D:/Projects/KeireValidation/PlanetaryExplorerStandalone20261031/surface-benchmark.json.
+Standalone renders the same ship/HUD/clouds and reproduces the known polar texture wedge. Screenshot saved:
+C:/Users/keith/Documents/ChatGPT/Keire/screenshots/planetary-standalone-surface.png.

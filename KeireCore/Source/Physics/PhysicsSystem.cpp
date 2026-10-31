@@ -994,8 +994,12 @@ namespace Keire
             native, JPH::Vec3(definition.LinearVelocity.X, definition.LinearVelocity.Y, definition.LinearVelocity.Z));
         try
         {
-            m_Impl->Bodies.emplace(id.m_Value, Impl::Body{std::move(runtimeDefinition), native, {}, false,
-                                                         frameSupport && definition.Motion == PhysicsMotionType::Static});
+            m_Impl->Bodies.emplace(id.m_Value,
+                                   Impl::Body{std::move(runtimeDefinition),
+                                              native,
+                                              {},
+                                              false,
+                                              frameSupport && definition.Motion == PhysicsMotionType::Static});
         }
         catch (...)
         {
@@ -1071,6 +1075,18 @@ namespace Keire
     {
         m_Impl->RequireOwner("Gravity");
         return FromJoltVector(m_Impl->Native.GetGravity());
+    }
+
+    Vector3 PhysicsWorld::SampleGravity(const Vector3 localPosition) const
+    {
+        m_Impl->RequireOwner("SampleGravity");
+        if (!Math::IsFinite(localPosition))
+        {
+            throw std::invalid_argument("Gravity sample position must be finite.");
+        }
+        const auto sources =
+            Detail::AccumulateGravitySources(m_Impl->GravitySources, m_Impl->WorldOrigin, localPosition);
+        return Detail::CombineGravity(sources, FromJoltVector(m_Impl->Native.GetGravity()));
     }
 
     void PhysicsWorld::SetGravity(const Vector3 acceleration)
@@ -1185,13 +1201,13 @@ namespace Keire
     }
 
     PhysicsBodyId Detail::PhysicsFrameAccess::CreateFrameBody(PhysicsWorld& world,
-                                                            const PhysicsBodyDefinition& definition)
+                                                              const PhysicsBodyDefinition& definition)
     {
         return world.CreateBodyWithFrameSupport(definition, true);
     }
 
     void Detail::PhysicsFrameAccess::ValidateFrameKinematics(const PhysicsWorld& world,
-                                                            const std::span<const PhysicsBodyId> bodies)
+                                                             const std::span<const PhysicsBodyId> bodies)
     {
         world.m_Impl->RequireOwner("ValidateFrameKinematics");
         for (const auto body : bodies)
@@ -1205,14 +1221,15 @@ namespace Keire
     }
 
     void Detail::PhysicsFrameAccess::SetFrameKinematics(PhysicsWorld& world,
-                                                       const std::span<const PhysicsBodyId> bodies, const bool enabled)
+                                                        const std::span<const PhysicsBodyId> bodies, const bool enabled)
     {
         ValidateFrameKinematics(world, bodies);
         auto& nativeBodies = world.m_Impl->Native.GetBodyInterface();
         for (const auto body : bodies)
         {
             auto& state = world.m_Impl->Bodies.at(body.m_Value);
-            const auto motion = enabled || state.Definition.Trigger ? JPH::EMotionType::Kinematic : JPH::EMotionType::Static;
+            const auto motion =
+                enabled || state.Definition.Trigger ? JPH::EMotionType::Kinematic : JPH::EMotionType::Static;
             const auto definitionMotion = enabled ? PhysicsMotionType::Kinematic : PhysicsMotionType::Static;
             if (state.Definition.Motion == definitionMotion)
             {
@@ -1220,7 +1237,8 @@ namespace Keire
             }
             nativeBodies.SetLinearAndAngularVelocity(state.Native, JPH::Vec3::sZero(), JPH::Vec3::sZero());
             nativeBodies.SetMotionType(state.Native, motion, JPH::EActivation::DontActivate);
-            nativeBodies.SetObjectLayer(state.Native, motion == JPH::EMotionType::Static ? NonMovingLayer : MovingLayer);
+            nativeBodies.SetObjectLayer(state.Native,
+                                        motion == JPH::EMotionType::Static ? NonMovingLayer : MovingLayer);
             if (enabled)
             {
                 nativeBodies.ActivateBody(state.Native);
@@ -1454,20 +1472,12 @@ namespace Keire
                     continue;
                 }
                 const auto position = FromJoltPosition(bodies.GetCenterOfMassPosition(body.Native));
-                Vector3d acceleration;
-                for (const auto& source : m_Impl->GravitySources)
-                {
-                    const auto contribution = Detail::EvaluateGravitySource(source, m_Impl->WorldOrigin, position);
-                    acceleration.X += contribution.X;
-                    acceleration.Y += contribution.Y;
-                    acceleration.Z += contribution.Z;
-                }
+                const auto acceleration =
+                    Detail::AccumulateGravitySources(m_Impl->GravitySources, m_Impl->WorldOrigin, position);
                 const Vector3d force{acceleration.X * body.Definition.Mass, acceleration.Y * body.Definition.Mass,
                                      acceleration.Z * body.Definition.Mass};
                 forces.emplace_back(body.Native, Math::RelativeFloat(force, {}, std::numeric_limits<float>::max()));
-                body.PendingGravityAcceleration = {static_cast<float>(acceleration.X + uniformGravity.X),
-                                                   static_cast<float>(acceleration.Y + uniformGravity.Y),
-                                                   static_cast<float>(acceleration.Z + uniformGravity.Z)};
+                body.PendingGravityAcceleration = Detail::CombineGravity(acceleration, uniformGravity);
             }
             // Validate every force before touching native state. Unsupported bodies must keep integrating even
             // when their acceleration is below the backend's sleep threshold.

@@ -824,6 +824,14 @@ namespace KeireRuntime
         return Keire::Detail::QueryManagedSphereOverlap(runtime, query);
     }
 
+    std::optional<Keire::Vector3> ManagedWorldRuntimeServices::SampleCharacterGravity(const std::uint64_t world,
+                                                                                      const Keire::AssetId character)
+    {
+        const auto runtime =
+            m_RuntimeWorld ? m_RuntimeWorld->SessionForWorld(world) : Keire::Ref<Keire::SceneRuntimeSession>{};
+        return Keire::Detail::QueryManagedCharacterGravity(runtime, world, character);
+    }
+
     std::optional<Keire::ManagedRaycastHitPrecise>
     ManagedWorldRuntimeServices::RaycastManagedPrecise(const Keire::ManagedRaycastQueryPrecise& query)
     {

@@ -1427,6 +1427,14 @@ void EditorWorkspaceLayer::ReportInputActionsError(std::string message) noexcept
     ReportError("Input", std::move(message));
 }
 
+std::optional<Keire::Vector3> EditorWorkspaceLayer::SampleCharacterGravity(const std::uint64_t world,
+                                                                           const Keire::AssetId character)
+{
+    const auto runtime =
+        m_PlayRuntimeWorld ? m_PlayRuntimeWorld->SessionForWorld(world) : Keire::Ref<Keire::SceneRuntimeSession>{};
+    return Keire::Detail::QueryManagedCharacterGravity(runtime, world, character);
+}
+
 std::optional<Keire::ManagedRaycastHitPrecise>
 EditorWorkspaceLayer::RaycastManagedPrecise(const Keire::ManagedRaycastQueryPrecise& query)
 {

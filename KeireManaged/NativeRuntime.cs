@@ -378,6 +378,7 @@ internal static unsafe class NativeRuntime
     internal static delegate* unmanaged<ulong, ulong, ulong, Quaternion> GetLocalRotationIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, Quaternion, void> SetLocalRotationIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, Vector3, byte> MoveCharacterControllerIcall;
+    internal static delegate* unmanaged<ulong, ulong, ulong, Vector3*, byte> GetCharacterGravityIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, byte*, Vector3*, Vector3*, byte>
         GetCharacterControllerStateIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, byte*, float*, Vector3*, byte*, byte*, byte>
@@ -769,6 +770,21 @@ internal static unsafe class NativeRuntime
                                                                                      entity.Id.Low, value);
     internal static bool MoveCharacterController(Entity entity, Vector3 displacement) =>
         MoveCharacterControllerIcall(entity.World, entity.Id.High, entity.Id.Low, displacement) != 0;
+
+    internal static bool TryGetCharacterGravity(Entity entity, out Vector3 acceleration)
+    {
+        Vector3 value = default;
+        acceleration = default;
+        if (GetCharacterGravityIcall == null ||
+            GetCharacterGravityIcall(entity.World, entity.Id.High, entity.Id.Low, &value) == 0 ||
+            !float.IsFinite(value.X) || !float.IsFinite(value.Y) || !float.IsFinite(value.Z))
+        {
+            return false;
+        }
+        acceleration = value;
+        return true;
+    }
+
     internal static bool TryGetCharacterControllerState(Entity entity, out CharacterControllerState state)
     {
         byte grounded = 0;

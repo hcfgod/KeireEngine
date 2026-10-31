@@ -1,5 +1,6 @@
 var tests = new (string Name, Action Run)[]
 {
+    ("Character gravity preserves world context and distinguishes zero from unavailable", CharacterGravityTests.Run),
     ("Rigid body motion settings validate and round trip through the native bridge", RigidBodyMotionSettingsTests.Run),
     ("Precise positions subtract origins before bounded float conversion", PrecisePositionTests.Run),
     ("Transform aliases and axis-angle rotation preserve composition validation and identity", TransformRotationTests.Run),

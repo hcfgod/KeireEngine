@@ -2,6 +2,7 @@
 #include "Keire/ECS/Component.h"
 #include "Keire/ECS/Components/AnimatorComponent.h"
 #include "Keire/ECS/Components/AudioComponents.h"
+#include "Keire/ECS/Components/CharacterControllerComponent.h"
 #include "Keire/Jobs/JobSystem.h"
 #include "Keire/Scenes/Scene.h"
 #include "Keire/Scripting/ManagedAssemblyAsset.h"
@@ -57,6 +58,20 @@ namespace
             return {query.ContextEntity};
         }
 
+        std::optional<Keire::Vector3> SampleCharacterGravity(const std::uint64_t world,
+                                                             const Keire::AssetId character) override
+        {
+            if (world != ExpectedWorld || character != ExpectedCharacter)
+            {
+                throw std::invalid_argument("Character gravity marshaling lost its owning context.");
+            }
+            ++GravityCalls;
+            return Keire::Vector3{3.0F, -4.0F, 5.0F};
+        }
+
+        std::uint64_t ExpectedWorld = 0;
+        Keire::AssetId ExpectedCharacter;
+        int GravityCalls = 0;
         int RayCalls = 0;
         int CapsuleCalls = 0;
         int OverlapCalls = 0;
@@ -1120,6 +1135,10 @@ TEST_CASE("Managed runtime reload is transactional and preserves retained state"
                "var overlap = Physics.OverlapSpherePrecise(Entity, p, 1); "
                "if (overlap.Count != 1 || overlap[0].Id != Entity.Id) throw new "
                "System.InvalidOperationException(\"Precise native overlap mismatch.\"); "
+               "var character = GetComponent<CharacterController>(); "
+               "if (character == null || !character.TryGetGravityAcceleration(out var acceleration) || "
+               "acceleration != new Vector3(3,-4,5)) "
+               "throw new System.InvalidOperationException(\"Character gravity native bridge mismatch.\"); "
                "PreciseContactCount++; } "
                "protected override void OnCollisionEnter(CollisionContact contact) { CaptureContact(contact); } "
                "protected override void OnCollisionStay(CollisionContact contact) { CaptureContact(contact); } "
@@ -1710,7 +1729,10 @@ TEST_CASE("Managed runtime reload is transactional and preserves retained state"
     CHECK(std::get<std::string>(animationEventResults.at("AnimationEventText")) == "Turn In Place");
 
     {
+        REQUIRE(runtimeEntity.AddComponent<Keire::CharacterControllerComponent>());
         ScopedPrecisePhysicsServices preciseServices(scripts);
+        preciseServices.Services.ExpectedWorld = runtimeEntity.World();
+        preciseServices.Services.ExpectedCharacter = runtimeEntity.Id().Value();
         for (const bool trigger : {false, true})
         {
             for (const auto phase : {Keire::PhysicsContactPhase::Enter, Keire::PhysicsContactPhase::Stay,
@@ -1728,6 +1750,8 @@ TEST_CASE("Managed runtime reload is transactional and preserves retained state"
         CHECK(preciseServices.Services.RayCalls == 6);
         CHECK(preciseServices.Services.CapsuleCalls == 6);
         CHECK(preciseServices.Services.OverlapCalls == 12);
+        CHECK(preciseServices.Services.GravityCalls == 6);
+        REQUIRE(runtimeEntity.RemoveComponent<Keire::CharacterControllerComponent>());
     }
     const auto contactResults = registration->Serialize(*runtimeComponent);
     REQUIRE(contactResults.contains("PreciseContactCount"));

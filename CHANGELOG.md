@@ -1,6 +1,10 @@
 # Changelog
 
 ## Unreleased
+- Add allocation-free physics gravity sampling and a context-scoped managed character query, distinguishing a
+  valid zero field from unavailable physics. Add an opt-in arbitrary-up FPS motor overload; automatic character
+  alignment and moving-planet character transfers remain unfinished.
+- Avoid cloud-light-cache compute work when neither direct sunlight nor ambient occlusion needs transmission.
 - Skip cloud-pass height-fog marching when a conservative per-view optical-depth bound is negligible; retain
   local volumes, reachable density and orthographic views. This bounds extinction, not arbitrary HDR radiance.
 - Add opt-in per-planet sky atmosphere profiles with stable identity, preserved global inheritance, airless-planet
