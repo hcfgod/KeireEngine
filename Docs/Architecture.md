@@ -2524,6 +2524,18 @@ Managed ray and capsule casts plus sphere overlaps enter through owner-thread ru
 IDs back to stable scene entity IDs. Capsule self-filtering is applied as a native body filter so a cast can reach the
 next surface. Managed overlap copies are deterministic, unique, and capped at 256 entities inside one callback scope.
 
+Native `PhysicsWorld::OverlapCapsule` uses the backend narrow phase for a stationary oriented capsule and returns
+the deepest contact per body, sorted by body ID. Query positions and contact points are relative to WorldOrigin;
+normals separate the query from the contacted body. Total height includes both hemispheres, with diameter-height
+capsules handled as spheres. The query normalizes valid nonzero rotations, rejects invalid dimensions/nonfinite
+inputs, and applies reciprocal masks, trigger inclusion and self exclusion without mutating bodies. It requires
+the open world's owner thread. It does not validate the arc between orientations and is not yet exposed through
+managed scene queries or character rotation transactions. Rotation sweeping and bounded contact collection remain
+separate work before using this path for per-tick character alignment at scale. Internal
+`PhysicsFrameAccess::HasCapsuleContact` shares query validation and filters but uses a stack-resident shape and
+an any-hit collector: clearance queries terminate on the first contact without building a penetration list.
+It is still a stationary query, not proof that the path between two clear poses is collision-free.
+
 After owner-thread and argument validation, scene queries synchronize authored static/kinematic geometry when a
 private physics mutation revision changes. Collider configuration, activation, hierarchy, and relevant ancestor
 transforms invalidate this revision; unrelated camera, naming, and presentation edits do not. Repeated queries reuse

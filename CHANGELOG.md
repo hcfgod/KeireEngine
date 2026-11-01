@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased
+- Add native stationary capsule overlap contacts with penetration depth, oriented shapes and body filtering as
+  groundwork for collision-safe planetary character orientation. Automatic rotation is not enabled by this query.
 - Refresh cached material texture bindings before retiring replaced GPU textures, including last-good bindings
   retained during failed material or shader reloads.
 - Retain queued Play requests during scene asset refresh and prioritize startup scene/default input dependencies

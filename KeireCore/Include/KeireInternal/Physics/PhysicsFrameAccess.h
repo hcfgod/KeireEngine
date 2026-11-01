@@ -10,12 +10,16 @@ namespace Keire::Detail
     class PhysicsFrameAccess final
     {
       public:
+        // Clearance checks stop at the first contact, without constructing a penetration list.
+        // Uses the same validation and collision filters as PhysicsWorld::OverlapCapsule.
+        [[nodiscard]] static KEIRE_API bool HasCapsuleContact(const PhysicsWorld& world,
+                                                              const PhysicsCapsuleOverlapQuery& query);
+
         // Scene statics retain motion storage so owner changes never replace their body identity.
         [[nodiscard]] static KEIRE_API PhysicsBodyId CreateFrameBody(PhysicsWorld& world,
-                                                                    const PhysicsBodyDefinition& definition);
+                                                                     const PhysicsBodyDefinition& definition);
 
-        static KEIRE_API void ValidateFrameKinematics(const PhysicsWorld& world,
-                                                      std::span<const PhysicsBodyId> bodies);
+        static KEIRE_API void ValidateFrameKinematics(const PhysicsWorld& world, std::span<const PhysicsBodyId> bodies);
         static KEIRE_API void SetFrameKinematics(PhysicsWorld& world, std::span<const PhysicsBodyId> bodies,
                                                  bool enabled);
 

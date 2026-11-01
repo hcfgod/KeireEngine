@@ -190,6 +190,27 @@ namespace Keire
         PhysicsBodyId IgnoreBody;
     };
 
+    struct PhysicsCapsuleOverlapQuery
+    {
+        Vector3 Center;
+        Quaternion Rotation;
+        float Radius = 0.5F;
+        float Height = 1.0F;
+        std::uint32_t Mask = ~0U;
+        bool IncludeTriggers = false;
+        std::uint32_t Layer = 1;
+        PhysicsBodyId IgnoreBody;
+    };
+
+    struct PhysicsPenetrationHit
+    {
+        PhysicsBodyId Body;
+        Vector3 Position;
+        /// Direction that separates the query shape from the hit body.
+        Vector3 Normal;
+        float Depth = 0.0F;
+    };
+
     struct PhysicsQueryHit
     {
         PhysicsBodyId Body;
@@ -312,6 +333,9 @@ namespace Keire
         [[nodiscard]] std::optional<PhysicsBodyState> TryGetBody(PhysicsBodyId body) const;
         [[nodiscard]] std::vector<PhysicsQueryHit> RayCast(const PhysicsRayQuery& query) const;
         [[nodiscard]] std::optional<PhysicsQueryHit> CastCapsule(const PhysicsCapsuleCastQuery& query) const;
+        /// Exact stationary capsule contacts in world-local coordinates, ordered by body ID.
+        /// Height includes both hemispheres. Returns the deepest contact per body; does not sweep rotation.
+        [[nodiscard]] std::vector<PhysicsPenetrationHit> OverlapCapsule(const PhysicsCapsuleOverlapQuery& query) const;
         [[nodiscard]] std::vector<PhysicsBodyId> OverlapSphere(const PhysicsSphereOverlapQuery& query) const;
         [[nodiscard]] std::vector<PhysicsBodyId> OverlapSphere(Vector3 center, float radius, std::uint32_t mask = ~0U,
                                                                std::uint32_t layer = 1) const;

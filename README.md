@@ -403,6 +403,8 @@ Kéire already includes substantial, integrated engine and authoring foundations
   Standalone players and editor Play Mode both interpolate physics presentation between fixed ticks; gameplay
   queries use simulation geometry rather than interpolated visuals. Ray, capsule, and sphere queries see same-tick
   authored static/kinematic support changes without advancing simulation or consuming queued character movement.
+  Native `PhysicsWorld::OverlapCapsule` reports stationary capsule penetration contacts in world-local coordinates.
+  It is groundwork for orientation clearance, not automatic gravity alignment or a rotation sweep.
   Custom fixed-step movers can opt into transform interpolation and presentation-space IK through C++ or C#;
   see [animation and rigging](Docs/AnimationRigging.md) for the coordinate-space contract.
 - Input actions and rebinding, physics, navigation, configurable mono/stereo/5.1/7.1 audio output, typed live Mix

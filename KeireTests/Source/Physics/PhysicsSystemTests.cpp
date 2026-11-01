@@ -1,5 +1,6 @@
 #include "Keire/Core.h"
 #include "KeireInternal/Math/RelativePositionTranslation.h"
+#include "KeireInternal/Physics/CapsuleRotationBounds.h"
 #include "KeireInternal/Physics/GravityField.h"
 #include "KeireInternal/Physics/PhysicsFrameAccess.h"
 #include "KeireInternal/Spatial/SimulationOriginPolicy.h"
@@ -857,6 +858,162 @@ TEST_CASE("capsule casts return walkable surface normals and can ignore the cont
     character.Height = 1.0F;
     const auto sphereLikeCapsule = world->CreateBody(character);
     CHECK(world->TryGetBody(sphereLikeCapsule).has_value());
+}
+
+TEST_CASE("stationary capsule overlaps respect orientation filtering and distant origins")
+{
+    const auto system = CreatePhysics();
+    for (const double origin : {0.0, 1.0e12, -1.0e12})
+    {
+        CAPTURE(origin);
+        const auto world = system->CreateWorld({origin, origin, origin});
+        Keire::PhysicsBodyDefinition wall;
+        wall.Position = {0.9F, 0.0F, 0.0F};
+        wall.HalfExtent = {0.1F, 2.0F, 2.0F};
+        const auto body = world->CreateBody(wall);
+        Keire::PhysicsCapsuleOverlapQuery query;
+        query.Radius = 0.25F;
+        query.Height = 2.0F;
+        CHECK(world->OverlapCapsule(query).empty());
+        CHECK_FALSE(Keire::Detail::PhysicsFrameAccess::HasCapsuleContact(*world, query));
+        // A 90-degree turn puts the capsule tip inside the wall, without any translation.
+        query.Rotation = {0.0F, 0.0F, 0.70710678F, 0.70710678F};
+        const auto hits = world->OverlapCapsule(query);
+        REQUIRE(hits.size() == 1);
+        CHECK(Keire::Detail::PhysicsFrameAccess::HasCapsuleContact(*world, query));
+        CHECK(hits.front().Body == body);
+        CHECK(hits.front().Depth == doctest::Approx(0.2F).epsilon(0.02));
+        CHECK(hits.front().Normal.X < -0.99F);
+        query.IgnoreBody = body;
+        CHECK(world->OverlapCapsule(query).empty());
+        CHECK_FALSE(Keire::Detail::PhysicsFrameAccess::HasCapsuleContact(*world, query));
+        query.IgnoreBody = {};
+        query.Mask = 0;
+        CHECK(world->OverlapCapsule(query).empty());
+        CHECK_FALSE(Keire::Detail::PhysicsFrameAccess::HasCapsuleContact(*world, query));
+        query.Mask = ~0U;
+        query.Height = 0.5F;
+        CHECK(world->OverlapCapsule(query).empty());
+        CHECK_FALSE(Keire::Detail::PhysicsFrameAccess::HasCapsuleContact(*world, query));
+        query.Rotation = {0.0F, 0.0F, 0.0F, 0.0F};
+        CHECK_THROWS_AS((void)world->OverlapCapsule(query), std::invalid_argument);
+        CHECK_THROWS_AS((void)Keire::Detail::PhysicsFrameAccess::HasCapsuleContact(*world, query),
+                        std::invalid_argument);
+        query.Rotation = {};
+        query.Height = 0.1F;
+        CHECK_THROWS_AS((void)world->OverlapCapsule(query), std::invalid_argument);
+        world->Close();
+        CHECK_THROWS_AS((void)world->OverlapCapsule({}), std::logic_error);
+        CHECK_THROWS_AS((void)Keire::Detail::PhysicsFrameAccess::HasCapsuleContact(*world, {}), std::logic_error);
+    }
+}
+
+TEST_CASE("capsule rotation bounds cover intermediate arcs and pivot motion")
+{
+    using Keire::Detail::CapsuleRotationInflation;
+    CHECK(CapsuleRotationInflation(0.0, 3.141592653589793, 0.25) == 0.25);
+    CHECK(CapsuleRotationInflation(1.0, 0.0, 0.0) == 0.0);
+    CHECK(CapsuleRotationInflation(std::numeric_limits<double>::max(), 0.0, 0.0) == 0.0);
+    CHECK_THROWS_AS(CapsuleRotationInflation(std::numeric_limits<double>::max(), std::numbers::pi, 0.0),
+                    std::overflow_error);
+    CHECK(CapsuleRotationInflation(1.0, 3.141592653589793, 0.0) == doctest::Approx(2.0));
+    for (const double angle : {0.01, 0.5, 1.5707963267948966, 3.141592653589793})
+    {
+        const double inflation = CapsuleRotationInflation(0.75, angle, 0.2);
+        for (int sample = -32; sample <= 32; ++sample)
+        {
+            const double rotation = angle * static_cast<double>(sample) / 32.0;
+            const double x = 0.75 * std::sin(rotation);
+            const double y = 0.75 * (std::cos(rotation) - 1.0);
+            CHECK(std::hypot(x, y) + 0.2 <= inflation + 1.0e-12);
+        }
+    }
+    CHECK_THROWS_AS(CapsuleRotationInflation(-1.0, 0.5, 0.0), std::invalid_argument);
+    CHECK_THROWS_AS(CapsuleRotationInflation(1.0, 4.0, 0.0), std::invalid_argument);
+    CHECK_THROWS_AS(CapsuleRotationInflation(1.0, 0.5, -0.1), std::invalid_argument);
+    CHECK_THROWS_AS(CapsuleRotationInflation(1.0, std::numeric_limits<double>::quiet_NaN(), 0.0),
+                    std::invalid_argument);
+}
+
+TEST_CASE("capsule bound conversion never shrinks the collision envelope")
+{
+    using Keire::Detail::RoundCapsuleBoundOutward;
+    const double aboveOne = std::nextafter(1.0, 2.0);
+    CHECK(RoundCapsuleBoundOutward(aboveOne) == std::nextafter(1.0F, 2.0F));
+    CHECK(RoundCapsuleBoundOutward(0.0) == 0.0F);
+    CHECK(RoundCapsuleBoundOutward(1.0) == 1.0F);
+    CHECK(static_cast<double>(RoundCapsuleBoundOutward(std::numeric_limits<double>::min())) >=
+          std::numeric_limits<double>::min());
+    CHECK(RoundCapsuleBoundOutward(std::numeric_limits<float>::max()) == std::numeric_limits<float>::max());
+    CHECK_THROWS_AS(RoundCapsuleBoundOutward(std::numeric_limits<double>::max()), std::overflow_error);
+    CHECK_THROWS_AS(RoundCapsuleBoundOutward(-1.0), std::invalid_argument);
+    CHECK_THROWS_AS(RoundCapsuleBoundOutward(std::numeric_limits<double>::quiet_NaN()), std::invalid_argument);
+}
+
+TEST_CASE("capsule overlaps enforce reciprocal masks triggers and owner thread without mutation")
+{
+    const auto system = CreatePhysics();
+    const auto world = system->CreateWorld();
+    Keire::PhysicsBodyDefinition obstacle;
+    obstacle.HalfExtent = {1.0F, 1.0F, 1.0F};
+    obstacle.Layer = 2U;
+    obstacle.Mask = 4U;
+    obstacle.Trigger = true;
+    const auto body = world->CreateBody(obstacle);
+    const auto before = world->TryGetBody(body);
+    REQUIRE(before);
+    Keire::PhysicsCapsuleOverlapQuery query;
+    query.Mask = 2U;
+    query.Layer = 4U;
+    CHECK(world->OverlapCapsule(query).empty());
+    CHECK_FALSE(Keire::Detail::PhysicsFrameAccess::HasCapsuleContact(*world, query));
+    query.IncludeTriggers = true;
+    REQUIRE(world->OverlapCapsule(query).size() == 1);
+    CHECK(Keire::Detail::PhysicsFrameAccess::HasCapsuleContact(*world, query));
+    query.Layer = 1U;
+    CHECK(world->OverlapCapsule(query).empty());
+    CHECK_FALSE(Keire::Detail::PhysicsFrameAccess::HasCapsuleContact(*world, query));
+    query.Layer = 4U;
+
+    bool rejected = false;
+    bool clearanceRejected = false;
+    std::thread foreign(
+        [&]
+        {
+            try
+            {
+                (void)world->OverlapCapsule(query);
+            }
+            catch (const std::logic_error&)
+            {
+                rejected = true;
+            }
+            try
+            {
+                (void)Keire::Detail::PhysicsFrameAccess::HasCapsuleContact(*world, query);
+            }
+            catch (const std::logic_error&)
+            {
+                clearanceRejected = true;
+            }
+        });
+    foreign.join();
+    CHECK(rejected);
+    CHECK(clearanceRejected);
+    const auto after = world->TryGetBody(body);
+    REQUIRE(after);
+    CHECK(after->Position == before->Position);
+    CHECK(after->Rotation == before->Rotation);
+    CHECK(after->LinearVelocity == before->LinearVelocity);
+
+    query.Center.X = std::numeric_limits<float>::infinity();
+    CHECK_THROWS_AS((void)world->OverlapCapsule(query), std::invalid_argument);
+    query.Center = {};
+    query.Radius = std::numeric_limits<float>::quiet_NaN();
+    CHECK_THROWS_AS((void)world->OverlapCapsule(query), std::invalid_argument);
+    query.Radius = 0.5F;
+    query.Layer = 3U;
+    CHECK_THROWS_AS((void)world->OverlapCapsule(query), std::invalid_argument);
 }
 
 TEST_CASE("physics contacts expose narrow-phase data and enforce reciprocal masks")

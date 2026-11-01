@@ -345,6 +345,19 @@ namespace Keire
             bool m_IncludeTriggers;
         };
 
+        void ValidateCapsuleOverlap(const PhysicsCapsuleOverlapQuery& query)
+        {
+            const auto rotationLength = query.Rotation.X * query.Rotation.X + query.Rotation.Y * query.Rotation.Y +
+                                        query.Rotation.Z * query.Rotation.Z + query.Rotation.W * query.Rotation.W;
+            if (!Math::IsFinite(query.Center) || !Math::IsFinite(query.Rotation) || !std::isfinite(rotationLength) ||
+                rotationLength <= std::numeric_limits<float>::epsilon() || !std::isfinite(query.Radius) ||
+                query.Radius <= 0.0F || !std::isfinite(query.Height) || query.Height < query.Radius * 2.0F ||
+                !std::has_single_bit(query.Layer))
+            {
+                throw std::invalid_argument("Physics capsule overlap is invalid.");
+            }
+        }
+
         class SpecificBodyFilter final : public JPH::BodyFilter
         {
           public:
@@ -1407,6 +1420,84 @@ namespace Keire
         }
         m_Impl->RecordCapsuleCast(query, result);
         return result;
+    }
+
+    std::vector<PhysicsPenetrationHit> PhysicsWorld::OverlapCapsule(const PhysicsCapsuleOverlapQuery& query) const
+    {
+        m_Impl->RequireOwner("OverlapCapsule");
+        ValidateCapsuleOverlap(query);
+
+        JPH::ShapeRefC shape;
+        const auto halfCylinder = query.Height * 0.5F - query.Radius;
+        if (halfCylinder <= std::numeric_limits<float>::epsilon())
+        {
+            shape = new JPH::SphereShape(query.Radius);
+        }
+        else
+        {
+            shape = new JPH::CapsuleShape(halfCylinder, query.Radius);
+        }
+        JPH::CollideShapeSettings settings;
+        JPH::AllHitCollisionCollector<JPH::CollideShapeCollector> collector;
+        const QueryBodyFilter filter(query.Mask, query.Layer, query.IncludeTriggers, query.IgnoreBody.m_Value);
+        m_Impl->Native.GetNarrowPhaseQuery().CollideShape(
+            shape.GetPtr(), JPH::Vec3::sOne(),
+            JPH::RMat44::sRotationTranslation(ToJolt(Math::Normalize(query.Rotation)), ToJolt(query.Center)), settings,
+            JPH::RVec3::sZero(), collector, {}, {}, filter);
+
+        std::map<PhysicsBodyId, PhysicsPenetrationHit> contacts;
+        for (const auto& hit : collector.mHits)
+        {
+            JPH::BodyLockRead lock(m_Impl->Native.GetBodyLockInterface(), hit.mBodyID2);
+            if (!lock.Succeeded())
+            {
+                continue;
+            }
+            const PhysicsBodyId body(lock.GetBody().GetUserData());
+            const auto normal = -hit.mPenetrationAxis.NormalizedOr(JPH::Vec3::sAxisY());
+            const PhysicsPenetrationHit contact{body, FromJoltVector(hit.mContactPointOn2), FromJoltVector(normal),
+                                                std::max(0.0F, hit.mPenetrationDepth)};
+            const auto [entry, inserted] = contacts.try_emplace(body, contact);
+            if (!inserted && contact.Depth > entry->second.Depth)
+            {
+                entry->second = contact;
+            }
+        }
+        std::vector<PhysicsPenetrationHit> result;
+        result.reserve(contacts.size());
+        for (const auto& [body, contact] : contacts)
+        {
+            (void)body;
+            result.push_back(contact);
+        }
+        return result;
+    }
+
+    bool Detail::PhysicsFrameAccess::HasCapsuleContact(const PhysicsWorld& world,
+                                                       const PhysicsCapsuleOverlapQuery& query)
+    {
+        world.m_Impl->RequireOwner("HasCapsuleContact");
+        ValidateCapsuleOverlap(query);
+        const QueryBodyFilter filter(query.Mask, query.Layer, query.IncludeTriggers, query.IgnoreBody.m_Value);
+        const auto transform =
+            JPH::RMat44::sRotationTranslation(ToJolt(Math::Normalize(query.Rotation)), ToJolt(query.Center));
+        const auto collide = [&](const JPH::Shape& shape)
+        {
+            JPH::AnyHitCollisionCollector<JPH::CollideShapeCollector> collector;
+            const JPH::CollideShapeSettings settings;
+            world.m_Impl->Native.GetNarrowPhaseQuery().CollideShape(&shape, JPH::Vec3::sOne(), transform, settings,
+                                                                    JPH::RVec3::sZero(), collector, {}, {}, filter);
+            return collector.HadHit();
+        };
+
+        const auto halfCylinder = query.Height * 0.5F - query.Radius;
+        if (halfCylinder <= std::numeric_limits<float>::epsilon())
+        {
+            const JPH::SphereShape shape(query.Radius);
+            return collide(shape);
+        }
+        const JPH::CapsuleShape shape(halfCylinder, query.Radius);
+        return collide(shape);
     }
 
     std::vector<PhysicsBodyId> PhysicsWorld::OverlapSphere(const PhysicsSphereOverlapQuery& query) const

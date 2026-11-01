@@ -9,17 +9,37 @@ master; preserve authored QA projects and validate changes in separate test proj
 1. Finish current rendering stability and startup performance work. Preserve shader resource contracts,
    visual output and runtime performance when reducing forward shader compile time. Complete cold-start,
    reload, sanitizer and production validation before publishing installers.
-2. Finish planetary integration: atmosphere selection/composition, planetary weather, collision-safe
-   gravity/frame changes, moving supports, physical travel, far-distance physics and standalone parity.
+2. Validate and save the current planetary checkpoint. Defer advanced planetary integration until after
+   post-processing and water, as requested by the user on November 1, 2026.
 3. Implement shared post-processing profiles and blending with editor authoring and runtime integration.
 4. Implement water bodies and their planetary, rendering, physics and post-processing integration.
-5. Validate the combined Earth/space/Mars showcase and document verified limits before release.
+5. Resume planetary integration: atmosphere selection/composition, planetary weather, collision-safe
+   gravity/frame changes, moving supports, physical travel, far-distance physics and standalone parity.
+6. Validate the combined Earth/space/Mars showcase and document verified limits before release.
 
 Water and post-processing design/audits can proceed alongside planetary fixes, but neither replaces
 unfinished planetary acceptance. Existing production release work remains tracked separately; do not
 label unfinished new systems production-ready merely because an installer builds.
 
 ## Planetary acceptance
+
+### Checkpoint before changing focus
+
+The user approved deferring advanced planetary integration until after post-processing and water.
+Preserve the full acceptance scope below; a checkpoint is not planetary completion.
+
+- Validate and save the current native capsule-contact and conservative rotation-bound batch. These are
+  prerequisites, not an automatic gravity-alignment feature. Run the complete focused filter against
+  a binary rebuilt after the final source edits.
+- Keep the existing character/parented-collider frame-following restrictions until transactional rotation,
+  support ownership and collision coverage justify lifting them. Do not imply physical ship boarding
+  or arbitrary planetary landing from the scripted flight demonstration.
+- Preserve the authored QA scenes and document the demonstrated flight/far-origin workflows separately
+  from outstanding multi-planet weather, moving-frame character and standalone acceptance.
+- Record test results and remaining release gates before committing. The cold-start and production
+  packaging gates remain independent; this checkpoint does not authorize bypassing either.
+
+### Full acceptance (still required)
 
 - Ground-to-space-to-ground travel without loading screens, with correct atmosphere, stars, clouds,
   fog, lighting and day/night at distant world origins and around translated/rotated planets.
@@ -30,6 +50,21 @@ label unfinished new systems production-ready merely because an installer builds
   pad does not prove arbitrary planetary landing.
 - Repeatable far-distance physics, rebase, save/load and standalone tests; frame-time and memory budgets
   measured on the test hardware, including long sessions and repeated transitions.
+
+### Checkpoint validation — November 1, 2026
+
+- DevDist `KeireTests` build passed after the final physics source edits (nine-step incremental build).
+- Focused capsule overlap, filtering/thread-affinity, rotation-bound and cast checks: 5 tests,
+  357 assertions passed. Includes stationary queries at world origins 0 and ±1e12 metres.
+- All tests in `PhysicsSystemTests.cpp`: 37 tests, 276,544 assertions passed. Reproduce with
+  `KeireTests.exe --source-file=*PhysicsSystemTests.cpp` from the DevDist output directory.
+- clang-format dry-run and `git diff --check` passed. MSVC emitted warnings, including constant-arithmetic
+  overflow warnings while compiling rejected extreme-input tests; the build was not warning-free.
+- No editor flight, standalone, sanitizer or production-package acceptance was performed for this
+  checkpoint. These results do not validate continuous capsule rotation, automatic gravity alignment,
+  planetary boarding, multi-planet weather or the full planetary acceptance list above.
+- Original QA projects were not modified. Advanced planetary integration is deferred by user request;
+  resume with bounded continuous pose clearance and transactional character/support integration.
 
 ## Environment art direction across styles
 
@@ -49,6 +84,26 @@ label unfinished new systems production-ready merely because an installer builds
   preset round trips, Undo/Redo, standalone parity and measured quality/performance settings.
 
 ## Post-processing system
+
+Delivery should use two or three substantial implementation batches, as requested November 1:
+
+1. Build an end-to-end authoring/runtime workflow: reusable profiles, global/local Volume components,
+   deterministic per-camera blending, core effects, dedicated dockable panel and renderer integration.
+   Test serialization, scene editing, edit/play behavior and representative visuals together.
+2. Complete the remaining effects and extension points, presets, diagnostics, performance work and
+   fixes found in the first pass. Validate multiple cameras, large-world coordinates and standalone output.
+3. Use a final batch only where measured regressions or visual polish require it. Do not turn each
+   individual control into a separate build/desktop test cycle. Keep underwater integration ready for water.
+
+The batch count is a workflow target, not permission to omit acceptance checks or describe unfinished
+effects as complete. Preserve compatibility with existing exposure, bloom and camera fullscreen effects.
+
+- Dedicated dockable Post Processing panel for profiles, effect stacks, previews and diagnostics. Add a
+  Post Process Volume component with global/local mode, profile reference, priority, weight, blend distance
+  and bounds. Effects belong to reusable profiles rather than an expanding camera Inspector.
+- Keep camera controls limited to participation and volume-layer selection where possible. Preserve legacy
+  camera fullscreen effects and provide an explicit migration path into profiles without changing their order.
+  Volume authoring needs scene gizmos and selection/edit workflows as well as Inspector controls.
 
 - Reusable, versioned profile assets; global and local volumes with priority, weights, bounds, blend
   distance and deterministic overlap rules. Camera overrides and layer filtering.
@@ -86,6 +141,13 @@ label unfinished new systems production-ready merely because an installer builds
 
 ## Evidence and release gates
 
+Performance is continuous work in every feature batch: implement the required behavior, measure representative
+CPU/GPU frame time, startup/import time, allocations and peak/resident memory, optimize measured bottlenecks,
+then rerun correctness and performance checks. Cover editor UI as well as standalone rendering/physics. Record
+hardware, scene, quality, resolution, cold/warm state and frame-time percentiles; averages alone hide stutters.
+Keep realistic and stylized quality options scalable without silently dropping authored effects. Do not defer
+all optimization until the systems are finished or trade away correctness to meet a timing target.
+
 Each batch records code changes, focused tests, actual editor screenshots, standalone checks and measured
 performance. Shader reflection compatibility alone does not prove visual or GPU-performance parity.
 Use DevDist for iteration; use official clean production packaging and deployment checks for releases.
@@ -98,3 +160,32 @@ fullscreen material hooks. MaterialShadingModel includes Water, but that enum is
 water-body, ocean, river or buoyancy system. Audit those implementations before selecting extensions.
 Planetary gaps and previous evidence remain in PlanetaryIntegrationBatch.md and the current validation
 handoff. Start by reconciling those records with source rather than repeating completed fixes.
+
+### Post-processing integration findings
+
+`CameraComponent::FullscreenEffects` and the render packet currently hold one material for each of three
+stages: BeforeTonemapping, AfterTonemapping and AfterUi. RenderSurfaceRecording executes these hooks.
+Keep existing authored camera effects compatible when adding ordered effect stacks; migration must preserve
+their stage and material identity. Do not automatically grade the HUD with scene effects.
+
+BloomSettings already specifies exposed linear HDR thresholds, soft knee and radius measured in bloom-buffer
+pixels. Profile evaluation must feed the existing bloom/tone-map path rather than apply exposure or bloom twice.
+Evaluate immutable camera-local settings before render submission. Volume distances must use large-world
+relative coordinates so translating a scene to a distant origin does not change its blends. Define stable
+priority ties and discrete-property transitions; never interpolate asset IDs or enable flags numerically.
+Temporal effects require history invalidation on cuts, origin/frame changes and incompatible profile changes.
+
+### Water integration findings
+
+`CreateOpenPbrMaterial` currently maps Water and ThinTranslucent to the transparent shader output. This is
+material routing, not an ocean simulation or water-body implementation. The initial native/editor source
+audit found no WaterBody, RiverSpline, Ocean or Buoyancy component implementation under those names.
+
+Keep body geometry and queries separate from visual styling: a shared body/profile identity should connect
+surface position, normal, flow and velocity queries to rendered waves, foam and underwater effects. Planet
+oceans need planet-relative radial coordinates; lakes and ponds need bounded local surfaces; rivers need
+continuous spline parameterization and stable flow through segments. Do not derive physical water height
+from screen-space depth or reflections. Document wave-query tolerances and visual-only detail bands.
+Allow inexpensive styles to opt out of expensive reflections/refraction/caustics while retaining consistent
+body shape, interactions and deterministic query behavior. The transparent path must be validated for water
+depth and layering rather than assumed sufficient because it renders ordinary translucent materials.
