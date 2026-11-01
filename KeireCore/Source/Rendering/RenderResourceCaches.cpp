@@ -12,6 +12,7 @@
 #include "KeireInternal/Rendering/EnvironmentLightingApplication.h"
 #include "KeireInternal/Rendering/EnvironmentLightingValidation.h"
 #include "KeireInternal/Rendering/MaterialPropertyValidation.h"
+#include "KeireInternal/Rendering/MaterialTextureReplacement.h"
 #include "KeireInternal/Rendering/PlanetAtmosphereSetUniforms.h"
 #include "KeireInternal/Rendering/PlanetEnvironmentCapture.h"
 #include "KeireInternal/Rendering/RenderGeometryMathInternal.h"
@@ -1091,6 +1092,10 @@ namespace Keire::RenderBackend
                 try
                 {
                     auto replacement = CreateTextureResources(*texture);
+                    // Last-good material bindings can survive a failed shader/material reload. Update their
+                    // borrowed texture handles before retirement, even when dependency rebuilding is skipped.
+                    RefreshMaterialTextureBindings(MaterialCache, entry.Resources.Texture,
+                                                   {replacement.Texture, replacement.Sampler});
                     Retire(std::exchange(entry.Resources, replacement));
                     entry.LoadedRevision = revision;
                 }

@@ -11,7 +11,9 @@ reduce the stored precision. Long values use an explicit middle ellipsis in narr
 
 Editor startup opens the saved source scene while asset refresh runs in the background. Incompatible cooked assets
 use pending or fallback presentation; Play waits for the scene's compatible dependency closure. Refresh preserves
-open document edits and camera state. Cold, warm, and importer-migration startup timing validation is in progress.
+open document edits and camera state. Play requests made during scene refresh remain queued and can be cancelled
+with Stop. Cold startup prioritizes the scene and default input before unrelated assets; required shader compilation
+can still take minutes. Cold, warm, and importer-migration startup timing validation is in progress.
 Supported legacy importer names remain compatible, including older material metadata. A partial refresh applies
 compatible published assets while retaining diagnostics and excluding incompatible artifacts.
 

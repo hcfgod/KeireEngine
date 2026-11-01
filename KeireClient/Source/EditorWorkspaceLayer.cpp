@@ -970,11 +970,17 @@ void EditorWorkspaceLayer::OnAttach()
             {
                 // Open the source document now. Only cooked dependencies wait for their compatible refresh.
                 m_SceneTransitions->RequireStartupRefresh(startupCandidate);
-                if (hasPublishedCatalog && startupCandidate && m_AssetDatabase->Find(startupCandidate))
+                if (startupCandidate && m_AssetDatabase->Find(startupCandidate))
                 {
-                    // Refresh the scene's dependency closure before unrelated importer migrations.
+                    // Publish the startup closure first, including on a project's first cold import.
+                    std::vector<Keire::AssetId> startupAssets{startupCandidate};
+                    if (const auto defaultInput = project->Descriptor().DefaultInput;
+                        defaultInput && m_AssetDatabase->Find(defaultInput))
+                    {
+                        startupAssets.push_back(defaultInput);
+                    }
                     m_AssetOperations->QueueAssetImport(
-                        startupCandidate, KeireEditor::AssetOperationPriority::ExplicitAction,
+                        std::move(startupAssets), KeireEditor::AssetOperationPriority::ExplicitAction,
                         {.Reason = "startup-scene-refresh", .StartupSceneRefresh = true});
                     m_AssetStatus = "Scene source is available. Refreshing incompatible assets in the background.";
                 }

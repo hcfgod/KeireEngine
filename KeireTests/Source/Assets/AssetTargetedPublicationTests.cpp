@@ -104,6 +104,22 @@ TEST_CASE("targeted publication includes newly referenced dependency sources and
     const auto unrelated = create("unrelated");
     const std::array targets{material};
 
+    SUBCASE("missing catalog publishes the requested dependency closure without unrelated sources")
+    {
+        REQUIRE(std::filesystem::remove(initial.CatalogPath));
+        const auto imported = Keire::Detail::AssetDatabaseWorkerAccess::ImportAssetsFromSourceIndex(
+            *database, targets, Keire::AssetImportPolicy::FailFast);
+        const auto catalog = Keire::Detail::LoadCatalog(imported.CatalogPath);
+        REQUIRE(catalog.Entries.size() == 4);
+        for (const auto id : {leaf, shader, generated, material})
+        {
+            CHECK(std::ranges::find(catalog.Entries, id, &Keire::Detail::CatalogEntry::Id) != catalog.Entries.end());
+        }
+        CHECK(std::ranges::find(catalog.Entries, unrelated, &Keire::Detail::CatalogEntry::Id) == catalog.Entries.end());
+        CHECK(std::ranges::find(catalog.Entries, baseline, &Keire::Detail::CatalogEntry::Id) == catalog.Entries.end());
+        CHECK_NOTHROW(Keire::AssetCooker::Validate(imported.CatalogPath));
+    }
+
     SUBCASE("missing dependencies are published transitively without importing unrelated sources")
     {
         const auto imported = Keire::Detail::AssetDatabaseWorkerAccess::ImportAssetsFromSourceIndex(

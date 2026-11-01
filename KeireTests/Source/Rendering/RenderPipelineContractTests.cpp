@@ -3,6 +3,7 @@
 
 #include "KeireInternal/RenderInternal.h"
 #include "KeireInternal/Rendering/MaterialPassRoutingInternal.h"
+#include "KeireInternal/Rendering/MaterialTextureReplacement.h"
 #include "KeireInternal/Rendering/RenderBackendInternal.h"
 #include "KeireInternal/Rendering/RenderFramePacketInternal.h"
 #include "KeireInternal/Rendering/RenderPipelineStateInternal.h"
@@ -28,6 +29,49 @@
 #include <string>
 #include <thread>
 #include <vector>
+
+TEST_CASE("texture replacement refreshes retained material bindings across sample counts")
+{
+    using namespace Keire::RenderBackend;
+    std::array<std::byte, 4> identities{};
+    auto* previous = reinterpret_cast<SDL_GPUTexture*>(&identities[0]);
+    auto* replacement = reinterpret_cast<SDL_GPUTexture*>(&identities[1]);
+    auto* unrelated = reinterpret_cast<SDL_GPUTexture*>(&identities[2]);
+    auto* sampler = reinterpret_cast<SDL_GPUSampler*>(&identities[3]);
+    std::map<int, GpuMaterialEntry> materials;
+    auto& retained = materials[1];
+    retained.LastAttemptedRevision = 2;
+    retained.LoadedRevision = 1;
+    for (const auto samples : {SDL_GPU_SAMPLECOUNT_1, SDL_GPU_SAMPLECOUNT_4})
+    {
+        GpuMaterialBindingEntry binding;
+        binding.Samples = samples;
+        binding.LastAttemptedDependencyStamp = 20;
+        binding.LastGoodDependencyStamp = 10;
+        binding.Binding.Textures = {{previous, nullptr}, {unrelated, nullptr}, {previous, nullptr}};
+        retained.Bindings.push_back(std::move(binding));
+    }
+    materials[2].Bindings.emplace_back();
+    materials[2].Bindings.front().Binding.Textures = {{previous, nullptr}};
+
+    RefreshMaterialTextureBindings(materials, previous, {replacement, sampler});
+    for (const auto& binding : retained.Bindings)
+    {
+        CHECK(binding.Binding.Textures[0].texture == replacement);
+        CHECK(binding.Binding.Textures[0].sampler == sampler);
+        CHECK(binding.Binding.Textures[1].texture == unrelated);
+        CHECK(binding.Binding.Textures[2].texture == replacement);
+        CHECK(binding.LastGoodDependencyStamp == 10);
+        CHECK(binding.LastAttemptedDependencyStamp == 20);
+    }
+    CHECK(materials[2].Bindings.front().Binding.Textures[0].texture == replacement);
+    CHECK(retained.LoadedRevision == 1);
+
+    RefreshMaterialTextureBindings(materials, replacement, {previous, sampler});
+    CHECK(retained.Bindings.front().Binding.Textures[0].texture == previous);
+    RefreshMaterialTextureBindings(materials, nullptr, {unrelated, nullptr});
+    CHECK(retained.Bindings.front().Binding.Textures[0].texture == previous);
+}
 
 namespace
 {

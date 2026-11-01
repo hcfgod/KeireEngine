@@ -167,6 +167,10 @@ VFX Shader Graphs retain the standard instanced mesh pass and additionally compi
 world-space particle vertices. Their fragment logic and material/lighting bindings are shared with mesh VFX.
 The material cache owns all pass pipelines and replaces or retires them together using its existing last-good and
 device-generation lifecycle. Adjacent CPU batches must also match the material identity before coalescing.
+Texture replacement updates matching borrowed handles in cached material bindings before retiring the old GPU
+texture. This includes last-good bindings whose material or shader dependency rebuild was rejected; a failed
+dependency rebuild must not leave a cached binding pointing at a retired texture. Submitted GPU work continues
+to use the existing fence-based resource retirement path.
 
 Compute compilation validates the generated SPIR-V buffer ABI against `ProgramArtifact` reflection before publishing
 backend binaries. The current `ComputeDevice` owns an independent GPU device and opaque device-scoped identities;
@@ -1726,7 +1730,9 @@ refreshed after the editor becomes usable. When a published catalog exists but i
 startup scene requires refresh, startup first imports that scene and its transitive dependency closure. Traversal
 continues through current catalog entries to find outdated dependency importers. A successful targeted completion
 opens the deferred scene and queues the remaining project refresh; failed dependency statuses prevent that handoff.
-Missing catalogs and unavailable startup sources retain the full-import fallback. Validated shader compiler-cache
+Missing catalogs use targeted first publication with an empty previous-entry set; default input joins the startup
+targets. Unavailable startup sources retain the full-import fallback. Play intent remains pending until compatible
+scene assets are mounted; Stop and scene changes cancel that intent. Validated shader compiler-cache
 hits avoid temporary source staging while retaining snapshot, dependency and ABI validation.
 
 `ShaderGraphDocument` is a separate authoring document layered on the shared stable node-graph canvas rather than a

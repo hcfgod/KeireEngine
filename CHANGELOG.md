@@ -1,6 +1,10 @@
 # Changelog
 
 ## Unreleased
+- Refresh cached material texture bindings before retiring replaced GPU textures, including last-good bindings
+  retained during failed material or shader reloads.
+- Retain queued Play requests during scene asset refresh and prioritize startup scene/default input dependencies
+  on cold imports. Required cold shader compilation remains expensive; startup timing validation is ongoing.
 - Preserve pending project edits and Undo/Redo after importing rendering settings, while accepting only the
   explicitly imported file as the new save baseline and retaining unrelated external-file conflict protection.
 - Add identity-keyed per-planet cloud and fog overrides with global inheritance and explicit disabled profiles.

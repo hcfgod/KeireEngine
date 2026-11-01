@@ -191,7 +191,7 @@ namespace Keire
         std::unordered_set<AssetId> selectedSources(sourceAssets.begin(), sourceAssets.end());
         std::vector<Detail::CatalogEntry> previousEntries;
         std::unordered_map<AssetId, AssetTypeId> availableTypes;
-        if (incremental)
+        if (incremental && std::filesystem::exists(destination / "catalog.json"))
         {
             const auto previous = Detail::LoadCatalog(destination / "catalog.json");
             previousEntries = previous.Entries;

@@ -302,11 +302,13 @@ namespace Keire
         if (!assets.empty())
         {
             const auto previousCatalog = m_Impl->CacheRoot / "Runtime" / "catalog.json";
-            if (!std::filesystem::is_regular_file(previousCatalog))
-                return ImportAssetsUnlocked({}, policy, cancellation, std::move(progress), refreshSources);
-
-            for (const auto& entry : Detail::LoadCatalog(previousCatalog).Entries)
-                availableAssets.insert(entry.Id);
+            if (std::filesystem::exists(previousCatalog))
+            {
+                for (const auto& entry : Detail::LoadCatalog(previousCatalog).Entries)
+                {
+                    availableAssets.insert(entry.Id);
+                }
+            }
             std::unordered_map<std::string, std::vector<std::size_t>> dependents;
             for (std::size_t index = 0; index < allRecords.size(); ++index)
             {

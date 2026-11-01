@@ -505,7 +505,8 @@ void EditorWorkspaceLayer::BeginPlayMode()
     const auto sceneAssets = Owner().Assets();
     if (!sceneAssets || !sceneAssets->TryGetType(m_SceneDocument->Asset()))
     {
-        m_SceneDocument->SetStatus("Play is unavailable until this scene's compatible assets finish refreshing.");
+        m_PlayStartPending = true;
+        m_SceneDocument->SetStatus("Play queued while this scene's compatible assets finish refreshing.");
         return;
     }
     const bool requiresManagedRuntime = ProjectRequiresManagedRuntime();
@@ -695,6 +696,11 @@ void EditorWorkspaceLayer::ContinuePendingPlayMode()
 {
     if (!m_PlayStartPending || m_SceneDocument->PlaySession() || !m_SceneDocument->EditingScene())
         return;
+    const auto sceneAssets = Owner().Assets();
+    if (!sceneAssets || !sceneAssets->TryGetType(m_SceneDocument->Asset()))
+    {
+        return;
+    }
     if (m_ManagedRuntimeCoordinator && m_ManagedRuntimeCoordinator->HasPendingBuild())
         return;
     const auto scripts = Owner().Scripts();
