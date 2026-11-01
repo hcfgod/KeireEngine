@@ -566,3 +566,9 @@ Optimization validation completed: the official DevDist KeireTests build regener
 shader artifacts and passed all 16 native build steps. Focused density/weather/planetary-cloud regressions
 passed 14 cases and 74,140 assertions. Formatting and diff checks passed. This establishes preserved kernel
 results, not a measured GPU speedup. Staged editor/player and post-change visual checks remain pending.
+
+DevDist editor/player staging subsequently passed in 35.8 seconds. The updated editor opened the separate
+sample successfully, displayed its cloud/ship scene without an import error, and was checked maximized before
+closing between batches. The surface sanity capture is planetary-editor-cloud-optimization-check.png in the
+chat screenshots directory. No obvious appearance regression was visible in that fixed view; animated
+post-change flight and controlled GPU timing remain pending. Earlier flight captures used the preceding build.
