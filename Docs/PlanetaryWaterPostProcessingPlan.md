@@ -31,6 +31,23 @@ label unfinished new systems production-ready merely because an installer builds
 - Repeatable far-distance physics, rebase, save/load and standalone tests; frame-time and memory budgets
   measured on the test hardware, including long sessions and repeated transitions.
 
+## Environment art direction across styles
+
+- Sky, atmosphere, clouds, fog, stars, sun/moon and day/night support realistic and stylized authoring;
+  realistic appearance is the default preset, not a restriction on the system.
+- Reusable profiles/presets for realistic, painterly, cartoon/cel-shaded, low-poly and fantasy looks.
+  Presets must expose editable parameters rather than fixed named modes that constrain customization.
+- Author sky/horizon/zenith gradients and time-of-day curves, celestial disk size/color/halo and star
+  appearance, cloud shape/height/coverage/detail, lighting ramps, edge softness and fog color/density.
+- Separate artistic overrides from physical defaults with clear controls for inheritance, blend behavior
+  and reset. Support intentional nonphysical colors and lighting without breaking numeric validation.
+- Keep authored styles consistent in edit/play mode, from surface to space, across planets and through
+  post-processing. Preserve large-world precision and camera-local temporal history in every style.
+- Provide extension points for custom sky/cloud materials or shading where the renderer supports them,
+  with explicit resource contracts and diagnostics. Do not promise arbitrary shader compatibility.
+- Acceptance includes realistic and strongly stylized example scenes, day/night and altitude transitions,
+  preset round trips, Undo/Redo, standalone parity and measured quality/performance settings.
+
 ## Post-processing system
 
 - Reusable, versioned profile assets; global and local volumes with priority, weights, bounds, blend
