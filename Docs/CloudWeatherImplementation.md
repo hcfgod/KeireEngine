@@ -2039,3 +2039,22 @@ remain open.
 October 28 user acceptance: the user reports the viewport rings are not visible in the currently open updated
 build. Preserve this as visual evidence for that build, rather than a claim that every view or display is covered.
 Repeat the night/day Game-view angle checks after the next fog integration build.
+
+## October 31: regional height range and composite fog parity
+
+Independent Weather now exposes Minimum Type Height (%) beside Cloud Type and Type Variation. Its range is
+1–100%, with the legacy 35% default. Type zero uses this fraction of the authored layer; type one retains the
+full layer. Regional type variation blends between those ends. Base-height variation still controls placement,
+and extinction still controls opacity rather than shape. Very thin types require sufficiently resolved view
+and shadow marching; this control does not promise thin-feature visibility at every quality setting.
+
+Cloud volume schema 10 stores minimumTypeThickness as a fraction. Records 1–9 retain 0.35. The reserved Z lane
+of RadiusGeometry carries the fraction for both flat and planetary views, without increasing uniform sizes;
+zero from old producers decodes as 0.35. History and light-cache keys include the control. Independent Weather
+disabled keeps the existing full profile. Existing authored presets are not automatically retuned.
+
+The composite exact-ray fallback now binds the terrain shadow array and the same shadow constants as the
+main trace. This prevents the fallback from treating fog at thin foreground silhouettes as wholly unshadowed.
+Its fragment contract becomes six samplers, three uniform buffers and one storage buffer; cache storage moves
+to t6, shadow texture/sampler use t5/s5 and shadow constants use b2. Shader regeneration and reflection checks
+must accompany the host binding change. Native and visual acceptance of this batch are pending.

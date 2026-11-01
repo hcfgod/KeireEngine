@@ -7,6 +7,7 @@
 
 namespace
 {
+    using std::clamp;
     using std::max;
     using std::min;
 
@@ -324,4 +325,31 @@ TEST_CASE("Cloud envelope rejection declines nonfinite and out-of-contract bound
         CHECK_FALSE(VolumeCloudEnvelopeProvesEmpty(invalid, 0.5F));
         CHECK_FALSE(VolumeCloudEnvelopeProvesEmpty(0.5F, invalid));
     }
+}
+
+TEST_CASE("Cloud type height preserves legacy profiles and permits thin and tall regional bodies")
+{
+    for (int step = 0; step <= 100; ++step)
+    {
+        const float type = static_cast<float>(step) / 100.0F;
+        const float legacy = 0.35F + 0.65F * type;
+        CHECK(VolumeCloudTypeHeightFraction(type, 0.0F) == legacy);
+        CHECK(VolumeCloudTypeHeightFraction(type, 0.35F) == legacy);
+        const float thin = VolumeCloudTypeHeightFraction(type, 0.05F);
+        CHECK(thin >= 0.05F);
+        CHECK(thin <= 1.0F);
+        CHECK(thin <= legacy);
+    }
+    CHECK(VolumeCloudTypeHeightFraction(0.0F, 0.01F) == 0.01F);
+    CHECK(VolumeCloudTypeHeightFraction(1.0F, 0.01F) == 1.0F);
+    CHECK(VolumeCloudTypeHeightFraction(0.5F, 1.0F) == 1.0F);
+
+    // At 20% of the maximum layer, a 5% type is already empty while a tower retains its body.
+    const float height = 0.2F;
+    const float thinEnvelope =
+        VolumeCloudAuthoredHeightProfile(height / VolumeCloudTypeHeightFraction(0.0F, 0.05F), 0.0F, 0.08F, 0.4F, 1.0F);
+    const float tallEnvelope =
+        VolumeCloudAuthoredHeightProfile(height / VolumeCloudTypeHeightFraction(1.0F, 0.05F), 0.0F, 0.08F, 0.4F, 1.0F);
+    CHECK(VolumeCloudDensityWithProfile(1.0F, 0.5F, 0.0F, 0.0F, 0.8F, 0.0F, thinEnvelope) == 0.0F);
+    CHECK(VolumeCloudDensityWithProfile(1.0F, 0.5F, 0.0F, 0.0F, 0.8F, 0.0F, tallEnvelope) > 0.0F);
 }

@@ -152,6 +152,18 @@ TEST_CASE("Cloud reprojection rejects cloud edits, light jumps, cuts and invalid
     CHECK_FALSE(MakeCloudTemporalReprojection(current, previous, true));
 }
 
+TEST_CASE("Flat cloud history resets when minimum regional type height changes")
+{
+    auto previous = View(10);
+    previous.Volume.PlanetaryCloud.RadiusGeometry.Z = 0.35F;
+    auto current = previous;
+    current.FrameId = 11;
+    REQUIRE(MakeCloudTemporalReprojection(current, previous, true));
+    REQUIRE(current.Volume.PlanetaryCloud.Controls[0] == 0U);
+    current.Volume.PlanetaryCloud.RadiusGeometry.Z = 0.05F;
+    CHECK_FALSE(MakeCloudTemporalReprojection(current, previous, true));
+}
+
 TEST_CASE("Fog exclusion edits invalidate accumulated cloud and fog history")
 {
     auto previous = View(10);

@@ -5,6 +5,7 @@
 struct PlanetaryCloudGeometry
 {
     float4 ObserverRadialAltitude;
+    // XY planet geometry; Z minimum cloud type thickness (also used by flat views), zero means legacy 35%.
     float4 RadiusGeometry;
     float4 ObserverToPlanetX;
     float4 ObserverToPlanetY;

@@ -16,6 +16,8 @@ namespace Keire::RenderBackend
     struct PlanetaryCloudUniforms final
     {
         Vector4 ObserverRadialAltitude;
+        // XY: planet radius and base height. Z: minimum cloud type thickness fraction for all views;
+        // zero preserves the legacy 35% envelope. W remains reserved.
         Vector4 RadiusGeometry;
         Vector4 ObserverToPlanetX;
         Vector4 ObserverToPlanetY;

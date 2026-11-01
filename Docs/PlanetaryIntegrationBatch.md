@@ -572,3 +572,59 @@ sample successfully, displayed its cloud/ship scene without an import error, and
 closing between batches. The surface sanity capture is planetary-editor-cloud-optimization-check.png in the
 chat screenshots directory. No obvious appearance regression was visible in that fixed view; animated
 post-change flight and controlled GPU timing remain pending. Earlier flight captures used the preceding build.
+
+## Thin cloud types, fog fallback shadows and shader preparation — October 31
+
+The next batch adds Minimum Type Height (%) with a legacy-preserving 35% default and 1–100% range. Volume
+schema 10 stores the authored fraction; schemas 1–9 migrate to 35%. The reserved RadiusGeometry.Z lane carries
+it for flat and planetary views, zero retaining the old producer default. Light caches and temporal history
+invalidate when the control changes. Sample authoring accepts schemas 9 and 10 without retuning existing
+values. The isolated sample harness passes. This supersedes the earlier fixed-35% model limitation, but visual
+acceptance of thinner regional bodies remains pending.
+
+The composite fallback now uses the same terrain-fog shadow kernel as the main trace. Direct DXIL/SPIR-V/MSL
+compilation and reflection pass: volume 1616 bytes at b0, cache 48 at b1, fog shadows 304 at b2, shadow t5/s5 and
+cache storage t6. Generated embedded fragments match those validated outputs byte-for-byte. Evidence is under
+Build/Validation/CloudTypeFogReflection. Native tests and thin-silhouette visual acceptance remain pending.
+
+Shader preparation used one aggregate fingerprint per generator: a cloud edit triggered 93 builtin calls and
+69 VFX calls. VFX fragment cloud dependencies are real; independent visibility shaders do not share them. New
+Windows/Unix helpers cache individual outputs by recursive source/include closure, compiler and adjacent
+library identity, stage, entrypoint, destination and options. They verify stored hashes and reject failed,
+empty or concurrently changed inputs. Existing outer locks and content-aware header publication remain.
+Isolated fake-compiler regressions pass on PowerShell and Git Bash, including dependency isolation, corruption
+and failure recovery. A first real population and repeat-run timing are still needed; no speedup is claimed.
+
+The existing Windows generated-content regression also passes. The existing Unix regression reaches its
+simulated vanished-PID lock race, then exceeds that test's two-second deadline under Git Bash. A traced rerun
+reproduced the timeout; no existing timeout was relaxed. This is an unpassed compatibility check on this host,
+not evidence of a fully validated Linux/macOS build. The new Unix shader-cache harness passes separately.
+
+Focused native validation passed 62 cases / 95,105 assertions, with formatting and diff checks passing.
+Final integration review also caught the planetary light-cache reframe recreating geometry with the legacy
+minimum type height. It now preserves the authored fraction when snapping the cache frame; the next stage
+build includes that correction. Initial staging exposed Unicode-path handling in the new Windows blob cache
+(the real compiler cannot read the accented repository path directly); correction and real warm-up are pending.
+
+The corrected Windows compiler staging uses an ASCII dependency snapshot while retaining original source
+identities in the cache key. Unicode-path regression and a real DXIL compile pass; the probe matches the
+previous embedded output. Unix prepared identities are now revalidated before cache hits as well as after
+compilation. Both isolated blob-cache harnesses pass. The official DevDist stage then passed all 166 native
+steps in 774.5 seconds, including first population of 162 shader blobs. Warm unchanged builtin+VFX preparation
+subsequently completed in 0.748 seconds; this is not an edited-source speedup measurement.
+
+The rebuilt editor was checked maximized in the separate PlanetaryExplorer project. Minimum Type Height
+loaded the legacy 35%, accepted 8%, and saved volume schema 10 / minimumTypeThickness 0.08 while retaining
+48 view / 6 shadow samples. A paused ascent capture at 7.4 km shows cloud bodies with varied vertical extent,
+but lighting remains pale/soft and observed editor frame times are roughly 45–53 ms in this dense-cloud view.
+These status-bar observations are not a controlled GPU benchmark or production acceptance. Screenshots in
+the chat screenshot folder: cloud-height-35-percent-baseline.png, cloud-height-8-percent-comparison.png and
+planetary-cloud-height-variety-7km.png. The later Play-mode comparison was confounded when clipboard paste
+into an Environment numeric field triggered the demo camera's V hotkey; follow camera was restored. Record
+editor/gameplay input isolation as a follow-up. No claim of clean fixed-camera Play-mode A/B or continuous
+flicker verification. Thin-silhouette fog visual acceptance remains pending.
+
+Editor closed normally after discarding temporary flight transforms; the sample retains the 8% candidate.
+The final focused tests, relinked against the corrected cache implementation, pass 62 cases / 95,105 assertions.
+Original GravityAcceptanceQA scene SHA256 remains
+A85D25F5CE5A5073B1684BDF1889A48B95B694ABAF7A3F98D603E440F98CAB7C.

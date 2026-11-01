@@ -74,6 +74,13 @@ float VolumeCloudAuthoredHeightProfile(float height, float baseStart, float base
     return VolumeCloudHeightProfile(height, baseStart, baseEnd, crownStart, crownEnd);
 }
 
+// Zero is the reserved-lane value from older producers. Retain their 35% thin-type envelope.
+float VolumeCloudTypeHeightFraction(float cloudType, float minimumTypeThickness)
+{
+    const float minimum = minimumTypeThickness > 0.0F ? clamp(minimumTypeThickness, 0.01F, 1.0F) : 0.35F;
+    return minimum + (1.0F - minimum) * saturate(cloudType);
+}
+
 // combinedShape is saturated to at most one before multiplying this envelope. If even that
 // maximum cannot cross the coverage threshold, no body/detail/erosion fetch can create density.
 // Only certify the authored unit domain; unordered/nonfinite or out-of-contract values fall back.

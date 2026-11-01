@@ -81,12 +81,22 @@ eclipse correctness, runtime manifest export or complete planetary travel accept
 
 `Author-CloudVariety.ps1 -Project <project-folder>` is a one-time, sample-only shape starting point, pending
 visual and performance acceptance. Run with the editor closed or Play stopped and settings saved. It requires
-cloud settings version 3 / volume version 9 and the existing 48 view samples, 6 shadow samples, zero ambient
+cloud settings version 3 / volume version 9 or 10 and the existing 48 view samples, 6 shadow samples, zero ambient
 occlusion budget; it rejects other quality budgets rather than overwriting them.
 
 The revised comparison uses a 6,000-metre thickness and 2,500-metre pattern size, Cloud Type 0.55 / Type Variation
 1.0, coverage 0.5, regional strength 0.7, detail 0.6 at frequency 2, erosion 0.25, and vertical profile
-`[0, 0.08, 0.4, 1]`. Regional cloud types can use approximately 2,100 to 6,000 metres of the height envelope.
+`[0, 0.08, 0.4, 1]`. With the legacy 35% minimum, regional cloud types can use approximately 2,100 to
+6,000 metres of the height envelope. In the Environment panel, **Minimum Type Height (%)** adjusts the thin
+end of regional types from 1% to 100% without changing the maximum layer height or density. For example, an
+8% minimum permits a 480-metre shallow envelope beside fully developed 6,000-metre clouds. This requires
+Independent Weather; Type Variation determines how much regional variation occurs. Thin features need
+sufficient view and shadow samples and must be checked during camera motion and ascent/descent.
+
+Volume version 10 stores this control as `minimumTypeThickness`; older records retain 35%. The authoring
+script preserves an existing version-10 value exactly and leaves version-9 records unchanged in schema;
+it does not silently opt the project into thinner clouds. Visual acceptance must still verify visible
+thin/tall variety, stable edges through transitions, and frame time at the selected sampling budget.
 Base height stays at 1,500 metres with 800 metres of regional variation. These are candidate artistic values,
 not a guarantee of particular cloud silhouettes.
 

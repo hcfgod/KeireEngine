@@ -150,6 +150,35 @@ try
     $record.clouds.volume.version = 8
     Write-Json $unsupportedPath $record
     Assert-RejectedUnchanged $unsupported
+    foreach ($fraction in @(0.01, 0.08, 0.35, 1.0))
+    {
+        $current = New-Fixture ('Version10-' + $fraction)
+        $currentPath = Join-Path $current 'ProjectSettings/Rendering.keiresettings'
+        $record = Get-Content -LiteralPath $currentPath -Raw | ConvertFrom-Json
+        $record.clouds.volume.version = 10
+        $record.clouds.volume | Add-Member -NotePropertyName minimumTypeThickness -NotePropertyValue $fraction
+        Write-Json $currentPath $record
+        & $author -Project $current | Out-Null
+        $updated = Get-Content -LiteralPath $currentPath -Raw | ConvertFrom-Json
+        Assert-Contract ($updated.clouds.volume.version -eq 10) 'Authoring changed volume schema.'
+        Assert-Contract ($updated.clouds.volume.minimumTypeThickness -eq $fraction) 'Authoring replaced the custom minimum height.'
+        Assert-RejectedUnchanged $current
+    }
+    $invalidIndex = 0
+    foreach ($invalid in @($null, 0.0, 0.009, 1.01, '0.35', $true))
+    {
+        $current = New-Fixture ('InvalidVersion10-' + $invalidIndex++)
+        $currentPath = Join-Path $current 'ProjectSettings/Rendering.keiresettings'
+        $record = Get-Content -LiteralPath $currentPath -Raw | ConvertFrom-Json
+        $record.clouds.volume.version = 10
+        if ($null -ne $invalid)
+        {
+            $record.clouds.volume | Add-Member -NotePropertyName minimumTypeThickness -NotePropertyValue $invalid
+        }
+        Write-Json $currentPath $record
+        Assert-RejectedUnchanged $current
+        Assert-Contract (-not (Test-Path -LiteralPath (Join-Path $current 'ProjectSettings/Rendering.before-cloud-variety.keiresettings.backup'))) 'Invalid volume created a backup.'
+    }
     Write-Output 'PASS cloud variety: exact shape values, normalized ranges, untouched quality/density/other systems, byte-exact backup, repeat/foreign/version/quality rejection. Visual and performance acceptance remain pending.'
 }
 finally

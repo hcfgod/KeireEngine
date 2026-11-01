@@ -13,13 +13,20 @@ $Header = Join-Path $GeneratedDirectory "BuiltinVfxShaders.h"
 $Stamp = Join-Path $GeneratedDirectory "BuiltinVfxShaders.stamp"
 $CacheHelper = Join-Path $PSScriptRoot "generated-content-cache.ps1"
 . $CacheHelper
+$BlobCacheHelper = Join-Path $PSScriptRoot "shader-blob-cache.ps1"
+. $BlobCacheHelper
+$ShaderIncludeDirectory = Join-Path $Root "KeireCore/Shaders"
+$BlobCacheDirectory = Join-Path $Root "Build/Cache/ShaderBlobs/windows"
+$CompilerInputs = @(Get-ShaderCompilerInputs -Compiler $Compiler)
+$CompilerIdentity = Get-GeneratedContentFingerprint -Schema ('shader-compiler-v1|' + ($CompilerInputs -join '|')) -Inputs $CompilerInputs
 
 if (-not (Test-Path -LiteralPath $Compiler)) {
     throw "KeireShaderCompiler is required before generating the built-in VFX shaders."
 }
 
-$Fingerprint = Get-GeneratedContentFingerprint -Schema "builtin-vfx-v2" `
-    -Inputs (@($PSCommandPath, $CacheHelper, $Compiler, $Source, $VisibilitySource) + $Includes)
+$RecursiveInputs = @(Get-ShaderIncludeClosure -Sources @($Source, $VisibilitySource) -IncludeDirectories @($ShaderIncludeDirectory))
+$Fingerprint = Get-GeneratedContentFingerprint -Schema ("builtin-vfx-v3|$CompilerIdentity") `
+    -Inputs (@($PSCommandPath, $CacheHelper, $BlobCacheHelper) + $CompilerInputs + $RecursiveInputs + $Includes)
 if (Test-GeneratedContentCurrent -Output $Header -Stamp $Stamp -Fingerprint $Fingerprint) {
     return
 }
@@ -31,15 +38,11 @@ try {
         return
     }
 
+    $SourceIdentity = Get-ShaderBlobInputIdentity -Source $Source -IncludeDirectories @($ShaderIncludeDirectory) -CompilerIdentity $CompilerIdentity
+    $VisibilityIdentity = Get-ShaderBlobInputIdentity -Source $VisibilitySource -IncludeDirectories @($ShaderIncludeDirectory) -CompilerIdentity $CompilerIdentity
+
     $Temporary = Join-Path ([IO.Path]::GetTempPath()) ("KeireBuiltinVfx-" + [Guid]::NewGuid().ToString("N"))
     New-Item -ItemType Directory -Force -Path $Temporary | Out-Null
-    $temporarySource = Join-Path $Temporary "BuiltinVfx.hlsl"
-    $temporaryVisibilitySource = Join-Path $Temporary "BuiltinVfxVisibility.hlsl"
-    Copy-Item -LiteralPath $Source -Destination $temporarySource
-    Copy-Item -LiteralPath $VisibilitySource -Destination $temporaryVisibilitySource
-    foreach ($Include in $Includes) {
-        Copy-Item -LiteralPath $Include -Destination $Temporary
-    }
     $stages = @(
         @{ Stage = "compute"; Entry = "CSInitialize"; Name = "Initialize" },
         @{ Stage = "compute"; Entry = "CSReset"; Name = "Reset" },
@@ -74,15 +77,14 @@ try {
         foreach ($variant in $variants) {
             $output = Join-Path $Temporary ("$($stage.Name)-$($variant.Name).$($variant.Extension)")
             $stageSource = if ($stage.Name -in @("BuildVisibilityCandidates", "CompactVisibility")) {
-                $temporaryVisibilitySource
+                $VisibilitySource
             } else {
-                $temporarySource
+                $Source
             }
-            & $Compiler $stageSource --source HLSL --dest $variant.Destination --stage $stage.Stage `
-                --entrypoint $stage.Entry -I $Temporary --output $output
-            if ($LASTEXITCODE -ne 0) {
-                throw "Built-in VFX shader compilation failed for $($stage.Entry) / $($variant.Destination)."
-            }
+            $blobIdentity = if ($stageSource -eq $VisibilitySource) { $VisibilityIdentity } else { $SourceIdentity }
+            Invoke-CachedShaderCompile -Compiler $Compiler -Source $stageSource -Stage $stage.Stage `
+                -Entry $stage.Entry -Destination $variant.Destination -IncludeDirectories @($ShaderIncludeDirectory) `
+                -Output $output -CacheDirectory $BlobCacheDirectory -InputIdentity $blobIdentity
         }
     }
 

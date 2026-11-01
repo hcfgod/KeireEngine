@@ -1,5 +1,6 @@
 #include "Keire/BuiltinUnlitShaders.h"
 #include "KeireInternal/Rendering/CloudTemporalRendering.h"
+#include "KeireInternal/Rendering/CloudTemporalShaderBindings.h"
 #include "KeireInternal/Rendering/RenderBackendInternal.h"
 
 #include <array>
@@ -54,10 +55,8 @@ namespace Keire::RenderBackend
         }
         SDL_GPUShaderCreateInfo information{};
         information.stage = vertex ? SDL_GPU_SHADERSTAGE_VERTEX : SDL_GPU_SHADERSTAGE_FRAGMENT;
-        constexpr std::array samplerCounts{3U, 4U, 5U};
-        constexpr std::array uniformCounts{4U, 3U, 2U};
-        information.num_samplers = vertex ? 0U : samplerCounts[index];
-        information.num_uniform_buffers = vertex ? 0U : uniformCounts[index];
+        information.num_samplers = vertex ? 0U : CloudTemporalSamplerCounts[index];
+        information.num_uniform_buffers = vertex ? 0U : CloudTemporalUniformCounts[index];
         information.num_storage_buffers = vertex || pass == CloudTemporalPass::Resolve ? 0U : 1U;
         const auto formats = SDL_GetGPUShaderFormats(device);
         Code code{};

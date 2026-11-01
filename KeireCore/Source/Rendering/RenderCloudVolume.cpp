@@ -52,6 +52,11 @@ namespace Keire::RenderBackend
         const auto light =
             MakeCloudLightingUniforms(packet.Environment.AmbientColor, packet.Environment.AmbientIntensity,
                                       packet.Lighting.ColorAndIntensity, packet.Lighting.Enabled, atmosphere.SunHeight);
+        auto cloudGeometry =
+            packet.PlanetFrame
+                ? MakePlanetaryCloudUniforms(*packet.PlanetFrame, packet.Environment.Clouds.Volume.BaseHeightMeters)
+                : PlanetaryCloudUniforms{};
+        cloudGeometry.RadiusGeometry.Z = static_cast<float>(packet.Environment.Clouds.Volume.MinimumTypeThickness);
         return {Math::Inverse(camera.Projection),
                 Math::Inverse(camera.View),
                 packet.CloudVolume,
@@ -78,9 +83,7 @@ namespace Keire::RenderBackend
                  static_cast<float>(packet.Environment.Clouds.Volume.TypeVariation),
                  static_cast<float>(packet.Environment.Clouds.Volume.BaseHeightVariationMeters)},
                 fog,
-                packet.PlanetFrame
-                    ? MakePlanetaryCloudUniforms(*packet.PlanetFrame, packet.Environment.Clouds.Volume.BaseHeightMeters)
-                    : PlanetaryCloudUniforms{}};
+                cloudGeometry};
     }
 
     void RenderSharedState::RecordCloudVolume(SDL_GPUCommandBuffer* commands, RenderSurfaceState& surface,

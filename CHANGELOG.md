@@ -1,6 +1,13 @@
 # Changelog
 
 ## Unreleased
+- Cache builtin shader outputs independently by source dependencies, compiler identity and compilation options
+  on Windows and Unix. Reject corrupt entries and inputs changed during compilation; preserve existing locked
+  header publication. The first run populates the cache; real incremental timing remains to be measured.
+- Add Minimum Type Height (%) to cloud authoring, allowing thin regional patches alongside full-height towers.
+  Existing cloud records retain their 35% minimum; current records use volume schema 10. Shape changes reset
+  temporal history and cloud lighting caches in flat and planetary views.
+- Apply terrain fog shadows in the cloud composite's thin-surface fallback, matching the main trace path.
 - Add allocation-free physics gravity sampling and a context-scoped managed character query, distinguishing a
   valid zero field from unavailable physics. Add an opt-in arbitrary-up FPS motor overload; automatic character
   alignment and moving-planet character transfers remain unfinished.

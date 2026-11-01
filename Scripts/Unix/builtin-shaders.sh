@@ -4,6 +4,9 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cache_helper="$ROOT/Scripts/Unix/generated-content-cache.sh"
 source "$cache_helper"
+blob_helper="$ROOT/Scripts/Unix/shader-blob-cache.sh"
+source "$blob_helper"
+blob_cache="$ROOT/Build/Cache/ShaderBlobs/unix"
 compiler="$ROOT/Build/Tools/ShaderCompiler/KeireShaderCompiler"
 source_files=("$ROOT/KeireCore/Shaders/BuiltinUnlit.hlsl" "$ROOT/KeireCore/Shaders/BuiltinSky.hlsl" \
   "$ROOT/KeireCore/Shaders/BuiltinCloudVolume.hlsl" \
@@ -49,8 +52,15 @@ stamp="$ROOT/Build/Generated/Keire/BuiltinRenderingShaders.stamp"
 lock="$ROOT/Build/Generated/.locks/builtin-rendering.lock"
 
 [[ -x "$compiler" ]] || { printf 'KeireShaderCompiler is required before generating built-in rendering shaders.\n' >&2; exit 1; }
-fingerprint="$(generated_content_fingerprint builtin-rendering-v2 "${BASH_SOURCE[0]}" "$cache_helper" \
-  "$compiler" "${source_files[@]}" "${include_files[@]}")"
+dependency_list="$(mktemp)"
+shader_blob_global_inputs "$compiler" "$ROOT/KeireCore/Shaders" "$dependency_list" "${source_files[@]}" || {
+  rm -f "$dependency_list"
+  exit 1
+}
+fingerprint_inputs=("${BASH_SOURCE[0]}" "$cache_helper" "$blob_helper" "${include_files[@]}")
+while IFS= read -r dependency; do fingerprint_inputs+=("$dependency"); done < "$dependency_list"
+rm -f "$dependency_list"
+fingerprint="$(generated_content_fingerprint builtin-rendering-v3 "${fingerprint_inputs[@]}")"
 [[ -f "$generated_source" ]] && generated_content_is_current "$generated" "$stamp" "$fingerprint" && exit 0
 
 mkdir -p "$(dirname "$generated")"
@@ -79,10 +89,12 @@ select_source_variants() {
 
 for source_index in "${!source_files[@]}"; do
   select_source_variants "${prefixes[$source_index]}"
+  source_identity="$(shader_blob_source_identity "$compiler" "${source_files[$source_index]}" \
+    "$ROOT/KeireCore/Shaders" "$temporary")"
   for index in "${source_variants[@]}"; do
-    "$compiler" "${source_files[$source_index]}" -s HLSL -d "${destinations[$index]}" -t "${stages[$index]}" \
-      -e "${entries[$index]}" -I "$ROOT/KeireCore/Shaders" \
-      -o "$temporary/${prefixes[$source_index]}-${files[$index]}"
+    shader_blob_compile "$blob_cache" "$compiler" "${source_files[$source_index]}" \
+      "$temporary/${prefixes[$source_index]}-${files[$index]}" "${stages[$index]}" "${entries[$index]}" \
+      "${destinations[$index]}" "$ROOT/KeireCore/Shaders" "$source_identity"
   done
 done
 

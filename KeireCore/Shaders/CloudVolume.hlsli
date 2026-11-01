@@ -138,7 +138,8 @@ float VolumeCloudDensityPoint(float3 position, float sampleSpacing, CloudVolumeP
     float profileHeight = height;
     if (parameters.WeatherControls.x > 0.5F)
     {
-        profileHeight = profile.x + (height - profile.x) / (0.35F + 0.65F * cloudType);
+        const float typeHeight = VolumeCloudTypeHeightFraction(cloudType, parameters.PlanetaryCloud.RadiusGeometry.z);
+        profileHeight = profile.x + (height - profile.x) / typeHeight;
     }
     const float envelope = VolumeCloudAuthoredHeightProfile(profileHeight, profile.x, profile.y, profile.z, profile.w);
     // Weather and profile can prove this point empty before any warped body/detail atlas fetches.

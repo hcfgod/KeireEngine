@@ -13,7 +13,8 @@ namespace Keire::Detail
     [[nodiscard]] inline nlohmann::json EncodeVolumetricCloudSettings(const VolumetricCloudSettings& settings)
     {
         ValidateVolumetricCloudSettings(settings);
-        return {{"version", 9},
+        return {{"version", 10},
+                {"minimumTypeThickness", settings.MinimumTypeThickness},
                 {"baseHeightVariationMeters", settings.BaseHeightVariationMeters},
                 {"independentWeather", settings.IndependentWeather},
                 {"cloudType", settings.CloudType},
@@ -52,7 +53,8 @@ namespace Keire::Detail
             if (!record.is_object() || !record.at("version").is_number_integer() ||
                 (record.at("version") != 1 && record.at("version") != 2 && record.at("version") != 3 &&
                  record.at("version") != 4 && record.at("version") != 5 && record.at("version") != 6 &&
-                 record.at("version") != 7 && record.at("version") != 8 && record.at("version") != 9) ||
+                 record.at("version") != 7 && record.at("version") != 8 && record.at("version") != 9 &&
+                 record.at("version") != 10) ||
                 record.size() != (record.at("version") == 1   ? 15U
                                   : record.at("version") == 2 ? 17U
                                   : record.at("version") == 3 ? 21U
@@ -61,7 +63,8 @@ namespace Keire::Detail
                                   : record.at("version") == 6 ? 25U
                                   : record.at("version") == 7 ? 26U
                                   : record.at("version") == 8 ? 29U
-                                                              : 30U) ||
+                                  : record.at("version") == 9 ? 30U
+                                                              : 31U) ||
                 !record.at("enabled").is_boolean())
             {
                 throw std::invalid_argument("Malformed or unsupported volumetric cloud record.");
@@ -101,6 +104,7 @@ namespace Keire::Detail
             };
 
             VolumetricCloudSettings result;
+            result.MinimumTypeThickness = record.at("version") >= 10 ? scalar("minimumTypeThickness") : 0.35;
             result.BaseHeightVariationMeters = record.at("version") >= 9 ? scalar("baseHeightVariationMeters") : 0.0;
             result.AmbientOcclusionStrength = record.at("version") >= 6 ? scalar("ambientOcclusionStrength") : 0.0;
             if (record.at("version") >= 7)

@@ -41,6 +41,7 @@ namespace Keire::Detail
             throw std::invalid_argument("Volumetric cloud detail, variation or contrast settings are invalid.");
         }
         if (!within(settings.CloudType, 0.0, 1.0) || !within(settings.TypeVariation, 0.0, 1.0) ||
+            !within(settings.MinimumTypeThickness, 0.01, 1.0) ||
             !within(settings.BaseHeightVariationMeters, 0.0, 100000.0))
         {
             throw std::invalid_argument("Cloud type or regional height variation is outside its finite range.");

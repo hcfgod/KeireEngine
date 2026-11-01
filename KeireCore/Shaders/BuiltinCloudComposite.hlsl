@@ -2,7 +2,11 @@
 #define KEIRE_CLOUD_NOISE_TEXTURE t4
 #define KEIRE_CLOUD_NOISE_SAMPLER s4
 #define KEIRE_CLOUD_LIGHT_CACHE
-StructuredBuffer<float4> CloudLightTransmissionCache : register(t5, space2);
+#define KEIRE_FOG_SHADOW_TEXTURE t5
+#define KEIRE_FOG_SHADOW_SAMPLER s5
+#define KEIRE_FOG_SHADOW_CONSTANTS b2
+#include "FogTerrainShadow.hlsli"
+StructuredBuffer<float4> CloudLightTransmissionCache : register(t6, space2);
 cbuffer CloudCacheConstants : register(b1, space3)
 {
     float4 CloudCacheOrigin;

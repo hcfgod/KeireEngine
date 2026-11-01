@@ -4,6 +4,9 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cache_helper="$ROOT/Scripts/Unix/generated-content-cache.sh"
 source "$cache_helper"
+blob_helper="$ROOT/Scripts/Unix/shader-blob-cache.sh"
+source "$blob_helper"
+blob_cache="$ROOT/Build/Cache/ShaderBlobs/unix"
 compiler="$ROOT/Build/Tools/ShaderCompiler/KeireShaderCompiler"
 source_file="$ROOT/KeireCore/Shaders/BuiltinVfx.hlsl"
 visibility_source_file="$ROOT/KeireCore/Shaders/BuiltinVfxVisibility.hlsl"
@@ -32,8 +35,13 @@ lock="$ROOT/Build/Generated/.locks/builtin-vfx.lock"
   exit 1
 }
 
-fingerprint="$(generated_content_fingerprint builtin-vfx-v2 "${BASH_SOURCE[0]}" "$cache_helper" \
-  "$compiler" "$source_file" "$visibility_source_file" "${includes[@]}")"
+dependency_list="$(mktemp)"
+shader_blob_global_inputs "$compiler" "$ROOT/KeireCore/Shaders" "$dependency_list" \
+  "$source_file" "$visibility_source_file" || { rm -f "$dependency_list"; exit 1; }
+fingerprint_inputs=("${BASH_SOURCE[0]}" "$cache_helper" "$blob_helper" "${includes[@]}")
+while IFS= read -r dependency; do fingerprint_inputs+=("$dependency"); done < "$dependency_list"
+rm -f "$dependency_list"
+fingerprint="$(generated_content_fingerprint builtin-vfx-v3 "${fingerprint_inputs[@]}")"
 generated_content_is_current "$header" "$stamp" "$fingerprint" && exit 0
 
 mkdir -p "$generated_directory"
@@ -73,17 +81,21 @@ stages=(
   "fragment PSCpu CpuFragment"
 )
 variants=("DXIL Dxil dxil" "SPIRV Spirv spv" "MSL Msl msl")
+source_identity="$(shader_blob_source_identity "$compiler" "$source_file" "$ROOT/KeireCore/Shaders" "$temporary")"
+visibility_identity="$(shader_blob_source_identity "$compiler" "$visibility_source_file" "$ROOT/KeireCore/Shaders" "$temporary")"
 
 for stage_row in "${stages[@]}"; do
   read -r stage entry name <<< "$stage_row"
   stage_source="$source_file"
+  stage_identity="$source_identity"
   if [[ "$name" == "BuildVisibilityCandidates" || "$name" == "CompactVisibility" ]]; then
     stage_source="$visibility_source_file"
+    stage_identity="$visibility_identity"
   fi
   for variant_row in "${variants[@]}"; do
     read -r destination variant extension <<< "$variant_row"
-    "$compiler" "$stage_source" --source HLSL --dest "$destination" --stage "$stage" --entrypoint "$entry" \
-      -I "$ROOT/KeireCore/Shaders" --output "$temporary/$name-$variant.$extension"
+    shader_blob_compile "$blob_cache" "$compiler" "$stage_source" "$temporary/$name-$variant.$extension" \
+      "$stage" "$entry" "$destination" "$ROOT/KeireCore/Shaders" "$stage_identity"
   done
 done
 

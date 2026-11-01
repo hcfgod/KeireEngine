@@ -180,6 +180,8 @@ namespace Keire::RenderBackend
             grid->CellSize = buildGrid.CellSize;
             grid->Dimensions = buildGrid.Dimensions;
             buildView.PlanetaryCloud = MakePlanetaryCloudUniforms(buildFrame, view.Volume.Geometry[0]);
+            // Reframing changes geometry, not the authored density profile used by the view.
+            buildView.PlanetaryCloud.RadiusGeometry.Z = view.PlanetaryCloud.RadiusGeometry.Z;
             const auto sunlight = planetFrame->PlanetToObserver.Inverse().Apply(
                 {view.SunDirection.X, view.SunDirection.Y, view.SunDirection.Z});
             buildView.SunDirection = {static_cast<float>(sunlight[0]), static_cast<float>(sunlight[1]),

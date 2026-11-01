@@ -55,13 +55,20 @@ $Includes = @((Join-Path $Root "KeireCore\Shaders\BuiltinLighting.hlsli"),
 $Stamp = Join-Path $Root "Build\Generated\Keire\BuiltinRenderingShaders.stamp"
 $CacheHelper = Join-Path $PSScriptRoot "generated-content-cache.ps1"
 . $CacheHelper
+$BlobCacheHelper = Join-Path $PSScriptRoot "shader-blob-cache.ps1"
+. $BlobCacheHelper
+$ShaderIncludeDirectory = Join-Path $Root "KeireCore/Shaders"
+$BlobCacheDirectory = Join-Path $Root "Build/Cache/ShaderBlobs/windows"
+$CompilerInputs = @(Get-ShaderCompilerInputs -Compiler $Compiler)
+$CompilerIdentity = Get-GeneratedContentFingerprint -Schema ('shader-compiler-v1|' + ($CompilerInputs -join '|')) -Inputs $CompilerInputs
 
 if (-not (Test-Path -LiteralPath $Compiler -PathType Leaf)) {
     throw "KeireShaderCompiler is required before generating built-in rendering shaders."
 }
 
-$FingerprintInputs = @($PSCommandPath, $CacheHelper, $Compiler) + @($Sources | ForEach-Object { $_.Path }) + $Includes
-$Fingerprint = Get-GeneratedContentFingerprint -Schema "builtin-rendering-v2" -Inputs $FingerprintInputs
+$RecursiveInputs = @(Get-ShaderIncludeClosure -Sources @($Sources | ForEach-Object { $_.Path }) -IncludeDirectories @($ShaderIncludeDirectory))
+$FingerprintInputs = @($PSCommandPath, $CacheHelper, $BlobCacheHelper) + $CompilerInputs + $RecursiveInputs + $Includes
+$Fingerprint = Get-GeneratedContentFingerprint -Schema ("builtin-rendering-v3|$CompilerIdentity") -Inputs $FingerprintInputs
 if ((Test-Path -LiteralPath $GeneratedSource -PathType Leaf) -and
     (Test-GeneratedContentCurrent -Output $Generated -Stamp $Stamp -Fingerprint $Fingerprint)) {
     return
@@ -96,17 +103,15 @@ try {
         Copy-Item -LiteralPath $Include -Destination $Temporary
     }
     foreach ($Source in $Sources) {
+        $BlobIdentity = Get-ShaderBlobInputIdentity -Source $Source.Path -IncludeDirectories @($ShaderIncludeDirectory) -CompilerIdentity $CompilerIdentity
         $StagedSource = Join-Path $Temporary "$($Source.Prefix).hlsl"
         Copy-Item -LiteralPath $Source.Path -Destination $StagedSource
         $SourceVariants = if ($Source.ContainsKey('Compute')) { $ComputeVariants } else { $Variants }
         foreach ($Variant in $SourceVariants) {
             $Output = Join-Path $Temporary "$($Source.Prefix)-$($Variant.File)"
-            $CompilerArguments = @($StagedSource, '-s', 'HLSL', '-d', $Variant.Destination, '-t', $Variant.Stage,
-                                   '-e', $Variant.Entry, '-I', $Temporary, '-o', $Output)
-            & $Compiler @CompilerArguments
-            if ($LASTEXITCODE -ne 0) {
-                throw "$($Source.Prefix) $($Variant.Name) shader compilation failed."
-            }
+            Invoke-CachedShaderCompile -Compiler $Compiler -Source $Source.Path -Stage $Variant.Stage `
+                -Entry $Variant.Entry -Destination $Variant.Destination -IncludeDirectories @($ShaderIncludeDirectory) `
+                -Output $Output -CacheDirectory $BlobCacheDirectory -InputIdentity $BlobIdentity
         }
     }
 

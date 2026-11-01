@@ -63,6 +63,7 @@ namespace Keire::RenderBackend
             view.Volume.Geometry[3] != old.Volume.Geometry[3] || view.ShapeControls != old.ShapeControls ||
             view.RegionalControls != old.RegionalControls || view.HeightProfile != old.HeightProfile ||
             view.WeatherControls != old.WeatherControls || view.Fog != old.Fog ||
+            view.PlanetaryCloud.RadiusGeometry.Z != old.PlanetaryCloud.RadiusGeometry.Z ||
             view.CameraControls.X != old.CameraControls.X || view.CameraControls.Z != old.CameraControls.Z ||
             view.CameraControls.W != old.CameraControls.W ||
             !CloudTemporalDetail::SimilarRadiance(view.SunRadiance, old.SunRadiance) ||

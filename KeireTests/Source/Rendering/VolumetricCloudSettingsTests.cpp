@@ -103,7 +103,7 @@ TEST_CASE("Volumetric cloud records reject malformed fields rather than silently
         }
     }
     auto future = valid;
-    future["version"] = 10;
+    future["version"] = 11;
     CHECK_THROWS_AS((void)Keire::Detail::DecodeVolumetricCloudSettings(future), std::invalid_argument);
 }
 
@@ -111,6 +111,7 @@ TEST_CASE("Cloud ambient occlusion preserves legacy illumination and validates a
 {
     auto legacy = Keire::Detail::EncodeVolumetricCloudSettings({});
     legacy["version"] = 5;
+    legacy.erase("minimumTypeThickness");
     legacy.erase("baseHeightVariationMeters");
     legacy.erase("independentWeather");
     legacy.erase("cloudType");
@@ -142,6 +143,7 @@ TEST_CASE("Cloud erosion migrates coupled detail and round trips independently")
         settings.DetailAmount = detail;
         auto legacy = Keire::Detail::EncodeVolumetricCloudSettings(settings);
         legacy["version"] = 4;
+        legacy.erase("minimumTypeThickness");
         legacy.erase("baseHeightVariationMeters");
         legacy.erase("independentWeather");
         legacy.erase("cloudType");
@@ -169,6 +171,7 @@ TEST_CASE("Old authored cloud volumes retain single scattering across migration 
 {
     auto record = Keire::Detail::EncodeVolumetricCloudSettings({});
     record["version"] = 1;
+    record.erase("minimumTypeThickness");
     record.erase("baseHeightVariationMeters");
     record.erase("independentWeather");
     record.erase("cloudType");
@@ -198,6 +201,7 @@ TEST_CASE("Cloud shape controls migrate and reject invalid periodic domains")
 {
     auto legacy = Keire::Detail::EncodeVolumetricCloudSettings({});
     legacy["version"] = 2;
+    legacy.erase("minimumTypeThickness");
     legacy.erase("baseHeightVariationMeters");
     legacy.erase("independentWeather");
     legacy.erase("cloudType");
@@ -229,6 +233,7 @@ TEST_CASE("Regional coverage migrates old volumes and validates its independent 
 {
     auto legacy = Keire::Detail::EncodeVolumetricCloudSettings({});
     legacy["version"] = 3;
+    legacy.erase("minimumTypeThickness");
     legacy.erase("baseHeightVariationMeters");
     legacy.erase("independentWeather");
     legacy.erase("cloudType");
@@ -347,6 +352,7 @@ TEST_CASE("Authored cloud height profiles round trip and migrate the previous sc
           settings);
     auto legacy = Keire::Detail::EncodeVolumetricCloudSettings(settings);
     legacy["version"] = 6;
+    legacy.erase("minimumTypeThickness");
     legacy.erase("baseHeightVariationMeters");
     legacy.erase("independentWeather");
     legacy.erase("cloudType");
@@ -389,6 +395,7 @@ TEST_CASE("Independent cloud weather round trips and leaves old authored models 
           settings);
     auto legacy = Keire::Detail::EncodeVolumetricCloudSettings(settings);
     legacy["version"] = 7;
+    legacy.erase("minimumTypeThickness");
     legacy.erase("baseHeightVariationMeters");
     legacy.erase("independentWeather");
     legacy.erase("cloudType");
@@ -417,6 +424,7 @@ TEST_CASE("Regional cloud base height preserves legacy records and rejects inval
     CHECK(Keire::Detail::DecodeVolumetricCloudSettings(record) == settings);
     auto legacy = record;
     legacy["version"] = 8;
+    legacy.erase("minimumTypeThickness");
     legacy.erase("baseHeightVariationMeters");
     const auto migrated = Keire::Detail::DecodeVolumetricCloudSettings(legacy);
     CHECK(migrated.IndependentWeather);
@@ -425,6 +433,55 @@ TEST_CASE("Regional cloud base height preserves legacy records and rejects inval
     {
         settings.BaseHeightVariationMeters = invalid;
         CHECK_THROWS_AS(Keire::Detail::EncodeVolumetricCloudSettings(settings), std::invalid_argument);
+    }
+}
+
+TEST_CASE("Minimum cloud type thickness round trips and migrates every prior volume schema")
+{
+    Keire::VolumetricCloudSettings settings;
+    CHECK(settings.MinimumTypeThickness == 0.35);
+    for (const double fraction : {0.01, 0.08, 0.35, 1.0})
+    {
+        settings.MinimumTypeThickness = fraction;
+        const auto record = Keire::Detail::EncodeVolumetricCloudSettings(settings);
+        CHECK(record.at("version") == 10);
+        CHECK(record.size() == 31U);
+        CHECK(Keire::Detail::DecodeVolumetricCloudSettings(record) == settings);
+    }
+    for (int version = 1; version <= 9; ++version)
+    {
+        CAPTURE(version);
+        auto legacy = Keire::Detail::EncodeVolumetricCloudSettings(settings);
+        legacy["version"] = version;
+        legacy.erase("minimumTypeThickness");
+        const auto removeBefore = [&](const int introduction, const std::initializer_list<const char*> fields)
+        {
+            if (version < introduction)
+            {
+                for (const auto* field : fields)
+                {
+                    legacy.erase(field);
+                }
+            }
+        };
+        removeBefore(9, {"baseHeightVariationMeters"});
+        removeBefore(8, {"independentWeather", "cloudType", "typeVariation"});
+        removeBefore(7, {"heightProfile"});
+        removeBefore(6, {"ambientOcclusionStrength"});
+        removeBefore(5, {"erosionAmount"});
+        removeBefore(4, {"regionalCoverageStrength", "regionalCoveragePeriod"});
+        removeBefore(3, {"detailFrequency", "variationStrength", "variationPeriod", "densityContrast"});
+        removeBefore(2, {"multipleScatteringContribution", "multipleScatteringOcclusion"});
+        CHECK(Keire::Detail::DecodeVolumetricCloudSettings(legacy).MinimumTypeThickness == 0.35);
+    }
+    for (const double invalid :
+         {0.0, 0.009, 1.001, std::numeric_limits<double>::infinity(), std::numeric_limits<double>::quiet_NaN()})
+    {
+        settings.MinimumTypeThickness = invalid;
+        CHECK_THROWS_AS(Keire::Detail::EncodeVolumetricCloudSettings(settings), std::invalid_argument);
+        auto malformed = Keire::Detail::EncodeVolumetricCloudSettings({});
+        malformed["minimumTypeThickness"] = invalid;
+        CHECK_THROWS_AS((void)Keire::Detail::DecodeVolumetricCloudSettings(malformed), std::invalid_argument);
     }
 }
 

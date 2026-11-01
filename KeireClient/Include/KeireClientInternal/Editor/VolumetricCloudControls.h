@@ -152,6 +152,16 @@ namespace KeireEditor::Detail
             {
                 changed |= DrawCloudScalar(ui, "Cloud Type", settings.CloudType, 0.01, 0.0, 1.0, commit);
                 changed |= DrawCloudScalar(ui, "Type Variation", settings.TypeVariation, 0.01, 0.0, 1.0, commit);
+                double minimumTypeHeightPercent = settings.MinimumTypeThickness * 100.0;
+                if (DrawCloudScalar(ui, "Minimum Type Height (%)", minimumTypeHeightPercent, 0.1, 1.0, 100.0, commit))
+                {
+                    settings.MinimumTypeThickness = minimumTypeHeightPercent / 100.0;
+                    changed = true;
+                }
+                ui.TextColoredWrapped(theme.MutedText,
+                                      "Sets the thin end of regional cloud types without changing the maximum layer "
+                                      "height. Lower values allow wisps beside tall clouds; thin features need "
+                                      "sufficient view and shadow samples.");
                 changed |= DrawCloudScalar(ui, "Base Height Variation (m)", settings.BaseHeightVariationMeters, 10.0,
                                            0.0, 100000.0, commit);
                 ui.TextColoredWrapped(

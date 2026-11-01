@@ -42,6 +42,19 @@ TEST_CASE("Cloud light cache keys distinguish planetary geometry identity and di
     CHECK(changedRevision != original);
 }
 
+TEST_CASE("Cloud light cache invalidates minimum type height in flat and planetary views")
+{
+    for (const auto enabled : {0U, 1U})
+    {
+        CloudVolumeViewUniforms view{};
+        view.PlanetaryCloud.Controls[0] = enabled;
+        view.PlanetaryCloud.RadiusGeometry.Z = 0.35F;
+        const auto original = Key(view);
+        view.PlanetaryCloud.RadiusGeometry.Z = 0.05F;
+        CHECK(Key(view) != original);
+    }
+}
+
 TEST_CASE("Cloud light cache rejects changed density, wind, geometry and shadow budgets")
 {
     CloudVolumeViewUniforms baseline{};

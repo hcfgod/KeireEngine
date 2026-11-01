@@ -1,5 +1,6 @@
 #include "KeireInternal/Rendering/CloudTemporalRendering.h"
 #include "KeireInternal/Rendering/CloudTemporalReprojection.h"
+#include "KeireInternal/Rendering/CloudTemporalShaderBindings.h"
 #include "KeireInternal/Rendering/RenderBackendInternal.h"
 #include "KeireInternal/Rendering/VolumeShadowUniforms.h"
 
@@ -116,17 +117,23 @@ namespace Keire::RenderBackend
         {
             throw std::runtime_error("SDL_BeginGPURenderPass(cloud temporal composition) failed: " + LastSdlError());
         }
-        const std::array compositeBindings{SDL_GPUTextureSamplerBinding{workset.SampledDepth, sampler},
-                                           SDL_GPUTextureSamplerBinding{background, sampler},
-                                           SDL_GPUTextureSamplerBinding{writer.History.RadianceOpacity, sampler},
-                                           SDL_GPUTextureSamplerBinding{writer.History.CloudAndSceneDepth, sampler},
-                                           SDL_GPUTextureSamplerBinding{noise.Texture, noise.Sampler}};
+        const std::array compositeBindings{
+            SDL_GPUTextureSamplerBinding{workset.SampledDepth, sampler},
+            SDL_GPUTextureSamplerBinding{background, sampler},
+            SDL_GPUTextureSamplerBinding{writer.History.RadianceOpacity, sampler},
+            SDL_GPUTextureSamplerBinding{writer.History.CloudAndSceneDepth, sampler},
+            SDL_GPUTextureSamplerBinding{noise.Texture, noise.Sampler},
+            SDL_GPUTextureSamplerBinding{
+                workset.DirectionalShadow ? workset.DirectionalShadow : state.EmptyShadowTexture, state.ShadowSampler}};
+        static_assert(compositeBindings.size() == CloudTemporalSamplerCounts[2]);
+        static_assert(CloudCompositeShadowSampler + 1U == compositeBindings.size());
         SDL_BindGPUGraphicsPipeline(pass, compositePipeline);
         SDL_BindGPUFragmentSamplers(pass, 0, compositeBindings.data(),
                                     static_cast<std::uint32_t>(compositeBindings.size()));
         SDL_BindGPUFragmentStorageBuffers(pass, 0, &workset.CloudLightCache.Transmission, 1);
         SDL_PushGPUFragmentUniformData(commands, 0, &uniforms, sizeof(uniforms));
         SDL_PushGPUFragmentUniformData(commands, 1, &cacheUniforms, sizeof(cacheUniforms));
+        SDL_PushGPUFragmentUniformData(commands, CloudCompositeShadowUniform, &shadows, sizeof(shadows));
         SDL_DrawGPUPrimitives(pass, 3, 1, 0, 0);
         SDL_EndGPURenderPass(pass);
         writer.RecordedView = current;

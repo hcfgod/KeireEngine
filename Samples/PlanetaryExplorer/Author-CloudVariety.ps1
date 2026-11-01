@@ -18,11 +18,26 @@ if (Test-Path -LiteralPath $backupPath)
 
 $originalHash = (Get-FileHash -LiteralPath $settingsPath -Algorithm SHA256).Hash
 $settings = Get-Content -LiteralPath $settingsPath -Raw | ConvertFrom-Json
-if ($settings.clouds.version -ne 3 -or $settings.clouds.volume.version -ne 9)
+if ($settings.clouds.version -ne 3 -or $settings.clouds.volume.version -notin @(9, 10))
 {
-    throw 'Expected cloud settings version 3 with volume version 9; no migration will be guessed.'
+    throw 'Expected cloud settings version 3 with volume version 9 or 10; no migration will be guessed.'
 }
 $volume = $settings.clouds.volume
+$minimumHeight = $volume.PSObject.Properties['minimumTypeThickness']
+if ($volume.version -eq 10)
+{
+    if ($null -eq $minimumHeight -or $minimumHeight.Value -is [string] -or
+        $minimumHeight.Value -is [bool] -or $null -eq $minimumHeight.Value -or
+        -not [double]::IsFinite([double]$minimumHeight.Value) -or
+        [double]$minimumHeight.Value -lt 0.01 -or [double]$minimumHeight.Value -gt 1.0)
+    {
+        throw 'Volume version 10 requires a finite numeric minimumTypeThickness from 0.01 to 1.0.'
+    }
+}
+elseif ($null -ne $minimumHeight)
+{
+    throw 'minimumTypeThickness requires volume version 10; no migration will be guessed.'
+}
 if ($volume.enabled -isnot [bool] -or -not $volume.enabled)
 {
     throw 'Enable and validate the existing volume before applying this sample shape comparison.'
@@ -52,7 +67,7 @@ foreach ($name in $shape.Keys)
 {
     if ($null -eq $volume.PSObject.Properties[$name])
     {
-        throw "Missing version-9 cloud field: $name"
+        throw "Missing cloud shape field: $name"
     }
     $volume.$name = $shape[$name]
 }

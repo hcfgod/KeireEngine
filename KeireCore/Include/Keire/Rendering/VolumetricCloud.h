@@ -21,6 +21,8 @@ namespace Keire
         double CloudType = 1.0;
         /// Regional variation around CloudType, independent of coverage and extinction.
         double TypeVariation = 0.5;
+        /// Minimum regional type height as a fraction of the authored layer; full type remains full height.
+        double MinimumTypeThickness = 0.35;
         /// Maximum regional displacement above/below the base height; independent weather only.
         double BaseHeightVariationMeters = 0.0;
         /// Ordered normalized layer heights: base start/end and crown start/end.
