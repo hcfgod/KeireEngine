@@ -1473,6 +1473,9 @@ scene-card cache is surface-owned and render-thread-affine; bounded rolling upda
 bounds plus low-density transparent, hair, volume, and VFX aggregates without exposing renderer implementation state
 through the public API.
 `ProjectSettingsDocument` owns the editor draft, validation, dirty lifecycle, per-file atomic saves, and coalesced undo command.
+An approved package import explicitly reconciles its rendering file through `AcceptImportedRenderingSettings`.
+Stable byte capture and validation precede the update; only rendering's disk baseline and saved state advance.
+Pending authoring edits and unrelated file baselines remain intact, with a separate undo step for imported rendering.
 Normal editor exit invokes the owner-thread-affine document coordinator's `SaveProjectSettingsBeforeExit` before
 closing the scene or requesting application exit. Failed saves and dirty read-only projects reject that transition;
 the existing transition failure path reports the error and permits retry. Mandatory teardown remains best effort,

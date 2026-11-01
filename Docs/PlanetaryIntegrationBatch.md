@@ -709,3 +709,11 @@ Surface sample batch: authored seven material-batched meshes, six hangars, opera
 Editor depth isolation: CapHidden removed terrain stripes; CapShadowOff did not. Actual SHA256-matched imported float32 terrain/cap geometry retains at least 0.5 m sampled launch-region clearance, and GPU vertex positions are FLOAT3. Investigate forward-depth projection precision rather than masking the problem with arbitrary elevation or shadow removal. Diagnostic scenes under Assets/Validation/SpaceportSurfaceIsolation leave authored startup intact. Editor closed normally after comparison. Production packaging has not started.
 
 Spaceport terrain acceptance, October 31: replaced the globe cap beneath the 16 km terrain footprint and stitched its boundary. Geometry checks passed projected-area conservation, exclusion of cap triangles inside the footprint, 64 km boundary coverage, outward winding, and eight real mesh imports/catalog validation. The same Scene camera no longer shows the broad stripes. The 150-second Game-view flight reached 150 km and returned to the launch pad; sampled ascent/descent/landing views remained free of the previous broad surface stripes. Midnight preview was checked and reset without saving project changes. These captures do not prove absence of all transient flicker. General forward-depth precision remains a renderer limitation; the sample removes redundant surfaces rather than weakening near clipping or disabling shadows. Production Dist test compilation is underway; installers and website publication remain pending.
+
+Release-gate correction: the Dist Editor suite stopped with 681/683 cases passing. The import callback
+failed to reconcile the rendering file baseline after an approved package import; added an explicit
+stable-read reconciliation that preserves unrelated external conflict protection and pending authoring edits.
+The navigation test now permits reapplication of unchanged physics settings and restores exact original
+file bytes when recovering its simulated file error. Official DevDist EditorTests build passed all 139
+steps. Focused settings/import/navigation tests passed 5 cases / 579 assertions; changed C++ formatting
+and git diff --check passed. Full production gates must be rerun before publication.

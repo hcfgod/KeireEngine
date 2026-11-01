@@ -46,6 +46,9 @@ namespace KeireEditor
         [[nodiscard]] const Keire::Detail::PlanetProjectSettings& Planets() const noexcept { return m_Planets; }
 
         void Update(Keire::RenderEnvironmentSettings settings);
+        // Call only after an explicitly approved package import has committed its rendering file.
+        // Other settings files retain their conflict baselines and pending edits.
+        void AcceptImportedRenderingSettings();
         void UpdateAuthoring(Keire::ProjectAuthoringSettings settings);
         void UpdateEnvironmentTime(Keire::Detail::EnvironmentClockState settings);
         void UpdateEnvironmentLighting(Keire::Detail::EnvironmentLightingProfile settings);

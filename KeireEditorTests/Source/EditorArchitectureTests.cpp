@@ -1154,9 +1154,7 @@ TEST_CASE("project settings document validates saves and owns one-step edit hist
     auto importedRendering = document.Settings();
     importedRendering.Exposure = 3.0F;
     Keire::SaveRenderEnvironmentSettings(root, importedRendering);
-    document.CommitEdit();
-    document.Update(Keire::LoadRenderEnvironmentSettings(root));
-    document.CommitEdit("Import rendering settings");
+    document.AcceptImportedRenderingSettings();
     CHECK(document.AuthoringSettings() == pendingAuthoring);
     CHECK(document.Settings() == importedRendering);
     CHECK(undo->Undo());
@@ -1169,6 +1167,101 @@ TEST_CASE("project settings document validates saves and owns one-step edit hist
 
     document.Close();
     undo->Close();
+    undoService->Close();
+    std::filesystem::remove_all(root);
+}
+
+TEST_CASE("imported rendering settings reconcile only the approved file baseline")
+{
+    const auto root =
+        std::filesystem::temp_directory_path() / ("Keire-ImportedSettings-" + Keire::AssetId::Generate().ToString());
+    const auto undoService = Keire::CreateRef<Keire::UndoService>();
+    const auto undo = undoService->CreateContext({.Name = "Project Settings"});
+    KeireEditor::ProjectSettingsDocument document;
+    document.Open(root, {}, undo);
+    document.Save();
+    const auto originalRendering = document.Settings();
+    const auto originalAuthoring = document.AuthoringSettings();
+    auto imported = originalRendering;
+    imported.Exposure = 3.0F;
+
+    SUBCASE("accepted import is saved while undo remains an unsaved change")
+    {
+        Keire::SaveRenderEnvironmentSettings(root, imported);
+        document.AcceptImportedRenderingSettings();
+        CHECK(document.Settings() == imported);
+        CHECK_FALSE(document.Dirty());
+        CHECK(undo->UndoCount() == 1);
+        REQUIRE(undo->Undo());
+        CHECK(document.Settings() == originalRendering);
+        CHECK(document.Dirty());
+        REQUIRE(undo->Redo());
+        CHECK_FALSE(document.Dirty());
+        document.AcceptImportedRenderingSettings();
+        CHECK(undo->UndoCount() == 1);
+        CHECK_NOTHROW(document.Save());
+    }
+
+    SUBCASE("accepting rendering does not accept unrelated external authoring edits")
+    {
+        auto pending = originalAuthoring;
+        pending.Audio.MixSampleRate = 44100;
+        document.UpdateAuthoring(pending);
+        auto external = originalAuthoring;
+        external.PhysicsLayerNames[7] = "External";
+        Keire::SaveProjectAuthoringSettings(root, external);
+        Keire::SaveRenderEnvironmentSettings(root, imported);
+        document.AcceptImportedRenderingSettings();
+        CHECK(document.AuthoringSettings() == pending);
+        CHECK(document.Dirty());
+        CHECK_THROWS(document.Save());
+        CHECK(Keire::LoadProjectAuthoringSettings(root) == external);
+        CHECK(Keire::LoadRenderEnvironmentSettings(root) == imported);
+        CHECK(document.AuthoringSettings() == pending);
+        Keire::SaveProjectAuthoringSettings(root, originalAuthoring);
+        CHECK_NOTHROW(document.Save());
+        CHECK(Keire::LoadProjectAuthoringSettings(root) == pending);
+    }
+
+    SUBCASE("later rendering changes still conflict with the accepted import")
+    {
+        Keire::SaveRenderEnvironmentSettings(root, imported);
+        document.AcceptImportedRenderingSettings();
+        auto external = imported;
+        external.Exposure = 4.0F;
+        Keire::SaveRenderEnvironmentSettings(root, external);
+        CHECK_THROWS(document.Save());
+        CHECK(document.Settings() == imported);
+        CHECK(Keire::LoadRenderEnvironmentSettings(root) == external);
+    }
+
+    SUBCASE("malformed import preserves pending edits and the old baseline")
+    {
+        auto pending = originalRendering;
+        pending.Exposure = 2.0F;
+        document.Update(pending);
+        Keire::Detail::WriteTextFileAtomically(root / "ProjectSettings/Rendering.keiresettings", "{invalid");
+        CHECK_THROWS(document.AcceptImportedRenderingSettings());
+        CHECK(document.Settings() == pending);
+        CHECK(document.Dirty());
+        CHECK(undo->UndoCount() == 0);
+        Keire::SaveRenderEnvironmentSettings(root, originalRendering);
+        CHECK_NOTHROW(document.Save());
+        CHECK(Keire::LoadRenderEnvironmentSettings(root) == pending);
+    }
+
+    SUBCASE("missing import does not silently accept defaults")
+    {
+        REQUIRE(std::filesystem::remove(root / "ProjectSettings/Rendering.keiresettings"));
+        CHECK_THROWS(document.AcceptImportedRenderingSettings());
+        CHECK(document.Settings() == originalRendering);
+        CHECK_FALSE(document.Dirty());
+        CHECK(undo->UndoCount() == 0);
+        CHECK_THROWS(document.Save());
+    }
+
+    document.Close();
+    CHECK_THROWS_AS(document.AcceptImportedRenderingSettings(), std::logic_error);
     undoService->Close();
     std::filesystem::remove_all(root);
 }

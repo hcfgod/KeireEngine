@@ -11,6 +11,7 @@
 #include <array>
 #include <filesystem>
 #include <memory>
+#include <string>
 #include <string_view>
 
 namespace
@@ -59,9 +60,13 @@ namespace
             return {};
         }
 
-        void ApplyProjectAuthoringSettings(const Keire::ProjectAuthoringSettings&) override
+        void ApplyProjectAuthoringSettings(const Keire::ProjectAuthoringSettings& settings) override
         {
-            FAIL("Navigation changed physics");
+            // Saving reapplies authoring settings, even when only rendering changed.
+            const auto defaults = Keire::DefaultProjectAuthoringSettings();
+            CHECK(settings.PhysicsGravity == defaults.PhysicsGravity);
+            CHECK(settings.PhysicsCollisionMatrix == defaults.PhysicsCollisionMatrix);
+            CHECK(settings.PhysicsLayerNames == defaults.PhysicsLayerNames);
         }
 
       protected:
@@ -123,6 +128,7 @@ namespace
             if (m_Frame == 12)
             {
                 const auto path = m_Root / "ProjectSettings/Rendering.keiresettings";
+                m_RenderingFileBeforeFailure = Keire::Detail::ReadTextFile(path, 1024U * 1024U);
                 REQUIRE(std::filesystem::remove(path));
                 std::filesystem::create_directory(path);
             }
@@ -342,6 +348,8 @@ namespace
                 if (m_Frame == 15)
                 {
                     REQUIRE(std::filesystem::remove(m_Root / "ProjectSettings/Rendering.keiresettings"));
+                    Keire::Detail::WriteTextFileAtomically(m_Root / "ProjectSettings/Rendering.keiresettings",
+                                                           m_RenderingFileBeforeFailure);
                 }
             }
             if (m_Frame == 17)
@@ -387,6 +395,7 @@ namespace
         mutable int m_RenderReads = 0;
         std::filesystem::path m_Root;
         std::filesystem::path m_CustomExecutable;
+        std::string m_RenderingFileBeforeFailure;
         Keire::Ref<Keire::UndoService> m_History;
         KeireEditor::ProjectSettingsDocument m_Document;
         KeireEditor::EnvironmentPreviewClock m_Preview;

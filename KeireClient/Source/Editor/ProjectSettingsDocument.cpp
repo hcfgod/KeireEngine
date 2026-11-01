@@ -163,6 +163,35 @@ namespace KeireEditor
         RefreshDirty();
     }
 
+    void ProjectSettingsDocument::AcceptImportedRenderingSettings()
+    {
+        if (!Opened())
+        {
+            throw std::logic_error("ProjectSettingsDocument is closed.");
+        }
+        RequireRecoveredSettings(m_ProjectRoot);
+        constexpr std::size_t renderingIndex = 0;
+        const auto destination = std::filesystem::path("ProjectSettings") / SettingsNames[renderingIndex];
+        const Keire::Detail::AnchoredFileSystem files(m_ProjectRoot);
+        auto importedBytes = files.Read(destination, MaximumOriginalSettingsBytes);
+        const auto importedSettings = Keire::LoadRenderEnvironmentSettings(m_ProjectRoot);
+        Validate(importedSettings);
+        if (files.Read(destination, MaximumOriginalSettingsBytes) != importedBytes)
+        {
+            throw std::runtime_error(
+                "Imported rendering settings changed while refreshing. Reopen the project to review them.");
+        }
+
+        // Keep the pending edit separate from the imported rendering undo step. Only this explicitly
+        // imported file becomes an accepted baseline; unrelated external changes must still block Save.
+        CommitEdit();
+        Update(importedSettings);
+        CommitEdit("Import rendering settings");
+        m_FileBaseline[renderingIndex] = std::move(importedBytes);
+        m_SavedState->Rendering = importedSettings;
+        RefreshDirty();
+    }
+
     void ProjectSettingsDocument::UpdateAuthoring(Keire::ProjectAuthoringSettings settings)
     {
         if (!Opened())

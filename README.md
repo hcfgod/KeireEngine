@@ -357,6 +357,8 @@ project default (activating its first action map). Both choices are off by defau
 are listed and skipped. Invalid supported settings fail before publication, and failures restore the original files.
 Adopted settings and default-input assets belong to the project and survive package removal. The Editor refreshes
 its committed descriptor and rendering state immediately; the default input is activated on the next Play session.
+Rendering imports preserve pending authoring edits and Undo/Redo. Later saves accept the imported rendering file
+while still detecting unrelated external settings changes.
 When an externally managed Editor was intentionally rebuilt or replaced in place, its Installs card exposes **Refresh
 registration**. That action validates the new package manifest and complete file inventory before the Hub adopts the
 updated metadata; unrequested on-disk changes remain reported as damaged.
