@@ -717,3 +717,9 @@ The navigation test now permits reapplication of unchanged physics settings and 
 file bytes when recovering its simulated file error. Official DevDist EditorTests build passed all 139
 steps. Focused settings/import/navigation tests passed 5 cases / 579 assertions; changed C++ formatting
 and git diff --check passed. Full production gates must be rerun before publication.
+# Expanded goal scope
+
+The November 1 continuation adds production water and post-processing systems to the planetary goal.
+See [Planetary, water and post-processing plan](PlanetaryWaterPostProcessingPlan.md) for requirements,
+delivery order and acceptance criteria. Existing planetary work remains required; the usage cap is removed.
+
