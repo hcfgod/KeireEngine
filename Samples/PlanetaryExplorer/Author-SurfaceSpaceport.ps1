@@ -244,6 +244,3 @@ $metadata.dependencies = @($metadata.dependencies) + $dependencies.ToArray()
 Write-Json $scenePath $scene
 Write-Json ($scenePath + '.keiremeta') $metadata
 Write-Output "Added $($entities.Count) entities: seven batched visual meshes, $($colliders.Count) static box colliders, a 16 km terrain patch, and a detailed surface spaceport. Terrain is visual only; flight remains kinematic."
-
-
-

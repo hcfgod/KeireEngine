@@ -69,4 +69,3 @@ $materialMeta.dependencies = @($materialMeta.dependencies | ForEach-Object {
 $material | ConvertTo-Json -Depth 30 | Set-Content -LiteralPath $materialPath -Encoding UTF8
 $materialMeta | ConvertTo-Json -Depth 30 | Set-Content -LiteralPath ($materialPath + '.keiremeta') -Encoding UTF8
 Write-Output 'Authored a separate pole-corrected Earth texture; original NASA image and material backup preserved. Reimport before visual acceptance.'
-

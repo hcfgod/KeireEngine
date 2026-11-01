@@ -96,4 +96,3 @@ finally
         Remove-Item -LiteralPath $resolved -Recurse -Force
     }
 }
-
