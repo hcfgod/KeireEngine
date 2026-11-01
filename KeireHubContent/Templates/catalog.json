@@ -224,7 +224,7 @@
       "compatibleEditors": ">=0.4.7 <2.0.0",
       "projectSchema": 4,
       "platformTarget": "desktop",
-      "estimatedSizeBytes": 25136387,
+      "estimatedSizeBytes": 25139204,
       "payloadRoot": "Payloads/Sandbox",
       "payloadFiles": [
         {
@@ -594,8 +594,8 @@
         },
         {
           "path": "Assets/FirstPersonController/Runtime/FirstPersonMotor.cs",
-          "sizeBytes": 5994,
-          "sha256": "874f12cd681a951ccf7f739d17b991cedeae0fec1e72e20091ce7a29844084fe"
+          "sizeBytes": 8811,
+          "sha256": "7c1c4d2c3b2d6464b2d32424efa77d2441bc13bd95a90bb4e24089cc20ef13d1"
         },
         {
           "path": "Assets/FirstPersonController/Runtime/FirstPersonMotor.cs.keiremeta",
