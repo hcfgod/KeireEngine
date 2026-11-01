@@ -1871,12 +1871,15 @@ TEST_CASE("shader importer accepts the current Starter 3D schema without lowerin
 {
     const auto repository = std::filesystem::current_path();
     const auto project = repository / "KeireHubContent/Templates/Payloads/Starter3D";
-    const auto sourceRoot = project / "Assets";
-    const auto manifest = sourceRoot / "Shaders/DefaultUnlit.keireshader";
+    TemporaryDirectory scratch("StarterShaderImport");
+    const auto sourceRoot = scratch.Path / "Assets";
+    const auto manifest = project / "Assets/Shaders/DefaultUnlit.keireshader";
+    const bool templateHadLibrary = std::filesystem::exists(project / "Library");
     Keire::AssetImportContext context;
-    context.ProjectRoot = project;
+    // Read the shipped source, but keep compiler caches outside the immutable template payload.
+    context.ProjectRoot = scratch.Path;
     context.SourceRoot = sourceRoot;
-    context.SourcePath = manifest;
+    context.SourcePath = sourceRoot / "Shaders/DefaultUnlit.keireshader";
     context.RelativePath = "Shaders/DefaultUnlit.keireshader";
     context.ReadProjectFile = [project](const std::filesystem::path& relative)
     { return ReadTestBytes(project / relative); };
@@ -1884,6 +1887,7 @@ TEST_CASE("shader importer accepts the current Starter 3D schema without lowerin
     const auto importer = Keire::CreateShaderAssetImporter();
     REQUIRE(importer.ContextualImport);
     const auto output = importer.ContextualImport(context, ReadTestBytes(manifest));
+    CHECK(std::filesystem::exists(project / "Library") == templateHadLibrary);
     const auto shader = Keire::ShaderAsset::Decode(output.Bytes);
     CHECK(shader->Definition().SchemaVersion == Keire::ShaderAssetSchemaVersion);
     CHECK(shader->Definition().InstanceAddressingAbiVersion == 2U);
