@@ -703,3 +703,7 @@ Before release packaging, the user requested correction of a visible Earth polar
 detailed Earth surface spaceport with terrain and authored structures. Reproduced the wedge in Scene
 view; sample geometry/texture isolation and reproducible spaceport authoring are in progress. This
 additional sample work does not establish general planet terrain streaming or physical landing support.
+
+Surface sample batch: authored seven material-batched meshes, six hangars, operations tower, gantries, fuel/solar facilities, roads/markings, emissive beacons and 16 km curved terrain, with 38 static box colliders under one root. Original scene/metadata are backed up in AuthoringBackups/BeforeSpaceport. Isolated authoring, handedness/winding, preservation and real mesh import/catalog validation passed. A hash-bound separate NASA Earth texture derivative corrects a bright polar source border; original JPEG and attribution remain intact. Its pixel/preservation regression passed; same-angle visual verification remains pending.
+
+Editor depth isolation: CapHidden removed terrain stripes; CapShadowOff did not. Actual SHA256-matched imported float32 terrain/cap geometry retains at least 0.5 m sampled launch-region clearance, and GPU vertex positions are FLOAT3. Investigate forward-depth projection precision rather than masking the problem with arbitrary elevation or shadow removal. Diagnostic scenes under Assets/Validation/SpaceportSurfaceIsolation leave authored startup intact. Editor closed normally after comparison. Production packaging has not started.

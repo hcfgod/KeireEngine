@@ -60,7 +60,7 @@ Additional close-up Mars surface sources are staged at D:/Projects/KeireValidati
 Shared PlanetaryFlightGeometry selects nearest surface and supplies HUD altitude, radial lift, autopilot direction and analytic safety. Finite inputs are checked and a deterministic up direction handles planet centers. Incremental quaternion steering preserves initial ship orientation. Both camera views ramp the near plane from 0.2 to 10 metres with altitude. Switching to cockpit no longer reduces planetary depth precision; a future close-up cockpit interior requires a separate near-field rendering solution. Test-FlightGeometry.ps1 compiles and exercises the actual dependency-free geometry helper without an engine build.
 ## Explicit sky-profile authoring
 
-After the updated schema-3/profile-capable editor has been built and Play Mode is stopped, run
+After the updated schema-4/profile-capable editor has been built and Play Mode is stopped, run
 `Author-PlanetAtmospheres.ps1 -Project <project-folder>` once to create explicit Earth and Mars sky profiles.
 The script is restricted to this sample's project and planet identities. Earth copies the existing global
 atmosphere exactly; Mars defaults to an airless opaque reference planet for testing that it does not inherit
@@ -68,11 +68,14 @@ Earth's optical medium. It leaves global rendering, scenes, geometry, planet sel
 
 For an illustrative thin optical medium instead, choose `-MarsMode Thin -MarsDensityScale 0.02` before the first
 run. The scale can range from 0 through 1. This is an artistic test profile, not calibrated Martian atmospheric
-physics. It does not supply independent dust weather, cloud layers or fog for Mars. Keep the existing manual
-Earth selection until those remaining rendering domains have their own verified profiles.
+physics. It does not author independent dust weather, cloud layers or fog for Mars. Use **Environment > Sky >
+Planet Placement and Ownership** to add cloud and fog overrides for each planet. New overrides copy global
+settings; disable their cloud layers, volume and fog for an airless world. Removing an override restores global
+inheritance. Keep manual Earth selection until the other planet's weather has been authored and checked.
 
 The script preserves a byte-exact `ProjectSettings/Planets.before-atmosphere-profiles.keiresettings.backup`,
-refuses existing overrides or an existing backup, and writes planet schema 3 only after validation. It does not
+refuses existing atmosphere overrides or an existing backup, and writes planet schema 4 only after validation.
+Existing cloud and fog overrides are preserved. It does not
 replace an old installed editor or import assets. Back up and edit authored profiles through the updated editor;
 do not rerun this setup expecting it to overwrite your work. `Test-PlanetAtmospheres.ps1` exercises isolated
 temporary projects and does not touch the QA project. Script validation does not establish GPU appearance,
@@ -111,7 +114,8 @@ Thickness, pattern size, height profile and weather type control shape. Extincti
 absorption; raising it does not make a flat cloud taller. This script leaves extinction, lighting, wind, seed,
 quality, layered clouds and all non-cloud settings unchanged. A thicker occupied shell can still increase GPU
 work or reduce march detail with the same sample count; compare stabilized and moving-camera frame times.
-This remains the shared cloud system, not independent cloud profiles for each planet.
+This script adjusts the global cloud defaults. Per-planet cloud overrides are independent copies and must be
+edited separately; planets without an override inherit these defaults.
 
 The original rendering file is preserved byte-for-byte in
 `ProjectSettings/Rendering.before-cloud-variety.keiresettings.backup`. Existing backups prevent reapplication.
