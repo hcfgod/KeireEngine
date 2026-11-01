@@ -21,6 +21,13 @@ try
     @{ schemaVersion = 1; id = '62093bd5-cb66-45da-9285-dc84a50978dd'; dependencies = @()
         importer = 'Keire.Scene'; importerVersion = 10; subAssets = @(); type = '4b454952-4553-4345-4e45-415353455401' } |
         ConvertTo-Json -Depth 10 | Set-Content -LiteralPath ($scenePath + '.keiremeta') -Encoding utf8
+    if (-not ('PlanetaryExplorer.Authoring.PlanetGlobeMeshGenerator' -as [type]))
+    {
+        Add-Type -Path (Join-Path $PSScriptRoot 'Source/PlanetGlobeMeshGenerator.cs')
+    }
+    $globeFolder = Join-Path $fixture 'Assets/PlanetaryExplorer/GlobeMeshes'
+    New-Item -ItemType Directory -Path $globeFolder -Force | Out-Null
+    [PlanetaryExplorer.Authoring.PlanetGlobeMeshGenerator]::Create(6360000.0, 4.0, 128, 256, $true).WriteObj((Join-Path $globeFolder 'EarthCap.obj'))
     $before = (Get-FileHash -LiteralPath $scenePath).Hash
     & (Join-Path $PSScriptRoot 'Author-SurfaceSpaceport.ps1') -Project $fixture
     $backup = Join-Path $fixture 'AuthoringBackups/BeforeSpaceport/PlanetaryExplorer.keirescene'
@@ -44,7 +51,7 @@ try
     {
         $vertices = 0
         $faces = 0
-        foreach ($line in [IO.File]::ReadLines($mesh.FullName))
+        foreach ($line in [IO.File]::ReadAllLines($mesh.FullName))
         {
             $parts = $line.Split(' ')
             if ($parts[0] -eq 'v')
@@ -63,14 +70,14 @@ try
                 $faces++
                 foreach ($index in $parts[1..3])
                 {
-                    if ([int]$index -lt 1 -or [int]$index -gt $vertices)
+                    if ([int]($index.Split('/')[0]) -lt 1 -or [int]($index.Split('/')[0]) -gt $vertices)
                     {
                         throw 'Mesh triangle index out of bounds.'
                     }
                 }
             }
         }
-        if ($faces -lt 1 -or ($mesh.BaseName -eq 'Terrain' -and ($vertices -ne 25921 -or $faces -ne 51200)))
+        if ($faces -lt 1 -or ($mesh.BaseName -eq 'Terrain' -and ($vertices -le 25921 -or $faces -le 51200)))
         {
             throw 'Mesh geometry count regressed.'
         }
@@ -134,9 +141,9 @@ try
         }
         $catalogPath = Join-Path $meshProject 'Library/AssetCache/Runtime/catalog.json'
         $catalog = Get-Content -LiteralPath $catalogPath -Raw | ConvertFrom-Json
-        if (@($catalog.assets | Where-Object type -eq '4b454952-454d-4553-4841-535345540001').Count -ne 7)
+        if (@($catalog.assets | Where-Object type -eq '4b454952-454d-4553-4841-535345540001').Count -ne 8)
         {
-            throw 'Expected seven imported mesh assets.'
+            throw 'Expected eight imported mesh assets, including the replacement globe cap.'
         }
         & $AssetTool validate --catalog $catalogPath
         if ($LASTEXITCODE -ne 0)

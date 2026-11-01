@@ -27,6 +27,15 @@ if ($launch.id -ne '93dd6968-c276-41ce-9677-aea7c9cda72e' -or $launch.parent -or
 {
     throw 'Earth launch cap must retain the unrotated, unit-scale origin baseline.'
 }
+$capSource = Join-Path $root 'Assets/PlanetaryExplorer/GlobeMeshes/EarthCap.obj'
+if (-not (Test-Path -LiteralPath $capSource))
+{
+    throw 'Missing original Earth cap source for terrain integration.'
+}
+if (-not ('PlanetaryExplorer.Authoring.SpaceportCapCutout' -as [type]))
+{
+    Add-Type -Path (Join-Path $PSScriptRoot 'Source/SpaceportCapCutout.cs')
+}
 $shader = 'b1b2c3d4-1000-4000-8000-000000000001'
 $groups = @{}
 $colliders = [Collections.Generic.List[object]]::new()
@@ -233,6 +242,14 @@ foreach ($definition in $materialDefinitions)
     $dependencies.Add($meshId)
     $dependencies.Add($materialId)
 }
+$cutoutPath = Join-Path $target 'EarthCapWithSpaceport.obj'
+Write-Output ([PlanetaryExplorer.Authoring.SpaceportCapCutout]::Generate($capSource, $cutoutPath, (Join-Path $target 'Terrain.obj')))
+$cutoutId = Get-StableId 'EarthCapWithSpaceport.Mesh'
+Write-Json ($cutoutPath + '.keiremeta') @{ schemaVersion = 1; id = $cutoutId
+    type = '4b454952-454d-4553-4841-535345540001'; importer = 'Keire.Mesh'; importerVersion = 26
+    dependencies = @(); subAssets = @(); importSettings = @{} }
+$launchRenderer.data.mesh = $cutoutId
+$dependencies.Add($cutoutId)
 foreach ($box in $colliders)
 {
     $entities.Add((New-Entity ('Spaceport collision - ' + $box.name) $box.position $box.size $null $null $true))
