@@ -163,6 +163,7 @@ namespace Keire::RenderBackend
         CloudSettings Clouds;
         BloomSettings Bloom;
         StarFieldSettings Stars;
+        FogSettings Fog;
         std::optional<double> EnvironmentSecondsPerDay;
         Vector3d WorldOrigin;
         Vector3d EnvironmentAnchor;
@@ -174,7 +175,7 @@ namespace Keire::RenderBackend
         {
             return EnvironmentSource == next.EnvironmentSource && EnvironmentRevision == next.EnvironmentRevision &&
                    EnvironmentDirectional == next.EnvironmentDirectional && Atmosphere == next.Atmosphere &&
-                   Clouds == next.Clouds && Bloom == next.Bloom && Stars == next.Stars &&
+                   Clouds == next.Clouds && Bloom == next.Bloom && Stars == next.Stars && Fog == next.Fog &&
                    EnvironmentSecondsPerDay == next.EnvironmentSecondsPerDay &&
                    EnvironmentAnchor == next.EnvironmentAnchor && PlanetEnvironment == next.PlanetEnvironment &&
                    PlanetAtmospheres == next.PlanetAtmospheres &&
@@ -185,7 +186,7 @@ namespace Keire::RenderBackend
     [[nodiscard]] inline CameraMotionHistoryEntry
     MakeCameraMotionHistory(const Matrix4& transform, const std::uint64_t frame,
                             const RenderEnvironmentSettings& environment,
-                            const std::optional<EnvironmentLightingSnapshot>& snapshot) noexcept
+                            const std::optional<EnvironmentLightingSnapshot>& snapshot)
     {
         CameraMotionHistoryEntry result{transform,
                                         frame,
@@ -195,7 +196,8 @@ namespace Keire::RenderBackend
                                         environment.Atmosphere,
                                         environment.Clouds,
                                         environment.Bloom,
-                                        environment.Stars};
+                                        environment.Stars,
+                                        environment.Fog};
         if (snapshot && snapshot->Time)
         {
             result.EnvironmentSecondsPerDay = snapshot->Time->SecondsPerDay;

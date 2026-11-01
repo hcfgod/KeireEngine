@@ -151,9 +151,42 @@ TEST_CASE("Planet atmosphere profiles require schema 13 while schema 12 retains 
     settings.AtmosphereOverrides.push_back({settings.SelectedPlanet, atmosphere});
     auto record = PlanetManifest(settings);
     CHECK(EnvironmentRuntimeManifest::DecodeState(record).Planets == settings);
+    record["schemaVersion"] = 13;
+    record["planets"]["schemaVersion"] = 3;
+    record["planets"].erase("cloudOverrides");
+    record["planets"].erase("fogOverrides");
+    CHECK(EnvironmentRuntimeManifest::DecodeState(record).Planets == settings);
     record["schemaVersion"] = 12;
     CHECK_THROWS_AS(EnvironmentRuntimeManifest::DecodeState(record), std::invalid_argument);
     record["planets"]["schemaVersion"] = 2;
     record["planets"].erase("atmosphereOverrides");
+    record["planets"].erase("cloudOverrides");
+    record["planets"].erase("fogOverrides");
     CHECK(EnvironmentRuntimeManifest::DecodeState(record).Planets.AtmosphereOverrides.empty());
+}
+
+TEST_CASE("Planet weather profiles require schema 14 and preserve explicit airless-world weather choices")
+{
+    auto settings = AuthoredPlanets();
+    Keire::CloudSettings clouds;
+    clouds.Volume.Enabled = true;
+    clouds.Volume.MinimumTypeThickness = 0.08;
+    Keire::FogSettings fog;
+    fog.Enabled = false;
+    fog.PlanetaryHeight = true;
+    settings.CloudOverrides = {{settings.SelectedPlanet, clouds}};
+    settings.FogOverrides = {{settings.SelectedPlanet, fog}};
+    auto record = PlanetManifest(settings);
+    CHECK(EnvironmentRuntimeManifest::DecodeState(nlohmann::json::parse(record.dump())).Planets == settings);
+    record["schemaVersion"] = 13;
+    CHECK_THROWS_AS(EnvironmentRuntimeManifest::DecodeState(record), std::invalid_argument);
+    record["planets"]["schemaVersion"] = 3;
+    record["planets"].erase("cloudOverrides");
+    record["planets"].erase("fogOverrides");
+    const auto legacy = EnvironmentRuntimeManifest::DecodeState(record);
+    CHECK(legacy.Planets.CloudOverrides.empty());
+    CHECK(legacy.Planets.FogOverrides.empty());
+    CHECK(legacy.Planets.Planets == settings.Planets);
+    record["schemaVersion"] = EnvironmentRuntimeManifest::CurrentSchema + 1;
+    CHECK_THROWS_AS(EnvironmentRuntimeManifest::DecodeState(record), std::invalid_argument);
 }

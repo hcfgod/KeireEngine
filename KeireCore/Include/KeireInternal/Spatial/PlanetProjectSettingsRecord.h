@@ -1,6 +1,8 @@
 #pragma once
 
 #include "KeireInternal/Environment/AtmosphereRecord.h"
+#include "KeireInternal/Environment/CloudRecord.h"
+#include "KeireInternal/Environment/FogDensityRecord.h"
 #include "KeireInternal/Spatial/PlanetDefinitionRecord.h"
 #include "KeireInternal/Spatial/PlanetProjectSettings.h"
 
@@ -31,8 +33,21 @@ namespace Keire::Detail
                 overrides.push_back({{"planet", profile.Planet.ToString()},
                                      {"atmosphere", EncodeAtmosphere(profile.Atmosphere, planet->RadiusMetres)}});
             }
-            return {{"schemaVersion", 3},
+            auto clouds = nlohmann::json::array();
+            for (const auto& profile : settings.CloudOverrides)
+            {
+                clouds.push_back(
+                    {{"planet", profile.Planet.ToString()}, {"clouds", EncodeCloudSettings(profile.Clouds)}});
+            }
+            auto fog = nlohmann::json::array();
+            for (const auto& profile : settings.FogOverrides)
+            {
+                fog.push_back({{"planet", profile.Planet.ToString()}, {"fog", EncodeFogDensity(profile.Fog)}});
+            }
+            return {{"schemaVersion", 4},
                     {"atmosphereOverrides", std::move(overrides)},
+                    {"cloudOverrides", std::move(clouds)},
+                    {"fogOverrides", std::move(fog)},
                     {"selection", settings.Selection == PlanetSelectionMode::Manual ? "manual" : "nearest-surface"},
                     {"geometry", settings.Geometry == PlanetGeometryMode::Flat ? "flat" : "planetary"},
                     {"gravity", settings.Gravity == PlanetGravityMode::Uniform  ? "uniform"
@@ -50,7 +65,8 @@ namespace Keire::Detail
                 if (!record.is_object() || !record.at("schemaVersion").is_number_integer() ||
                     !((record.at("schemaVersion") == 1 && record.size() == 5) ||
                       (record.at("schemaVersion") == 2 && record.size() == 6) ||
-                      (record.at("schemaVersion") == 3 && record.size() == 7)) ||
+                      (record.at("schemaVersion") == 3 && record.size() == 7) ||
+                      (record.at("schemaVersion") == 4 && record.size() == 9)) ||
                     !record.at("planets").is_array() || record.at("planets").size() > 64)
                 {
                     throw std::invalid_argument("Unsupported planet project settings record.");
@@ -110,6 +126,34 @@ namespace Keire::Detail
                         }
                         settings.AtmosphereOverrides.push_back(
                             {identity, DecodeAtmosphere(profile.at("atmosphere"), planet->RadiusMetres)});
+                    }
+                }
+                if (record.at("schemaVersion") >= 4)
+                {
+                    const auto& clouds = record.at("cloudOverrides");
+                    const auto& fog = record.at("fogOverrides");
+                    if (!clouds.is_array() || clouds.size() > settings.Planets.size() || !fog.is_array() ||
+                        fog.size() > settings.Planets.size())
+                    {
+                        throw std::invalid_argument("Planet weather override collection is invalid.");
+                    }
+                    for (const auto& profile : clouds)
+                    {
+                        if (!profile.is_object() || profile.size() != 2)
+                        {
+                            throw std::invalid_argument("Planet cloud override record is invalid.");
+                        }
+                        settings.CloudOverrides.push_back({AssetId::Parse(profile.at("planet").get<std::string>()),
+                                                           DecodeCloudSettings(profile.at("clouds"))});
+                    }
+                    for (const auto& profile : fog)
+                    {
+                        if (!profile.is_object() || profile.size() != 2)
+                        {
+                            throw std::invalid_argument("Planet fog override record is invalid.");
+                        }
+                        settings.FogOverrides.push_back({AssetId::Parse(profile.at("planet").get<std::string>()),
+                                                         DecodeFogDensity(profile.at("fog"))});
                     }
                 }
                 ValidatePlanetProjectSettings(settings);

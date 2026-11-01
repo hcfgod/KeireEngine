@@ -14,7 +14,8 @@ namespace Keire::Detail
     class EnvironmentRuntimeManifest final
     {
       public:
-        static constexpr unsigned CurrentSchema = 13;
+        static constexpr unsigned CurrentSchema = 14;
+        static constexpr unsigned PlanetWeatherSchema = 14;
         static constexpr unsigned PlanetSchema = 12;
         static constexpr unsigned GravitySchema = 11;
         static constexpr unsigned FogSchema = 10;
@@ -150,6 +151,10 @@ namespace Keire::Detail
                     throw std::invalid_argument("Runtime manifest schema 12 requires planet settings.");
                 }
                 result.Planets = PlanetProjectSettingsRecord::Decode(manifest.at("planets"));
+                if (schema < PlanetWeatherSchema && manifest.at("planets").at("schemaVersion") > 3)
+                {
+                    throw std::invalid_argument("Planet weather profiles require runtime manifest schema 14.");
+                }
                 if (schema < 13 && manifest.at("planets").at("schemaVersion") > 2)
                 {
                     throw std::invalid_argument("Planet atmosphere profiles require runtime manifest schema 13.");

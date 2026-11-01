@@ -147,6 +147,8 @@ TEST_CASE("Nearest surface planet selection is per observer and legacy records r
     record["schemaVersion"] = 1;
     record.erase("selection");
     record.erase("atmosphereOverrides");
+    record.erase("cloudOverrides");
+    record.erase("fogOverrides");
     CHECK(PlanetProjectSettingsRecord::Decode(record).Selection == PlanetSelectionMode::Manual);
     PlanetProjectFrameResolver resolver;
     resolver.Configure(settings);
@@ -177,13 +179,17 @@ TEST_CASE("Planet atmosphere overrides round trip and legacy settings inherit wi
     PlanetProjectSettingsStore::Save(fixture.Root, settings);
     CHECK(PlanetProjectSettingsStore::Load(fixture.Root) == settings);
     auto record = PlanetProjectSettingsRecord::Encode(settings);
-    CHECK(record.at("schemaVersion") == 3);
+    CHECK(record.at("schemaVersion") == 4);
     record["schemaVersion"] = 2;
     record.erase("atmosphereOverrides");
+    record.erase("cloudOverrides");
+    record.erase("fogOverrides");
     CHECK(PlanetProjectSettingsRecord::Decode(record).AtmosphereOverrides.empty());
     record["schemaVersion"] = 1;
     record.erase("selection");
     record.erase("atmosphereOverrides");
+    record.erase("cloudOverrides");
+    record.erase("fogOverrides");
     CHECK(PlanetProjectSettingsRecord::Decode(record).AtmosphereOverrides.empty());
     settings.AtmosphereOverrides.push_back(settings.AtmosphereOverrides.front());
     CHECK_THROWS_AS(ValidatePlanetProjectSettings(settings), std::invalid_argument);
@@ -215,4 +221,104 @@ TEST_CASE("Planet atmosphere profile thickness follows physical radius through p
     settings.AtmosphereOverrides.clear();
     CHECK_NOTHROW(ValidatePlanetProjectSettings(settings));
     CHECK(PlanetProjectSettingsRecord::Decode(PlanetProjectSettingsRecord::Encode(settings)) == settings);
+}
+
+TEST_CASE("Planet weather overrides preserve disabled profiles and legacy inheritance")
+{
+    using namespace Keire::Detail;
+    PlanetDefinition earth;
+    earth.Planet = Keire::AssetId(102, 1);
+    earth.Frame = 2;
+    PlanetDefinition mars = earth;
+    mars.Planet = Keire::AssetId(102, 2);
+    mars.Frame = 3;
+    PlanetProjectSettings settings;
+    settings.Planets = {earth, mars};
+    Keire::CloudSettings earthClouds;
+    earthClouds.Volume.Enabled = true;
+    earthClouds.Volume.MinimumTypeThickness = 0.08;
+    Keire::FogSettings earthFog;
+    earthFog.Enabled = true;
+    earthFog.PlanetaryHeight = true;
+    earthFog.ExtinctionPerMeter = 0.003;
+    settings.CloudOverrides = {{earth.Planet, earthClouds}, {mars.Planet, {}}};
+    settings.FogOverrides = {{earth.Planet, earthFog}, {mars.Planet, {}}};
+    PlanetSettingsFixture fixture;
+    PlanetProjectSettingsStore::Save(fixture.Root, settings);
+    CHECK(PlanetProjectSettingsStore::Load(fixture.Root) == settings);
+    const auto record = PlanetProjectSettingsRecord::Encode(settings);
+    const auto restored = PlanetProjectSettingsRecord::Decode(nlohmann::json::parse(record.dump()));
+    CHECK(restored == settings);
+    REQUIRE(restored.CloudOverrides.size() == 2);
+    CHECK_FALSE(restored.CloudOverrides[1].Clouds.Volume.Enabled);
+    CHECK_FALSE(restored.FogOverrides[1].Fog.Enabled);
+    for (const int schema : {1, 2, 3})
+    {
+        auto legacy = record;
+        legacy["schemaVersion"] = schema;
+        legacy.erase("cloudOverrides");
+        legacy.erase("fogOverrides");
+        if (schema < 3)
+        {
+            legacy.erase("atmosphereOverrides");
+        }
+        if (schema < 2)
+        {
+            legacy.erase("selection");
+        }
+        const auto inherited = PlanetProjectSettingsRecord::Decode(legacy);
+        CHECK(inherited.Planets == settings.Planets);
+        CHECK(inherited.CloudOverrides.empty());
+        CHECK(inherited.FogOverrides.empty());
+    }
+}
+
+TEST_CASE("Planet weather records reject malformed collections and invalid profiles transactionally")
+{
+    using namespace Keire::Detail;
+    PlanetDefinition planet;
+    planet.Planet = Keire::AssetId(103, 1);
+    planet.Frame = 2;
+    PlanetProjectSettings settings;
+    settings.Planets = {planet};
+    settings.CloudOverrides = {{planet.Planet, {}}};
+    settings.FogOverrides = {{planet.Planet, {}}};
+    const auto baseline = PlanetProjectSettingsRecord::Encode(settings);
+    for (const auto key : {"cloudOverrides", "fogOverrides"})
+    {
+        auto record = baseline;
+        record[key] = nullptr;
+        CHECK_THROWS_AS(PlanetProjectSettingsRecord::Decode(record), std::invalid_argument);
+        record = baseline;
+        record[key].push_back(record[key][0]);
+        CHECK_THROWS_AS(PlanetProjectSettingsRecord::Decode(record), std::invalid_argument);
+        record = baseline;
+        record[key][0]["planet"] = Keire::AssetId(999, 999).ToString();
+        CHECK_THROWS_AS(PlanetProjectSettingsRecord::Decode(record), std::invalid_argument);
+        record = baseline;
+        record[key][0]["unexpected"] = true;
+        CHECK_THROWS_AS(PlanetProjectSettingsRecord::Decode(record), std::invalid_argument);
+        record = baseline;
+        record.erase(key);
+        CHECK_THROWS_AS(PlanetProjectSettingsRecord::Decode(record), std::invalid_argument);
+    }
+    auto future = baseline;
+    future["schemaVersion"] = 5;
+    CHECK_THROWS_AS(PlanetProjectSettingsRecord::Decode(future), std::invalid_argument);
+    auto invalid = settings;
+    invalid.CloudOverrides.push_back(invalid.CloudOverrides.front());
+    CHECK_THROWS_AS(ValidatePlanetProjectSettings(invalid), std::invalid_argument);
+    invalid = settings;
+    invalid.FogOverrides.push_back(invalid.FogOverrides.front());
+    CHECK_THROWS_AS(ValidatePlanetProjectSettings(invalid), std::invalid_argument);
+    invalid = settings;
+    invalid.CloudOverrides[0].Clouds.Volume.MinimumTypeThickness = 0.0;
+    CHECK_THROWS_AS(ValidatePlanetProjectSettings(invalid), std::invalid_argument);
+    invalid = settings;
+    invalid.FogOverrides[0].Fog.ExtinctionPerMeter = std::numeric_limits<double>::infinity();
+    CHECK_THROWS_AS(ValidatePlanetProjectSettings(invalid), std::invalid_argument);
+    PlanetSettingsFixture fixture;
+    PlanetProjectSettingsStore::Save(fixture.Root, settings);
+    CHECK_THROWS_AS(PlanetProjectSettingsStore::Save(fixture.Root, invalid), std::invalid_argument);
+    CHECK(PlanetProjectSettingsStore::Load(fixture.Root) == settings);
 }

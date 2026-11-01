@@ -512,11 +512,10 @@ namespace Keire::RenderBackend
         }
         std::vector<AtmosphereSettings> atmosphereSettings;
         atmosphereSettings.reserve(request.PlanetAtmospheres.size());
-        if (request.PlanetEnvironment && request.PlanetEnvironment->AtmosphereOverride)
+        if (request.PlanetEnvironment)
         {
-            request.Environment.Atmosphere = *request.PlanetEnvironment->AtmosphereOverride;
-            // Only the immutable view copy adopts physical geometry; authored compatibility fields stay intact.
-            request.Environment.Atmosphere.PlanetRadius = request.PlanetEnvironment->RadiusMetres;
+            Detail::ApplyPlanetEnvironmentOverrides(*request.PlanetEnvironment, request.Environment.Atmosphere,
+                                                    request.Environment.Clouds, request.Environment.Fog);
         }
         if (request.PlanetAtmospheres.size() > MaximumPlanetAtmospheres)
         {

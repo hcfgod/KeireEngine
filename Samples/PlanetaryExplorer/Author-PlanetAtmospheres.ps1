@@ -97,7 +97,7 @@ function Assert-Atmosphere
 
 $originalHash = (Get-FileHash -LiteralPath $settingsPath -Algorithm SHA256).Hash
 $settings = Get-Content -LiteralPath $settingsPath -Raw | ConvertFrom-Json
-if ($settings.schemaVersion -notin @(1, 2, 3))
+if ($settings.schemaVersion -notin @(1, 2, 3, 4))
 {
     throw 'Unsupported planet settings schema; no files changed.'
 }
@@ -106,15 +106,19 @@ if ($settings.schemaVersion -ge 2)
 {
     $expectedFields += 'selection'
 }
-if ($settings.schemaVersion -eq 3)
+if ($settings.schemaVersion -ge 3)
 {
     $expectedFields += 'atmosphereOverrides'
+}
+if ($settings.schemaVersion -eq 4)
+{
+    $expectedFields += @('cloudOverrides', 'fogOverrides')
 }
 if (@(Compare-Object $expectedFields @($settings.PSObject.Properties.Name)).Count -ne 0)
 {
     throw 'Unexpected planet settings fields; refusing a lossy migration.'
 }
-if ($settings.schemaVersion -eq 3 -and
+if ($settings.schemaVersion -ge 3 -and
     ($settings.atmosphereOverrides -isnot [Array] -or $settings.atmosphereOverrides.Count -ne 0))
 {
     throw 'Existing atmosphere overrides will not be overwritten.'
@@ -124,6 +128,30 @@ $mars = @($settings.planets | Where-Object { $_.frame -eq 3 -and $_.planet -eq '
 if (@($settings.planets).Count -ne 2 -or $earth.Count -ne 1 -or $mars.Count -ne 1)
 {
     throw 'Expected the authored Earth and Mars identities/frames; no files changed.'
+}
+if ($settings.schemaVersion -eq 4)
+{
+    # Weather payloads belong to their engine codecs. Preserve them without interpreting or rewriting them.
+    foreach ($collection in @('cloudOverrides', 'fogOverrides'))
+    {
+        if ($settings.$collection -isnot [Array])
+        {
+            throw "$collection must be an array; no files changed."
+        }
+        $payloadName = if ($collection -eq 'cloudOverrides') { 'clouds' } else { 'fog' }
+        $identities = @()
+        foreach ($entry in $settings.$collection)
+        {
+            if ($null -eq $entry -or
+                @(Compare-Object @('planet', $payloadName) @($entry.PSObject.Properties.Name)).Count -ne 0 -or
+                $entry.planet -notin @($earth[0].planet, $mars[0].planet) -or $entry.planet -in $identities -or
+                $entry.$payloadName -isnot [pscustomobject])
+            {
+                throw "$collection contains an invalid or duplicate profile envelope; no files changed."
+            }
+            $identities += $entry.planet
+        }
+    }
 }
 $rendering = Get-Content -LiteralPath (Join-Path $root 'ProjectSettings/Rendering.keiresettings') -Raw | ConvertFrom-Json
 $earthProfile = $rendering.atmosphere | ConvertTo-Json -Depth 20 | ConvertFrom-Json
@@ -147,7 +175,12 @@ if ($settings.schemaVersion -eq 1)
 {
     $settings | Add-Member -NotePropertyName selection -NotePropertyValue 'manual'
 }
-$settings.schemaVersion = 3
+if ($settings.schemaVersion -lt 4)
+{
+    $settings | Add-Member -NotePropertyName cloudOverrides -NotePropertyValue @()
+    $settings | Add-Member -NotePropertyName fogOverrides -NotePropertyValue @()
+}
+$settings.schemaVersion = 4
 $profiles = @(
     @{ planet = $earth[0].planet; atmosphere = $earthProfile },
     @{ planet = $mars[0].planet; atmosphere = $marsProfile }
@@ -173,4 +206,4 @@ finally
     }
 }
 Write-Output "Authored explicit Earth and $MarsMode Mars sky profiles; backup: $backupPath"
-Write-Output 'Global rendering, clouds/fog, planet selection, scenes and geometry are unchanged. Requires the schema-3/profile-capable editor; visual acceptance is still required.'
+Write-Output 'Global rendering, weather overrides, planet selection, scenes and geometry are unchanged. Requires the schema-4/profile-capable editor; visual acceptance is still required.'

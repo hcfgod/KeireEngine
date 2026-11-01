@@ -73,9 +73,21 @@ function New-Fixture
     {
         $settings.selection = 'nearest-surface'
     }
-    if ($Schema -eq 3)
+    if ($Schema -ge 3)
     {
         $settings.atmosphereOverrides = @()
+    }
+    if ($Schema -eq 4)
+    {
+        # Sentinel payloads test opaque preservation, not the engine weather codecs.
+        $settings.cloudOverrides = @(@{
+            planet = '8238b398-bb92-49fe-bbcf-8f0e81c060a5'
+            clouds = @{ enabled = $true; volume = @{ enabled = $false; authoredValue = 0.08 } }
+        })
+        $settings.fogOverrides = @(@{
+            planet = '8546d07d-0afd-48ac-8082-9a91bccbfb28'
+            fog = @{ enabled = $false; volumes = @(@{ authoredValue = 42 }) }
+        })
     }
     Write-Json (Join-Path $settingsFolder 'Planets.keiresettings') $settings
     return $root
@@ -102,7 +114,7 @@ function Assert-RejectedUnchanged
 
 try
 {
-    foreach ($schema in @(1, 2, 3))
+    foreach ($schema in @(1, 2, 3, 4))
     {
         $project = New-Fixture "Airless-$schema" $schema
         $path = Join-Path $project 'ProjectSettings/Planets.keiresettings'
@@ -114,7 +126,20 @@ try
         $global = (Get-Content -LiteralPath $renderingPath -Raw | ConvertFrom-Json).atmosphere
         & $author -Project $project | Out-Null
         $after = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
-        Assert-Contract ($after.schemaVersion -eq 3 -and @($after.PSObject.Properties).Count -eq 7) 'Output must be exactly planet schema 3.'
+        Assert-Contract ($after.schemaVersion -eq 4 -and @($after.PSObject.Properties).Count -eq 9) 'Output must be exactly planet schema 4.'
+        foreach ($collection in @('cloudOverrides', 'fogOverrides'))
+        {
+            Assert-Contract ($after.$collection -is [Array]) 'Weather profiles must remain arrays.'
+            if ($schema -eq 4)
+            {
+                Assert-Contract (($after.$collection | ConvertTo-Json -Depth 40 -Compress) -eq
+                    ($before.$collection | ConvertTo-Json -Depth 40 -Compress)) 'Authored weather profile changed.'
+            }
+            else
+            {
+                Assert-Contract ($after.$collection.Count -eq 0) 'Legacy projects must inherit global weather.'
+            }
+        }
         Assert-Contract ($after.atmosphereOverrides.Count -eq 2) 'Expected two explicit profiles.'
         Assert-Contract (($after.atmosphereOverrides[0].atmosphere | ConvertTo-Json -Depth 20 -Compress) -eq
             ($global | ConvertTo-Json -Depth 20 -Compress)) 'Earth profile was not preserved exactly.'
@@ -146,6 +171,22 @@ try
     Write-Json $existingPath $record
     Assert-RejectedUnchanged $existing
 
+    foreach ($invalidKind in @('Duplicate', 'Foreign', 'NotArray', 'ExtraField'))
+    {
+        $weather = New-Fixture "Weather-$invalidKind" 4
+        $weatherPath = Join-Path $weather 'ProjectSettings/Planets.keiresettings'
+        $record = Get-Content -LiteralPath $weatherPath -Raw | ConvertFrom-Json
+        switch ($invalidKind)
+        {
+            'Duplicate' { $record.cloudOverrides += $record.cloudOverrides[0] }
+            'Foreign' { $record.cloudOverrides[0].planet = '00000000-0000-0000-0000-000000000001' }
+            'NotArray' { $record.cloudOverrides = $null }
+            'ExtraField' { $record.cloudOverrides[0] | Add-Member -NotePropertyName unexpected -NotePropertyValue 1 }
+        }
+        Write-Json $weatherPath $record
+        Assert-RejectedUnchanged $weather
+    }
+
     $invalid = New-Fixture 'Invalid'
     $invalidRendering = Join-Path $invalid 'ProjectSettings/Rendering.keiresettings'
     $record = Get-Content -LiteralPath $invalidRendering -Raw | ConvertFrom-Json
@@ -153,7 +194,7 @@ try
     Write-Json $invalidRendering $record
     Assert-RejectedUnchanged $invalid
     Assert-Contract (-not (Test-Path -LiteralPath (Join-Path $invalid 'ProjectSettings/Planets.before-atmosphere-profiles.keiresettings.backup'))) 'Invalid source created a backup or started authoring.'
-    Write-Output 'PASS atmosphere authoring: schema 1/2/3, explicit profiles, thin option, byte-exact backup/global preservation, existing override rejection and invalid input rejection. No engine imports or GPU checks performed.'
+    Write-Output 'PASS atmosphere authoring: schema 1/2/3/4 migration, weather preservation/envelope rejection, explicit sky profiles, thin option, byte-exact backup/global preservation, existing override rejection and invalid input rejection. No engine imports or GPU checks performed.'
 }
 finally
 {

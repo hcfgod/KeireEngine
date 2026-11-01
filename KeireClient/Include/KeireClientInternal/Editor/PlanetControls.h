@@ -2,6 +2,9 @@
 
 #include "KeireClient/Editor/ProjectSettingsDocument.h"
 #include "KeireClientInternal/Editor/AtmosphereControls.h"
+#include "KeireClientInternal/Editor/CloudControls.h"
+#include "KeireClientInternal/Editor/FogControls.h"
+#include "KeireClientInternal/Editor/VolumetricCloudControls.h"
 
 #include <algorithm>
 #include <array>
@@ -108,7 +111,8 @@ namespace KeireEditor::Detail
             ui.TextColoredWrapped(
                 theme.MutedText,
                 "Each camera uses the selected planet or the nearest planet surface. Planets inherit the global "
-                "atmosphere unless overridden below. Cloud and fog appearance remain shared in this release.");
+                "atmosphere, clouds, and fog unless overridden below. Weather follows the selected environment "
+                "planet.");
         }
         if (auto combo = ui.BeginCombo("Gravity Mode", gravityLabels[static_cast<std::size_t>(settings.Gravity)]);
             combo)
@@ -256,6 +260,54 @@ namespace KeireEditor::Detail
                     "Changes preview in Edit mode; restart Play mode to apply them to the running world.");
                 changed |= DrawAtmosphereControls(ui, theme, profile->Atmosphere, commit, planet.RadiusMetres);
             }
+            auto cloudProfile = std::ranges::find(settings.CloudOverrides, planet.Planet, &PlanetCloudOverride::Planet);
+            bool overrideClouds = cloudProfile != settings.CloudOverrides.end();
+            if (ui.Checkbox("Override this planet's clouds", overrideClouds))
+            {
+                if (overrideClouds)
+                {
+                    settings.CloudOverrides.push_back({planet.Planet, document.Settings().Clouds});
+                }
+                else
+                {
+                    settings.CloudOverrides.erase(cloudProfile);
+                }
+                cloudProfile = std::ranges::find(settings.CloudOverrides, planet.Planet, &PlanetCloudOverride::Planet);
+                changed = true;
+                commit = true;
+            }
+            if (cloudProfile != settings.CloudOverrides.end())
+            {
+                auto weatherId = ui.PushId("PlanetCloudOverride");
+                changed |= DrawCloudControls(ui, theme, cloudProfile->Clouds, commit);
+                changed |= DrawVolumetricCloudControls(ui, theme, cloudProfile->Clouds.Volume, commit);
+            }
+            auto fogProfile = std::ranges::find(settings.FogOverrides, planet.Planet, &PlanetFogOverride::Planet);
+            bool overrideFog = fogProfile != settings.FogOverrides.end();
+            if (ui.Checkbox("Override this planet's fog", overrideFog))
+            {
+                if (overrideFog)
+                {
+                    settings.FogOverrides.push_back({planet.Planet, document.Settings().Fog});
+                }
+                else
+                {
+                    settings.FogOverrides.erase(fogProfile);
+                }
+                fogProfile = std::ranges::find(settings.FogOverrides, planet.Planet, &PlanetFogOverride::Planet);
+                changed = true;
+                commit = true;
+            }
+            if (fogProfile != settings.FogOverrides.end())
+            {
+                auto weatherId = ui.PushId("PlanetFogOverride");
+                changed |= DrawFogControls(ui, theme, fogProfile->Fog, commit);
+            }
+            ui.TextColoredWrapped(theme.MutedText,
+                                  "Weather overrides copy global settings when enabled. Disable the cloud layers, "
+                                  "volume and fog inside an override for a clear planet; removing an override restores "
+                                  "global inheritance. Weather follows the selected planet. Restart Play mode after "
+                                  "editing planet profiles.");
             const bool hasChildren =
                 std::ranges::any_of(settings.Planets, [&](const auto& other)
                                     { return other.ParentCenter.Identity().Frame == planet.Frame; });
@@ -265,6 +317,9 @@ namespace KeireEditor::Detail
                 const auto removedPlanet = planet.Planet;
                 std::erase_if(settings.AtmosphereOverrides,
                               [&](const auto& entry) { return entry.Planet == removedPlanet; });
+                std::erase_if(settings.CloudOverrides,
+                              [&](const auto& entry) { return entry.Planet == removedPlanet; });
+                std::erase_if(settings.FogOverrides, [&](const auto& entry) { return entry.Planet == removedPlanet; });
                 settings.Planets.erase(selected);
                 settings.SelectedPlanet = settings.Planets.empty() ? Keire::AssetId{} : settings.Planets.front().Planet;
                 if (settings.Planets.empty())

@@ -1,6 +1,8 @@
 #pragma once
 
 #include "Keire/Rendering/PlanetEnvironmentView.h"
+#include "KeireInternal/Environment/CloudEvaluation.h"
+#include "KeireInternal/Environment/FogDensity.h"
 #include "KeireInternal/Spatial/PlanetFrameResolution.h"
 #include "KeireInternal/Spatial/PlanetProjectSettings.h"
 
@@ -27,6 +29,14 @@ namespace Keire::Detail
         if (view.AtmosphereOverride)
         {
             ValidateAtmosphere(*view.AtmosphereOverride, view.RadiusMetres);
+        }
+        if (view.CloudOverride)
+        {
+            ValidateCloudSettings(*view.CloudOverride);
+        }
+        if (view.FogOverride)
+        {
+            ValidateFogDensity(*view.FogOverride);
         }
         const EnvironmentClockState clock{view.Clock.Day, view.Clock.DayFraction, view.Clock.SecondsPerDay};
         (void)EnvironmentClock(clock);
@@ -55,6 +65,27 @@ namespace Keire::Detail
                 FrameRotation::Normalize(rotation[0], rotation[1], rotation[2], rotation[3]),
                 view.RadiusMetres,
                 FrameRotation::Normalize(rootRotation[0], rootRotation[1], rootRotation[2], rootRotation[3])};
+    }
+
+    // Resolve the selected planet before any phase, packet, cache or temporal-history capture.
+    // An absent profile inherits; an explicitly disabled profile still replaces the inherited settings.
+    inline void ApplyPlanetEnvironmentOverrides(const PlanetEnvironmentView& view, AtmosphereSettings& atmosphere,
+                                                CloudSettings& clouds, FogSettings& fog)
+    {
+        (void)CapturePlanetEnvironment(view);
+        if (view.AtmosphereOverride)
+        {
+            atmosphere = *view.AtmosphereOverride;
+            atmosphere.PlanetRadius = view.RadiusMetres;
+        }
+        if (view.CloudOverride)
+        {
+            clouds = *view.CloudOverride;
+        }
+        if (view.FogOverride)
+        {
+            fog = *view.FogOverride;
+        }
     }
 
     [[nodiscard]] inline PlanetEnvironmentView ToPlanetEnvironmentView(const ResolvedPlanetFrame& frame)
@@ -90,6 +121,23 @@ namespace Keire::Detail
                 break;
             }
         }
+        for (const auto& profile : settings.CloudOverrides)
+        {
+            if (profile.Planet == frame.Planet)
+            {
+                view.CloudOverride = profile.Clouds;
+                break;
+            }
+        }
+        for (const auto& profile : settings.FogOverrides)
+        {
+            if (profile.Planet == frame.Planet)
+            {
+                view.FogOverride = profile.Fog;
+                break;
+            }
+        }
+        (void)CapturePlanetEnvironment(view);
         return view;
     }
 } // namespace Keire::Detail

@@ -19,6 +19,12 @@ Environment > Planet Placement offers manual selection or **Nearest surface per 
 the closest spherical surface independently for each view, with stable identity tie-breaking. Existing projects
 remain manual. This selects one planet; it does not blend multiple atmospheres or change physics ownership.
 
+Planet Placement also offers independent cloud and fog overrides. Enabling an override copies the global settings;
+removing it restores inheritance. To author a clear planet, keep its overrides and disable the cloud layers,
+volumetric clouds and fog within them. Disabling atmosphere alone does not disable weather. These weather profiles
+follow the selected planet rather than composing several planets' weather simultaneously. Restart Play after
+editing planet profiles. This development workflow is undergoing integration and visual acceptance testing.
+
 Large-world support is undergoing a development migration. Native transforms now store double-precision translation;
 C# provides `Transform.LocalPositionPrecise` and `Transform.PositionPrecise` (`Vector3d`) for precise positions in the
 parent and scene frames. These APIs are not yet an end-to-end planetary travel workflow: camera/render matrices,

@@ -1,6 +1,8 @@
 #pragma once
 
 #include "KeireInternal/Environment/AtmosphereValidation.h"
+#include "KeireInternal/Environment/CloudEvaluation.h"
+#include "KeireInternal/Environment/FogDensity.h"
 #include "KeireInternal/Spatial/FrameRegistry.h"
 #include "KeireInternal/Spatial/PlanetDefinition.h"
 
@@ -40,6 +42,22 @@ namespace Keire::Detail
         bool operator==(const PlanetAtmosphereOverride&) const noexcept = default;
     };
 
+    struct PlanetCloudOverride
+    {
+        AssetId Planet;
+        CloudSettings Clouds;
+
+        bool operator==(const PlanetCloudOverride&) const noexcept = default;
+    };
+
+    struct PlanetFogOverride
+    {
+        AssetId Planet;
+        FogSettings Fog;
+
+        bool operator==(const PlanetFogOverride&) const noexcept = default;
+    };
+
     struct PlanetProjectSettings
     {
         PlanetGeometryMode Geometry = PlanetGeometryMode::Flat;
@@ -49,6 +67,9 @@ namespace Keire::Detail
         PlanetSelectionMode Selection = PlanetSelectionMode::Manual;
         // Missing entries inherit the global atmosphere; an explicit disabled entry is airless.
         std::vector<PlanetAtmosphereOverride> AtmosphereOverrides;
+        // Missing weather entries inherit global settings; explicit disabled profiles remain disabled.
+        std::vector<PlanetCloudOverride> CloudOverrides;
+        std::vector<PlanetFogOverride> FogOverrides;
 
         bool operator==(const PlanetProjectSettings&) const noexcept = default;
     };
@@ -93,6 +114,24 @@ namespace Keire::Detail
             }
             const auto planet = std::ranges::find(settings.Planets, profile.Planet, &PlanetDefinition::Planet);
             ValidateAtmosphere(profile.Atmosphere, planet->RadiusMetres);
+        }
+        overridden.clear();
+        for (const auto& profile : settings.CloudOverrides)
+        {
+            if (!identities.contains(profile.Planet) || !overridden.insert(profile.Planet).second)
+            {
+                throw std::invalid_argument("Planet cloud override has a missing or duplicate planet.");
+            }
+            ValidateCloudSettings(profile.Clouds);
+        }
+        overridden.clear();
+        for (const auto& profile : settings.FogOverrides)
+        {
+            if (!identities.contains(profile.Planet) || !overridden.insert(profile.Planet).second)
+            {
+                throw std::invalid_argument("Planet fog override has a missing or duplicate planet.");
+            }
+            ValidateFogDensity(profile.Fog);
         }
         std::set<std::uint64_t> created{1};
         while (!pending.empty())

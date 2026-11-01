@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased
+- Add identity-keyed per-planet cloud and fog overrides with global inheritance and explicit disabled profiles.
+  Planet settings schema 4 and runtime manifest schema 14 preserve older records; integration testing is in progress.
 - Skip cloud shadow-density sampling for empty paths without changing occupied-cloud quality or planet occlusion.
 - Suppress managed gameplay actions and raw controls while editing editor text/numeric fields during Play,
   including the commit frame, so paste and typing do not trigger game shortcuts. Game HUD and Escape routing stay intact.

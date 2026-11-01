@@ -651,3 +651,55 @@ and the editor exited normally. This verifies the reported paste/camera regressi
 full keyboard-device or planetary travel acceptance. Surface cloud rendering remained visible,
 but pale lighting and the Earth polar texture wedge remain outstanding. No controlled GPU
 speedup is claimed. Changed C++ files pass clang-format dry-run, and git diff --check passes.
+
+## Per-planet weather integration batch
+
+Added independent identity-keyed cloud/fog profiles and editor controls. Missing profiles inherit global
+settings; explicit disabled profiles remain distinct. Planet schema 4 migrates schemas 1–3, and runtime
+manifest schema 14 rejects incompatible older outer/nested combinations. Selected weather is resolved
+before phase evaluation, packet construction and temporal capture. Camera history now includes fog,
+including local volumes/exclusions. Only the selected planet supplies weather; simultaneous multi-planet
+cloud/fog composition remains unfinished. Fog box coordinates retain their existing semantics.
+
+Sample atmosphere-authoring scripts preserve schema-4 weather payloads and migrate legacy records;
+isolated PowerShell regressions pass. New native tests cover profile identity, inheritance, disabled and
+malformed profiles, history invalidation, Earth–Mars–Earth with fresh inherited requests, reversed profile
+ordering and timeline preservation. Native and focused UI acceptance results are recorded below.
+Original QA was not modified. Planetary walking still requires transactional collision-safe capsule orientation
+before automatic gravity alignment or lifting the moving-frame character guard.
+
+## Release direction after weather batch
+
+User extended the stop threshold to 50% remaining usage and requested preparation of production
+installer/packages and an updated website download. Prioritize stabilizing this batch, targeted native
+and editor acceptance, then a clean committed master revision and official Dist packaging gates.
+Current configured release is 0.4.8; earlier same-version hotfix direction remains in effect unless changed.
+Do not publish DevDist, dirty or unverified artifacts. Production package-editor/package-hub-installer
+scripts and distribution publish-snapshot workflow are the release authorities. Keep unfinished planetary
+walking, multi-planet weather composition, terrain collision/streaming and performance acceptance explicit;
+release preparation does not mean those features have passed production acceptance.
+
+Release preflight: live Windows stable catalog read-only check returned sequence 28 with Hub and Editor
+0.4.8. Existing deploy-script-handoff-hotfix-0.4.8.ps1 is hard-coded to sequence28/snapshot09822a59;
+it must not be rerun for this release. Prepare a fresh sequence above the current live sequence and
+recheck immediately before activation. D: free space was approximately281GiB. No live publication,
+website deployment, signing, or production packaging has occurred in this batch.
+
+Native acceptance: official DevDist KeireTests build completed all 199 steps successfully. Focused
+PlanetProjectSettings, EnvironmentPlanetManifest, EnvironmentSkyManifest, PlanetEnvironmentCapture,
+PlanetEnvironmentHistory and SceneRuntimePlanet tests passed 48 cases / 3,368 assertions
+(Build/Validation/planet-weather-core-tests.log). These are native persistence/selection/history/runtime
+checks, not visual or full travel acceptance. Editor staging completed 164 steps in 954.6 seconds in
+Build/Validation/planet-weather-editor-stage.log. No production artifacts have been published.
+
+UI acceptance: enabled Earth cloud and fog overrides in Environment > Sky > Planet Placement and
+Ownership, saved, and inspected Planets.keiresettings: schema 4 held one cloud and one fog profile
+under the selected Earth identity. Removed both through their checkboxes, saved, and verified both
+arrays were empty again. The renderer stayed responsive and inherited appearance was preserved.
+Screenshot: planet-weather-overrides-verified.png in the task screenshots folder. Editor exited normally.
+Corrected obsolete help text that still claimed weather appearance was always shared.
+
+Before release packaging, the user requested correction of a visible Earth polar white wedge and a
+detailed Earth surface spaceport with terrain and authored structures. Reproduced the wedge in Scene
+view; sample geometry/texture isolation and reproducible spaceport authoring are in progress. This
+additional sample work does not establish general planet terrain streaming or physical landing support.

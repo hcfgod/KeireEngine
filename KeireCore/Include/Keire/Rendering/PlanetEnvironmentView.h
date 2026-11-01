@@ -4,6 +4,8 @@
 #include "Keire/Rendering/EnvironmentLighting.h"
 
 #include "Keire/Rendering/Atmosphere.h"
+#include "Keire/Rendering/Cloud.h"
+#include "Keire/Rendering/Fog.h"
 
 #include <array>
 #include <cstdint>
@@ -29,5 +31,7 @@ namespace Keire
         double RadiusMetres = 0.0;
         std::array<double, 4> RootToObserverRotation{0.0, 0.0, 0.0, 1.0};
         std::optional<AtmosphereSettings> AtmosphereOverride;
+        std::optional<CloudSettings> CloudOverride;
+        std::optional<FogSettings> FogOverride;
     };
 } // namespace Keire
