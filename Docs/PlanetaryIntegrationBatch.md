@@ -530,3 +530,39 @@ an uncontrolled condition; use this as diagnostic evidence, not a clean A/B opti
 10ms performance. Report: D:/Projects/KeireValidation/PlanetaryExplorerStandalone20261031/surface-benchmark.json.
 Standalone renders the same ship/HUD/clouds and reproduces the known polar texture wedge. Screenshot saved:
 C:/Users/keith/Documents/ChatGPT/Keire/screenshots/planetary-standalone-surface.png.
+
+## Cloud shape and cost follow-up — October 31
+
+The current type mapping uses 35% to 100% of the authored thickness. With a 6 km layer, even the
+shallowest type is 2.1 km deep. A genuinely thin deck alongside tall towers needs a wider authored
+development range or separate layers; the current comparison must not be presented as complete cloud-type
+authoring. Planetary weather also varies vertically, so base/type coherence through a cloud column needs
+visual verification before changing its mapping. Preserve existing scenes when extending these controls.
+
+Two appearance-preserving shader optimizations are prepared: reject density samples whose envelope cannot
+cross the coverage threshold, and use power-of-two wrapping for planetary weather hashes. Shared production
+kernel tests cover threshold neighbors and exact hash equivalence. Native/shader validation is pending.
+
+A separate copied cooked output with only volumetric clouds disabled completed the same 300 warm-up / 2,000
+frame benchmark. Median admission wait was 20.5787 ms, render CPU 1.1434 ms and queued GPU retirement
+41.4067 ms. This was slower than the earlier clouds-on diagnostic, and both runs included foreground/occlusion
+changes. These results do not isolate cloud cost or establish an optimization gain. Retain fixed visibility,
+camera, time, resolution and GPU workload for the next controlled comparison. The original sample and its
+cooked baseline were not modified by this diagnostic variant.
+
+Lighting audit found no demonstrated duplicate atmosphere or exposure in the main cloud composition.
+Isolate evaluated timeline ambient, multiple-scattering contribution and bloom one at a time at a fixed pose.
+A separate parity issue remains: the exact-ray thin-surface fallback in BuiltinCloudComposite.hlsl does not
+include terrain fog visibility, unlike BuiltinCloudTrace.hlsl. Verify and repair its shadow binding parity
+with thin-silhouette regression coverage; this does not explain broad high-altitude cloud washout.
+
+The existing staged standalone completed its interactive 150-second Earth-space-return trip, switched to
+cockpit and back to follow view, and returned to Manual at displayed altitude 0.0 km. The player exited 0
+after closing normally. Captures show ascent at 32.7 km, stars and the Earth limb at 141.3 km, and the final
+surface view. These are discrete visual observations, not a continuous flicker recording or acceptance of
+the new unbuilt optimization. Cloud washout and the known polar texture wedge remain visible.
+
+Optimization validation completed: the official DevDist KeireTests build regenerated the affected builtin
+shader artifacts and passed all 16 native build steps. Focused density/weather/planetary-cloud regressions
+passed 14 cases and 74,140 assertions. Formatting and diff checks passed. This establishes preserved kernel
+results, not a measured GPU speedup. Staged editor/player and post-change visual checks remain pending.

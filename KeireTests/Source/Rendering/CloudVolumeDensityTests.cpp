@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <initializer_list>
+#include <limits>
 
 namespace
 {
@@ -275,5 +276,52 @@ TEST_CASE("Empty cloud coverage or envelope is independent of skipped atlas samp
                 CHECK(VolumeCloudDensityWithProfile(shape, detail, 1.0F, erosion, 1.0F, 1.0F, 0.0F) == 0.0F);
             }
         }
+    }
+}
+
+TEST_CASE("Cloud envelope rejection preserves the actual density kernel at threshold neighbors")
+{
+    for (const float coverage : {0.0F, 0.0001F, 0.1F, 0.5F, 0.85F, 0.9999F, 1.0F})
+    {
+        const float threshold = 1.0F - coverage;
+        const float below = std::nextafter(threshold, -std::numeric_limits<float>::infinity());
+        const float above = std::nextafter(threshold, std::numeric_limits<float>::infinity());
+        CHECK(VolumeCloudEnvelopeProvesEmpty(coverage, threshold));
+        CHECK_FALSE(VolumeCloudEnvelopeProvesEmpty(coverage, above));
+        if (below >= 0.0F)
+        {
+            CHECK(VolumeCloudEnvelopeProvesEmpty(coverage, below));
+        }
+        for (const float envelope : {0.0F, below, threshold, above, 0.25F, 0.75F, 1.0F})
+        {
+            for (const float shape : {0.0F, 0.25F, 0.75F, 1.0F})
+            {
+                for (const float detail : {0.0F, 0.5F, 1.0F})
+                {
+                    for (const float erosion : {0.0F, 0.5F, 1.0F})
+                    {
+                        // This calls the production HLSL kernel, not a duplicated reference equation.
+                        const float original =
+                            VolumeCloudDensityWithProfile(shape, detail, 1.0F, erosion, coverage, 0.8F, envelope);
+                        const float rejected = VolumeCloudEnvelopeProvesEmpty(coverage, envelope) ? 0.0F : original;
+                        CHECK(rejected == original);
+                    }
+                }
+            }
+        }
+        if (coverage > 0.0F && above >= std::numeric_limits<float>::min() && above <= 1.0F)
+        {
+            CHECK(VolumeCloudDensityWithProfile(1.0F, 0.5F, 0.0F, 0.0F, coverage, 0.0F, above) > 0.0F);
+        }
+    }
+}
+
+TEST_CASE("Cloud envelope rejection declines nonfinite and out-of-contract bounds")
+{
+    for (const float invalid : {-1.0F, 1.01F, std::numeric_limits<float>::infinity(),
+                                -std::numeric_limits<float>::infinity(), std::numeric_limits<float>::quiet_NaN()})
+    {
+        CHECK_FALSE(VolumeCloudEnvelopeProvesEmpty(invalid, 0.5F));
+        CHECK_FALSE(VolumeCloudEnvelopeProvesEmpty(0.5F, invalid));
     }
 }

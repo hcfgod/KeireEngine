@@ -143,7 +143,8 @@ float VolumeCloudDensityPoint(float3 position, float sampleSpacing, CloudVolumeP
     const float envelope = VolumeCloudAuthoredHeightProfile(profileHeight, profile.x, profile.y, profile.z, profile.w);
     // Weather and profile can prove this point empty before any warped body/detail atlas fetches.
     // The density remap returns exactly zero for either condition, independent of those samples.
-    if (regionalCoverage <= 0.0F || envelope <= 0.0F)
+    if (regionalCoverage <= 0.0F || envelope <= 0.0F ||
+        VolumeCloudEnvelopeProvesEmpty(regionalCoverage, envelope))
     {
         return 0.0F;
     }

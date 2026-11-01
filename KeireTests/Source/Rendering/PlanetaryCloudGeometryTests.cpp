@@ -14,7 +14,41 @@ namespace
     using std::sqrt;
 
 #include "../../../KeireCore/Shaders/PlanetaryCloudIntersections.hlsli"
+#include "../../../KeireCore/Shaders/PlanetaryCloudWeather.hlsli"
 } // namespace
+
+TEST_CASE("Planetary weather integer wrapping preserves modulo samples for all supported regional periods")
+{
+    const auto referenceHash = [](const uint x, const uint y, const uint z, const uint repeat, const uint seed)
+    {
+        uint value = (x % repeat) * 0x8da6b343U ^ (y % repeat) * 0xd8163841U ^ (z % repeat) * 0xcb1ab31fU ^ seed;
+        value ^= value >> 16U;
+        value *= 0x7feb352dU;
+        value ^= value >> 15U;
+        value *= 0x846ca68bU;
+        return value ^ (value >> 16U);
+    };
+    for (uint period = 1U; period <= 64U; period *= 2U)
+    {
+        const uint repeat = 256U / period;
+        for (const uint cell : {0U, 1U, repeat - 1U, repeat, repeat + 1U, std::numeric_limits<uint>::max()})
+        {
+            for (const uint seed : {0U, 1U, 0xa511e9b3U, 0x3912a51U, 0xffffffffU})
+            {
+                for (uint corner = 0U; corner < 8U; ++corner)
+                {
+                    const uint x = cell + (corner & 1U);
+                    const uint y = repeat - 1U + ((corner >> 1U) & 1U);
+                    const uint z = repeat + ((corner >> 2U) & 1U);
+                    const uint expected = referenceHash(x, y, z, repeat, seed);
+                    CHECK(PlanetaryCloudWeatherHash(x, y, z, repeat, seed) == expected);
+                    CHECK(PlanetaryCloudWeatherHash(y, z, x, repeat, seed) == referenceHash(y, z, x, repeat, seed));
+                    CHECK(PlanetaryCloudWeatherHash(z, x, y, repeat, seed) == referenceHash(z, x, y, repeat, seed));
+                }
+            }
+        }
+    }
+}
 
 TEST_CASE("Planetary cloud shells retain thin surface layers and orbital entry")
 {

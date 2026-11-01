@@ -74,6 +74,15 @@ float VolumeCloudAuthoredHeightProfile(float height, float baseStart, float base
     return VolumeCloudHeightProfile(height, baseStart, baseEnd, crownStart, crownEnd);
 }
 
+// combinedShape is saturated to at most one before multiplying this envelope. If even that
+// maximum cannot cross the coverage threshold, no body/detail/erosion fetch can create density.
+// Only certify the authored unit domain; unordered/nonfinite or out-of-contract values fall back.
+bool VolumeCloudEnvelopeProvesEmpty(float coverage, float envelope)
+{
+    return coverage >= 0.0F && coverage <= 1.0F && envelope >= 0.0F && envelope <= 1.0F &&
+        envelope <= 1.0F - coverage;
+}
+
 float VolumeCloudDensityWithProfile(float shape, float shapeDetail, float shapeDetailWeight,
                                     float erosion, float coverage, float detailAmount, float envelope)
 {
