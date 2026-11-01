@@ -227,6 +227,11 @@ float VolumeCloudLightOpticalDepth(float3 position, float3 sunDirection,
         const PlanetaryCloudIntervals intervals = LimitPlanetaryCloudTravel(PlanetaryCloudRayIntervals(
             position, sunDirection, parameters.PlanetaryCloud, parameters.BaseHeight - heightVariation,
             parameters.Thickness + 2.0F * heightVariation, reach), parameters.MaximumDistance);
+        // Planet-ground occlusion was handled above; a missed cloud shell contributes no cloud attenuation.
+        if (PlanetaryCloudIntervalsEmpty(intervals))
+        {
+            return 0.0F;
+        }
         const uint count = intervals.SecondExit > intervals.SecondEntry ? max(shadowSteps, 2U) : shadowSteps;
         float depth = 0.0F;
         [loop]
@@ -242,6 +247,10 @@ float VolumeCloudLightOpticalDepth(float3 position, float3 sunDirection,
     const float shadowDistance = CloudVolumeShadowDistance(position.y, sunDirection.y,
         parameters.BaseHeight - heightVariation, parameters.Thickness + 2.0F * heightVariation,
         parameters.MaximumDistance);
+    if (shadowDistance <= 0.0F)
+    {
+        return 0.0F;
+    }
     const float shadowStepLength = shadowDistance / float(shadowSteps);
     float lightOpticalDepth = 0.0F;
     [loop]

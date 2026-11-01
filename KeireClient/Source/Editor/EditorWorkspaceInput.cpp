@@ -589,7 +589,8 @@ Keire::Vector2 EditorWorkspaceLayer::ReadManagedInput(const std::string_view act
 {
     try
     {
-        if (!m_GameplayInputContext || !m_SceneDocument->PlaySession() || !m_GameViewportInputActive)
+        if (!m_GameplayInputContext || !m_SceneDocument->PlaySession() || !m_GameViewportInputActive ||
+            !m_EditorTextInputGate.AllowsGameplay())
             return {};
         if (!m_GameplayInputMap || !m_GameplayInputContext->MapEnabled(m_GameplayInputMap))
             return {};
@@ -623,7 +624,8 @@ Keire::ManagedInputState EditorWorkspaceLayer::ReadManagedInputState(const std::
 {
     try
     {
-        if (!m_GameplayInputContext || !m_SceneDocument->PlaySession() || !m_GameViewportInputActive)
+        if (!m_GameplayInputContext || !m_SceneDocument->PlaySession() || !m_GameViewportInputActive ||
+            !m_EditorTextInputGate.AllowsGameplay())
             return Keire::ManagedInputState::None;
         if (!m_GameplayInputMap || !m_GameplayInputContext->MapEnabled(m_GameplayInputMap))
             return Keire::ManagedInputState::None;
@@ -843,23 +845,29 @@ EditorWorkspaceLayer::ManagedInputAction(const std::uint64_t handle, const Keire
     if (!m_SceneDocument->PlaySession())
         return std::nullopt;
     return KeireEditor::RouteGameViewportAction(m_ManagedInputContexts.Action(handle, action),
-                                                m_GameViewportInputActive);
+                                                m_GameViewportInputActive && m_EditorTextInputGate.AllowsGameplay());
 }
 
 std::optional<Keire::InputDeviceId>
 EditorWorkspaceLayer::CurrentManagedInputDevice(const Keire::InputDeviceType type) noexcept
 {
     const auto input = Owner().Input();
-    return input && m_SceneDocument->PlaySession() && m_GameViewportInputActive ? input->CurrentDevice(type)
-                                                                                : std::nullopt;
+    return input && m_SceneDocument->PlaySession() && m_GameViewportInputActive &&
+                   m_EditorTextInputGate.AllowsGameplay()
+               ? input->CurrentDevice(type)
+               : std::nullopt;
 }
 
 std::optional<Keire::InputControlSnapshot>
 EditorWorkspaceLayer::ManagedInputControl(const Keire::InputDeviceId device, const std::string_view path) noexcept
 {
     const auto input = Owner().Input();
-    return input && m_SceneDocument->PlaySession() && m_GameViewportInputActive ? input->ReadControl(device, path)
-                                                                                : std::nullopt;
+    if (!input || !m_SceneDocument->PlaySession() || !m_GameViewportInputActive)
+    {
+        return std::nullopt;
+    }
+    return KeireEditor::RouteGameViewportControl(input->ReadControl(device, path),
+                                                 m_EditorTextInputGate.AllowsGameplay());
 }
 
 bool EditorWorkspaceLayer::PlayManagedAudio(const Keire::ManagedAudioPlayback& playback) noexcept

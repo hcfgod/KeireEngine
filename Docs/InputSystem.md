@@ -11,6 +11,11 @@ and asset completions, Input publishes one immutable snapshot for the outer fram
 update observe that snapshot. UI capture from the last completed UI frame suppresses keyboard or pointer bindings on
 `RespectUiCapture` maps; `AlwaysReceive` maps remain available for editor and global shortcuts.
 
+In editor Play Mode, editing an editor text or numeric field temporarily suppresses managed gameplay action and
+raw-device reads. The first frame after editing ends remains neutral so committing with Enter or pasting does not
+trigger gameplay shortcuts. Ordinary HUD interaction does not release Play ownership; Escape still releases capture.
+This editor policy does not alter standalone raw input or the application's global InputSystem snapshots.
+
 Input mutation, pairing, map enablement, subscriptions, rebinding, and override persistence are owner-thread operations.
 Keyboard and mouse are stable logical devices 1 and 2. Gamepad handles use RAII, reconnect by a stable hardware key,
 cancel actions on disconnect, and restore surviving user ownership deterministically. Gamepad support may be absent in

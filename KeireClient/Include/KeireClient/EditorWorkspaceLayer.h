@@ -19,6 +19,7 @@
 #include "KeireClient/Editor/UiBuilderPanel.h"
 #include "KeireClient/Editor/VfxEffectPanel.h"
 #include "KeireClient/Editor/ViewportAssetDropRouter.h"
+#include "KeireClient/Editor/ViewportInputRouting.h"
 #include "KeireInternal/Scripting/ManagedRuntimeApplicationServices.h"
 #include "KeireInternal/Scripting/ManagedRuntimeInput.h"
 
@@ -1021,6 +1022,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     std::optional<Keire::RenderEnvironmentSettings> m_ManagedRenderEnvironmentOverride;
     Keire::Detail::ManagedMaterialParameterStore m_ManagedMaterialParameters;
     bool m_GameViewportInputActive = false;
+    KeireEditor::EditorTextInputGate m_EditorTextInputGate;
     bool m_GameViewportCaptureSuspended = false;
     KeireEditor::RuntimeUiPointerRoutingState m_GameRuntimeUiPointer;
     Keire::AssetId m_UiBuilderLivePickVisualTree;

@@ -1078,6 +1078,7 @@ void EditorWorkspaceLayer::OnAttach()
 
 void EditorWorkspaceLayer::OnUpdate(const Keire::Time& time)
 {
+    m_EditorTextInputGate.Observe(time.FrameCount(), Owner().UiCapture().TextInput);
     if (auto& capture = m_ReplayProfilingCoordinator->Profiler().Sustained; capture.Active())
     {
         if (const auto profiler = Owner().GetProfiler(); profiler && profiler->IsOpen())

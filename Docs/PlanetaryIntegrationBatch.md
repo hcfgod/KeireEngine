@@ -628,3 +628,26 @@ Editor closed normally after discarding temporary flight transforms; the sample 
 The final focused tests, relinked against the corrected cache implementation, pass 62 cases / 95,105 assertions.
 Original GravityAcceptanceQA scene SHA256 remains
 A85D25F5CE5A5073B1684BDF1889A48B95B694ABAF7A3F98D603E440F98CAB7C.
+
+## Follow-up: authoring input isolation and empty cloud-shadow paths
+
+The Play-mode paste finding was traced to managed raw keyboard reads bypassing editor text-input capture.
+A workspace-owned gate now suppresses managed action/control values and edges while editor text input is
+active and for the first neutral frame after editing ends. Persistent Game ownership, cursor/Escape policy,
+and runtime HUD routing remain separate. Focused input tests pass 6 cases / 84 assertions; real-paste acceptance remains pending.
+
+Cloud shadow marching now returns zero before density queries when the flat shadow distance or both planetary
+cloud intervals are empty. Planet-ground occlusion remains checked first and still returns opaque depth.
+Occupied-path sampling is unchanged. Shared-kernel regressions cover empty, tangent, zero-budget and nonempty
+shell paths. Focused cloud geometry, density, cache, temporal and fog-binding tests pass 51 cases / 111,111 assertions. This is a bounded work reduction, not a demonstrated dense-cloud frame-time fix. The official DevDist stage and visual acceptance remain pending.
+
+Follow-up acceptance: the official DevDist stage passed in 285.4 seconds (63 native steps).
+In maximized PlanetaryExplorer Play mode, double-clicking Cloud Base Height, pasting 1500 and
+committing with Enter retained follow view and the Cockpit [V] button label. The HUD camera
+button subsequently switched to cockpit and back normally. Screenshot:
+planetary-input-isolation-verified.png in the chat screenshot directory. The test used the
+existing value, preserving authored cloud settings. Temporary Play transforms were discarded,
+and the editor exited normally. This verifies the reported paste/camera regression; it is not
+full keyboard-device or planetary travel acceptance. Surface cloud rendering remained visible,
+but pale lighting and the Earth polar texture wedge remain outstanding. No controlled GPU
+speedup is claimed. Changed C++ files pass clang-format dry-run, and git diff --check passes.

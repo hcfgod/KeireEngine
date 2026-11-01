@@ -117,3 +117,31 @@ TEST_CASE("Planetary cloud shared sampling budget skips vacuum and preserves opt
     }
     CHECK(length == doctest::Approx(1500.0F));
 }
+
+TEST_CASE("Planetary shadow misses skip only zero-length sampled cloud paths")
+{
+    const auto outward = IntersectPlanetaryCloudShell(6360000.0F, 9000.0F, 1.0F, 700.0F, 7600.0F, 100000.0F);
+    const auto tangent = IntersectPlanetaryCloudShell(6360000.0F, 9000.0F, 0.0F, 700.0F, 7600.0F, 100000.0F);
+    const auto occupied = IntersectPlanetaryCloudShell(6360000.0F, 7400.0F, 1.0F, 700.0F, 7600.0F, 100000.0F);
+    const auto zeroBudget = LimitPlanetaryCloudTravel(occupied, 0.0F);
+    CHECK_FALSE(PlanetaryCloudIntervalsEmpty(occupied));
+    for (const auto empty : {outward, tangent, zeroBudget, PlanetaryCloudIntervals{}})
+    {
+        REQUIRE(PlanetaryCloudIntervalsEmpty(empty));
+        for (uint index = 0; index < 6U; ++index)
+        {
+            const auto sample = PlanetaryCloudSample(empty, 6U, index);
+            CHECK(sample.Exit == sample.Entry);
+        }
+    }
+    const float cosine = -std::sqrt(1.0F - 1050.0F * 1050.0F / (2000.0F * 2000.0F));
+    const auto twoIntervals = IntersectPlanetaryCloudShell(1000.0F, 1000.0F, cosine, 100.0F, 100.0F, 5000.0F);
+    REQUIRE(twoIntervals.SecondExit > twoIntervals.SecondEntry);
+    CHECK_FALSE(PlanetaryCloudIntervalsEmpty(twoIntervals));
+    CHECK_FALSE(PlanetaryCloudIntervalsEmpty({0.0F, 0.0F, 100.0F, 101.0F}));
+    const float next = std::nextafter(100.0F, std::numeric_limits<float>::infinity());
+    CHECK_FALSE(PlanetaryCloudIntervalsEmpty({100.0F, next, 0.0F, 0.0F}));
+    CHECK_FALSE(PlanetaryCloudIntervalsEmpty({0.0F, std::numeric_limits<float>::quiet_NaN(), 0.0F, 0.0F}));
+    CHECK_FALSE(PlanetaryCloudIntervalsEmpty(
+        {0.0F, 0.0F, std::numeric_limits<float>::infinity(), std::numeric_limits<float>::infinity()}));
+}

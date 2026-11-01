@@ -50,6 +50,14 @@ struct PlanetaryCloudIntervals
     float SecondExit;
 };
 
+// Shared by shadow marching and numerical tests. Invalid bounds do not prove an empty path.
+bool PlanetaryCloudIntervalsEmpty(PlanetaryCloudIntervals intervals)
+{
+    return isfinite(intervals.FirstEntry) && isfinite(intervals.FirstExit) &&
+        isfinite(intervals.SecondEntry) && isfinite(intervals.SecondExit) &&
+        intervals.FirstExit <= intervals.FirstEntry && intervals.SecondExit <= intervals.SecondEntry;
+}
+
 PlanetaryCloudIntervals IntersectPlanetaryCloudShell(float radius, float altitude, float radialCosine,
     float baseHeight, float thickness, float maximumDistance)
 {

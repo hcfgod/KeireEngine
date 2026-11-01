@@ -4,6 +4,70 @@
 
 #include <optional>
 
+TEST_CASE("editor text input isolates gameplay paste commit and focus restoration")
+{
+    KeireEditor::EditorTextInputGate gate;
+    const Keire::ManagedInputActionSnapshot action{
+        Keire::InputActionPhase::Performed, {Keire::InputValueType::Axis2D, 1.0F, -0.5F}, 42, true, true, true, true};
+    const Keire::InputControlSnapshot key{{}, {Keire::InputValueType::Boolean, 1.0F, 0.0F}, 42, true, true};
+    gate.Observe(40, false);
+    CHECK(gate.AllowsGameplay());
+    // Persistent Play ownership stays intact while an editor numeric/text field owns text input.
+    CHECK(KeireEditor::GameViewportOwnsRuntimeInput(true, true, false, false, false));
+    gate.Observe(41, true);
+    gate.Observe(42, true);
+    for (const bool commitFrame : {false, true})
+    {
+        if (commitFrame)
+        {
+            gate.Observe(43, false);
+        }
+        CHECK_FALSE(gate.AllowsGameplay());
+        const auto routedAction = KeireEditor::RouteGameViewportAction(action, gate.AllowsGameplay());
+        REQUIRE(routedAction);
+        CHECK(routedAction->Enabled);
+        CHECK(routedAction->Value.X == 0.0F);
+        CHECK_FALSE(routedAction->Started);
+        CHECK_FALSE(routedAction->Performed);
+        CHECK_FALSE(routedAction->Canceled);
+        const auto routedKey = KeireEditor::RouteGameViewportControl(key, gate.AllowsGameplay());
+        REQUIRE(routedKey);
+        CHECK_FALSE(routedKey->IsPressed());
+        CHECK_FALSE(routedKey->Pressed);
+        CHECK_FALSE(routedKey->Released);
+    }
+    // Multiple reads in the commit frame cannot consume the neutral-frame barrier.
+    gate.Observe(43, false);
+    CHECK_FALSE(gate.AllowsGameplay());
+    gate.Observe(44, false);
+    CHECK(gate.AllowsGameplay());
+    auto heldKey = key;
+    heldKey.Pressed = false;
+    heldKey.Released = false;
+    const auto restored = KeireEditor::RouteGameViewportControl(heldKey, gate.AllowsGameplay());
+    REQUIRE(restored);
+    CHECK(restored->IsPressed());
+    CHECK_FALSE(restored->Pressed);
+    CHECK_FALSE(restored->Released);
+    CHECK(KeireEditor::RouteGameViewportAction(action, gate.AllowsGameplay())->Performed);
+    CHECK_FALSE(KeireEditor::GameViewportOwnsRuntimeInput(true, true, true, false, true));
+    CHECK_FALSE(KeireEditor::RouteGameViewportControl(std::nullopt, false));
+}
+
+TEST_CASE("editor text gate leaves ordinary HUD focus alone and captures late same-frame editing")
+{
+    KeireEditor::EditorTextInputGate gate;
+    gate.Observe(1, false);
+    CHECK(gate.AllowsGameplay());
+    gate.Observe(1, true);
+    gate.Observe(1, false);
+    CHECK_FALSE(gate.AllowsGameplay());
+    gate.Observe(2, false);
+    CHECK_FALSE(gate.AllowsGameplay());
+    gate.Observe(3, false);
+    CHECK(gate.AllowsGameplay());
+}
+
 TEST_CASE("game viewport focus loss suppresses input without invalidating managed actions")
 {
     const Keire::ManagedInputActionSnapshot original{

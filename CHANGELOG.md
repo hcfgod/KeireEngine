@@ -1,6 +1,9 @@
 # Changelog
 
 ## Unreleased
+- Skip cloud shadow-density sampling for empty paths without changing occupied-cloud quality or planet occlusion.
+- Suppress managed gameplay actions and raw controls while editing editor text/numeric fields during Play,
+  including the commit frame, so paste and typing do not trigger game shortcuts. Game HUD and Escape routing stay intact.
 - Cache builtin shader outputs independently by source dependencies, compiler identity and compilation options
   on Windows and Unix. Reject corrupt entries and inputs changed during compilation; preserve existing locked
   header publication. The first run populates the cache; real incremental timing remains to be measured.

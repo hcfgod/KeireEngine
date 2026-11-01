@@ -95,3 +95,13 @@ TEST_CASE("Shifted cloud intervals cover the full clipped ray without gaps or ov
         }
     }
 }
+
+TEST_CASE("Flat shadow rays outside the cloud slab have zero march distance")
+{
+    CHECK(CloudVolumeShadowDistance(1600.0F, 1.0F, 1000.0F, 500.0F, 10000.0F) == 0.0F);
+    CHECK(CloudVolumeShadowDistance(1600.0F, 0.0F, 1000.0F, 500.0F, 10000.0F) == 0.0F);
+    CHECK(CloudVolumeShadowDistance(900.0F, -1.0F, 1000.0F, 500.0F, 10000.0F) == 0.0F);
+    CHECK(CloudVolumeShadowDistance(1250.0F, 1.0F, 1000.0F, 500.0F, 0.0F) == 0.0F);
+    CHECK(CloudVolumeShadowDistance(1250.0F, 1.0F, 1000.0F, 500.0F, 10000.0F) > 0.0F);
+    CHECK(CloudVolumeShadowDistance(1250.0F, 0.0F, 1000.0F, 500.0F, 10000.0F) == 10000.0F);
+}
