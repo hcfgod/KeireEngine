@@ -175,7 +175,7 @@ TEST_CASE("Shader Graph v2 catalogs stable node identities and migrates v1 sourc
 TEST_CASE("Shader Graph compatibility versions are explicit and future sources fail recoverably")
 {
     CHECK(Keire::ShaderGraphSourceSchemaVersion == 6);
-    CHECK(Keire::ShaderGraphGeneratedShaderVersion == 39);
+    CHECK(Keire::ShaderGraphGeneratedShaderVersion == 40);
     CHECK(Keire::ShaderGraphVertexLayoutVersion == 3);
 
     const auto graph = Keire::CreateDefaultShaderGraph();
@@ -195,7 +195,7 @@ TEST_CASE("Shader Graph compatibility versions are explicit and future sources f
     CHECK(manifest.at("spatialLightingAbiVersion") == 3U);
     CHECK(manifest.at("volumeLightingAbiVersion") == 13U);
     CHECK(manifest.at("maximumWorldPositionDisplacementRadius").get<float>() == doctest::Approx(0.0F));
-    CHECK(variant.Hlsl.find("Generator version 39, source schema 6") != std::string::npos);
+    CHECK(variant.Hlsl.find("Generator version 40, source schema 6") != std::string::npos);
     CHECK(variant.Hlsl.find("#define KEIRE_CLOUD_NOISE_TEXTURE t") != std::string::npos);
     CHECK(variant.Hlsl.find("Texture3D<float4> VolumeCloudNoiseTexture") != std::string::npos);
     CHECK(variant.Hlsl.find("#define KEIRE_CLOUD_NOISE_TEXTURE t9\n") != std::string::npos);
