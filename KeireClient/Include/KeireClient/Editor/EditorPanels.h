@@ -7,6 +7,7 @@
 #include "KeireClient/Editor/ExternalEditorProfiles.h"
 #include "KeireClient/Editor/InspectorTransformUndo.h"
 #include "KeireClient/Editor/ViewportInputRouting.h"
+#include "KeireClientInternal/Editor/HierarchyDragInteraction.h"
 #include "KeireClientInternal/Editor/SettingsEditSurfaceTracker.h"
 #include "KeireInternal/Rendering/DynamicResolutionInternal.h"
 
@@ -301,6 +302,10 @@ namespace KeireEditor
         Keire::UiPanelRegistration m_Registration;
         Keire::AssetId m_SelectionAnchor;
         Keire::AssetId m_PendingSelectionCollapse;
+        Keire::AssetId m_ObservedSelection;
+        Keire::AssetId m_ObservedScene;
+        std::vector<Keire::AssetId> m_DraggedEntities;
+        HierarchyDragHover m_DragHover;
         std::string m_Search;
     };
 

@@ -13,6 +13,7 @@
 #include <Jolt/Core/TempAllocator.h>
 #include <Jolt/Physics/Body/BodyCreationSettings.h>
 #include <Jolt/Physics/Body/BodyLock.h>
+#include <Jolt/Physics/Body/BodyLockMulti.h>
 #include <Jolt/Physics/Body/MotionProperties.h>
 #include <Jolt/Physics/Collision/CastResult.h>
 #include <Jolt/Physics/Collision/CollideShape.h>
@@ -37,6 +38,7 @@
 #include <deque>
 #include <limits>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <numbers>
 #include <ranges>
@@ -322,12 +324,117 @@ namespace Keire
             }
         };
 
+        void ValidateStagedKinematicTarget(const JPH::Body& native, const std::optional<PhysicsBodyState>& staged,
+                                           const Detail::PhysicsKinematicTarget& target)
+        {
+            if (!native.IsKinematic())
+            {
+                throw std::invalid_argument("Prepared frame target requires a native kinematic body.");
+            }
+            const auto sourceRotation = staged ? ToJolt(staged->Rotation) : native.GetRotation();
+            const auto centerOffset = native.GetShape()->GetCenterOfMass();
+            const auto sourceCenter =
+                staged ? ToJolt(staged->Position) + sourceRotation * centerOffset : native.GetCenterOfMassPosition();
+            const auto targetRotation = ToJolt(target.Rotation);
+            const auto targetCenter = ToJolt(target.Position) + targetRotation * centerOffset;
+            const auto delta = targetCenter - sourceCenter;
+            // Match native float narrowing and division, including its squared-length arithmetic.
+            // Finite double COM deltas alone do not prove that the solver's float velocities are finite.
+            const JPH::Vec3 nativeDelta(static_cast<float>(delta.GetX()), static_cast<float>(delta.GetY()),
+                                        static_cast<float>(delta.GetZ()));
+            const auto linear = nativeDelta / target.DeltaSeconds;
+            const auto angular = (targetRotation * sourceRotation.Conjugated()).GetAngularVelocity(target.DeltaSeconds);
+            if (!std::isfinite(linear.LengthSq()) || !std::isfinite(angular.LengthSq()))
+            {
+                throw std::out_of_range("Prepared kinematic target velocity exceeds native arithmetic range.");
+            }
+        }
+
+        [[nodiscard]] Detail::PhysicsLoadBodySnapshot CaptureLoadBody(const JPH::Body& native, const PhysicsBodyId body,
+                                                                      const PhysicsMotionSettings settings,
+                                                                      const bool useGravity)
+        {
+            if (!native.IsDynamic())
+            {
+                throw std::invalid_argument("Prepared loads require dynamic bodies.");
+            }
+            Detail::PhysicsLoadBodySnapshot result;
+            result.State = {body,
+                            FromJoltPosition(native.GetPosition()),
+                            FromJoltRotation(native.GetRotation()),
+                            FromJoltVector(native.GetLinearVelocity()),
+                            FromJoltVector(native.GetAngularVelocity()),
+                            !native.IsActive()};
+            result.State.PendingForce = FromJoltVector(native.GetAccumulatedForce());
+            result.State.PendingTorque = FromJoltVector(native.GetAccumulatedTorque());
+            const auto center = native.GetCenterOfMassPosition();
+            result.CenterOfMass = {center.GetX(), center.GetY(), center.GetZ()};
+            const auto* motion = native.GetMotionProperties();
+            result.InverseMass = motion->GetInverseMass();
+            result.InversePrincipalInertia = FromJoltVector(motion->GetInverseInertiaDiagonal());
+            result.InertiaRotation = FromJoltRotation(motion->GetInertiaRotation());
+            const auto inertia = native.GetInverseInertia();
+            for (std::size_t column = 0; column < 3; ++column)
+            {
+                const auto values = inertia.GetColumn3(static_cast<JPH::uint>(column));
+                result.WorldInverseInertia[column * 3] = values.GetX();
+                result.WorldInverseInertia[column * 3 + 1] = values.GetY();
+                result.WorldInverseInertia[column * 3 + 2] = values.GetZ();
+            }
+            result.MotionSettings = settings;
+            result.UseGravity = useGravity;
+            if (!Math::IsFinite(result.State.Position) || !Math::IsFinite(result.State.LinearVelocity) ||
+                !Math::IsFinite(result.State.AngularVelocity) || !Math::IsFinite(result.State.PendingForce) ||
+                !Math::IsFinite(result.State.PendingTorque) || !Math::IsFinite(result.CenterOfMass) ||
+                !std::isfinite(result.InverseMass) || result.InverseMass < 0.0F ||
+                !Math::IsFinite(result.InversePrincipalInertia) || result.InversePrincipalInertia.X < 0.0F ||
+                result.InversePrincipalInertia.Y < 0.0F || result.InversePrincipalInertia.Z < 0.0F ||
+                !std::ranges::all_of(
+                    result.WorldInverseInertia, [](const double value) { return std::isfinite(value); }))
+            {
+                throw std::runtime_error("Prepared load capture contains non-finite or invalid native motion data.");
+            }
+            (void)Math::Normalize(result.State.Rotation);
+            (void)Math::Normalize(result.InertiaRotation);
+            return result;
+        }
+
+        [[nodiscard]] bool SameLoadKinematics(const Detail::PhysicsLoadBodySnapshot& left,
+                                              const Detail::PhysicsLoadBodySnapshot& right) noexcept
+        {
+            // External forces may be queued after capture, waking a sleeping body. They are additive
+            // inputs, not kinematic changes, and must survive the prepared-load commit.
+            return left.State.Body == right.State.Body && left.State.Position == right.State.Position &&
+                   left.State.Rotation == right.State.Rotation &&
+                   left.State.LinearVelocity == right.State.LinearVelocity &&
+                   left.State.AngularVelocity == right.State.AngularVelocity &&
+                   left.CenterOfMass == right.CenterOfMass && left.InverseMass == right.InverseMass &&
+                   left.InversePrincipalInertia == right.InversePrincipalInertia &&
+                   left.InertiaRotation == right.InertiaRotation &&
+                   left.WorldInverseInertia == right.WorldInverseInertia &&
+                   left.MotionSettings == right.MotionSettings && left.UseGravity == right.UseGravity;
+        }
+
+        [[nodiscard]] Vector3 CheckedPreparedLoad(const Vector3d value)
+        {
+            constexpr double limit = std::numeric_limits<float>::max();
+            if (!Math::IsFinite(value) || std::abs(value.X) > limit || std::abs(value.Y) > limit ||
+                std::abs(value.Z) > limit)
+            {
+                throw std::out_of_range("Prepared load or accumulated load exceeds the native finite range.");
+            }
+            return {static_cast<float>(value.X), static_cast<float>(value.Y), static_cast<float>(value.Z)};
+        }
+
         class QueryBodyFilter final : public JPH::BodyFilter
         {
           public:
             QueryBodyFilter(const std::uint32_t mask, const std::uint32_t layer, const bool includeTriggers,
-                            const std::uint64_t ignoredBody = 0) noexcept
-                : m_Mask(mask), m_Layer(layer), m_IgnoredBody(ignoredBody), m_IncludeTriggers(includeTriggers)
+                            const std::uint64_t ignoredBody = 0, const std::uint64_t onlyBody = 0,
+                            const std::span<const PhysicsBodyId> excludedBodies = {},
+                            std::uint64_t (*bodyValue)(PhysicsBodyId) noexcept = nullptr) noexcept
+                : m_Mask(mask), m_Layer(layer), m_IgnoredBody(ignoredBody), m_IncludeTriggers(includeTriggers),
+                  m_OnlyBody(onlyBody), m_ExcludedBodies(excludedBodies), m_BodyValue(bodyValue)
             {
             }
 
@@ -335,7 +442,10 @@ namespace Keire
             {
                 const auto& group = body.GetCollisionGroup();
                 return (group.GetGroupID() & m_Mask) != 0 && (group.GetSubGroupID() & m_Layer) != 0 &&
-                       (m_IncludeTriggers || !body.IsSensor()) && body.GetUserData() != m_IgnoredBody;
+                       (m_IncludeTriggers || !body.IsSensor()) && body.GetUserData() != m_IgnoredBody &&
+                       (m_OnlyBody == 0 || body.GetUserData() == m_OnlyBody) &&
+                       !std::ranges::any_of(m_ExcludedBodies, [&](const PhysicsBodyId excluded)
+                                            { return m_BodyValue(excluded) == body.GetUserData(); });
             }
 
           private:
@@ -343,6 +453,9 @@ namespace Keire
             std::uint32_t m_Layer;
             std::uint64_t m_IgnoredBody;
             bool m_IncludeTriggers;
+            std::uint64_t m_OnlyBody;
+            std::span<const PhysicsBodyId> m_ExcludedBodies;
+            std::uint64_t (*m_BodyValue)(PhysicsBodyId) noexcept;
         };
 
         void ValidateCapsuleOverlap(const PhysicsCapsuleOverlapQuery& query)
@@ -650,6 +763,65 @@ namespace Keire
                 throw std::logic_error("PhysicsWorld is closed or its PhysicsSystem is unavailable.");
         }
 
+        void AccumulateForce(const JPH::BodyID body, const Vector3 force, const Vector3 torque,
+                             const std::optional<Vector3> localPosition)
+        {
+            if (!Math::IsFinite(force) || !Math::IsFinite(torque) || (localPosition && !Math::IsFinite(*localPosition)))
+            {
+                throw std::invalid_argument("Physics force, torque and application point must be finite.");
+            }
+            {
+                JPH::BodyLockWrite lock(Native.GetBodyLockInterface(), body);
+                if (!lock.Succeeded())
+                {
+                    throw std::runtime_error("Physics force target could not be locked.");
+                }
+                auto& native = lock.GetBody();
+                if (!native.IsDynamic())
+                {
+                    throw std::invalid_argument("Physics forces require a dynamic body.");
+                }
+                Vector3d moment{torque.X, torque.Y, torque.Z};
+                if (localPosition)
+                {
+                    const auto center = native.GetCenterOfMassPosition();
+                    const Vector3d arm{static_cast<double>(localPosition->X) - center.GetX(),
+                                       static_cast<double>(localPosition->Y) - center.GetY(),
+                                       static_cast<double>(localPosition->Z) - center.GetZ()};
+                    moment.X += arm.Y * force.Z - arm.Z * force.Y;
+                    moment.Y += arm.Z * force.X - arm.X * force.Z;
+                    moment.Z += arm.X * force.Y - arm.Y * force.X;
+                }
+                const auto checkedVector = [](const Vector3d value)
+                {
+                    constexpr double limit = std::numeric_limits<float>::max();
+                    if (!Math::IsFinite(value) || std::abs(value.X) > limit || std::abs(value.Y) > limit ||
+                        std::abs(value.Z) > limit)
+                    {
+                        throw std::out_of_range("Physics force or torque accumulator exceeds its finite range.");
+                    }
+                    return Vector3{static_cast<float>(value.X), static_cast<float>(value.Y),
+                                   static_cast<float>(value.Z)};
+                };
+                const auto appliedTorque = checkedVector(moment);
+                const auto previousForce = native.GetAccumulatedForce();
+                const auto previousTorque = native.GetAccumulatedTorque();
+                // Validate both sums before either native accumulator is changed.
+                (void)checkedVector({static_cast<double>(previousForce.GetX()) + force.X,
+                                     static_cast<double>(previousForce.GetY()) + force.Y,
+                                     static_cast<double>(previousForce.GetZ()) + force.Z});
+                (void)checkedVector({static_cast<double>(previousTorque.GetX()) + appliedTorque.X,
+                                     static_cast<double>(previousTorque.GetY()) + appliedTorque.Y,
+                                     static_cast<double>(previousTorque.GetZ()) + appliedTorque.Z});
+                native.AddForce(ToJolt(force));
+                native.AddTorque(ToJolt(appliedTorque));
+            }
+            if (force != Vector3{} || torque != Vector3{})
+            {
+                Native.GetBodyInterface().ActivateBody(body);
+            }
+        }
+
         void CloseNative() noexcept
         {
             if (!std::exchange(NativeOpen, false))
@@ -792,6 +964,9 @@ namespace Keire
         std::vector<std::pair<JPH::BodyID, Vector3>> GravityForces;
         bool Open = true;
         bool NativeOpen = true;
+        std::uint64_t PhysicsTick = 0;
+        std::optional<std::uint64_t> AppliedWaterLoadTick;
+        float AppliedWaterLoadDeltaSeconds = 0.0F;
         std::uint64_t NextBody = 1;
         std::map<std::uint64_t, Body> Bodies;
         std::map<BodyPair, ContactData> ActiveContacts;
@@ -1140,6 +1315,39 @@ namespace Keire
         }
     }
 
+    void PhysicsWorld::AddForce(const PhysicsBodyId body, const Vector3 force)
+    {
+        m_Impl->RequireOwner("AddForce");
+        const auto found = m_Impl->Bodies.find(body.m_Value);
+        if (!body || found == m_Impl->Bodies.end())
+        {
+            throw std::invalid_argument("Physics body is unavailable.");
+        }
+        m_Impl->AccumulateForce(found->second.Native, force, {}, std::nullopt);
+    }
+
+    void PhysicsWorld::AddForceAtPosition(const PhysicsBodyId body, const Vector3 force, const Vector3 localPosition)
+    {
+        m_Impl->RequireOwner("AddForceAtPosition");
+        const auto found = m_Impl->Bodies.find(body.m_Value);
+        if (!body || found == m_Impl->Bodies.end())
+        {
+            throw std::invalid_argument("Physics body is unavailable.");
+        }
+        m_Impl->AccumulateForce(found->second.Native, force, {}, localPosition);
+    }
+
+    void PhysicsWorld::AddTorque(const PhysicsBodyId body, const Vector3 torque)
+    {
+        m_Impl->RequireOwner("AddTorque");
+        const auto found = m_Impl->Bodies.find(body.m_Value);
+        if (!body || found == m_Impl->Bodies.end())
+        {
+            throw std::invalid_argument("Physics body is unavailable.");
+        }
+        m_Impl->AccumulateForce(found->second.Native, {}, torque, std::nullopt);
+    }
+
     PhysicsMotionSettings PhysicsWorld::GetMotionSettings(const PhysicsBodyId body) const
     {
         m_Impl->RequireOwner("GetMotionSettings");
@@ -1188,7 +1396,10 @@ namespace Keire
         const auto found = m_Impl->Bodies.find(body.m_Value);
         if (!body || found == m_Impl->Bodies.end() || (state.Body && state.Body != body) ||
             !Math::IsFinite(state.Position) || !Math::IsFinite(state.Rotation) ||
-            !Math::IsFinite(state.LinearVelocity) || !Math::IsFinite(state.AngularVelocity))
+            !Math::IsFinite(state.LinearVelocity) || !Math::IsFinite(state.AngularVelocity) ||
+            !Math::IsFinite(state.PendingForce) || !Math::IsFinite(state.PendingTorque) ||
+            (found->second.Definition.Motion != PhysicsMotionType::Dynamic &&
+             (state.PendingForce != Vector3{} || state.PendingTorque != Vector3{})))
         {
             throw std::invalid_argument("Physics body checkpoint state is invalid or unavailable.");
         }
@@ -1211,6 +1422,360 @@ namespace Keire
         found->second.Definition.Position = state.Position;
         found->second.Definition.Rotation = rotation;
         found->second.Definition.LinearVelocity = state.LinearVelocity;
+        if (found->second.Definition.Motion == PhysicsMotionType::Dynamic)
+        {
+            JPH::BodyLockWrite lock(m_Impl->Native.GetBodyLockInterface(), found->second.Native);
+            if (!lock.Succeeded())
+            {
+                throw std::runtime_error("Physics body force state could not be locked.");
+            }
+            auto& native = lock.GetBody();
+            native.ResetForce();
+            native.ResetTorque();
+            native.AddForce(ToJolt(state.PendingForce));
+            native.AddTorque(ToJolt(state.PendingTorque));
+        }
+    }
+
+    Detail::PhysicsLoadCheckpoint Detail::PhysicsFrameAccess::CaptureLoadCheckpoint(const PhysicsWorld& world)
+    {
+        world.m_Impl->RequireOwner("CaptureLoadCheckpoint");
+        return {world.m_Impl->PhysicsTick, world.m_Impl->AppliedWaterLoadTick,
+                world.m_Impl->AppliedWaterLoadDeltaSeconds};
+    }
+
+    void Detail::PhysicsFrameAccess::ValidateLoadCheckpoint(const PhysicsWorld& world,
+                                                            const PhysicsLoadCheckpoint& state)
+    {
+        world.m_Impl->RequireOwner("ValidateLoadCheckpoint");
+        if (!std::isfinite(state.AcceptedWaterDeltaSeconds) ||
+            (state.AcceptedWaterTick &&
+             (*state.AcceptedWaterTick > state.Tick || state.AcceptedWaterDeltaSeconds <= 0.0F ||
+              state.AcceptedWaterDeltaSeconds > 1.0F)) ||
+            (!state.AcceptedWaterTick && state.AcceptedWaterDeltaSeconds != 0.0F))
+        {
+            throw std::invalid_argument("Physics checkpoint prepared-load metadata is invalid.");
+        }
+        if (world.m_Impl->Revision == std::numeric_limits<std::uint64_t>::max())
+        {
+            throw std::overflow_error("Physics checkpoint capture revision exhausted.");
+        }
+    }
+
+    void Detail::PhysicsFrameAccess::RestoreLoadCheckpoint(PhysicsWorld& world, const PhysicsLoadCheckpoint& state)
+    {
+        ValidateLoadCheckpoint(world, state);
+        world.m_Impl->PhysicsTick = state.Tick;
+        world.m_Impl->AppliedWaterLoadTick = state.AcceptedWaterTick;
+        world.m_Impl->AppliedWaterLoadDeltaSeconds = state.AcceptedWaterDeltaSeconds;
+        // Restoring an earlier tick must never revive a previously captured load batch.
+        ++world.m_Impl->Revision;
+    }
+
+    Detail::ImmutablePhysicsLoadCapture Detail::PhysicsFrameAccess::CapturePreparedLoads(
+        const Ref<PhysicsWorld>& world, const PhysicsLoadFrameContext context, const PhysicsLoadSource source,
+        const std::span<const PhysicsBodyId> bodies)
+    {
+        if (!world)
+        {
+            throw std::invalid_argument("Prepared loads require a live physics world.");
+        }
+        world->m_Impl->RequireOwner("CapturePreparedLoads");
+        if (source != PhysicsLoadSource::Water || !std::isfinite(context.DeltaSeconds) ||
+            context.DeltaSeconds <= 0.0F || context.DeltaSeconds > 1.0F ||
+            bodies.size() > static_cast<std::size_t>(std::numeric_limits<int>::max()))
+        {
+            throw std::invalid_argument("Prepared load source, duration, or body count is invalid.");
+        }
+        auto capture = std::shared_ptr<PhysicsLoadCapture>(new PhysicsLoadCapture());
+        capture->m_World = world;
+        capture->m_Source = source;
+        capture->m_Context = context;
+        capture->m_PhysicsTick = world->m_Impl->PhysicsTick;
+        capture->m_WorldRevision = world->m_Impl->Revision;
+        capture->m_WorldOrigin = world->m_Impl->WorldOrigin;
+        capture->m_UniformGravity = FromJoltVector(world->m_Impl->Native.GetGravity());
+        capture->m_GravitySources = world->m_Impl->GravitySources;
+        capture->m_Bodies.reserve(bodies.size());
+        std::vector<JPH::BodyID> nativeIds;
+        nativeIds.reserve(bodies.size());
+        std::set<std::uint64_t> unique;
+        for (const auto body : bodies)
+        {
+            const auto found = world->m_Impl->Bodies.find(body.m_Value);
+            if (!body || found == world->m_Impl->Bodies.end() || !unique.insert(body.m_Value).second ||
+                found->second.Definition.Motion != PhysicsMotionType::Dynamic)
+            {
+                throw std::invalid_argument("Prepared load capture requires unique live dynamic bodies.");
+            }
+            nativeIds.push_back(found->second.Native);
+        }
+        if (nativeIds.empty())
+        {
+            return capture;
+        }
+        JPH::BodyLockMultiRead locks(world->m_Impl->Native.GetBodyLockInterface(), nativeIds.data(),
+                                     static_cast<int>(nativeIds.size()));
+        for (std::size_t index = 0; index < bodies.size(); ++index)
+        {
+            const auto* native = locks.GetBody(static_cast<int>(index));
+            if (!native)
+            {
+                throw std::runtime_error("Prepared load capture could not lock every body.");
+            }
+            const auto& definition = world->m_Impl->Bodies.at(bodies[index].m_Value).Definition;
+            capture->m_Bodies.push_back(
+                CaptureLoadBody(*native, bodies[index], definition.MotionSettings, definition.UseGravity));
+        }
+        return capture;
+    }
+
+    void Detail::PhysicsFrameAccess::ApplyPreparedLoads(PhysicsWorld& world,
+                                                        const PhysicsLoadFrameContext currentContext,
+                                                        const ImmutablePhysicsLoadCapture& capture,
+                                                        const std::span<const PreparedPhysicsBodyLoad> loads)
+    {
+        world.m_Impl->RequireOwner("ApplyPreparedLoads");
+        const auto owner = capture ? capture->m_World.Lock() : Ref<PhysicsWorld>{};
+        if (!capture || owner.Get() != &world || capture->m_Source != PhysicsLoadSource::Water ||
+            capture->m_Context != currentContext || capture->m_PhysicsTick != world.m_Impl->PhysicsTick ||
+            capture->m_WorldRevision != world.m_Impl->Revision || capture->m_WorldOrigin != world.m_Impl->WorldOrigin ||
+            capture->m_UniformGravity != FromJoltVector(world.m_Impl->Native.GetGravity()) ||
+            capture->m_GravitySources != world.m_Impl->GravitySources ||
+            world.m_Impl->AppliedWaterLoadTick == world.m_Impl->PhysicsTick)
+        {
+            throw std::logic_error("Prepared load capture is stale, foreign, or already consumed for this tick.");
+        }
+        struct Delta
+        {
+            std::size_t Index;
+            Vector3 Force;
+            Vector3 Torque;
+        };
+        std::vector<Delta> deltas;
+        deltas.reserve(loads.size());
+        std::set<std::uint64_t> unique;
+        for (const auto& load : loads)
+        {
+            const auto found =
+                std::ranges::find_if(capture->m_Bodies, [&](const auto& body) { return body.State.Body == load.Body; });
+            if (found == capture->m_Bodies.end() || !unique.insert(load.Body.m_Value).second)
+            {
+                throw std::invalid_argument("Prepared load contains an uncaptured or duplicate body.");
+            }
+            deltas.push_back({static_cast<std::size_t>(found - capture->m_Bodies.begin()),
+                              CheckedPreparedLoad(load.Force), CheckedPreparedLoad(load.Torque)});
+        }
+        std::vector<JPH::BodyID> nativeIds;
+        nativeIds.reserve(capture->m_Bodies.size());
+        for (const auto& body : capture->m_Bodies)
+        {
+            const auto found = world.m_Impl->Bodies.find(body.State.Body.m_Value);
+            if (found == world.m_Impl->Bodies.end())
+            {
+                throw std::logic_error("Prepared load body no longer exists.");
+            }
+            nativeIds.push_back(found->second.Native);
+        }
+        if (nativeIds.empty())
+        {
+            world.m_Impl->AppliedWaterLoadDeltaSeconds = currentContext.DeltaSeconds;
+            world.m_Impl->AppliedWaterLoadTick = world.m_Impl->PhysicsTick;
+            return;
+        }
+        JPH::BodyLockMultiWrite locks(world.m_Impl->Native.GetBodyLockInterface(), nativeIds.data(),
+                                      static_cast<int>(nativeIds.size()));
+        for (std::size_t index = 0; index < capture->m_Bodies.size(); ++index)
+        {
+            const auto* native = locks.GetBody(static_cast<int>(index));
+            if (!native)
+            {
+                throw std::runtime_error("Prepared load could not lock every captured body.");
+            }
+            const auto& captured = capture->m_Bodies[index];
+            const auto& definition = world.m_Impl->Bodies.at(captured.State.Body.m_Value).Definition;
+            const auto current =
+                CaptureLoadBody(*native, captured.State.Body, definition.MotionSettings, definition.UseGravity);
+            if (!SameLoadKinematics(captured, current))
+            {
+                throw std::logic_error("Prepared load body kinematics or inertia changed before commit.");
+            }
+        }
+        for (const auto& delta : deltas)
+        {
+            const auto& native = *locks.GetBody(static_cast<int>(delta.Index));
+            const auto force = native.GetAccumulatedForce();
+            const auto torque = native.GetAccumulatedTorque();
+            (void)CheckedPreparedLoad({static_cast<double>(force.GetX()) + delta.Force.X,
+                                       static_cast<double>(force.GetY()) + delta.Force.Y,
+                                       static_cast<double>(force.GetZ()) + delta.Force.Z});
+            (void)CheckedPreparedLoad({static_cast<double>(torque.GetX()) + delta.Torque.X,
+                                       static_cast<double>(torque.GetY()) + delta.Torque.Y,
+                                       static_cast<double>(torque.GetZ()) + delta.Torque.Z});
+        }
+        auto& bodyInterface = world.m_Impl->Native.GetBodyInterfaceNoLock();
+        for (const auto& delta : deltas)
+        {
+            auto& native = *locks.GetBody(static_cast<int>(delta.Index));
+            native.AddForce(JPH::Vec3(delta.Force.X, delta.Force.Y, delta.Force.Z));
+            native.AddTorque(JPH::Vec3(delta.Torque.X, delta.Torque.Y, delta.Torque.Z));
+            if (delta.Force != Vector3{} || delta.Torque != Vector3{})
+            {
+                bodyInterface.ActivateBody(nativeIds[delta.Index]);
+            }
+        }
+        world.m_Impl->AppliedWaterLoadDeltaSeconds = currentContext.DeltaSeconds;
+        world.m_Impl->AppliedWaterLoadTick = world.m_Impl->PhysicsTick;
+    }
+
+    void Detail::PhysicsFrameAccess::ApplyAuthoredBodyUpdates(PhysicsWorld& world,
+                                                              const std::span<const AuthoredPhysicsBodyUpdate> updates)
+    {
+        world.m_Impl->RequireOwner("ApplyAuthoredBodyUpdates");
+        if (updates.empty())
+        {
+            return;
+        }
+        if (updates.size() > static_cast<std::size_t>(std::numeric_limits<int>::max()))
+        {
+            throw std::length_error("Authored physics batch exceeds native lock capacity.");
+        }
+        std::vector<AuthoredPhysicsBodyUpdate> prepared(updates.begin(), updates.end());
+        std::vector<JPH::BodyID> nativeIds;
+        nativeIds.reserve(prepared.size());
+        std::set<std::uint64_t> unique;
+        for (auto& update : prepared)
+        {
+            const auto found = world.m_Impl->Bodies.find(update.Body.m_Value);
+            if (!update.Body || found == world.m_Impl->Bodies.end() || !unique.insert(update.Body.m_Value).second)
+            {
+                throw std::invalid_argument("Authored physics batch contains a missing or duplicate body.");
+            }
+            if (update.MotionSettings && !Detail::ValidMotionSettings(*update.MotionSettings))
+            {
+                throw std::invalid_argument("Authored physics batch contains invalid motion settings.");
+            }
+            if (update.State)
+            {
+                auto& state = *update.State;
+                if ((state.Body && state.Body != update.Body) || !Math::IsFinite(state.Position) ||
+                    !Math::IsFinite(state.Rotation) || !Math::IsFinite(state.LinearVelocity) ||
+                    !Math::IsFinite(state.AngularVelocity) || !Math::IsFinite(state.PendingForce) ||
+                    !Math::IsFinite(state.PendingTorque) ||
+                    (found->second.Definition.Motion != PhysicsMotionType::Dynamic &&
+                     (state.PendingForce != Vector3{} || state.PendingTorque != Vector3{})))
+                {
+                    throw std::invalid_argument("Authored physics batch contains an invalid body state.");
+                }
+                state.Rotation = Math::Normalize(state.Rotation);
+            }
+            if (update.KinematicTarget)
+            {
+                auto& target = *update.KinematicTarget;
+                if (!Math::IsFinite(target.Position) || !Math::IsFinite(target.Rotation) ||
+                    !std::isfinite(target.DeltaSeconds) || target.DeltaSeconds <= 0.0F || target.DeltaSeconds > 1.0F)
+                {
+                    throw std::invalid_argument("Authored physics batch contains an invalid kinematic target.");
+                }
+                target.Rotation = Math::Normalize(target.Rotation);
+            }
+            nativeIds.push_back(found->second.Native);
+        }
+        JPH::BodyLockMultiWrite locks(world.m_Impl->Native.GetBodyLockInterface(), nativeIds.data(),
+                                      static_cast<int>(nativeIds.size()));
+        for (std::size_t index = 0; index < nativeIds.size(); ++index)
+        {
+            if (!locks.GetBody(static_cast<int>(index)))
+            {
+                throw std::runtime_error("Authored physics batch could not lock every native body.");
+            }
+        }
+        for (std::size_t index = 0; index < prepared.size(); ++index)
+        {
+            const auto& update = prepared[index];
+            if (update.KinematicTarget)
+            {
+                ValidateStagedKinematicTarget(*locks.GetBody(static_cast<int>(index)), update.State,
+                                              *update.KinematicTarget);
+            }
+        }
+        // The multi-lock owns every body until the entire write phase completes. Calling the locking
+        // interface here would recursively lock native mutexes; use its explicitly nonlocking peer.
+        auto& bodies = world.m_Impl->Native.GetBodyInterfaceNoLock();
+        for (std::size_t index = 0; index < prepared.size(); ++index)
+        {
+            const auto& update = prepared[index];
+            auto& record = world.m_Impl->Bodies.at(update.Body.m_Value);
+            auto& native = *locks.GetBody(static_cast<int>(index));
+            if (update.MotionSettings)
+            {
+                const auto& settings = *update.MotionSettings;
+                if (!native.IsStatic())
+                {
+                    auto* motion = native.GetMotionProperties();
+                    motion->SetLinearDamping(settings.LinearDamping);
+                    motion->SetAngularDamping(settings.AngularDamping);
+                    motion->SetMaxLinearVelocity(settings.MaximumLinearSpeed);
+                    motion->SetMaxAngularVelocity(settings.MaximumAngularSpeed);
+                    motion->ClampLinearVelocity();
+                    motion->ClampAngularVelocity();
+                }
+                record.Definition.MotionSettings = settings;
+            }
+            if (update.State)
+            {
+                const auto& state = *update.State;
+                bodies.SetPositionAndRotation(record.Native, ToJolt(state.Position), ToJolt(state.Rotation),
+                                              state.Sleeping ? JPH::EActivation::DontActivate
+                                                             : JPH::EActivation::Activate);
+                if (record.Definition.Motion != PhysicsMotionType::Static)
+                {
+                    bodies.SetLinearAndAngularVelocity(
+                        record.Native,
+                        JPH::Vec3(state.LinearVelocity.X, state.LinearVelocity.Y, state.LinearVelocity.Z),
+                        JPH::Vec3(state.AngularVelocity.X, state.AngularVelocity.Y, state.AngularVelocity.Z));
+                    if (state.Sleeping)
+                    {
+                        bodies.DeactivateBody(record.Native);
+                    }
+                    else
+                    {
+                        bodies.ActivateBody(record.Native);
+                    }
+                }
+                if (record.Definition.Motion == PhysicsMotionType::Dynamic)
+                {
+                    native.ResetForce();
+                    native.ResetTorque();
+                    native.AddForce(ToJolt(state.PendingForce));
+                    native.AddTorque(ToJolt(state.PendingTorque));
+                }
+                record.Definition.Position = state.Position;
+                record.Definition.Rotation = state.Rotation;
+                record.Definition.LinearVelocity = state.LinearVelocity;
+            }
+            if (update.KinematicTarget)
+            {
+                const auto& target = *update.KinematicTarget;
+                bodies.MoveKinematic(record.Native, ToJolt(target.Position), ToJolt(target.Rotation),
+                                     target.DeltaSeconds);
+                record.Definition.Position = target.Position;
+                record.Definition.Rotation = target.Rotation;
+            }
+            if (update.UseGravity)
+            {
+                const bool enabled = *update.UseGravity;
+                record.Definition.UseGravity = enabled;
+                if (record.Definition.Motion == PhysicsMotionType::Dynamic)
+                {
+                    bodies.SetGravityFactor(record.Native, enabled ? 1.0F : 0.0F);
+                    if (enabled)
+                    {
+                        bodies.ActivateBody(record.Native);
+                    }
+                }
+            }
+        }
     }
 
     PhysicsBodyId Detail::PhysicsFrameAccess::CreateFrameBody(PhysicsWorld& world,
@@ -1319,17 +1884,28 @@ namespace Keire
         m_Impl->RequireOwner("TryGetBody");
         const auto found = m_Impl->Bodies.find(body.m_Value);
         if (found == m_Impl->Bodies.end())
+        {
             return std::nullopt;
-        JPH::RVec3 position;
-        JPH::Quat rotation;
-        const auto& bodyInterface = m_Impl->Native.GetBodyInterface();
-        bodyInterface.GetPositionAndRotation(found->second.Native, position, rotation);
-        return PhysicsBodyState{body,
-                                FromJoltPosition(position),
-                                FromJoltRotation(rotation),
-                                FromJoltVector(bodyInterface.GetLinearVelocity(found->second.Native)),
-                                FromJoltVector(bodyInterface.GetAngularVelocity(found->second.Native)),
-                                !bodyInterface.IsActive(found->second.Native)};
+        }
+        JPH::BodyLockRead lock(m_Impl->Native.GetBodyLockInterface(), found->second.Native);
+        if (!lock.Succeeded())
+        {
+            throw std::runtime_error("Physics body state could not be read.");
+        }
+        // Capture one coherent snapshot without reacquiring the body lock for every field.
+        const auto& native = lock.GetBody();
+        PhysicsBodyState result{body,
+                                FromJoltPosition(native.GetPosition()),
+                                FromJoltRotation(native.GetRotation()),
+                                FromJoltVector(native.GetLinearVelocity()),
+                                FromJoltVector(native.GetAngularVelocity()),
+                                !native.IsActive()};
+        if (native.IsDynamic())
+        {
+            result.PendingForce = FromJoltVector(native.GetAccumulatedForce());
+            result.PendingTorque = FromJoltVector(native.GetAccumulatedTorque());
+        }
+        return result;
     }
 
     std::vector<PhysicsQueryHit> PhysicsWorld::RayCast(const PhysicsRayQuery& query) const
@@ -1476,9 +2052,31 @@ namespace Keire
     bool Detail::PhysicsFrameAccess::HasCapsuleContact(const PhysicsWorld& world,
                                                        const PhysicsCapsuleOverlapQuery& query)
     {
+        return HasCapsuleContact(world, query, std::nullopt, {});
+    }
+
+    bool Detail::PhysicsFrameAccess::HasCapsuleContact(const PhysicsWorld& world,
+                                                       const PhysicsCapsuleOverlapQuery& query,
+                                                       const std::optional<PhysicsBodyId> onlyBody,
+                                                       const std::span<const PhysicsBodyId> excludedBodies)
+    {
         world.m_Impl->RequireOwner("HasCapsuleContact");
         ValidateCapsuleOverlap(query);
-        const QueryBodyFilter filter(query.Mask, query.Layer, query.IncludeTriggers, query.IgnoreBody.m_Value);
+        const auto requireBody = [&](const PhysicsBodyId body)
+        {
+            if (!body || !world.m_Impl->Bodies.contains(body.m_Value))
+            {
+                throw std::invalid_argument("Capsule clearance body does not resolve in this live world.");
+            }
+            return body.m_Value;
+        };
+        const auto selected = onlyBody ? requireBody(*onlyBody) : 0;
+        for (const auto body : excludedBodies)
+        {
+            (void)requireBody(body);
+        }
+        const QueryBodyFilter filter(query.Mask, query.Layer, query.IncludeTriggers, query.IgnoreBody.m_Value, selected,
+                                     excludedBodies, [](const PhysicsBodyId body) noexcept { return body.m_Value; });
         const auto transform =
             JPH::RMat44::sRotationTranslation(ToJolt(Math::Normalize(query.Rotation)), ToJolt(query.Center));
         const auto collide = [&](const JPH::Shape& shape)
@@ -1536,13 +2134,30 @@ namespace Keire
         return OverlapSphere({.Center = center, .Radius = radius, .Mask = mask, .Layer = layer});
     }
 
+    void Detail::PhysicsFrameAccess::ValidateStepClock(const PhysicsWorld& world, const float deltaSeconds)
+    {
+        world.m_Impl->RequireOwner("ValidateStepClock");
+        if (!std::isfinite(deltaSeconds) || deltaSeconds <= 0.0F || deltaSeconds > 1.0F)
+        {
+            throw std::invalid_argument("Physics step delta is invalid.");
+        }
+        if (world.m_Impl->PhysicsTick == std::numeric_limits<std::uint64_t>::max())
+        {
+            throw std::overflow_error("Physics tick counter exhausted.");
+        }
+        if (world.m_Impl->AppliedWaterLoadTick == world.m_Impl->PhysicsTick &&
+            world.m_Impl->AppliedWaterLoadDeltaSeconds != deltaSeconds)
+        {
+            throw std::invalid_argument("Physics step duration differs from its accepted prepared loads.");
+        }
+    }
+
     void PhysicsWorld::Step(const float deltaSeconds)
     {
-        m_Impl->RequireOwner("Step");
-        if (!std::isfinite(deltaSeconds) || deltaSeconds <= 0.0F || deltaSeconds > 1.0F)
-            throw std::invalid_argument("Physics step delta is invalid.");
+        Detail::PhysicsFrameAccess::ValidateStepClock(*this, deltaSeconds);
         if (m_Impl->Bodies.empty())
         {
+            ++m_Impl->PhysicsTick;
             m_Impl->ActiveContacts.clear();
             m_Impl->Events.clear();
             return;
@@ -1567,7 +2182,23 @@ namespace Keire
                     Detail::AccumulateGravitySources(m_Impl->GravitySources, m_Impl->WorldOrigin, position);
                 const Vector3d force{acceleration.X * body.Definition.Mass, acceleration.Y * body.Definition.Mass,
                                      acceleration.Z * body.Definition.Mass};
-                forces.emplace_back(body.Native, Math::RelativeFloat(force, {}, std::numeric_limits<float>::max()));
+                const auto sourceForce = Math::RelativeFloat(force, {}, std::numeric_limits<float>::max());
+                if (sourceForce != Vector3{})
+                {
+                    JPH::BodyLockRead lock(m_Impl->Native.GetBodyLockInterface(), body.Native);
+                    if (!lock.Succeeded())
+                    {
+                        throw std::runtime_error("Physics gravity target could not be locked.");
+                    }
+                    const auto pending = lock.GetBody().GetAccumulatedForce();
+                    // External forces may already be queued. Reject combined overflow before any
+                    // gravity force or activation is submitted to the backend.
+                    const Vector3d combined{static_cast<double>(pending.GetX()) + sourceForce.X,
+                                            static_cast<double>(pending.GetY()) + sourceForce.Y,
+                                            static_cast<double>(pending.GetZ()) + sourceForce.Z};
+                    (void)Math::RelativeFloat(combined, {}, std::numeric_limits<float>::max());
+                    forces.emplace_back(body.Native, sourceForce);
+                }
                 body.PendingGravityAcceleration = Detail::CombineGravity(acceleration, uniformGravity);
             }
             // Validate every force before touching native state. Unsupported bodies must keep integrating even
@@ -1613,6 +2244,7 @@ namespace Keire
         }
         m_Impl->ContactListener.Clear();
         const auto collisionSteps = std::max(1, static_cast<int>(std::ceil(deltaSeconds * 60.0F)));
+        ++m_Impl->PhysicsTick;
         const auto error =
             m_Impl->Native.Update(deltaSeconds, collisionSteps, &m_Impl->Temporary, m_Impl->Service->Jobs.get());
         if (error != JPH::EPhysicsUpdateError::None)

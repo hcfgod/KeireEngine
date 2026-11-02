@@ -12,7 +12,7 @@ TEST_CASE("Cloud controls preserve every legacy material uniform prefix")
     CHECK(offsetof(CloudVolumeViewUniforms, ShapeControls) == 272U);
     CHECK(offsetof(CloudVolumeViewUniforms, RegionalControls) == 288U);
     CHECK(offsetof(CloudVolumeViewUniforms, Atmosphere) == 304U);
-    CHECK(sizeof(CloudVolumeViewUniforms) == 1616U);
+    CHECK(sizeof(CloudVolumeViewUniforms) == 13296U);
     CHECK(offsetof(CloudVolumeViewUniforms, PlanetaryCloud) == 1520U);
     CHECK(CloudVolumeUniformByteSize(1U) == 272U);
     CHECK(CloudVolumeUniformByteSize(2U) == 272U);
@@ -28,9 +28,13 @@ TEST_CASE("Cloud controls preserve every legacy material uniform prefix")
     CHECK(CloudVolumeUniformByteSize(12U) == 1520U);
     CHECK(CloudVolumeUniformByteSize(13U) == 1616U);
     CHECK(CloudVolumeUniformByteSize(14U) == 1616U);
+    CHECK(CloudVolumeUniformByteSize(15U) == 13296U);
+    CHECK(CloudVolumeUniformByteSize(16U) == 13296U);
+    CHECK(offsetof(CloudVolumeViewUniforms, PlanetAtmospheres) == 1616U);
+    CHECK(offsetof(CloudVolumeViewUniforms, PlanetWeather) == 2656U);
     CHECK(offsetof(CloudVolumeViewUniforms, Fog) == 448U);
     CHECK(offsetof(CloudVolumeViewUniforms, WeatherControls) == 432U);
     CHECK(offsetof(CloudVolumeViewUniforms, HeightProfile) == 416U);
     CHECK(offsetof(AssetEnvironmentVolumeUniforms, Volume) == 944U);
-    CHECK(sizeof(AssetEnvironmentVolumeUniforms) == 2560U);
+    CHECK(sizeof(AssetEnvironmentVolumeUniforms) == 14240U);
 }

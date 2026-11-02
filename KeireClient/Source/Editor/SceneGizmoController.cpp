@@ -4,6 +4,7 @@
 #include "KeireClient/Editor/ScenePicker.h"
 
 #include "Keire/ECS/Components/CharacterControllerComponent.h"
+#include "Keire/ECS/Components/PostProcessVolumeComponent.h"
 #include "Keire/ECS/Components/RigidBodyComponent.h"
 #include "KeireInternal/FileSystem.h"
 
@@ -290,6 +291,73 @@ namespace KeireEditor
                 if (previous && projected)
                     ui.DrawLine(*previous, *projected, color, thickness);
                 previous = projected;
+            }
+        }
+
+        void DrawPostProcessBounds(Keire::UiFrame& ui, const Keire::TransformComponent& transform,
+                                   const Keire::PostProcessVolumeSettings& settings, const Keire::Vector3d origin,
+                                   const Keire::Matrix4& viewProjection, const Keire::UiItemRect viewport)
+        {
+            if (settings.Global)
+            {
+                return;
+            }
+
+            const auto center = transform.PresentationWorldPositionPrecise();
+            Keire::Vector3 ignoredTranslation;
+            Keire::Quaternion rotation;
+            Keire::Vector3 scale;
+            if (!Keire::Math::DecomposeTransform(
+                    transform.PresentationRelativeMatrix(center, std::numeric_limits<double>::max()),
+                    ignoredTranslation, rotation, scale) ||
+                scale.X == 0.0F || scale.Y == 0.0F || scale.Z == 0.0F)
+            {
+                return;
+            }
+
+            // Match runtime volume geometry, including spherical bounds under nonuniform scale.
+            // Subtract the render origin in double precision before constructing the display matrix.
+            const Keire::Vector3 relative{static_cast<float>(center.X - origin.X),
+                                          static_cast<float>(center.Y - origin.Y),
+                                          static_cast<float>(center.Z - origin.Z)};
+            if (!Keire::Math::IsFinite(relative))
+            {
+                return;
+            }
+            const auto world = Keire::Math::ComposeTransform(relative, rotation, {1.0F, 1.0F, 1.0F});
+            constexpr Keire::UiColor boundaryColor{0.92F, 0.55F, 1.0F, 0.95F};
+            if (settings.Shape == Keire::PostProcessVolumeShape::Box)
+            {
+                const Keire::Vector3 extents{static_cast<float>(settings.HalfExtents.X * std::abs(scale.X)),
+                                             static_cast<float>(settings.HalfExtents.Y * std::abs(scale.Y)),
+                                             static_cast<float>(settings.HalfExtents.Z * std::abs(scale.Z))};
+                if (Keire::Math::IsFinite(extents))
+                {
+                    DrawWorldBox(ui, world, {-extents.X, -extents.Y, -extents.Z}, extents, viewProjection, viewport,
+                                 boundaryColor, 2.0F);
+                }
+                return;
+            }
+
+            const double radius = settings.Radius * std::max({std::abs(scale.X), std::abs(scale.Y), std::abs(scale.Z)});
+            const auto drawSphere = [&](const double value, const Keire::UiColor color, const float thickness)
+            {
+                const float displayRadius = static_cast<float>(value);
+                if (!std::isfinite(displayRadius))
+                {
+                    return;
+                }
+                DrawLocalCircle(ui, world, {}, {1.0F, 0.0F, 0.0F}, {0.0F, 1.0F, 0.0F}, displayRadius, viewProjection,
+                                viewport, color, thickness);
+                DrawLocalCircle(ui, world, {}, {1.0F, 0.0F, 0.0F}, {0.0F, 0.0F, 1.0F}, displayRadius, viewProjection,
+                                viewport, color, thickness);
+                DrawLocalCircle(ui, world, {}, {0.0F, 1.0F, 0.0F}, {0.0F, 0.0F, 1.0F}, displayRadius, viewProjection,
+                                viewport, color, thickness);
+            };
+            drawSphere(radius, boundaryColor, 2.0F);
+            if (settings.BlendDistance > 0.0)
+            {
+                drawSphere(radius + settings.BlendDistance, {0.92F, 0.55F, 1.0F, 0.35F}, 1.0F);
             }
         }
 
@@ -977,6 +1045,11 @@ namespace KeireEditor
             const auto selectedTransform = selectedProbe.GetComponent<Keire::TransformComponent>();
             if (selectedTransform)
             {
+                if (const auto volume = selectedProbe.GetComponent<Keire::PostProcessVolumeComponent>())
+                {
+                    DrawPostProcessBounds(ui, *selectedTransform, volume->Settings(), camera.WorldOrigin,
+                                          viewProjection, viewport);
+                }
                 if (const auto reflection = selectedProbe.GetComponent<Keire::ReflectionProbeComponent>())
                 {
                     const auto extents = reflection->BoxExtents();
@@ -1328,7 +1401,7 @@ namespace KeireEditor
                 if (DistanceToSegment(pointer.Position, *center, handle.End) <= 6.0F)
                     hoveredAxis = handle.HandleAxis;
             }
-            if (m_Tool == SceneTool::Scale)
+            if (m_Tool == SceneTool::Scale || m_Tool == SceneTool::Translate)
             {
                 const Keire::UiItemRect uniformHandle{{center->X - 5.0F, center->Y - 5.0F},
                                                       {center->X + 5.0F, center->Y + 5.0F}};
@@ -1336,6 +1409,21 @@ namespace KeireEditor
                 if (uniformHandle.Contains(pointer.Position))
                     hoveredAxis = Axis::Uniform;
             }
+        }
+
+        if (m_Tool == SceneTool::Rotate)
+        {
+            ui.DrawCircle(*center, 23.0F, {0.92F, 0.92F, 0.92F, 1.0F}, 1.5F);
+            if (Distance(pointer.Position, *center) <= 23.0F)
+            {
+                hoveredAxis = Axis::Uniform;
+            }
+        }
+        if (hovered && hoveredAxis == Axis::Uniform && !pointerBlocked)
+        {
+            ui.SetTooltip(m_Tool == SceneTool::Translate ? "Move in the view plane"
+                          : m_Tool == SceneTool::Rotate  ? "Free rotation"
+                                                         : "Scale all axes together");
         }
 
         if (hovered && pointer.LeftPressed && hoveredAxis != Axis::None && m_Drag.ActiveAxis == Axis::None &&
@@ -1361,6 +1449,21 @@ namespace KeireEditor
                 m_Drag.WorldAxis = {1.0F, 1.0F, 1.0F};
                 m_Drag.ScreenAxis = {1.0F, -1.0F};
                 m_Drag.ScreenLength = std::sqrt(2.0F);
+                const auto inverseView = Keire::Math::Inverse(camera.View);
+                m_Drag.CameraRight = Normalize(Keire::Math::TransformDirection(inverseView, {1.0F, 0.0F, 0.0F}));
+                m_Drag.CameraUp = Normalize(Keire::Math::TransformDirection(inverseView, {0.0F, 1.0F, 0.0F}));
+                if (m_Tool == SceneTool::Translate)
+                {
+                    const auto position = Keire::Math::TransformPoint(
+                        transform->PresentationRelativeMatrix(camera.WorldOrigin, std::numeric_limits<double>::max()),
+                        {});
+                    const auto right = m_Drag.CameraRight;
+                    const auto projectedRight =
+                        Project({position.X + right.X * worldLength, position.Y + right.Y * worldLength,
+                                 position.Z + right.Z * worldLength},
+                                viewProjection, viewport);
+                    m_Drag.ScreenLength = projectedRight ? std::max(Distance(*projectedRight, *center), 1.0F) : 1.0F;
+                }
             }
             else
             {
@@ -1397,7 +1500,42 @@ namespace KeireEditor
                     amount = projectedPixels * 0.35F;
                 else if (m_Tool == SceneTool::Scale)
                     amount = projectedPixels * 0.01F;
-                if (m_Settings.Snapping)
+                if (m_Drag.ActiveAxis == Axis::Uniform && m_Tool != SceneTool::Scale)
+                {
+                    const float x = pointer.Position.X - m_Drag.StartPointer.X;
+                    const float y = pointer.Position.Y - m_Drag.StartPointer.Y;
+                    const auto right = m_Drag.CameraRight;
+                    const auto up = m_Drag.CameraUp;
+                    if (m_Tool == SceneTool::Translate)
+                    {
+                        const float unitsPerPixel = m_Drag.WorldLength / m_Drag.ScreenLength;
+                        Keire::Vector3 delta{(right.X * x - up.X * y) * unitsPerPixel,
+                                             (right.Y * x - up.Y * y) * unitsPerPixel,
+                                             (right.Z * x - up.Z * y) * unitsPerPixel};
+                        if (m_Settings.Snapping)
+                        {
+                            delta = {Snap(delta.X, m_Settings.PositionSnap.X), Snap(delta.Y, m_Settings.PositionSnap.Y),
+                                     Snap(delta.Z, m_Settings.PositionSnap.Z)};
+                        }
+                        amount = Length(delta);
+                        m_Drag.WorldAxis = amount > 0.000001F ? Normalize(delta) : right;
+                    }
+                    else
+                    {
+                        m_Drag.WorldAxis =
+                            Normalize({right.X * y + up.X * x, right.Y * y + up.Y * x, right.Z * y + up.Z * x});
+                        amount = std::sqrt(x * x + y * y) * 0.35F;
+                        if (amount <= 0.000001F)
+                        {
+                            m_Drag.WorldAxis = up;
+                        }
+                        if (m_Settings.Snapping)
+                        {
+                            amount = Snap(amount, m_Settings.RotationSnapDegrees);
+                        }
+                    }
+                }
+                else if (m_Settings.Snapping)
                 {
                     if (m_Tool == SceneTool::Translate)
                     {
@@ -1412,7 +1550,7 @@ namespace KeireEditor
                     else
                         amount = Snap(amount, m_Settings.ScaleSnap);
                 }
-                if (std::abs(amount) > 0.00001F)
+                if (std::abs(amount) > 0.00001F || m_Drag.UndoRecorded)
                 {
                     if (!m_Drag.UndoRecorded)
                     {

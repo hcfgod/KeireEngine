@@ -185,6 +185,8 @@ namespace KeireEditor
             Axis ActiveAxis = Axis::None;
             Keire::UiPosition StartPointer;
             Keire::Vector3 WorldAxis;
+            Keire::Vector3 CameraRight;
+            Keire::Vector3 CameraUp;
             Keire::Vector3d Pivot;
             Keire::Quaternion PivotRotation;
             Keire::UiPosition ScreenAxis;

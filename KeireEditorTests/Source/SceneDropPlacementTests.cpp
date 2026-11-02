@@ -46,3 +46,28 @@ TEST_CASE("precise viewport placement retains distant offsets and the absolute g
     CHECK(horizon.Y == 5.0);
     CHECK(horizon.Z - camera.WorldOrigin.Z == -5.0);
 }
+
+TEST_CASE("viewport prefab placement follows elevated visible mesh bounds instead of global ground")
+{
+    auto scene = Keire::CreateRef<Keire::Scene>(Keire::AssetId::Generate(), Keire::SceneAsset::EmptyDefinition());
+    auto floor = scene->CreateEntity("Elevated floor");
+    auto transform = floor.GetComponent<Keire::TransformComponent>();
+    const Keire::Vector3d origin{1.0e9, 100.0, -1.0e9};
+    transform->SetLocalPositionPrecise(origin);
+    transform->SetLocalScale({20.0F, 1.0F, 20.0F});
+    auto renderer = floor.AddComponent<Keire::MeshRendererComponent>();
+    Keire::RenderCamera camera;
+    camera.WorldOrigin = origin;
+    camera.View = Keire::Math::LookAt({0.0F, 10.0F, 10.0F}, {}, {0.0F, 1.0F, 0.0F});
+    camera.Projection = Keire::Math::Perspective(60.0F, 1.0F, 0.1F, 100.0F);
+    const Keire::UiItemRect viewport{{0.0F, 0.0F}, {200.0F, 200.0F}};
+    const auto hit = KeireEditor::ResolveSceneDropPositionPrecise(viewport, {100.0F, 100.0F}, camera, scene, {});
+    CHECK(hit.X == doctest::Approx(origin.X));
+    CHECK(hit.Y == doctest::Approx(origin.Y + 0.5).epsilon(0.00001));
+    CHECK(hit.Z - origin.Z == doctest::Approx(0.5).epsilon(0.001));
+    renderer->SetVisible(false);
+    const auto hidden = KeireEditor::ResolveSceneDropPositionPrecise(viewport, {100.0F, 100.0F}, camera, scene, {});
+    const auto fallback = KeireEditor::ResolveSceneDropPositionPrecise(viewport, {100.0F, 100.0F}, camera);
+    CHECK(hidden == fallback);
+    scene->Close();
+}

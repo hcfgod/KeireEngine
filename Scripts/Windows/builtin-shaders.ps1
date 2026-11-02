@@ -12,6 +12,7 @@ $Sources = @(
     @{ Prefix = "BuiltinCloudComposite"; Path = (Join-Path $Root "KeireCore\Shaders\BuiltinCloudComposite.hlsl") },
     @{ Prefix = "BuiltinCloudLightCache"; Path = (Join-Path $Root "KeireCore\Shaders\BuiltinCloudLightCache.hlsl"); Compute = $true },
     @{ Prefix = "BuiltinGrid"; Path = (Join-Path $Root "KeireCore\Shaders\BuiltinGrid.hlsl") },
+    @{ Prefix = "BuiltinWater"; Path = (Join-Path $Root "KeireCore\Shaders\BuiltinWater.hlsl") },
     @{ Prefix = "BuiltinDepthVelocity"; Path = (Join-Path $Root "KeireCore\Shaders\BuiltinDepthVelocity.hlsl") },
     @{ Prefix = "BuiltinShadow"; Path = (Join-Path $Root "KeireCore\Shaders\BuiltinShadow.hlsl") },
     @{ Prefix = "BuiltinToneMap"; Path = (Join-Path $Root "KeireCore\Shaders\BuiltinToneMap.hlsl") },
@@ -24,6 +25,10 @@ $Sources = @(
 $Generated = Join-Path $Root "Build\Generated\Keire\BuiltinUnlitShaders.h"
 $GeneratedSource = Join-Path $Root "Build\Generated\Keire\CloudVolumeSource.h"
 $Includes = @((Join-Path $Root "KeireCore\Shaders\BuiltinLighting.hlsli"),
+             (Join-Path $Root "KeireCore\Shaders\BuiltinBrdf.hlsli"),
+             (Join-Path $Root "KeireCore\Shaders\BuiltinDirectionalShadow.hlsli"),
+             (Join-Path $Root "KeireCore\Shaders\WaterWaves.hlsli"),
+             (Join-Path $Root "KeireCore\Shaders\WaterOptics.hlsli"),
              (Join-Path $Root "KeireCore\Shaders\GridAppearance.hlsli"),
               (Join-Path $Root "KeireCore\Shaders\AtmosphereMedium.hlsli"),
               (Join-Path $Root "KeireCore\Shaders\AtmosphereGround.hlsli"),
@@ -36,6 +41,8 @@ $Includes = @((Join-Path $Root "KeireCore\Shaders\BuiltinLighting.hlsli"),
               (Join-Path $Root "KeireCore\Shaders\CloudTemporalRejection.hlsli"),
               (Join-Path $Root "KeireCore\Shaders\CloudRadianceEncoding.hlsli"),
               (Join-Path $Root "KeireCore\Shaders\DisplayTransfer.hlsli"),
+              (Join-Path $Root "KeireCore\Shaders\BuiltinPostProcess.hlsli"),
+              (Join-Path $Root "KeireCore\Shaders\BuiltinDepthOfField.hlsli"),
               (Join-Path $Root "KeireCore\Shaders\CloudVolumeGeometry.hlsli"),
               (Join-Path $Root "KeireCore\Shaders\PlanetaryCloudIntersections.hlsli"),
               (Join-Path $Root "KeireCore\Shaders\PlanetaryCloudGeometry.hlsli"),
@@ -49,6 +56,10 @@ $Includes = @((Join-Path $Root "KeireCore\Shaders\BuiltinLighting.hlsli"),
               (Join-Path $Root "KeireCore\Shaders\CloudVolumeDensity.hlsli"),
               (Join-Path $Root "KeireCore\Shaders\CloudWeather.hlsli"),
               (Join-Path $Root "KeireCore\Shaders\SkyColorGradient.hlsli"),
+              (Join-Path $Root "KeireCore\Shaders\PlanetVolumeWeatherUniforms.hlsli"),
+              (Join-Path $Root "KeireCore\Shaders\PlanetVolumeIntervalGrid.hlsli"),
+              (Join-Path $Root "KeireCore\Shaders\PlanetVolumeRayIntervals.hlsli"),
+              (Join-Path $Root "KeireCore\Shaders\PlanetVolumeTransport.hlsli"),
               (Join-Path $Root "KeireCore\Shaders\CloudVolumeView.hlsli"),
               (Join-Path $Root "KeireCore\Shaders\VolumeSurfaceComposition.hlsli"),
               (Join-Path $Root "KeireCore\Shaders\VolumeTransport.hlsli"))
@@ -124,15 +135,15 @@ try {
         $SourceVariants = if ($Source.ContainsKey('Compute')) { $ComputeVariants } else { $Variants }
         foreach ($Variant in $SourceVariants) {
             $Bytes = [IO.File]::ReadAllBytes((Join-Path $Temporary "$($Source.Prefix)-$($Variant.File)"))
-            [void]$Builder.AppendLine("    inline constexpr unsigned char $($Source.Prefix)$($Variant.Name)[] = {")
-            for ($Index = 0; $Index -lt $Bytes.Length; $Index += 16) {
-                $End = [Math]::Min($Index + 15, $Bytes.Length - 1)
-                $Values = for ($Byte = $Index; $Byte -le $End; ++$Byte) { "0x{0:x2}" -f $Bytes[$Byte] }
-                [void]$Builder.Append("        ")
-                [void]$Builder.Append(($Values -join ", "))
-                [void]$Builder.AppendLine(",")
+            # Adjacent byte strings avoid one C++ initializer expression per byte. The explicit
+            # size below excludes the string terminator from shader uploads.
+            [void]$Builder.AppendLine("    inline constexpr unsigned char $($Source.Prefix)$($Variant.Name)[] =")
+            for ($Index = 0; $Index -lt $Bytes.Length; $Index += 8192) {
+                $Count = [Math]::Min(8192, $Bytes.Length - $Index)
+                $Escaped = [BitConverter]::ToString($Bytes, $Index, $Count).Replace('-', '\x').ToLowerInvariant()
+                [void]$Builder.Append('        "\x').Append($Escaped).AppendLine('"')
             }
-            [void]$Builder.AppendLine("    };")
+            [void]$Builder.AppendLine("    ;")
             [void]$Builder.AppendLine("    inline constexpr unsigned int $($Source.Prefix)$($Variant.Name)Size = $($Bytes.Length);")
         }
     }
@@ -150,9 +161,10 @@ try {
     $SourceBuilder = [Text.StringBuilder]::new()
     [void]$SourceBuilder.Append("#pragma once`n`nnamespace Keire::Detail`n{`n")
     [void]$SourceBuilder.Append('    inline constexpr char CloudVolumeShaderSource[] = "\n"').Append("`n")
-    foreach ($SourceName in @('VolumeTransport', 'AtmosphereMedium', 'CloudVolumeGeometry',
+    foreach ($SourceName in @('VolumeTransport', 'AtmosphereMedium', 'AtmosphereSunOcclusion', 'PlanetAtmosphereSet', 'CloudVolumeGeometry',
                               'PlanetaryCloudIntersections', 'PlanetaryCloudGeometry', 'PlanetaryCloudWeather',
                               'FogExclusion', 'FogDensity', 'FogRayIntervals', 'CloudVolumeLighting', 'CloudVolumeDensity', 'CloudWeather', 'CloudNoiseBuffer', 'CloudVolume',
+                              'PlanetVolumeWeatherUniforms', 'PlanetVolumeIntervalGrid', 'PlanetVolumeRayIntervals', 'PlanetVolumeTransport',
                               'VolumeSurfaceComposition', 'CloudVolumeView')) {
         $SourcePath = Join-Path $Root "KeireCore\Shaders\$SourceName.hlsli"
         foreach ($SourceLine in [IO.File]::ReadAllLines($SourcePath)) {

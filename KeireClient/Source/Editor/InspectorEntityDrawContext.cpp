@@ -1,4 +1,5 @@
 #include "KeireClientInternal/Editor/InspectorEntityDrawContext.h"
+#include "Keire/ECS/Components/WaterBodyComponent.h"
 #include "KeireClient/Editor/InspectorComponentUtilities.h"
 #include <utility>
 
@@ -60,7 +61,14 @@ namespace KeireEditor
             {
                 DrawMeshRenderer(mixedComponentValues);
             }
-            DrawReflectedComponent(displayedComponent, mixedComponentValues);
+            if (displayedComponent->Type() == Keire::WaterBodyComponent::StaticType())
+            {
+                DrawWaterBody(displayedComponent, mixedComponentValues);
+            }
+            else
+            {
+                DrawReflectedComponent(displayedComponent, mixedComponentValues);
+            }
             if (displayedRegistration && m_CurrentHeaderExpanded)
             {
                 const auto headerTitle = m_CurrentHeaderTitle;

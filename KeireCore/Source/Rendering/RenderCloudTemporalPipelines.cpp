@@ -1,6 +1,8 @@
 #include "Keire/BuiltinUnlitShaders.h"
+#include "KeireInternal/Rendering/CloudHistoryCompositeBlend.h"
 #include "KeireInternal/Rendering/CloudTemporalRendering.h"
 #include "KeireInternal/Rendering/CloudTemporalShaderBindings.h"
+#include "KeireInternal/Rendering/RenderBackendConversionsInternal.h"
 #include "KeireInternal/Rendering/RenderBackendInternal.h"
 
 #include <array>
@@ -90,9 +92,11 @@ namespace Keire::RenderBackend
         return shader;
     }
 
-    SDL_GPUGraphicsPipeline* EnsureCloudTemporalPipeline(RenderSharedState& state, const CloudTemporalPass pass)
+    SDL_GPUGraphicsPipeline* EnsureCloudTemporalPipeline(RenderSharedState& state, const CloudTemporalPass pass,
+                                                         const RenderSampleCount samples,
+                                                         const CloudHistoryCompositeMode mode)
     {
-        const auto index = static_cast<std::size_t>(pass);
+        const auto index = CloudTemporalPipelineIndex(pass, samples, mode);
         if (index >= state.CloudTemporalPipelines.size())
         {
             throw std::invalid_argument("Unsupported cloud temporal pass.");
@@ -111,6 +115,7 @@ namespace Keire::RenderBackend
             std::array<SDL_GPUColorTargetDescription, 2> colors{};
             colors[0].format = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
             colors[1].format = SDL_GPU_TEXTUREFORMAT_R32G32_FLOAT;
+            colors[0].blend_state = CloudHistoryCompositeBlend(mode);
             SDL_GPUGraphicsPipelineCreateInfo information{};
             information.vertex_shader = vertex.get();
             information.fragment_shader = fragment.get();
@@ -118,7 +123,7 @@ namespace Keire::RenderBackend
             information.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
             information.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
             information.rasterizer_state.front_face = SDL_GPU_FRONTFACE_CLOCKWISE;
-            information.multisample_state.sample_count = SDL_GPU_SAMPLECOUNT_1;
+            information.multisample_state.sample_count = ToSdlSampleCount(samples);
             information.target_info.color_target_descriptions = colors.data();
             information.target_info.num_color_targets = pass == CloudTemporalPass::Composite ? 1U : 2U;
             auto* pipeline = SDL_CreateGPUGraphicsPipeline(state.Device, &information);

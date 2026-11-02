@@ -7,6 +7,7 @@
 #include "KeireClient/Editor/AssetOperationService.h"
 #include "KeireClient/Editor/AssetPicker.h"
 #include "KeireClient/Editor/AudioMixerPanel.h"
+#include "KeireClient/Editor/DocumentSourcePersistence.h"
 #include "KeireClient/Editor/EditorPanels.h"
 #include "KeireClient/Editor/EditorRuntimeUiInput.h"
 #include "KeireClient/Editor/LightingPanel.h"
@@ -14,6 +15,7 @@
 #include "KeireClient/Editor/ManagedRuntimeDiagnostics.h"
 #include "KeireClient/Editor/MaterialGraphPanel.h"
 #include "KeireClient/Editor/MaterialMigrationReview.h"
+#include "KeireClient/Editor/PostProcessPanel.h"
 #include "KeireClient/Editor/RiggingStudioPanel.h"
 #include "KeireClient/Editor/ShaderGraphPanel.h"
 #include "KeireClient/Editor/UiBuilderPanel.h"
@@ -44,6 +46,7 @@ namespace KeireEditor
     class AnimatorControllerDocument;
     class AudioMixerDocument;
     class AudioMixerPreviewSession;
+    class PostProcessPreviewSession;
     class VfxEffectDocument;
     struct AssetMutationUndoState;
     enum class AssetMutationPhase : std::uint8_t;
@@ -111,6 +114,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
                                    private KeireEditor::IAnimatorControllerPanelController,
                                    private KeireEditor::IRiggingStudioController,
                                    private KeireEditor::IAudioMixerPanelController,
+                                   private KeireEditor::IPostProcessPanelController,
                                    private KeireEditor::IVfxEffectPanelController,
                                    private KeireEditor::IMaterialGraphPanelController,
                                    private KeireEditor::IShaderGraphPanelController,
@@ -152,6 +156,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
         DirtyScene,
         DirtyShaderGraph,
         DirtyMaterialGraph,
+        DirtyPostProcessing,
         DirtyPlayerBuild,
         RenameEntity
     };
@@ -178,6 +183,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     void DrawSceneSourceConflictDialog(Keire::UiFrame& ui);
     void DrawDirtyShaderGraphDialog(Keire::UiFrame& ui);
     void DrawDirtyMaterialGraphDialog(Keire::UiFrame& ui);
+    void DrawDirtyPostProcessingDialog(Keire::UiFrame& ui);
     void DrawDirtyPlayerBuildDialog(Keire::UiFrame& ui);
     void DrawThemeEditor(Keire::UiFrame& ui, Keire::UiWorkspace& workspace);
     [[nodiscard]] KeireEditor::InputActionsDocument& InputActionsState() noexcept override;
@@ -504,6 +510,17 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     void RedoAnimatorControllerEdit() override;
     void ReportAnimatorControllerError(std::string message) noexcept override;
     [[nodiscard]] KeireEditor::AudioMixerDocument& AudioMixerState() noexcept override;
+    [[nodiscard]] KeireEditor::PostProcessDocument& PostProcessState() noexcept override;
+    [[nodiscard]] Keire::Ref<Keire::AssetDatabase> PostProcessDatabase() const noexcept override;
+    void ActivatePostProcessHistory() noexcept override;
+    void OpenPostProcessProfile(Keire::AssetId asset) override;
+    [[nodiscard]] Keire::Ref<Keire::AssetSystem> PostProcessAssets() const noexcept override;
+    void CreatePostProcessProfile(std::string_view name) override;
+    void SavePostProcessProfile() override;
+    void ReloadPostProcessProfile() override;
+    void PersistPostProcessProfile(Keire::AssetId asset, std::span<const std::byte> bytes);
+    void PreviewPostProcessProfile(Keire::AssetId asset, const Keire::PostProcessProfileDefinition& definition);
+    void StopPostProcessPreview();
     [[nodiscard]] const Keire::UiThemeDefinition& AudioMixerTheme() const noexcept override;
     [[nodiscard]] Keire::Ref<Keire::AssetDatabase> AudioMixerDatabase() const noexcept override;
     [[nodiscard]] std::string_view AudioMixerPreviewDiagnostic() const noexcept override;
@@ -880,6 +897,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     std::unique_ptr<KeireEditor::ConsolePanel> m_ConsolePanel;
     std::unique_ptr<KeireEditor::DiagnosticsPanel> m_DiagnosticsPanel;
     std::unique_ptr<KeireEditor::AudioMixerPreviewSession> m_AudioMixerPreview;
+    std::unique_ptr<KeireEditor::PostProcessPreviewSession> m_PostProcessPreview;
     std::unique_ptr<KeireEditor::EditorDocumentWorkspaceDocuments> m_ConstructedDocuments;
     KeireEditor::SceneDocument* m_SceneDocument = nullptr;
     std::unique_ptr<KeireEditor::SceneDocument> m_PrefabReturnDocument;
@@ -893,6 +911,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     KeireEditor::InputActionsDocument* m_InputActionsDocument = nullptr;
     KeireEditor::AnimatorControllerDocument* m_AnimatorControllerDocument = nullptr;
     KeireEditor::AudioMixerDocument* m_AudioMixerDocument = nullptr;
+    KeireEditor::PostProcessDocument* m_PostProcessDocument = nullptr;
     KeireEditor::VfxEffectDocument* m_VfxEffectDocument = nullptr;
     KeireEditor::ShaderGraphDocument* m_ShaderGraphDocument = nullptr;
     KeireEditor::MaterialGraphDocument* m_MaterialGraphDocument = nullptr;
@@ -917,6 +936,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     std::unique_ptr<KeireEditor::AnimatorControllerPanel> m_AnimatorControllerPanel;
     std::unique_ptr<KeireEditor::RiggingStudioPanel> m_RiggingStudioPanel;
     std::unique_ptr<KeireEditor::AudioMixerPanel> m_AudioMixerPanel;
+    std::unique_ptr<KeireEditor::PostProcessPanel> m_PostProcessPanel;
     std::unique_ptr<KeireEditor::VfxEffectPanel> m_VfxEffectPanel;
     std::unique_ptr<KeireEditor::ShaderGraphPanel> m_ShaderGraphPanel;
     std::unique_ptr<KeireEditor::MaterialGraphPanel> m_MaterialGraphPanel;
@@ -1087,6 +1107,8 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     Keire::UiColor m_NoticeColor;
     std::uint32_t m_FrameCount = 0;
     std::uint64_t m_AudioMixerDocumentRevision = 0;
+    std::uint64_t m_PostProcessDocumentRevision = 0;
+    KeireEditor::DocumentSourcePersistence m_PostProcessPersistence;
     std::uint64_t m_VfxEffectDocumentRevision = 0;
     std::uint64_t m_MaterialGraphDocumentRevision = 0;
     std::uint64_t m_ShaderGraphDocumentRevision = 0;

@@ -65,6 +65,11 @@ public sealed class Camera : Component
 {
     internal Camera(Entity entity) : base(entity) { }
     private const NativeRenderingComponent Component = NativeRenderingComponent.Camera;
+
+    /// <summary>Discard temporal rendering history after a teleport or camera cut.
+    /// Ordinary movement and floating-origin shifts do not require this.</summary>
+    public void ResetTemporalHistory() => NativeRuntimeRendering.ResetCameraTemporalHistory(Entity);
+
     public Material? EffectBeforeTonemapping
     {
         get => Asset.FromId<Material>(NativeRuntimeRendering.GetAsset(Entity, Component, NativeRenderingAssetProperty.EffectBeforeTonemapping));

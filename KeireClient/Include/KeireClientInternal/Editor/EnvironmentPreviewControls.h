@@ -5,6 +5,7 @@
 #include "KeireClientInternal/Editor/EnvironmentPreviewClock.h"
 
 #include <cmath>
+#include <format>
 #include <string>
 
 namespace KeireEditor::Detail
@@ -17,7 +18,7 @@ namespace KeireEditor::Detail
         ui.TextColored(theme.Accent, "Preview Clock: " + EnvironmentClockLabel(state.DayFraction));
         ui.TextColoredWrapped(theme.MutedText, preview.Playing() ? "Playing - temporary edit-mode preview"
                                                                  : "Paused - temporary edit-mode preview");
-        const bool wideTransport = ui.ContentAvailable().Width >= 360.0F;
+        const bool wideTransport = ui.ContentAvailable().Width >= 440.0F;
         if (auto help = ui.BeginSection("How time preview works"); help)
         {
             ui.TextColoredWrapped(
@@ -34,7 +35,7 @@ namespace KeireEditor::Detail
                 "Sky textures, environment reflections and baked lighting do not animate with this clock. "
                 "Clock shortcuts seek within the current preview day without saving.");
         }
-        if (ui.Button(preview.Playing() ? "Pause Time Preview" : "Play Time Preview"))
+        if (ui.Button(preview.Playing() ? "Pause Preview" : "Play Preview"))
         {
             preview.SetPlaying(!preview.Playing());
         }
@@ -42,29 +43,34 @@ namespace KeireEditor::Detail
         {
             ui.SameLine();
         }
-        if (ui.Button("Reset Time Preview"))
+        if (ui.Button("Reset Preview"))
         {
             preview.Reset();
         }
         state = preview.State();
         constexpr const char* timeLabels[] = {"Midnight (00:00)", "Dawn (06:00)", "Noon (12:00)", "Dusk (18:00)"};
-        for (std::size_t index = 0; index < 4; ++index)
+        if (wideTransport)
         {
-            if (wideTransport && index % 2 == 1)
+            ui.SameLine();
+        }
+        ui.SetNextItemWidth(170.0F);
+        if (auto presets = ui.BeginCombo("##PreviewTimePreset", "Jump to time..."); presets)
+        {
+            for (std::size_t index = 0; index < 4; ++index)
             {
-                ui.SameLine();
-            }
-            if (ui.Button(timeLabels[index]))
-            {
-                preview.Seek(state.Day, static_cast<double>(index) / 4.0);
-                state = preview.State();
+                if (ui.Selectable(timeLabels[index]))
+                {
+                    preview.Seek(state.Day, static_cast<double>(index) / 4.0);
+                    state = preview.State();
+                }
             }
         }
-        ui.Text("Day Fraction");
+        ui.Text("Time of Day (hours)");
         ui.SetNextItemWidth(-1.0F);
-        if (ui.SliderScalar("##Day Fraction", state.DayFraction, 0.0, std::nextafter(1.0, 0.0)))
+        double hours = state.DayFraction * 24.0;
+        if (ui.SliderScalar("##TimeOfDayHours", hours, 0.0, std::nextafter(24.0, 0.0)))
         {
-            preview.Seek(state.Day, state.DayFraction);
+            preview.Seek(state.Day, hours / 24.0);
         }
         if (auto advanced = ui.BeginSection("Day and playback settings"); advanced)
         {
@@ -80,7 +86,7 @@ namespace KeireEditor::Detail
             {
                 preview.SetSpeed(state.Rate);
             }
-            ui.TextColoredWrapped(theme.MutedText, "Day length: " + std::to_string(state.SecondsPerDay) + " seconds.");
+            ui.TextColoredWrapped(theme.MutedText, std::format("Day length: {:.1f} seconds.", state.SecondsPerDay));
             ui.TextColoredWrapped(theme.MutedText, "Negative speed runs backward. These controls affect preview only; "
                                                    "Apply Time preserves the project's authored playback rate.");
         }

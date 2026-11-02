@@ -326,6 +326,11 @@ namespace Keire::RenderBackend
         SDL_GPUTexture* Depth = nullptr;
         SDL_GPUTexture* MultisampleDepth = nullptr;
         SDL_GPUTexture* SampledDepth = nullptr;
+        SDL_GPUTexture* LensDepth = nullptr;
+        std::array<SDL_GPUTexture*, 2> LensColors{};
+        std::array<SDL_GPUTexture*, 3> DofPyramid{};
+        std::array<SDL_GPUTexture*, 2> DofLayers{};
+        std::array<SDL_GPUTexture*, 2> DofBounds{};
         SDL_GPUTexture* DirectionalShadow = nullptr;
         SDL_GPUTexture* LocalShadow = nullptr;
         GpuOcclusionFrameResources GpuOcclusion;

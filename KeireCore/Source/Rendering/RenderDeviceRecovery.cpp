@@ -255,6 +255,11 @@ namespace Keire::RenderBackend
         ReleaseRuntimeUiRenderTextureCache(true);
         LightingTextureCache.clear();
         LightingSetCache.clear();
+        PostProcessContributions.clear();
+        PostProcessProfileLeases.clear();
+        PostProcessProfileCache.clear();
+        PostProcessLookups.clear();
+        PostProcessLookupTextures.clear();
         LightProbeVolumeCache.clear();
         MaterialCache.clear();
         ShaderCache.clear();

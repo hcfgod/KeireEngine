@@ -10,6 +10,7 @@
 #include "Keire/ECS/Components/ColliderComponent.h"
 #include "Keire/ECS/Components/DirectionalLightComponent.h"
 #include "Keire/ECS/Components/MeshRendererComponent.h"
+#include "Keire/ECS/Components/PostProcessVolumeComponent.h"
 #include "Keire/ECS/Components/TransformComponent.h"
 #include "Keire/ECS/Components/UiDocumentComponent.h"
 #include "Keire/ECS/Components/VfxEmitterComponent.h"
@@ -40,7 +41,7 @@ namespace Keire
         constexpr std::size_t MaximumComponentDataBytes = 4ULL * 1024ULL * 1024U;
         constexpr std::size_t MaximumHierarchyDepth = 512;
         constexpr std::size_t MaximumNameBytes = 256;
-        constexpr std::uint32_t SceneAssetImporterVersion = 10;
+        constexpr std::uint32_t SceneAssetImporterVersion = 11;
 
         [[nodiscard]] std::string_view LegacyUiComponentName(const ComponentTypeId type) noexcept
         {
@@ -286,6 +287,10 @@ namespace Keire
             {
                 for (const auto key : {"effectBeforeTonemapping", "effectAfterTonemapping", "effectAfterUi"})
                     CollectSerializedAsset(data, key, dependencies);
+            }
+            else if (component.Type == PostProcessVolumeComponent::StaticType())
+            {
+                CollectSerializedAsset(data, "profile", dependencies);
             }
             else if (component.Type == AnimatorComponent::StaticType())
             {

@@ -84,7 +84,6 @@ namespace Keire::Detail
                 ImGui::PopItemFlag();
                 if (ImGui::IsItemVisible())
                 {
-                    const auto fullText = ScalarEditText(candidate);
                     auto visibleText = ScalarDisplayText(candidate);
                     const float available = std::max(1.0F, decimalFrame.GetWidth() - style.FramePadding.x * 2.0F);
                     // Explicit middle elision keeps a tiny nonzero value from appearing to be a run of zeros.
@@ -122,7 +121,7 @@ namespace Keire::Detail
                     {
                         ImGui::BeginTooltip();
                         ImGui::PushTextWrapPos(ImGui::GetFontSize() * 40.0F);
-                        ImGui::TextUnformatted(fullText.c_str());
+                        ImGui::TextUnformatted(completeDisplay.c_str());
                         ImGui::PopTextWrapPos();
                         ImGui::EndTooltip();
                     }

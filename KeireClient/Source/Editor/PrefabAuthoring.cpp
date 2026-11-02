@@ -1,5 +1,7 @@
 #include "KeireClient/Editor/PrefabAuthoring.h"
 
+#include "Keire/ECS/Components/TransformComponent.h"
+
 #include <algorithm>
 #include <ranges>
 #include <set>
@@ -128,6 +130,17 @@ namespace KeireEditor
                 copy.Transform.Position = {(copy.Transform.Position.X - root->Transform.Position.X) + position->X,
                                            (copy.Transform.Position.Y - root->Transform.Position.Y) + position->Y,
                                            (copy.Transform.Position.Z - root->Transform.Position.Z) + position->Z};
+                // ECS reconstruction reads the serialized component before the legacy transform record.
+                // Keep both representations aligned so the mouse placement survives reconstruction and saving.
+                if (const auto transform = std::ranges::find(copy.Components, Keire::TransformComponent::StaticType(),
+                                                             &Keire::SceneComponentDefinition::Type);
+                    transform != copy.Components.end())
+                {
+                    auto data = nlohmann::json::parse(transform->Data);
+                    data["position"] = {copy.Transform.Position.X, copy.Transform.Position.Y,
+                                        copy.Transform.Position.Z};
+                    transform->Data = data.dump();
+                }
                 instance.Overrides.push_back({.Kind = Keire::PrefabOverrideKind::SetObjectTransform,
                                               .Object = object.Id,
                                               .Transform = copy.Transform});

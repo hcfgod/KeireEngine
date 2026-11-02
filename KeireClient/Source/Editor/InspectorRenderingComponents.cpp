@@ -20,7 +20,7 @@ namespace KeireEditor
         {
             m_Ui.Spacing();
             auto& cameraExpanded = Expansion("camera");
-            if (auto card = m_Ui.BeginChild("CameraCard", {0.0F, cameraExpanded ? 620.0F : 38.0F}, true, false); card)
+            if (auto card = m_Ui.BeginChild("CameraCard", {0.0F, cameraExpanded ? 690.0F : 38.0F}, true, false); card)
             {
                 const auto registration = m_Scene->Components()->Find(camera->Type());
                 const bool removed = registration && DrawComponentHeader(camera, *registration, cameraExpanded,
@@ -120,6 +120,51 @@ namespace KeireEditor
                             SetComponentProperty(
                                 camera->Type(), "clearColor",
                                 Keire::Color{clearColor.Red, clearColor.Green, clearColor.Blue, clearColor.Alpha});
+                        }
+                    }
+                    auto postProcessingEnabled = camera->PostProcessingEnabled();
+                    if (m_Ui.Checkbox("Use Post Processing Volumes", postProcessingEnabled))
+                    {
+                        m_Panel.m_Controller.RecordInspectorUndo();
+                        SetComponentProperty(camera->Type(), "postProcessingEnabled", postProcessingEnabled);
+                    }
+                    auto volumeMask = camera->PostProcessVolumeMask();
+                    const auto maskPreview = volumeMask == 0U    ? "None"
+                                             : volumeMask == ~0U ? "All Layers"
+                                                                 : "Selected Layers";
+                    if (auto volumeLayers = m_Ui.BeginCombo("Volume Layers", maskPreview); volumeLayers)
+                    {
+                        bool changed = false;
+                        if (m_Ui.Selectable("All Layers", volumeMask == ~0U))
+                        {
+                            volumeMask = ~0U;
+                            changed = true;
+                        }
+                        if (m_Ui.Selectable("None", volumeMask == 0U))
+                        {
+                            volumeMask = 0U;
+                            changed = true;
+                        }
+                        const auto names = m_Panel.m_Controller.InspectorLayerNames();
+                        for (std::uint32_t layer = 0; layer < Keire::EntityLayerCount; ++layer)
+                        {
+                            const std::uint32_t bit = 1U << layer;
+                            bool included = (volumeMask & bit) != 0U;
+                            const auto label =
+                                (layer < names.size() && !names[layer].empty() ? names[layer]
+                                                                               : "Layer " + std::to_string(layer)) +
+                                "##PostProcessLayer" + std::to_string(layer);
+                            if (m_Ui.Checkbox(label, included))
+                            {
+                                volumeMask = included ? volumeMask | bit : volumeMask & ~bit;
+                                changed = true;
+                            }
+                        }
+                        if (changed)
+                        {
+                            m_Panel.m_Controller.RecordInspectorUndo();
+                            SetComponentProperty(camera->Type(), "postProcessVolumeMask",
+                                                 static_cast<std::int64_t>(volumeMask));
                         }
                     }
                     m_Ui.Text("Fullscreen Effects");

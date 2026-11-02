@@ -41,6 +41,8 @@ namespace Keire::Detail
       public:
         ~ManagedRuntimeSceneServices() override = default;
 
+        [[nodiscard]] bool ResetManagedCameraTemporalHistory(std::uint64_t world, AssetId entity) noexcept override;
+
         [[nodiscard]] Entity ResolveManagedEntity(std::uint64_t world, AssetId entity) const noexcept;
 
         [[nodiscard]] std::optional<float>

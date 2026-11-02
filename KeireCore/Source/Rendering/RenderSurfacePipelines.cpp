@@ -1134,6 +1134,7 @@ namespace Keire::RenderBackend
         try
         {
             auto replacement = CreateResources(surface, samples);
+            (void)RetainCloudHistoryForResize(surface.Resources.CloudHistory, replacement.CloudHistory);
             Retire(std::exchange(surface.Resources, replacement));
             surface.Width = surface.RequestedWidth;
             surface.Height = surface.RequestedHeight;

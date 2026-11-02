@@ -26,6 +26,8 @@ namespace KeireEditor
         camera.WorldOrigin = PreciseFocus();
         camera.View = ViewMatrix();
         camera.Projection = ProjectionMatrix(aspect);
+        camera.TemporalHistoryId = m_TemporalHistoryId;
+        camera.TemporalHistoryRevision = m_TemporalHistoryRevision;
         return camera;
     }
 
@@ -162,6 +164,7 @@ namespace KeireEditor
                 state.SurfaceNavigation = surface != 0;
             }
             m_Camera.SetState(state);
+            ResetTemporalHistory();
             m_LockedEntities = std::move(locked);
             m_Dirty = false;
             return true;

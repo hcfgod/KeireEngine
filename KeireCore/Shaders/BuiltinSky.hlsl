@@ -1,5 +1,7 @@
 #include "AtmosphereGround.hlsli"
 #include "PlanetAtmosphereSet.hlsli"
+#include "PlanetWeatherUniforms.hlsli"
+#include "PlanetWeatherCloudEvents.hlsli"
 #include "CloudLayered.hlsl"
 #include "SkyColorGradient.hlsli"
 
@@ -43,6 +45,7 @@ cbuffer SkyConstants : register(b0, space3)
     float4 PlanetaryCloudPhase[2];
     float4 StarOrientation;
     PlanetAtmosphereSet PlanetAtmospheres;
+    PlanetWeatherUniforms PlanetWeather;
 };
 
 Texture2D EnvironmentTexture : register(t0, space2);
@@ -178,14 +181,25 @@ float3 AtmosphereSunTransmission(float3 position)
     return AtmosphereMediumSunTransmission(position, CurrentAtmosphereMedium());
 }
 
-float3 AtmosphereRadiance(float3 direction, out float3 backgroundTransmission, out float3 sunRadiance)
+float3 AtmosphereRadiance(float3 direction, out float3 backgroundTransmission, out float3 sunRadiance,
+    out float3 cloudRadiance, out float3 cloudTransmission)
 {
+    cloudRadiance = 0.0F;
+    cloudTransmission = 1.0F;
     if (PlanetAtmospheres.Controls.x > 0U)
     {
         uint ground;
         float endDistance;
-        const AtmosphereTransport air = IntegratePlanetAtmosphereSet(0.0F, direction, 3.0e30F,
+        AtmosphereTransport air = IntegratePlanetAtmosphereSet(0.0F, direction, 3.0e30F,
             PlanetAtmospheres, true, true, ground, endDistance);
+        if (PlanetWeather.Controls.x > 0U)
+        {
+            PlanetWeatherEvent events[KEIRE_MAX_PLANET_WEATHER_EVENTS];
+            const uint eventCount = BuildPlanetWeatherCloudEvents(direction, PlanetWeather, PlanetAtmospheres,
+                CloudAmbientLight.xyz, CloudSunLight.xyz, CloudSunDirection.xyz, events);
+            air = ComposePlanetWeather(direction, endDistance, PlanetAtmospheres, events, eventCount,
+                cloudRadiance, cloudTransmission);
+        }
         sunRadiance = 0.0F;
         backgroundTransmission = ground == KEIRE_MAX_PLANET_ATMOSPHERES ? air.Transmission : 0.0F;
         float3 radiance = air.Radiance;
@@ -361,11 +375,20 @@ float4 PSMain(VertexOutput input) : SV_Target0
     float3 radiance = 0.0F;
     float3 backgroundTransmission = 1.0F;
     float3 sunRadiance = 0.0F;
+    float3 cloudRadiance = 0.0F;
+    float3 cloudTransmission = 1.0F;
     if (AtmosphereControls.x > 0.5F || PlanetAtmospheres.Controls.x > 0U)
     {
-        radiance = AtmosphereRadiance(direction, backgroundTransmission, sunRadiance);
+        radiance = AtmosphereRadiance(direction, backgroundTransmission, sunRadiance,
+            cloudRadiance, cloudTransmission);
     }
-    else if (SkyParameters.w >= 0.0F)
+    bool hasAirTransport = AtmosphereControls.x > 0.5F;
+    [loop]
+    for (uint planetIndex = 0U; planetIndex < PlanetAtmospheres.Controls.x; ++planetIndex)
+    {
+        hasAirTransport = hasAirTransport || PlanetAtmospheres.Media[planetIndex].Controls.x > 0.5F;
+    }
+    if (!hasAirTransport && SkyParameters.w >= 0.0F)
     {
         const float rotation = radians(SkyParameters.x);
         const float sineRotation = sin(rotation);
@@ -379,13 +402,18 @@ float4 PSMain(VertexOutput input) : SV_Target0
                                        0.5F - asin(clamp(environmentDirection.y, -1.0F, 1.0F)) / 3.14159265359F)
                               : CubemapAtlasUv(environmentDirection, layout);
         const float4 sampleValue = EnvironmentTexture.SampleLevel(EnvironmentSampler, uv, 0.0F);
-        radiance = (SkyParameters.w >= 16.0F ? DecodeRgbe(sampleValue) : sampleValue.rgb) * SkyParameters.y;
+        radiance += (SkyParameters.w >= 16.0F ? DecodeRgbe(sampleValue) : sampleValue.rgb) *
+            SkyParameters.y * backgroundTransmission;
     }
     if (SkyHorizonWeight.w > 0.0F)
     {
         float3 up = float3(0.0F, 1.0F, 0.0F);
         bool visibleSky = true;
         float gradientWeight = SkyHorizonWeight.w;
+        if (PlanetAtmospheres.Controls.x > 0U)
+        {
+            visibleSky = any(backgroundTransmission > 0.0F);
+        }
         if (AtmosphereControls.x > 0.5F)
         {
             const float observerRadius = length(AtmosphereObserverRadius.xyz);
@@ -393,25 +421,31 @@ float4 PSMain(VertexOutput input) : SV_Target0
                 SkyGradientAtmosphereWeight(observerRadius, AtmosphereObserverRadius.w, AtmosphereSunHeight.w);
             up = AtmosphereObserverRadius.xyz / max(observerRadius, 1.0e-6F);
             float2 groundInterval;
-            visibleSky = observerRadius >= AtmosphereObserverRadius.w &&
+            visibleSky = visibleSky && observerRadius >= AtmosphereObserverRadius.w &&
                          !AtmosphereGroundIntersection(AtmosphereObserverRadius.xyz, direction, groundInterval);
         }
         if (visibleSky && gradientWeight > 0.0F)
         {
             // Override only the background, retaining the solar disc and later stars/clouds.
-            const float3 background = max(radiance - sunRadiance, 0.0F);
+            const float3 background = max(radiance - sunRadiance - cloudRadiance, 0.0F);
             const float cosineZenith = dot(direction, up);
-            radiance = float3(BlendSkyColorChannel(background.r, SkyHorizonWeight.r, SkyZenithExponent.r, cosineZenith,
+            const float3 horizon = SkyHorizonWeight.xyz * cloudTransmission;
+            const float3 zenith = SkyZenithExponent.xyz * cloudTransmission;
+            radiance = float3(BlendSkyColorChannel(background.r, horizon.r, zenith.r, cosineZenith,
                                                    gradientWeight, SkyZenithExponent.w),
-                              BlendSkyColorChannel(background.g, SkyHorizonWeight.g, SkyZenithExponent.g, cosineZenith,
+                              BlendSkyColorChannel(background.g, horizon.g, zenith.g, cosineZenith,
                                                    gradientWeight, SkyZenithExponent.w),
-                              BlendSkyColorChannel(background.b, SkyHorizonWeight.b, SkyZenithExponent.b, cosineZenith,
+                              BlendSkyColorChannel(background.b, horizon.b, zenith.b, cosineZenith,
                                                    gradientWeight, SkyZenithExponent.w)) +
-                       sunRadiance;
+                       sunRadiance + cloudRadiance;
         }
     }
     radiance += StarRadiance(direction) * backgroundTransmission;
-    if (PlanetaryCloud.Controls.x != 0U)
+    if (PlanetWeather.Controls.x > 0U && PlanetAtmospheres.Controls.x > 0U)
+    {
+        // Shells were composed with the atmospheric segments above.
+    }
+    else if (PlanetaryCloud.Controls.x != 0U)
     {
         PlanetaryCloudLayer layer0;
         layer0.Geometry = CloudGeometry0;

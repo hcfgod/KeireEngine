@@ -6,6 +6,11 @@ namespace Keire::RenderBackend
 {
     [[nodiscard]] inline bool CloudLightCacheHasDemand(const CloudVolumeViewUniforms& view) noexcept
     {
+        // A single-profile cache cannot represent shadows from other planetary media.
+        if (view.PlanetWeather.Controls[0] > 1U)
+        {
+            return false;
+        }
         if (view.Volume.Quality[0] == 0U || view.Volume.Density[0] <= 0.0F || view.Volume.Density[1] <= 0.0F)
         {
             return false;

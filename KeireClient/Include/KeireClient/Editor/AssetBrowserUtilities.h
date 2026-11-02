@@ -103,6 +103,7 @@ namespace KeireEditor
         AnimationGraph,
         AnimationClip,
         AudioMixer,
+        PostProcessing,
         VfxEffect,
         UiDocument,
         UiStyleSheet,

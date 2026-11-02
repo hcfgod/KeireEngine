@@ -181,6 +181,44 @@ TEST_CASE("Player support prefers the editor bundle and falls back to compatible
     CHECK(resolved.Variant.Configuration == Keire::PlayerBuildConfiguration::Development);
 }
 
+TEST_CASE("DevDist host runtime supports development players without impersonating release support")
+{
+    if (Keire::GetBuildInfo().Configuration != "DevDist")
+    {
+        MESSAGE("DevDist-specific runtime selection is exercised by the DevDist suite.");
+        return;
+    }
+
+    TemporaryDirectory directory;
+    const auto platform = Keire::HostPlayerPlatform();
+    const auto architecture = Keire::HostPlayerArchitecture();
+    const auto output =
+        directory.Path / "Build" / "Bin" /
+        ("DevDist-" + std::string(Keire::ToString(platform)) + "-" + std::string(Keire::ToString(architecture)));
+#if defined(_WIN32)
+    constexpr auto executableName = "KeireAssetTool.exe";
+    constexpr auto runtimeName = "KeireRuntime.exe";
+#else
+    constexpr auto executableName = "KeireAssetTool";
+    constexpr auto runtimeName = "KeireRuntime";
+#endif
+    const auto executable = output / "KeireAssetTool" / executableName;
+    const auto runtime = output / "KeireRuntime";
+    std::filesystem::create_directories(executable.parent_path());
+    std::filesystem::create_directories(runtime);
+    Keire::Detail::WriteTextFileAtomically(runtime / runtimeName, "runtime fixture");
+    const auto installed = directory.Path / "Installed";
+    const auto resolved = Keire::Detail::ResolvePlayerSupport(
+        executable, platform, architecture, Keire::PlayerBuildConfiguration::Development, "modules", installed);
+    CHECK(resolved.DevelopmentFallback);
+    CHECK(resolved.InstallationRoot == runtime);
+    CHECK(resolved.Variant.Configuration == Keire::PlayerBuildConfiguration::Development);
+    CHECK_THROWS((void)Keire::Detail::ResolvePlayerSupport(
+        executable, platform, architecture, Keire::PlayerBuildConfiguration::Release, "modules", installed));
+    CHECK_THROWS((void)Keire::Detail::ResolvePlayerSupport(
+        executable, platform, architecture, Keire::PlayerBuildConfiguration::Dist, "modules", installed));
+}
+
 TEST_CASE("Player support manifests load target variants and confined paths")
 {
     TemporaryDirectory directory;

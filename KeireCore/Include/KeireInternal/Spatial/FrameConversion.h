@@ -22,8 +22,9 @@ namespace Keire::Detail
     };
 
     // Rotation and angular velocity use the same live route as positions, without constructing an absolute position.
-    inline void ConvertFrameAxes(const FrameRegistry& registry, const LiveFrame& source, const LiveFrame& target,
-                                 const std::span<const BoundFrameSnapshot> snapshots, const double time,
+    template <typename Registry>
+    inline void ConvertFrameAxes(const Registry& registry, const LiveFrame& source, const LiveFrame& target,
+                                 const std::span<const typename Registry::SnapshotType> snapshots, const double time,
                                  FrameRotation& orientation, std::array<double, 3>& angularVelocity)
     {
         (void)registry.Identity(source);
@@ -122,10 +123,10 @@ namespace Keire::Detail
         angularVelocity = convertedAngularVelocity;
     }
 
-    [[nodiscard]] inline FrameRotation ConvertFrameRotation(const FrameRegistry& registry, const LiveFrame& source,
-                                                            const LiveFrame& target,
-                                                            const std::span<const BoundFrameSnapshot> snapshots,
-                                                            const double time)
+    template <typename Registry>
+    [[nodiscard]] inline FrameRotation
+    ConvertFrameRotation(const Registry& registry, const LiveFrame& source, const LiveFrame& target,
+                         const std::span<const typename Registry::SnapshotType> snapshots, const double time)
     {
         FrameRotation rotation;
         std::array<double, 3> angularVelocity{};
@@ -134,10 +135,11 @@ namespace Keire::Detail
     }
 
     // Owner-serialized operation. Input snapshots are borrowed only for this synchronous call.
-    [[nodiscard]] inline SpatialMotion ConvertFrameMotion(const FrameRegistry& registry, const LiveFrame& source,
-                                                          const LiveFrame& target, const SpatialMotion& motion,
-                                                          const std::span<const BoundFrameSnapshot> snapshots,
-                                                          const double time)
+    template <typename Registry>
+    [[nodiscard]] inline SpatialMotion
+    ConvertFrameMotion(const Registry& registry, const LiveFrame& source, const LiveFrame& target,
+                       const SpatialMotion& motion, const std::span<const typename Registry::SnapshotType> snapshots,
+                       const double time)
     {
         const auto sourceIdentity = registry.Identity(source);
         const auto targetIdentity = registry.Identity(target);
@@ -219,14 +221,44 @@ namespace Keire::Detail
         }
         return result;
     }
-    [[nodiscard]] inline SpatialBodyState ConvertFrameBodyState(const FrameRegistry& registry, const LiveFrame& source,
-                                                                const LiveFrame& target, const SpatialBodyState& state,
-                                                                const std::span<const BoundFrameSnapshot> snapshots,
-                                                                const double time)
+    template <typename Registry>
+    [[nodiscard]] inline SpatialBodyState
+    ConvertFrameBodyState(const Registry& registry, const LiveFrame& source, const LiveFrame& target,
+                          const SpatialBodyState& state,
+                          const std::span<const typename Registry::SnapshotType> snapshots, const double time)
     {
         auto result = state;
         result.Motion = ConvertFrameMotion(registry, source, target, state.Motion, snapshots, time);
         ConvertFrameAxes(registry, source, target, snapshots, time, result.Orientation, result.AngularVelocity);
         return result;
+    }
+    // Preserve the published-snapshot overloads for existing internal callers and function pointers.
+    inline void ConvertFrameAxes(const FrameRegistry& registry, const LiveFrame& source, const LiveFrame& target,
+                                 std::span<const BoundFrameSnapshot> snapshots, double time, FrameRotation& orientation,
+                                 std::array<double, 3>& angularVelocity)
+    {
+        ConvertFrameAxes<FrameRegistry>(registry, source, target, snapshots, time, orientation, angularVelocity);
+    }
+
+    [[nodiscard]] inline FrameRotation ConvertFrameRotation(const FrameRegistry& registry, const LiveFrame& source,
+                                                            const LiveFrame& target,
+                                                            std::span<const BoundFrameSnapshot> snapshots, double time)
+    {
+        return ConvertFrameRotation<FrameRegistry>(registry, source, target, snapshots, time);
+    }
+
+    [[nodiscard]] inline SpatialMotion ConvertFrameMotion(const FrameRegistry& registry, const LiveFrame& source,
+                                                          const LiveFrame& target, const SpatialMotion& motion,
+                                                          std::span<const BoundFrameSnapshot> snapshots, double time)
+    {
+        return ConvertFrameMotion<FrameRegistry>(registry, source, target, motion, snapshots, time);
+    }
+
+    [[nodiscard]] inline SpatialBodyState ConvertFrameBodyState(const FrameRegistry& registry, const LiveFrame& source,
+                                                                const LiveFrame& target, const SpatialBodyState& state,
+                                                                std::span<const BoundFrameSnapshot> snapshots,
+                                                                double time)
+    {
+        return ConvertFrameBodyState<FrameRegistry>(registry, source, target, state, snapshots, time);
     }
 } // namespace Keire::Detail

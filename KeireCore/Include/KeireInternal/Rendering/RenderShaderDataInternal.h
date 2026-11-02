@@ -8,6 +8,7 @@
 #include "KeireInternal/Rendering/CloudVolumeViewUniforms.h"
 #include "KeireInternal/Rendering/IrradynSceneCacheInternal.h"
 #include "KeireInternal/Rendering/PlanetAtmosphereSetUniforms.h"
+#include "KeireInternal/Rendering/PlanetWeatherUniforms.h"
 #include "KeireInternal/Rendering/PlanetaryCloudUniforms.h"
 #include "KeireInternal/Rendering/SkyColorUniforms.h"
 #include "KeireInternal/Rendering/StarFieldUniforms.h"
@@ -384,7 +385,7 @@ namespace Keire::RenderBackend
         CloudVolumeViewUniforms Volume;
     };
 
-    static_assert(sizeof(AssetEnvironmentVolumeUniforms) == 2560U);
+    static_assert(sizeof(AssetEnvironmentVolumeUniforms) == 14240U);
     static_assert(offsetof(AssetEnvironmentVolumeUniforms, Volume) == 944U);
 
     static_assert(sizeof(AssetObjectUniforms) == sizeof(float) * 64);
@@ -416,9 +417,11 @@ namespace Keire::RenderBackend
         std::array<Vector4, MaximumCloudLayers> PlanetaryCloudPhase;
         std::array<float, 4> StarOrientation;
         PlanetAtmosphereSetUniforms PlanetAtmospheres;
+        PlanetWeatherUniforms PlanetWeather;
     };
 
-    static_assert(sizeof(SkyUniforms) == 1728U);
+    static_assert(sizeof(SkyUniforms) == 3792U);
+    static_assert(offsetof(SkyUniforms, PlanetWeather) == 1728);
     static_assert(offsetof(SkyUniforms, PlanetAtmospheres) == 688);
     static_assert(offsetof(SkyUniforms, SkyColors) == 496);
 

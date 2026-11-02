@@ -53,6 +53,8 @@ namespace Keire
             static KEIRE_API void ValidateFrameFollowing(const SceneRuntimeSession& session,
                                                          bool validateContent = true);
             static KEIRE_API void SetFrameFollowing(SceneRuntimeSession& session, bool enabled);
+            static KEIRE_API void ValidateFrameMotion(const SceneRuntimeSession& session,
+                                                      const SceneFrameMotion& motion, float deltaSeconds);
             static KEIRE_API void PrepareFrameMotion(SceneRuntimeSession& session, const SceneFrameMotion& motion);
         };
     } // namespace Detail

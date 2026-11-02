@@ -8,6 +8,11 @@
 
 namespace Keire
 {
+    namespace Detail
+    {
+        class CharacterMovementAccess;
+    }
+
     struct CharacterControllerRuntimeState
     {
         std::uint32_t Generation = 0;
@@ -60,6 +65,7 @@ namespace Keire
 
       private:
         friend class Detail::SceneState;
+        friend class Detail::CharacterMovementAccess;
         void ApplyEntityLayer(std::uint32_t value) noexcept { m_Layer = value; }
         AssetId m_RuntimeId = AssetId::Generate();
         float m_Radius = 0.5F;

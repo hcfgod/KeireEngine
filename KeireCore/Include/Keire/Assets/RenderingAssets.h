@@ -24,7 +24,7 @@ namespace Keire
 
     [[nodiscard]] constexpr bool VolumeLightingUsesNoiseBuffer(const std::uint32_t version) noexcept
     {
-        return version == 10U || version == 12U || version == 14U;
+        return version == 10U || version == 12U || version == 14U || version == 16U;
     }
 
     [[nodiscard]] constexpr bool VolumeLightingUsesNoiseTexture(const std::uint32_t version) noexcept

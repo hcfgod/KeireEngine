@@ -155,6 +155,9 @@ namespace Keire
         Vector3 LinearVelocity;
         Vector3 AngularVelocity;
         bool Sleeping = false;
+        // Solver-space loads awaiting the next step; restoring state replaces both accumulators.
+        Vector3 PendingForce;
+        Vector3 PendingTorque;
     };
 
     struct PhysicsRayQuery
@@ -316,6 +319,15 @@ namespace Keire
         void SetKinematicTarget(PhysicsBodyId body, Vector3 position, Quaternion rotation);
         void SetBodyState(PhysicsBodyId body, const PhysicsBodyState& state);
         void SetGravityEnabled(PhysicsBodyId body, bool enabled);
+        /// Accumulate a force (newtons) at the center of mass for the next simulation step.
+        /// Requires an open world on its owner thread and an existing dynamic body. Nonzero forces wake it.
+        /// Forces use simulation axes, accumulate until Step, and survive translation rebasing.
+        /// Rejects nonfinite input and accumulator overflow before changing body state.
+        void AddForce(PhysicsBodyId body, Vector3 force);
+        /// As AddForce, with torque from a point local to WorldOrigin(), measured from the center of mass.
+        void AddForceAtPosition(PhysicsBodyId body, Vector3 force, Vector3 localPosition);
+        /// Accumulate torque (newton-metres) in simulation axes, under the same contract as AddForce.
+        void AddTorque(PhysicsBodyId body, Vector3 torque);
         void SetMotionSettings(PhysicsBodyId body, const PhysicsMotionSettings& settings);
         [[nodiscard]] PhysicsMotionSettings GetMotionSettings(PhysicsBodyId body) const;
         /// Uniform acceleration in simulation axes, in metres per second squared.

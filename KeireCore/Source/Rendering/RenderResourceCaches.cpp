@@ -501,54 +501,47 @@ namespace Keire::RenderBackend
 #endif
         const auto preparationStarted = std::chrono::steady_clock::now();
         auto request = std::move(pending.Request);
+        auto planetWeather = Detail::CapturePlanetWeather(request.PlanetAtmospheres, request.PlanetEnvironment,
+                                                          request.Environment.Atmosphere, request.Environment.Clouds,
+                                                          request.Environment.Fog, MaximumPlanetAtmospheres);
+        auto planetVolumeFog = Detail::ComposePlanetWeatherFog(request.Environment.Fog, planetWeather);
         // Resolve all inherited candidates before changing the selected per-view environment.
-        const auto inheritedAtmosphere = request.Environment.Atmosphere;
         const bool hasAtmosphereOverrides =
             (request.PlanetEnvironment && request.PlanetEnvironment->AtmosphereOverride) ||
             std::ranges::any_of(request.PlanetAtmospheres,
                                 [](const auto& candidate) { return candidate.AtmosphereOverride.has_value(); });
-        if (!inheritedAtmosphere.Enabled && !hasAtmosphereOverrides)
+        if (request.PlanetAtmospheres.size() > MaximumPlanetAtmospheres &&
+            (request.Environment.Atmosphere.Enabled || hasAtmosphereOverrides))
         {
-            request.PlanetAtmospheres.clear();
+            throw std::length_error("Planet atmosphere rendering supports at most eight candidates per view.");
         }
-        std::vector<AtmosphereSettings> atmosphereSettings;
-        atmosphereSettings.reserve(request.PlanetAtmospheres.size());
+        auto atmospheres = Detail::CapturePlanetAtmospheres(request.PlanetAtmospheres, request.PlanetEnvironment,
+                                                            request.Environment.Atmosphere);
+        auto atmosphereFrames = std::move(atmospheres.Frames);
+        auto atmosphereSettings = std::move(atmospheres.Profiles);
+        if (!planetWeather.empty())
+        {
+            // Disabled media still supply solid geometry for cloud visibility and sunlight occlusion.
+            atmosphereFrames.clear();
+            atmosphereSettings.clear();
+            for (const auto& weather : planetWeather)
+            {
+                const auto candidate =
+                    std::ranges::find(request.PlanetAtmospheres, weather.Frame.Planet, &PlanetEnvironmentView::Planet);
+                atmosphereFrames.push_back(weather.Frame);
+                atmosphereSettings.push_back(candidate->AtmosphereOverride.value_or(request.Environment.Atmosphere));
+            }
+        }
         if (request.PlanetEnvironment)
         {
             Detail::ApplyPlanetEnvironmentOverrides(*request.PlanetEnvironment, request.Environment.Atmosphere,
                                                     request.Environment.Clouds, request.Environment.Fog);
         }
-        if (request.PlanetAtmospheres.size() > MaximumPlanetAtmospheres)
+        if (atmosphereFrames.empty())
         {
-            throw std::length_error("Planet atmosphere rendering supports at most eight candidates per view.");
+            request.PlanetAtmospheres.clear();
         }
         std::ranges::sort(request.PlanetAtmospheres, {}, &PlanetEnvironmentView::Planet);
-        std::vector<Detail::ResolvedPlanetFrame> atmosphereFrames;
-        atmosphereFrames.reserve(request.PlanetAtmospheres.size());
-        for (const auto& atmosphere : request.PlanetAtmospheres)
-        {
-            if (!atmosphereFrames.empty() && atmosphereFrames.back().Planet == atmosphere.Planet)
-            {
-                throw std::invalid_argument("Planet atmosphere candidates contain a duplicate identity.");
-            }
-            if (!atmosphereFrames.empty())
-            {
-                const auto& first = atmosphereFrames.front();
-                if (first.ObserverFrame.World != atmosphere.World ||
-                    first.ObserverFrame.Frame != atmosphere.ObserverFrame ||
-                    first.SnapshotTime != atmosphere.SnapshotTime ||
-                    first.TopologyRevision != atmosphere.TopologyRevision)
-                {
-                    throw std::invalid_argument(
-                        "Planet atmosphere candidates require one observer frame and evaluation epoch.");
-                }
-            }
-            atmosphereFrames.push_back(Detail::CapturePlanetEnvironment(atmosphere));
-            if (hasAtmosphereOverrides)
-            {
-                atmosphereSettings.push_back(atmosphere.AtmosphereOverride.value_or(inheritedAtmosphere));
-            }
-        }
         if (request.PlanetEnvironment && request.EvaluatedEnvironment)
         {
             const auto planet = Detail::CapturePlanetEnvironment(*request.PlanetEnvironment);
@@ -689,6 +682,7 @@ namespace Keire::RenderBackend
         const auto featureSelection = ResolveRenderFeatureSelection(request.Environment, featureCapabilities);
         const bool temporalAntiAliasing = featureSelection.EffectiveAntiAliasing == RenderAntiAliasingMode::Taa;
         SceneRenderPacket packet;
+        packet.FeatureEnvironment = request.Environment;
         packet.Scene = primaryContribution->Asset();
         packet.Camera = camera;
         packet.UnjitteredProjection = camera.Projection;
@@ -706,16 +700,35 @@ namespace Keire::RenderBackend
         const auto previousCamera = CameraMotionHistory.find(cameraHistoryKey);
         auto cameraHistory = MakeCameraMotionHistory(unjitteredViewProjection, acceptedFrameId, request.Environment,
                                                      request.EvaluatedEnvironment);
+        cameraHistory.TemporalHistoryId = camera.TemporalHistoryId;
+        cameraHistory.TemporalHistoryRevision = camera.TemporalHistoryRevision;
         cameraHistory.WorldOrigin = camera.WorldOrigin;
         cameraHistory.EnvironmentAnchor = camera.EnvironmentAnchor;
         cameraHistory.PlanetEnvironment = MakePlanetEnvironmentHistoryKey(request.PlanetEnvironment);
         cameraHistory.PlanetAtmosphereSettings = atmosphereSettings;
+        cameraHistory.PlanetWeather = MakePlanetWeatherHistory(planetWeather);
         for (const auto& atmosphere : request.PlanetAtmospheres)
         {
             cameraHistory.PlanetAtmospheres.emplace_back(*MakePlanetEnvironmentHistoryKey(atmosphere),
                                                          atmosphere.ObserverFromCenterPlanetMetres);
         }
         const bool environmentDirectional = request.EvaluatedEnvironment && request.EvaluatedEnvironment->Directional;
+        packet.Environment = request.Environment;
+        packet.PlanetAtmospheres = std::move(atmosphereFrames);
+        packet.PlanetAtmosphereSettings = std::move(atmosphereSettings);
+        packet.PlanetWeather = std::move(planetWeather);
+        packet.PlanetVolumeFog = std::move(planetVolumeFog);
+        if (request.PlanetEnvironment)
+        {
+            packet.PlanetFrame = Detail::CapturePlanetEnvironment(*request.PlanetEnvironment);
+        }
+        packet.SkyColors = CaptureSkyColors(request.EvaluatedEnvironment);
+        Detail::ApplyEnvironment(packet.Environment, packet.CloudAdvectionPhase, packet.StarTwinklePhase,
+                                 request.EvaluatedEnvironment);
+        packet.AcceptedFrameId = acceptedFrameId;
+        CapturePostProcessing(request, packet);
+        cameraHistory.PostProcessExposure = packet.Environment.Exposure;
+        cameraHistory.Bloom = packet.Environment.Bloom;
         packet.TemporalHistoryContinuous = previousCamera != CameraMotionHistory.end() && acceptedFrameId != 0U &&
                                            previousCamera->second.Frame == acceptedFrameId - 1U &&
                                            previousCamera->second.HasContinuousEnvironment(cameraHistory);
@@ -725,16 +738,6 @@ namespace Keire::RenderBackend
                                             : viewProjection;
         packet.PreviousWorldOrigin =
             packet.TemporalHistoryContinuous ? previousCamera->second.WorldOrigin : camera.WorldOrigin;
-        packet.Environment = request.Environment;
-        packet.PlanetAtmospheres = std::move(atmosphereFrames);
-        packet.PlanetAtmosphereSettings = std::move(atmosphereSettings);
-        if (request.PlanetEnvironment)
-        {
-            packet.PlanetFrame = Detail::CapturePlanetEnvironment(*request.PlanetEnvironment);
-        }
-        packet.SkyColors = CaptureSkyColors(request.EvaluatedEnvironment);
-        Detail::ApplyEnvironment(packet.Environment, packet.CloudAdvectionPhase, packet.StarTwinklePhase,
-                                 request.EvaluatedEnvironment);
         packet.CloudVolume = CaptureCloudVolume(
             packet.Camera, packet.Environment.Clouds.Volume, request.EvaluatedEnvironment, false, camera.WorldOrigin,
             camera.EnvironmentAnchor, packet.PlanetFrame ? &*packet.PlanetFrame : nullptr);
@@ -785,7 +788,6 @@ namespace Keire::RenderBackend
         packet.DrawGrid = packet.DrawGrid && packet.Grid.Opacity > 0.0F;
         packet.MaterialTimeSeconds = request.MaterialTimeSeconds;
         packet.MaterialDeltaSeconds = request.MaterialDeltaSeconds;
-        packet.AcceptedFrameId = acceptedFrameId;
         packet.FrameIndex = request.FrameIndex;
         packet.VfxSnapshots.reserve(request.AdditionalScenes.size() + 1U);
 
@@ -807,6 +809,10 @@ namespace Keire::RenderBackend
             packet.LightProbeVolumes.insert(packet.LightProbeVolumes.end(),
                                             std::make_move_iterator(lightProbeVolumes.begin()),
                                             std::make_move_iterator(lightProbeVolumes.end()));
+
+            CaptureWaterBodies(*scene, camera.WorldOrigin, Math::TransformPoint(Math::Inverse(camera.View), {}),
+                               camera.View, Math::Multiply(camera.Projection, camera.View), request.MaterialTimeSeconds,
+                               packet.Water);
 
             const auto sceneAsset = scene->Asset();
             const auto renderEntities = scene->Query<MeshRendererComponent>();
@@ -899,6 +905,7 @@ namespace Keire::RenderBackend
             for (auto& contribution : request.AdditionalScenes)
                 appendContribution(contribution.Scene, std::move(contribution.Vfx));
         }
+        SortWaterPatches(packet.Water.Patches);
 
 #if defined(KEIRE_ENABLE_TEST_HOOKS)
         {

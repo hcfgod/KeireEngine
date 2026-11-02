@@ -175,7 +175,7 @@ TEST_CASE("Shader Graph v2 catalogs stable node identities and migrates v1 sourc
 TEST_CASE("Shader Graph compatibility versions are explicit and future sources fail recoverably")
 {
     CHECK(Keire::ShaderGraphSourceSchemaVersion == 6);
-    CHECK(Keire::ShaderGraphGeneratedShaderVersion == 40);
+    CHECK(Keire::ShaderGraphGeneratedShaderVersion == 42);
     CHECK(Keire::ShaderGraphVertexLayoutVersion == 3);
 
     const auto graph = Keire::CreateDefaultShaderGraph();
@@ -193,9 +193,10 @@ TEST_CASE("Shader Graph compatibility versions are explicit and future sources f
     CHECK(manifest.at("vfxRenderOriginAbiVersion") == 1U);
     CHECK(manifest.at("occlusionSupport") == 3U);
     CHECK(manifest.at("spatialLightingAbiVersion") == 3U);
-    CHECK(manifest.at("volumeLightingAbiVersion") == 13U);
+    CHECK(manifest.at("volumeLightingAbiVersion") == 15U);
+    CHECK(variant.Hlsl.find("#define KEIRE_PLANET_VOLUME_SET 1\n") != std::string::npos);
     CHECK(manifest.at("maximumWorldPositionDisplacementRadius").get<float>() == doctest::Approx(0.0F));
-    CHECK(variant.Hlsl.find("Generator version 40, source schema 6") != std::string::npos);
+    CHECK(variant.Hlsl.find("Generator version 42, source schema 6") != std::string::npos);
     CHECK(variant.Hlsl.find("#define KEIRE_CLOUD_NOISE_TEXTURE t") != std::string::npos);
     CHECK(variant.Hlsl.find("Texture3D<float4> VolumeCloudNoiseTexture") != std::string::npos);
     CHECK(variant.Hlsl.find("#define KEIRE_CLOUD_NOISE_TEXTURE t9\n") != std::string::npos);
@@ -1458,7 +1459,7 @@ TEST_CASE("Shader Graph preserves seven material textures within the portable sa
         REQUIRE(compilation.Variants.size() == 1);
         const auto& variant = compilation.Variants.front();
         const auto manifest = nlohmann::json::parse(variant.Manifest);
-        CHECK(manifest.at("volumeLightingAbiVersion") == (textureCount == 7U ? 14U : 13U));
+        CHECK(manifest.at("volumeLightingAbiVersion") == (textureCount == 7U ? 16U : 15U));
         CHECK(variant.Hlsl.find(textureCount == 7U ? "#define KEIRE_CLOUD_NOISE_BUFFER t16\n"
                                                    : "#define KEIRE_CLOUD_NOISE_TEXTURE t15\n") != std::string::npos);
         CHECK(variant.Hlsl.find("ForwardPlusLights : register(t" + std::to_string(textureCount + 10U) + ", space2)") !=
@@ -1516,7 +1517,7 @@ TEST_CASE("Seven-texture volume material compiles through the production shader 
     REQUIRE(compilation.Succeeded());
     REQUIRE(compilation.Variants.size() == 1);
     const auto& variant = compilation.Variants.front();
-    const std::uint32_t expectedVolumeAbi = output == Keire::ShaderGraphOutput::Unlit ? 13U : 14U;
+    const std::uint32_t expectedVolumeAbi = output == Keire::ShaderGraphOutput::Unlit ? 15U : 16U;
     REQUIRE(nlohmann::json::parse(variant.Manifest).at("volumeLightingAbiVersion") == expectedVolumeAbi);
 
     // Opt-in source fixture for the separate interactive renderer acceptance pass. Never overwrite

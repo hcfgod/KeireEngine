@@ -155,6 +155,40 @@ TEST_CASE("shader import cache reuses complete validated artifacts without start
     CHECK(fixture.Statistics->NativeStarts == after);
 }
 
+TEST_CASE("multi-backend shader import shares one HLSL intermediate per stage")
+{
+    CacheProject fixture;
+    fixture.Specification.Formats = {Keire::ShaderBinaryFormat::Dxil, Keire::ShaderBinaryFormat::SpirV,
+                                     Keire::ShaderBinaryFormat::Msl};
+    const auto cold = fixture.Import();
+    const auto shader = Keire::ShaderAsset::Decode(cold.Bytes);
+    REQUIRE(shader->Definition().Variants.size() == 3U);
+    for (const auto& variant : shader->Definition().Variants)
+    {
+        CHECK_FALSE(variant.Vertex.empty());
+        CHECK_FALSE(variant.Fragment.empty());
+    }
+    // Two HLSL stages, four backend conversions, and two reflection jobs.
+    CHECK(fixture.Statistics->HlslStages == 2U);
+    CHECK(fixture.Statistics->NativeStarts == 8U);
+    const auto warm = fixture.Import();
+    CHECK(warm.Bytes == cold.Bytes);
+    CHECK(fixture.Statistics->HlslStages == 2U);
+    CHECK(fixture.Statistics->NativeStarts == 8U);
+}
+
+TEST_CASE("failed shared shader intermediates do not launch conversions or publish cache entries")
+{
+    CacheProject fixture;
+    fixture.Specification.Formats = {Keire::ShaderBinaryFormat::Dxil, Keire::ShaderBinaryFormat::SpirV,
+                                     Keire::ShaderBinaryFormat::Msl};
+    fixture.Source += "\n#error intentional shared intermediate failure\n";
+    CHECK_THROWS_AS((void)fixture.Import(), std::runtime_error);
+    CHECK(fixture.Statistics->HlslStages.load() == 2U);
+    CHECK(fixture.Statistics->NativeStarts.load() == 2U);
+    CHECK(fixture.Slots().empty());
+}
+
 TEST_CASE("shader import cache ignores corrupt truncated oversized and replaced entries")
 {
     CacheProject fixture;
@@ -298,6 +332,9 @@ TEST_CASE("shader cache committed namespace remains bounded and collisions never
         {
             if (previous->TryRead(definition, fixture.Specification, passes).empty())
             {
+                // Even if the initial imported fixture occupies the same set, the first three new
+                // keys fit without eviction. Single-slot placement fails this retention guarantee.
+                CHECK(index >= Keire::Detail::ShaderImportCacheProbeCount - 1U);
                 collisionObserved = true;
                 break;
             }

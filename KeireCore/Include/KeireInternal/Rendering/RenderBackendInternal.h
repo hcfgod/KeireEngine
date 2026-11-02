@@ -2,6 +2,7 @@
 #include "Keire/Animation/Skinning.h"
 #include "Keire/Assets/AssetSystem.h"
 #include "Keire/Assets/LightingAssets.h"
+#include "Keire/Assets/PostProcessProfileAsset.h"
 #include "Keire/Assets/RenderingAssets.h"
 #include "Keire/ECS/Components/DirectionalLightComponent.h"
 #include "Keire/ECS/Components/LightProbeVolumeComponent.h"
@@ -16,6 +17,7 @@
 #include "Keire/Streaming/StreamingSystem.h"
 #include "Keire/Ui/RuntimeUi.h"
 #include "Keire/Vfx/VfxVolumeAsset.h"
+#include "KeireInternal/Rendering/CloudHistoryCompositePolicy.h"
 #include "KeireInternal/Rendering/CloudVolumePass.h"
 #include "KeireInternal/Rendering/DirectionalShadowPolicyInternal.h"
 #include "KeireInternal/Rendering/FrameGraphInternal.h"
@@ -25,6 +27,10 @@
 #include "KeireInternal/Rendering/GpuVfxPipelineBatchInternal.h"
 #include "KeireInternal/Rendering/GpuVisibilityCandidateInternal.h"
 #include "KeireInternal/Rendering/MaterialPassRoutingInternal.h"
+#include "KeireInternal/Rendering/PlanetWeatherCapture.h"
+#include "KeireInternal/Rendering/PlanetWeatherFogComposition.h"
+#include "KeireInternal/Rendering/PostProcessEvaluation.h"
+#include "KeireInternal/Rendering/PostProcessUploadRetry.h"
 #include "KeireInternal/Rendering/RenderBackendConversionsInternal.h"
 #include "KeireInternal/Rendering/RenderPipelineStateInternal.h"
 #include "KeireInternal/Rendering/RenderSceneRecordingTypesInternal.h"
@@ -37,6 +43,7 @@
 #include "KeireInternal/Rendering/SpatialLightingInternal.h"
 #include "KeireInternal/Rendering/VfxVisibilityPlanInternal.h"
 #include "KeireInternal/Rendering/VolumetricCloudUniforms.h"
+#include "KeireInternal/Rendering/WaterRenderCapture.h"
 #include "KeireInternal/Spatial/PlanetFrameResolution.h"
 #include "KeireInternal/Ui/RuntimeUiTextInternal.h"
 #include <SDL3/SDL.h>
@@ -525,10 +532,18 @@ namespace Keire::RenderBackend
         Matrix4 UnjitteredProjection;
         Matrix4 PreviousViewProjection;
         Vector3d PreviousWorldOrigin;
+        // Feature selection validates authored limits; evaluated lighting/exposure may exceed those limits.
+        RenderEnvironmentSettings FeatureEnvironment;
         RenderEnvironmentSettings Environment;
+        Detail::EvaluatedPostProcessing PostProcessing;
+        Ref<const Texture2DAsset> PostProcessLookup;
+        std::uint32_t PostProcessLookupEdge = 0;
         std::optional<Detail::ResolvedPlanetFrame> PlanetFrame;
         std::vector<Detail::ResolvedPlanetFrame> PlanetAtmospheres;
         std::vector<AtmosphereSettings> PlanetAtmosphereSettings;
+        std::vector<Detail::CapturedPlanetWeather> PlanetWeather;
+        Detail::PlanetWeatherFogComposition PlanetVolumeFog;
+        WaterRenderCapture Water;
         std::array<std::array<double, 2>, MaximumCloudLayers> CloudAdvectionPhase{};
         double StarTwinklePhase = 0.0;
         SkyColorUniforms SkyColors;
@@ -728,6 +743,7 @@ namespace Keire::RenderBackend
         SDL_GPUSampleCount Samples = SDL_GPU_SAMPLECOUNT_1;
         SDL_GPUGraphicsPipeline* Cube = nullptr;
         SDL_GPUGraphicsPipeline* Grid = nullptr;
+        SDL_GPUGraphicsPipeline* Water = nullptr;
         SDL_GPUGraphicsPipeline* Sky = nullptr;
         SDL_GPUGraphicsPipeline* Vfx = nullptr;
         SDL_GPUGraphicsPipeline* GpuVfx = nullptr;
@@ -1062,6 +1078,9 @@ namespace Keire::RenderBackend
                                                                          CloudVolumePass pass);
         [[nodiscard]] const GpuTextureResources& EnsureCloudNoiseTexture();
         [[nodiscard]] SDL_GPUBuffer* EnsureCloudNoiseBuffer();
+        void DrawWater(SDL_GPUCommandBuffer* commands, SDL_GPURenderPass* pass, RenderSurfaceState& surface,
+                       const SceneRenderPacket& packet, const ShadowFrameData& shadows,
+                       std::span<const WaterRenderPatch> patches);
         void RecordCloudVolume(SDL_GPUCommandBuffer* commands, RenderSurfaceState& surface,
                                const SceneRenderPacket& packet, const ShadowFrameData& shadows);
         SDL_GPUShader* CreateCloudVolumeShader(bool vertex) const;
@@ -1111,6 +1130,9 @@ namespace Keire::RenderBackend
                                                                         bool whiteFallback = false);
         [[nodiscard]] const GpuTextureResources& ResolveCookieAtlas(std::span<const AssetId> cookies);
         [[nodiscard]] Ref<const LightingSetAsset> ResolveLightingSet(AssetId id);
+        void CapturePostProcessing(const SceneRenderRequest& request, SceneRenderPacket& packet);
+        void RecordPostProcessing(SDL_GPUCommandBuffer* commands, RenderSurfaceState& surface,
+                                  const SceneRenderPacket& packet);
         [[nodiscard]] Ref<const LightProbeVolumeAsset> ResolveLightProbeVolume(AssetId id);
         [[nodiscard]] const GpuTextureResources& DefaultTexture(ShaderTextureSemantic semantic) const noexcept;
         [[nodiscard]] Ref<const MaterialAsset> ResolveMaterial(AssetId id);
@@ -1290,7 +1312,8 @@ namespace Keire::RenderBackend
         void RecordDeferredDepthVelocity(SDL_GPUCommandBuffer* commands, RenderSurfaceState& surface,
                                          const SceneRenderPacket& packet, const ShadowFrameData& shadows,
                                          const PreparedSceneDrawList& opaqueDraws, std::size_t firstBatch,
-                                         std::size_t batchCount, bool clearTargets);
+                                         std::size_t batchCount, bool clearTargets,
+                                         SDL_GPUTexture* depthOverride = nullptr);
         void RecordDeferredGBuffer(SDL_GPUCommandBuffer* commands, RenderSurfaceState& surface,
                                    const SceneRenderPacket& packet, const ShadowFrameData& shadows,
                                    const PreparedSceneDrawList& opaqueDraws, SceneDrawPhase phase,
@@ -1307,9 +1330,10 @@ namespace Keire::RenderBackend
                                     const SceneRenderPacket& packet);
         void ReleaseDisplayOutputs(SurfaceResources& resources) noexcept;
         void RecordDisplayOutput(SDL_GPUCommandBuffer* commands, const RenderSurfaceState& surface);
+        void EnsureLensResources(RenderSurfaceState& surface, bool secondColorTarget, bool depthOfField);
         void RecordToneMap(SDL_GPUCommandBuffer* commands, const RenderSurfaceState& surface,
                            RenderAntiAliasingMode antiAliasing, bool temporalHistoryContinuous,
-                           float bloomIntensity = 0.0F);
+                           float bloomIntensity = 0.0F, const SceneRenderPacket* packet = nullptr);
         [[nodiscard]] RenderPipelineSet& PipelinesFor(SDL_GPUSampleCount samples);
         [[nodiscard]] SDL_GPUShader* CreateAssetShader(const ShaderAssetDefinition& definition, bool vertex,
                                                        std::string_view passRole = "primary") const;
@@ -1353,7 +1377,7 @@ namespace Keire::RenderBackend
         SDL_GPUGraphicsPipeline* DisplayOutputPipeline = nullptr;
         SDL_GPUGraphicsPipeline* BloomPipeline = nullptr;
         std::array<SDL_GPUGraphicsPipeline*, CloudVolumePipelineCount> CloudVolumePipelines{};
-        std::array<SDL_GPUGraphicsPipeline*, 3> CloudTemporalPipelines{};
+        std::array<SDL_GPUGraphicsPipeline*, CloudTemporalPipelineCount> CloudTemporalPipelines{};
         SDL_GPUGraphicsPipeline* DeferredGBufferPipeline = nullptr;
         SDL_GPUGraphicsPipeline* DepthVelocityPipeline = nullptr;
         SDL_GPUGraphicsPipeline* DeferredLightingPipeline = nullptr;
@@ -1414,6 +1438,30 @@ namespace Keire::RenderBackend
         std::vector<std::size_t> RuntimeUiUploadCounts;
         std::unordered_map<AssetId, GpuLightingTextureEntry> LightingTextureCache;
         std::unordered_map<AssetId, AssetHandle<LightingSetAsset>> LightingSetCache;
+        struct PostProcessProfileCacheEntry
+        {
+            AssetHandle<PostProcessProfileAsset> Handle;
+            Ref<const PostProcessProfileAsset> LastGood;
+            std::uint64_t LastUsedFrame = 0;
+        };
+        std::unordered_map<AssetId, PostProcessProfileCacheEntry> PostProcessProfileCache;
+        std::vector<Ref<const PostProcessProfileAsset>> PostProcessProfileLeases;
+        std::vector<Detail::WeightedPostProcessProfile> PostProcessContributions;
+        struct PostProcessLookupEntry
+        {
+            AssetHandle<Texture2DAsset> Handle;
+            std::uint64_t LastUsedFrame = 0;
+        };
+        struct PostProcessLookupGpuEntry
+        {
+            Detail::PostProcessUploadRetry UploadRetry;
+            Ref<const Texture2DAsset> Source;
+            Ref<const Texture2DAsset> AttemptedSource;
+            GpuTextureResources Resources;
+            std::uint64_t LastUsedFrame = 0;
+        };
+        std::unordered_map<AssetId, PostProcessLookupEntry> PostProcessLookups;
+        std::unordered_map<AssetId, PostProcessLookupGpuEntry> PostProcessLookupTextures;
         std::unordered_map<AssetId, AssetHandle<LightProbeVolumeAsset>> LightProbeVolumeCache;
         std::unordered_map<AssetId, GpuMaterialEntry> MaterialCache;
         std::uint64_t MaterialBindingBuilds = 0;

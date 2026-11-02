@@ -13,6 +13,37 @@ struct PlanetaryCloudLayer
     float4 Phase;
 };
 
+float4 EvaluatePlanetaryCloudLocal(float3 direction, PlanetaryCloudLayer layer,
+    PlanetaryCloudGeometry planet, float3 position, float3 coordinate, float footprint,
+    float3 ambient, float3 incidentSun, float3 sunDirection)
+{
+    float density = 0.0F;
+    float weight = 0.533333333F;
+    [unroll]
+    for (uint octave = 0U; octave < 4U; ++octave)
+    {
+        const float frequency = float(1U << octave);
+        density += lerp(0.5F, PlanetaryCloudWeather(coordinate * frequency, 1.0F, layer.Noise.y + octave),
+            saturate(1.0F - footprint * frequency)) * weight;
+        weight *= 0.5F;
+    }
+    const float threshold = 1.0F - layer.Geometry.z;
+    const float mask = layer.Geometry.z >= 1.0F ? 1.0F :
+        smoothstep(threshold - layer.Pattern.z, threshold + layer.Pattern.z, density);
+    const float3 normal = normalize(PlanetaryCloudRadialVector(position, planet));
+    const float incidence = abs(dot(normal, direction));
+    const float alpha = mask * layer.Geometry.w * smoothstep(0.0F, max(layer.Pattern.w, 0.0001F), incidence);
+    float3 radiance = layer.Color.rgb;
+    if (layer.Noise.x == 1U)
+    {
+        const float core = lerp(1.0F, 0.45F, density);
+        const float rim = 0.15F * pow(saturate(dot(direction, sunDirection)), 8.0F) * (1.0F - density);
+        radiance *= ambient * (0.65F + 0.35F * (1.0F - density)) +
+            incidentSun * ((0.2F + 0.8F * saturate(dot(normal, sunDirection))) * core + rim) / 3.14159265359F;
+    }
+    return float4(min(radiance, 65504.0F) * alpha, alpha);
+}
+
 float4 EvaluatePlanetaryCloudLayers(float3 direction, PlanetaryCloudLayer first, PlanetaryCloudLayer second,
     float3 ambient, float3 sunlight, float3 sunDirection, PlanetaryCloudGeometry planet, AtmosphereMedium atmosphere)
 {
@@ -68,25 +99,9 @@ float4 EvaluatePlanetaryCloudLayers(float3 direction, PlanetaryCloudLayer first,
         {
             continue;
         }
-        float density = 0.0F;
-        float weight = 0.533333333F;
-        [unroll]
-        for (uint octave = 0U; octave < 4U; ++octave)
-        {
-            const float frequency = float(1U << octave);
-            density += lerp(0.5F, PlanetaryCloudWeather(coordinate * frequency, 1.0F, layer.Noise.y + octave),
-                saturate(1.0F - footprint * frequency)) * weight;
-            weight *= 0.5F;
-        }
-        const float threshold = 1.0F - layer.Geometry.z;
-        const float mask = layer.Geometry.z >= 1.0F ? 1.0F :
-            smoothstep(threshold - layer.Pattern.z, threshold + layer.Pattern.z, density);
-        const float3 normal = normalize(PlanetaryCloudRadialVector(position, planet));
-        const float incidence = abs(dot(normal, direction));
-        const float alpha = mask * layer.Geometry.w * smoothstep(0.0F, max(layer.Pattern.w, 0.0001F), incidence);
         float3 incidentSun = sunlight;
         const PlanetaryCloudRoots sunGround = PlanetaryCloudSphereRoots(planet.RadiusGeometry.x,
-            layer.Geometry.x, dot(normal, sunDirection), 0.0F);
+            layer.Geometry.x, dot(normalize(PlanetaryCloudRadialVector(position, planet)), sunDirection), 0.0F);
         if (sunGround.Hit && sunGround.Near >= 0.0F && sunGround.Far > 0.0F)
         {
             incidentSun = 0.0F;
@@ -96,14 +111,10 @@ float4 EvaluatePlanetaryCloudLayers(float3 direction, PlanetaryCloudLayer first,
         {
             incidentSun *= AtmosphereMediumSunTransmission(airPosition, atmosphere);
         }
-        float3 radiance = layer.Color.rgb;
-        if (layer.Noise.x == 1U)
-        {
-            const float core = lerp(1.0F, 0.45F, density);
-            const float rim = 0.15F * pow(saturate(dot(direction, sunDirection)), 8.0F) * (1.0F - density);
-            radiance *= ambient * (0.65F + 0.35F * (1.0F - density)) +
-                incidentSun * ((0.2F + 0.8F * saturate(dot(normal, sunDirection))) * core + rim) / 3.14159265359F;
-        }
+        const float4 local = EvaluatePlanetaryCloudLocal(direction, layer, planet, position, coordinate,
+            footprint, ambient, incidentSun, sunDirection);
+        const float alpha = local.a;
+        float3 radiance = alpha > 0.0F ? local.rgb / alpha : 0.0F;
         if (atmosphere.Controls.x > 0.5F)
         {
             const AtmosphereTransport foreground = IntegrateAtmosphereMedium(

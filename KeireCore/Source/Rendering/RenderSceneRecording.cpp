@@ -327,6 +327,14 @@ namespace Keire::RenderBackend
                           !draw.Item->SkinnedBuiltinVertices && material->SpatialLightingAbiVersion != 3U &&
                           draw.Item->MaterialProperties.empty() && draw.Item->MaterialInstanceProperties.empty())});
             }
+            if (&list == &result.Transparent && !packet.Water.Patches.empty())
+            {
+                // Opaque-state decals also enter this queue. Keep insertion boundaries for water.
+                for (auto& key : instanceKeys)
+                {
+                    key.SupportsInstancing = false;
+                }
+            }
             const auto batches = BuildInstanceBatches(instanceKeys);
             list.Batches.reserve(batches.size());
             for (const auto batch : batches)
@@ -615,8 +623,9 @@ namespace Keire::RenderBackend
                 CloudObserverWithinLocalDomain({observer.X, observer.Y, observer.Z}) &&
                 std::any_of(packet.Environment.Clouds.Layers.begin(), packet.Environment.Clouds.Layers.end(),
                             [](const CloudLayer& layer) { return layer.Enabled; });
-            if (!packet.PlanetAtmosphereSettings.empty() || HasProceduralSky(packet.Environment) ||
-                packet.SkyColors.HorizonWeight[3] > 0.0F || cloudsEnabled || !environment.Empty())
+            if (!packet.PlanetWeather.empty() || !packet.PlanetAtmosphereSettings.empty() ||
+                HasProceduralSky(packet.Environment) || packet.SkyColors.HorizonWeight[3] > 0.0F || cloudsEnabled ||
+                !environment.Empty())
             {
                 const float textureLayout = environment.Empty() ? -1.0F
                                                                 : static_cast<float>(environment.EnvironmentLayout) +
@@ -625,7 +634,7 @@ namespace Keire::RenderBackend
                     camera, packet.Environment, lighting, observer, packet.CloudAdvectionPhase, cloudsEnabled,
                     textureLayout, packet.StarTwinklePhase, packet.SkyColors, camera.WorldOrigin,
                     camera.EnvironmentAnchor, packet.PlanetFrame ? &*packet.PlanetFrame : nullptr,
-                    packet.PlanetAtmospheres, packet.PlanetAtmosphereSettings);
+                    packet.PlanetAtmospheres, packet.PlanetAtmosphereSettings, packet.PlanetWeather);
                 const SDL_GPUTextureSamplerBinding binding{
                     environment.Empty() ? WhiteTexture.Texture : environment.Texture,
                     environment.Empty() ? WhiteTexture.Sampler : environment.Sampler};
@@ -1148,7 +1157,7 @@ namespace Keire::RenderBackend
                                                         const SceneRenderPacket& packet, const ShadowFrameData& shadows,
                                                         const PreparedSceneDrawList& opaqueDraws,
                                                         const std::size_t firstBatch, const std::size_t batchCount,
-                                                        const bool clearTargets)
+                                                        const bool clearTargets, SDL_GPUTexture* depthOverride)
     {
         auto& workset = surface.ActiveWorkset();
         if (!workset.GBufferVelocity || !workset.Depth)
@@ -1162,7 +1171,7 @@ namespace Keire::RenderBackend
         velocity.load_op = clearTargets ? SDL_GPU_LOADOP_CLEAR : SDL_GPU_LOADOP_LOAD;
         velocity.store_op = SDL_GPU_STOREOP_STORE;
         SDL_GPUDepthStencilTargetInfo depth{};
-        depth.texture = workset.Depth;
+        depth.texture = depthOverride ? depthOverride : workset.Depth;
         depth.clear_depth = 1.0F;
         depth.load_op = clearTargets ? SDL_GPU_LOADOP_CLEAR : SDL_GPU_LOADOP_LOAD;
         depth.store_op = SDL_GPU_STOREOP_STORE;

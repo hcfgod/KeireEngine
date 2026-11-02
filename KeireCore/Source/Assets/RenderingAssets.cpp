@@ -736,7 +736,8 @@ namespace Keire
                 manifest.at("volumeLightingAbiVersion") != 7U && manifest.at("volumeLightingAbiVersion") != 8U &&
                 manifest.at("volumeLightingAbiVersion") != 9U && manifest.at("volumeLightingAbiVersion") != 10U &&
                 manifest.at("volumeLightingAbiVersion") != 11U && manifest.at("volumeLightingAbiVersion") != 12U &&
-                manifest.at("volumeLightingAbiVersion") != 13U && manifest.at("volumeLightingAbiVersion") != 14U)
+                manifest.at("volumeLightingAbiVersion") != 13U && manifest.at("volumeLightingAbiVersion") != 14U &&
+                manifest.at("volumeLightingAbiVersion") != 15U && manifest.at("volumeLightingAbiVersion") != 16U)
             {
                 throw std::invalid_argument("Shader volume-lighting ABI version is unsupported.");
             }
@@ -1286,8 +1287,31 @@ namespace Keire
                     }
                     laneDefines.emplace_back(*passLane.Define, "1");
                 }
-                // At most three formats are accepted. Join all six stage jobs before advancing the pass,
-                // retaining the staged source and define storage even when a compiler fails.
+                // ShaderCross routes DXIL and Metal through SPIR-V. Compile that intermediate once per
+                // stage, then share it across backends instead of optimizing identical HLSL three times.
+                const auto vertexSpirvPath = temporary.Path() / ("vertex-" + passLane.Role + "-SPIRV.bin");
+                const auto fragmentSpirvPath = temporary.Path() / ("fragment-" + passLane.Role + "-SPIRV.bin");
+                auto vertexSpirv = std::async(std::launch::async,
+                                              [&]
+                                              {
+                                                  return Detail::CompileShaderStage(
+                                                      compiler, source, "SPIRV", "vertex", definition.VertexEntry,
+                                                      vertexSpirvPath, stagedIncludeRoots, laneDefines, specification,
+                                                      temporary.Path(), cancellation, statistics.get());
+                                              })
+                                       .share();
+                auto fragmentSpirv =
+                    std::async(std::launch::async,
+                               [&]
+                               {
+                                   return Detail::CompileShaderStage(compiler, source, "SPIRV", "fragment",
+                                                                     definition.FragmentEntry, fragmentSpirvPath,
+                                                                     stagedIncludeRoots, laneDefines, specification,
+                                                                     temporary.Path(), cancellation, statistics.get());
+                               })
+                        .share();
+                // Join every consumer before advancing the pass. Shared futures propagate intermediate
+                // failures and keep both source storage and staged files alive through cancellation.
                 std::vector<std::pair<std::future<std::vector<std::byte>>, std::future<std::vector<std::byte>>>> stages;
                 stages.reserve(specification.Formats.size());
                 for (const auto format : specification.Formats)
@@ -1300,21 +1324,32 @@ namespace Keire
                     const auto vertexPath = temporary.Path() / ("vertex-" + stem + extension);
                     const auto fragmentPath = temporary.Path() / ("fragment-" + stem + extension);
                     auto vertex = std::async(std::launch::async,
-                                             [&, name, vertexPath]
+                                             [&, format, name, vertexPath]
                                              {
+                                                 const auto& intermediate = vertexSpirv.get();
+                                                 if (format == ShaderBinaryFormat::SpirV)
+                                                 {
+                                                     return intermediate;
+                                                 }
                                                  return Detail::CompileShaderStage(
-                                                     compiler, source, name, "vertex", definition.VertexEntry,
-                                                     vertexPath, stagedIncludeRoots, laneDefines, specification,
-                                                     temporary.Path(), cancellation, statistics.get());
+                                                     compiler, vertexSpirvPath, name, "vertex", definition.VertexEntry,
+                                                     vertexPath, {}, {}, specification, temporary.Path(), cancellation,
+                                                     statistics.get(), Detail::ShaderCompilerInput::SpirV);
                                              });
-                    auto fragment = std::async(std::launch::async,
-                                               [&, name, fragmentPath]
-                                               {
-                                                   return Detail::CompileShaderStage(
-                                                       compiler, source, name, "fragment", definition.FragmentEntry,
-                                                       fragmentPath, stagedIncludeRoots, laneDefines, specification,
-                                                       temporary.Path(), cancellation, statistics.get());
-                                               });
+                    auto fragment =
+                        std::async(std::launch::async,
+                                   [&, format, name, fragmentPath]
+                                   {
+                                       const auto& intermediate = fragmentSpirv.get();
+                                       if (format == ShaderBinaryFormat::SpirV)
+                                       {
+                                           return intermediate;
+                                       }
+                                       return Detail::CompileShaderStage(
+                                           compiler, fragmentSpirvPath, name, "fragment", definition.FragmentEntry,
+                                           fragmentPath, {}, {}, specification, temporary.Path(), cancellation,
+                                           statistics.get(), Detail::ShaderCompilerInput::SpirV);
+                                   });
                     stages.emplace_back(std::move(vertex), std::move(fragment));
                 }
                 for (std::size_t index = 0; index < stages.size(); ++index)

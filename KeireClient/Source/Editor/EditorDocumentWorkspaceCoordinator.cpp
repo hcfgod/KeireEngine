@@ -5,6 +5,7 @@
 #include "KeireClient/Editor/InputActionsDocument.h"
 #include "KeireClient/Editor/MaterialDocument.h"
 #include "KeireClient/Editor/MaterialGraphDocument.h"
+#include "KeireClient/Editor/PostProcessDocument.h"
 #include "KeireClient/Editor/ProjectSettingsDocument.h"
 #include "KeireClient/Editor/SceneDocument.h"
 #include "KeireClient/Editor/ShaderGraphDocument.h"
@@ -157,6 +158,13 @@ namespace KeireEditor
                     context->Close();
             }
             m_Dependencies.CloseWorkspaceUndo();
+            if (m_Documents.PostProcessing)
+            {
+                if (const auto context = m_Documents.PostProcessing->UndoContext())
+                {
+                    context->Close();
+                }
+            }
         }
         catch (...)
         {
@@ -298,6 +306,14 @@ namespace KeireEditor
         close("close-input-actions", [this] { m_Documents.InputActions->Close(); });
         close("close-animator-controller", [this] { m_Documents.AnimatorController->Close(); });
         close("close-audio-mixer", [this] { m_Documents.AudioMixer->Close(); });
+        close("close-post-processing",
+              [this]
+              {
+                  if (m_Documents.PostProcessing)
+                  {
+                      m_Documents.PostProcessing->Close();
+                  }
+              });
         close("close-vfx-effect", [this] { m_Documents.VfxEffect->Close(); });
         close("close-shader-graph", [this] { m_Documents.ShaderGraph->Close(); });
         close("close-material-graph", [this] { m_Documents.MaterialGraph->Close(); });

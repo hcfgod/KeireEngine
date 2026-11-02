@@ -153,7 +153,7 @@ namespace Keire::Detail
         const auto resources =
             GenerateShaderGraphResourceDeclarations(definition.Resources, propertyTextures, propertyTextures);
         const auto noiseSlot = std::max(resources.NextTextureRegister, resources.NextSamplerRegister) + (lit ? 9U : 0U);
-        const auto volumeAbi = screenSpace ? 0U : (noiseSlot >= 16U ? 14U : 13U);
+        const auto volumeAbi = screenSpace ? 0U : (noiseSlot >= 16U ? 16U : 15U);
         Json passes = Json::array();
         const auto addPass = [&](const std::string_view role, const std::string_view define)
         {

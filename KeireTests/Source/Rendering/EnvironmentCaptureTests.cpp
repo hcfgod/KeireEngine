@@ -2,6 +2,7 @@
 #include "Keire/ECS/Components/DirectionalLightComponent.h"
 #include "KeireInternal/Environment/EnvironmentCloudPhase.h"
 #include "KeireInternal/RenderInternal.h"
+#include "KeireInternal/Rendering/PostProcessEnvironment.h"
 #include "KeireInternal/Rendering/RenderBackendInternal.h"
 #include "KeireInternal/Rendering/RenderSurfaceStateInternal.h"
 
@@ -45,6 +46,18 @@ namespace
                 return state->CaptureRequests.front().Packet;
             };
             auto packet = capture(1);
+            CHECK(packet.FeatureEnvironment == request.Environment);
+            for (const double stops : {-20.0, 20.0})
+            {
+                auto exposed = packet;
+                auto postProcessing = Keire::Detail::MakePostProcessBaseline(exposed.Environment);
+                postProcessing.Parameters[static_cast<std::size_t>(Keire::PostProcessParameter::ExposureStops)] = stops;
+                Keire::Detail::ApplyPostProcessEnvironment(exposed.Environment, postProcessing);
+                CHECK_THROWS_AS(Keire::ValidateRenderEnvironmentSettings(exposed.Environment), std::invalid_argument);
+                CHECK(Keire::ResolveRenderFeatureSelection(exposed.FeatureEnvironment, {}) ==
+                      Keire::ResolveRenderFeatureSelection(request.Environment, {}));
+                CHECK(exposed.FeatureEnvironment == request.Environment);
+            }
             CHECK(packet.Environment.AmbientIntensity == request.Environment.AmbientIntensity);
             request.EvaluatedEnvironment->Ambient = Keire::EnvironmentAmbientLight{{0.1F, 0.2F, 0.3F}, 0.05F};
             packet = capture(1);
@@ -297,7 +310,19 @@ namespace
             request.PlanetAtmospheres.assign(9, nearPlanet);
             CHECK_THROWS_AS(capture(205), std::length_error);
             request.Environment.Atmosphere.Enabled = false;
+            // Airless planets can still have weather, which needs bounded, coherent candidate frames.
+            CHECK_THROWS_AS(capture(205), std::length_error);
+            const auto savedClouds = request.Environment.Clouds;
+            const auto savedFog = request.Environment.Fog;
+            request.Environment.Clouds.Volume.Enabled = false;
+            for (auto& layer : request.Environment.Clouds.Layers)
+            {
+                layer.Enabled = false;
+            }
+            request.Environment.Fog.Enabled = false;
             CHECK(capture(205).PlanetAtmospheres.empty());
+            request.Environment.Clouds = savedClouds;
+            request.Environment.Fog = savedFog;
             state->CaptureRequests.clear();
 
             // Two actual view surfaces keep independent selected profiles; distant candidates retain theirs.

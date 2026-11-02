@@ -1,5 +1,8 @@
 #pragma once
 
+#ifndef KEIRE_CLOUD_VOLUME_GEOMETRY_HLSLI
+#define KEIRE_CLOUD_VOLUME_GEOMETRY_HLSLI
+
 struct CloudVolumeInterval
 {
     float Entry;
@@ -63,3 +66,5 @@ float CloudVolumeShadowDistance(float sampleHeight, float sunHeight, float baseH
         IntersectCloudVolumeSlab(sampleHeight, sunHeight, baseHeight, thickness, maximumDistance);
     return interval.Exit;
 }
+
+#endif // KEIRE_CLOUD_VOLUME_GEOMETRY_HLSLI

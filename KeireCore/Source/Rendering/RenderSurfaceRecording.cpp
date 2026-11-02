@@ -1,11 +1,14 @@
 #include "KeireInternal/Diagnostics/TelemetryInternal.h"
 #include "KeireInternal/Rendering/BloomUniforms.h"
+#include "KeireInternal/Rendering/CloudVolumeViewUniforms.h"
 #include "KeireInternal/Rendering/DisplacementBoundsInternal.h"
 #include "KeireInternal/Rendering/ForwardPlusInternal.h"
 #include "KeireInternal/Rendering/InstanceBatchInternal.h"
 #include "KeireInternal/Rendering/RenderBackendInternal.h"
 #include "KeireInternal/Rendering/RenderGeometryMathInternal.h"
 #include "KeireInternal/Rendering/TransparencyInternal.h"
+#include "KeireInternal/Rendering/WaterDrawOrder.h"
+#include "KeireInternal/Rendering/WaterRendering.h"
 #include "KeireInternal/Vfx/VfxGpuValidationInternal.h"
 
 #include <algorithm>
@@ -96,8 +99,9 @@ namespace Keire::RenderBackend
         featureCapabilities.DeferredMultisample = deferredResourcesAvailable;
         featureCapabilities.DynamicResolution = true;
         const auto featureSelection =
-            request != requests.end() ? ResolveRenderFeatureSelection(request->Packet.Environment, featureCapabilities)
-                                      : RenderFeatureSelection{};
+            request != requests.end()
+                ? ResolveRenderFeatureSelection(request->Packet.FeatureEnvironment, featureCapabilities)
+                : RenderFeatureSelection{};
         surface.ActiveFeatureSelection = featureSelection;
         const bool deferred = request != requests.end() && featureSelection.EffectivePath == RenderPath::DeferredHybrid;
         const bool deferredMultisample = deferred && workset.MultisampleHdrColor;
@@ -116,9 +120,7 @@ namespace Keire::RenderBackend
         PreparedCpuVfx preparedCpuVfx;
         bool sampledDepthRecorded = false;
         bool gpuDepthCollisionRequired = false;
-        const bool cloudVolumeRequired = request != requests.end() && (request->Packet.CloudVolume.Quality[0] != 0U ||
-                                                                       request->Packet.Environment.Atmosphere.Enabled ||
-                                                                       request->Packet.Environment.Fog.Enabled);
+        const bool cloudVolumeRequired = request != requests.end() && HasCloudVolumeViewTransport(request->Packet);
         if (request != requests.end())
         {
             auto started = std::chrono::steady_clock::now();
@@ -682,8 +684,33 @@ namespace Keire::RenderBackend
                 if (frameGraphPass == frameGraph.Transparency)
                 {
                     const auto started = std::chrono::steady_clock::now();
-                    const auto batchTotal =
-                        request != requests.end() ? preparedDraws.Transparent.Batches.size() : std::size_t{};
+                    std::vector<WaterDrawOrderEntry> waterOrder;
+                    if (request != requests.end() && !request->Packet.Water.Patches.empty() &&
+                        surface.ActiveWorkset().Depth)
+                    {
+                        std::vector<float> meshDepths;
+                        std::vector<float> waterDepths;
+                        meshDepths.reserve(preparedDraws.Transparent.Batches.size());
+                        waterDepths.reserve(request->Packet.Water.Patches.size());
+                        for (const auto& batch : preparedDraws.Transparent.Batches)
+                        {
+                            meshDepths.push_back(preparedDraws.Transparent.Draws[batch.First].Depth);
+                        }
+                        for (const auto& patch : request->Packet.Water.Patches)
+                        {
+                            waterDepths.push_back(patch.SortDepth);
+                        }
+                        waterOrder = BuildWaterDrawOrder(meshDepths, waterDepths);
+                        auto& pipelines = PipelinesFor(ToSdlSampleCount(surface.ActualSamples));
+                        if (!pipelines.Water)
+                        {
+                            pipelines.Water = CreateWaterPipeline(Device, SceneColorFormat, DepthFormat,
+                                                                  ToSdlSampleCount(surface.ActualSamples));
+                        }
+                    }
+                    const auto batchTotal = !waterOrder.empty()         ? waterOrder.size()
+                                            : request != requests.end() ? preparedDraws.Transparent.Batches.size()
+                                                                        : std::size_t{};
                     const auto chunkTotal =
                         std::max<std::size_t>(1U, (batchTotal + MaximumSceneBatchesPerCommandBuffer - 1U) /
                                                       MaximumSceneBatchesPerCommandBuffer);
@@ -725,8 +752,44 @@ namespace Keire::RenderBackend
                             const auto firstBatch = chunk * MaximumSceneBatchesPerCommandBuffer;
                             const auto batchCount =
                                 std::min(MaximumSceneBatchesPerCommandBuffer, batchTotal - firstBatch);
-                            DrawScene(commands, pass, surface, request->Packet, shadows, SceneDrawPhase::Transparent,
-                                      preparedDraws.Transparent, firstBatch, batchCount);
+                            if (waterOrder.empty())
+                            {
+                                DrawScene(commands, pass, surface, request->Packet, shadows,
+                                          SceneDrawPhase::Transparent, preparedDraws.Transparent, firstBatch,
+                                          batchCount);
+                            }
+                            else
+                            {
+                                const auto end = firstBatch + batchCount;
+                                for (auto index = firstBatch; index < end;)
+                                {
+                                    const auto entry = waterOrder[index];
+                                    std::size_t count = 1;
+                                    while (index + count < end && waterOrder[index + count].Water == entry.Water &&
+                                           waterOrder[index + count].Index == entry.Index + count)
+                                    {
+                                        ++count;
+                                    }
+                                    if (entry.Water)
+                                    {
+                                        const auto patches =
+                                            std::span(request->Packet.Water.Patches).subspan(entry.Index, count);
+                                        DrawWater(commands, pass, surface, request->Packet, shadows, patches);
+                                        for (const auto& patch : patches)
+                                        {
+                                            ++Statistics.DrawCalls;
+                                            Statistics.Triangles += patch.VertexCount / 3U;
+                                        }
+                                    }
+                                    else
+                                    {
+                                        DrawScene(commands, pass, surface, request->Packet, shadows,
+                                                  SceneDrawPhase::Transparent, preparedDraws.Transparent, entry.Index,
+                                                  count);
+                                    }
+                                    index += count;
+                                }
+                            }
                             if (finalChunk)
                                 DrawVfx(commands, pass, surface, request->Packet, shadows, preparedCpuVfx);
                         }
@@ -765,6 +828,46 @@ namespace Keire::RenderBackend
                 if (frameGraphPass == frameGraph.HdrPreparation)
                 {
                     auto started = std::chrono::steady_clock::now();
+                    if (request != requests.end())
+                    {
+                        const auto& effects = request->Packet.PostProcessing.EffectWeights;
+                        const auto& parameters = request->Packet.PostProcessing.Parameters;
+                        const auto parameter = [&](const PostProcessParameter key)
+                        { return parameters[static_cast<std::size_t>(key)]; };
+                        const bool dofEnabled =
+                            effects[static_cast<std::size_t>(PostProcessEffect::DepthOfField)] > 0.0 &&
+                            parameter(PostProcessParameter::DepthOfFieldStrength) > 0.0 &&
+                            parameter(PostProcessParameter::FocusDistance) >
+                                parameter(PostProcessParameter::FocalLength) * 0.001;
+                        const bool motionEnabled =
+                            effects[static_cast<std::size_t>(PostProcessEffect::MotionBlur)] > 0.0 &&
+                            parameter(PostProcessParameter::MotionBlurStrength) > 0.0 &&
+                            request->Packet.TemporalHistoryContinuous;
+                        if ((dofEnabled || motionEnabled) && DepthVelocityPipeline)
+                        {
+                            EnsureLensResources(surface, dofEnabled && motionEnabled, dofEnabled);
+                            const auto batchTotal = preparedDraws.Opaque.Batches.size();
+                            const auto chunkTotal =
+                                std::max<std::size_t>(1U, (batchTotal + MaximumSceneBatchesPerCommandBuffer - 1U) /
+                                                              MaximumSceneBatchesPerCommandBuffer);
+                            for (std::size_t chunk = 0; chunk < chunkTotal; ++chunk)
+                            {
+                                if (chunk != 0U)
+                                {
+                                    acquireContinuation();
+                                }
+                                const auto firstBatch = chunk * MaximumSceneBatchesPerCommandBuffer;
+                                const auto count =
+                                    std::min(MaximumSceneBatchesPerCommandBuffer, batchTotal - firstBatch);
+                                RecordDeferredDepthVelocity(commands, surface, request->Packet, shadows,
+                                                            preparedDraws.Opaque, firstBatch, count, chunk == 0U,
+                                                            surface.ActiveWorkset().LensDepth);
+                            }
+                        }
+                    }
+                    Statistics.DepthPassMilliseconds +=
+                        std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - started).count();
+                    started = std::chrono::steady_clock::now();
                     RecordRuntimeUiWorldPanels(commands, surface);
                     Statistics.UiRecordingMilliseconds +=
                         std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - started).count();
@@ -774,6 +877,15 @@ namespace Keire::RenderBackend
                         RecordFullscreenEffect(
                             commands, surface, request->Packet.Camera.FullscreenEffects[0], true,
                             {request->Packet.MaterialTimeSeconds, request->Packet.MaterialDeltaSeconds});
+                        for (const auto& effect : request->Packet.PostProcessing.CustomEffects)
+                        {
+                            if (effect.Enabled && effect.Stage == PostProcessCustomStage::BeforeToneMap)
+                            {
+                                RecordFullscreenEffect(
+                                    commands, surface, effect.Material, true,
+                                    {request->Packet.MaterialTimeSeconds, request->Packet.MaterialDeltaSeconds});
+                            }
+                        }
                     }
                     Statistics.ToneMapMilliseconds +=
                         std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - started).count();
@@ -800,12 +912,25 @@ namespace Keire::RenderBackend
                     const auto bloomIntensity =
                         bloomEnabled ? static_cast<float>(request->Packet.Environment.Bloom.Intensity) : 0.0F;
                     RecordToneMap(commands, surface, featureSelection.EffectiveAntiAliasing, temporalHistoryContinuous,
-                                  bloomIntensity);
+                                  bloomIntensity, request != requests.end() ? &request->Packet : nullptr);
+                    if (request != requests.end())
+                    {
+                        RecordPostProcessing(commands, surface, request->Packet);
+                    }
                     if (request != requests.end())
                     {
                         RecordFullscreenEffect(
                             commands, surface, request->Packet.Camera.FullscreenEffects[1], false,
                             {request->Packet.MaterialTimeSeconds, request->Packet.MaterialDeltaSeconds});
+                        for (const auto& effect : request->Packet.PostProcessing.CustomEffects)
+                        {
+                            if (effect.Enabled && effect.Stage == PostProcessCustomStage::AfterToneMap)
+                            {
+                                RecordFullscreenEffect(
+                                    commands, surface, effect.Material, false,
+                                    {request->Packet.MaterialTimeSeconds, request->Packet.MaterialDeltaSeconds});
+                            }
+                        }
                     }
                     Statistics.ToneMapMilliseconds +=
                         std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - started).count();
@@ -816,9 +941,20 @@ namespace Keire::RenderBackend
                     const auto started = std::chrono::steady_clock::now();
                     RecordRuntimeUiCameraPanels(commands, surface);
                     if (request != requests.end())
+                    {
                         RecordFullscreenEffect(
                             commands, surface, request->Packet.Camera.FullscreenEffects[2], false,
                             {request->Packet.MaterialTimeSeconds, request->Packet.MaterialDeltaSeconds});
+                        for (const auto& effect : request->Packet.PostProcessing.CustomEffects)
+                        {
+                            if (effect.Enabled && effect.Stage == PostProcessCustomStage::AfterUi)
+                            {
+                                RecordFullscreenEffect(
+                                    commands, surface, effect.Material, false,
+                                    {request->Packet.MaterialTimeSeconds, request->Packet.MaterialDeltaSeconds});
+                            }
+                        }
+                    }
                     Statistics.UiRecordingMilliseconds +=
                         std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - started).count();
                     if (request != requests.end())

@@ -55,11 +55,103 @@ namespace Keire::Detail
         std::uint64_t m_Epoch;
     };
 
+    // Preparation snapshots cannot be accepted by the published-snapshot API.
+    class PreparedFrameSnapshot final
+    {
+      public:
+        [[nodiscard]] const FrameSnapshot& Evaluation() const noexcept { return m_Value.Evaluation(); }
+
+      private:
+        friend class FrameRegistry;
+        explicit PreparedFrameSnapshot(BoundFrameSnapshot value) : m_Value(std::move(value)) {}
+
+        BoundFrameSnapshot m_Value;
+    };
+
     // Owner-serialized topology. Handles borrow a lifetime token, never the registry or a node address.
     // Logical keys can be restored; runtime serials and the lifetime token must never be persisted.
     class FrameRegistry final
     {
       public:
+        using SnapshotType = BoundFrameSnapshot;
+
+        class PreparedPublication final
+        {
+          public:
+            using SnapshotType = PreparedFrameSnapshot;
+
+            PreparedPublication(const PreparedPublication&) = delete;
+            PreparedPublication& operator=(const PreparedPublication&) = delete;
+            PreparedPublication& operator=(PreparedPublication&&) = delete;
+
+            PreparedPublication(PreparedPublication&& other) noexcept
+                : m_Registry(std::exchange(other.m_Registry, nullptr)), m_Lifetime(std::move(other.m_Lifetime)),
+                  m_Revision(other.m_Revision), m_Epoch(other.m_Epoch), m_Snapshots(std::move(other.m_Snapshots)),
+                  m_Committed(std::move(other.m_Committed))
+            {
+            }
+
+            [[nodiscard]] std::span<const PreparedFrameSnapshot> Snapshots() const
+            {
+                RequireCurrent();
+                return m_Snapshots;
+            }
+
+            [[nodiscard]] SpatialIdentity Identity(const LiveFrame& frame) const
+            {
+                RequireCurrent();
+                return m_Registry->Identity(frame);
+            }
+
+            [[nodiscard]] std::optional<LiveFrame> Parent(const LiveFrame& frame) const
+            {
+                RequireCurrent();
+                return m_Registry->Parent(frame);
+            }
+
+            [[nodiscard]] bool IsCurrent(const PreparedFrameSnapshot& snapshot, const double time) const noexcept
+            {
+                if (!Current() || snapshot.Evaluation().Time() != time)
+                {
+                    return false;
+                }
+                // Only this preparation's borrowed snapshots carry its authority. Copies and
+                // snapshots from another same-epoch preparation must not be interchangeable.
+                return std::ranges::any_of(m_Snapshots, [&](const auto& candidate) { return &candidate == &snapshot; });
+            }
+
+          private:
+            friend class FrameRegistry;
+
+            PreparedPublication(const FrameRegistry& registry, std::vector<PreparedFrameSnapshot> snapshots,
+                                std::vector<BoundFrameSnapshot> committed)
+                : m_Registry(&registry), m_Lifetime(registry.m_Lifetime), m_Revision(registry.m_Revision),
+                  m_Epoch(registry.m_Epoch), m_Snapshots(std::move(snapshots)), m_Committed(std::move(committed))
+            {
+            }
+
+            [[nodiscard]] bool Current() const noexcept
+            {
+                return m_Registry && !m_Lifetime.Expired() && m_Registry->m_Revision == m_Revision &&
+                       m_Registry->m_Epoch == m_Epoch;
+            }
+
+            void RequireCurrent() const
+            {
+                if (!Current())
+                {
+                    throw std::logic_error("Frame preparation is stale, consumed, or its registry is closed.");
+                }
+            }
+
+            const FrameRegistry* m_Registry;
+            WeakRef<FrameRegistryLifetime> m_Lifetime;
+            std::uint64_t m_Revision;
+            std::uint64_t m_Epoch;
+            std::vector<PreparedFrameSnapshot> m_Snapshots;
+            std::vector<BoundFrameSnapshot> m_Committed;
+        };
+
         static constexpr std::size_t DefaultMaximumDepth = 256;
 
         explicit FrameRegistry(const std::uint64_t world, const std::uint64_t rootKey = 1,
@@ -132,6 +224,47 @@ namespace Keire::Detail
             RequireLive(frame);
             const auto parent = m_Nodes.at(frame.m_Key).Parent;
             return parent == 0 ? std::nullopt : std::optional<LiveFrame>{Find(parent)};
+        }
+
+        [[nodiscard]] PreparedPublication PreparePublication(const std::span<const FrameSnapshot> evaluations,
+                                                             const double time) const
+        {
+            RequireOpen();
+            if (!std::isfinite(time) || evaluations.size() != m_Nodes.size() - 1)
+            {
+                throw std::invalid_argument("Frame preparation requires one evaluation per nonroot frame.");
+            }
+            RequireIncrement(m_Epoch);
+            std::set<std::uint64_t> keys;
+            std::vector<PreparedFrameSnapshot> prepared;
+            std::vector<BoundFrameSnapshot> committed;
+            prepared.reserve(evaluations.size());
+            committed.reserve(evaluations.size());
+            for (const auto& evaluation : evaluations)
+            {
+                if (evaluation.Time() != time || !keys.insert(evaluation.ChildIdentity().Frame).second)
+                {
+                    throw std::invalid_argument("Frame preparation contains mixed times or duplicate frames.");
+                }
+                auto bound = Bind(Find(evaluation.ChildIdentity().Frame), evaluation);
+                prepared.push_back(PreparedFrameSnapshot(bound));
+                bound.m_Epoch = m_Epoch + 1;
+                committed.push_back(std::move(bound));
+            }
+            return PreparedPublication(*this, std::move(prepared), std::move(committed));
+        }
+
+        [[nodiscard]] std::vector<BoundFrameSnapshot> CommitPublication(PreparedPublication&& preparation)
+        {
+            preparation.RequireCurrent();
+            if (preparation.m_Registry != this)
+            {
+                throw std::invalid_argument("Frame preparation belongs to another registry.");
+            }
+            // Preparation owns all output storage; publication performs no allocation.
+            ++m_Epoch;
+            preparation.m_Registry = nullptr;
+            return std::move(preparation.m_Committed);
         }
 
         [[nodiscard]] std::vector<BoundFrameSnapshot> Publish(const std::span<const FrameSnapshot> evaluations,

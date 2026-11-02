@@ -20,6 +20,13 @@ namespace Keire::Detail
     {
         thread_local IScriptRuntimeServices* ActiveServices = nullptr;
 
+        [[nodiscard]] std::uint8_t ResetCameraTemporalHistory(const std::uint64_t world, const std::uint64_t high,
+                                                              const std::uint64_t low) noexcept
+        {
+            return ActiveServices && ActiveServices->ResetManagedCameraTemporalHistory(world, AssetId(high, low)) ? 1
+                                                                                                                  : 0;
+        }
+
         [[nodiscard]] bool ValidComponent(const std::uint8_t component) noexcept
         {
             return component <= static_cast<std::uint8_t>(ManagedRenderingComponent::SpotLight);
@@ -337,6 +344,8 @@ namespace Keire::Detail
 
     void RegisterManagedRuntimeRendering(Coral::ManagedAssembly& assembly)
     {
+        assembly.AddInternalCall("Keire.NativeRuntimeRendering", "ResetCameraTemporalHistoryIcall",
+                                 reinterpret_cast<void*>(&ResetCameraTemporalHistory));
         assembly.AddInternalCall("Keire.NativeRuntimeRendering", "GetScalarIcall", reinterpret_cast<void*>(&GetScalar));
         assembly.AddInternalCall("Keire.NativeRuntimeRendering", "SetScalarIcall", reinterpret_cast<void*>(&SetScalar));
         assembly.AddInternalCall("Keire.NativeRuntimeRendering", "GetIntegerIcall",

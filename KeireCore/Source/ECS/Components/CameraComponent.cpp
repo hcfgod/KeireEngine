@@ -3,6 +3,7 @@
 #include "Keire/ECS/Components/TransformComponent.h"
 
 #include <cmath>
+#include <limits>
 #include <stdexcept>
 
 namespace Keire
@@ -31,6 +32,18 @@ namespace Keire
 
     CameraComponent::CameraComponent() : Component(StaticType()) {}
 
+    void CameraComponent::SetPostProcessingEnabled(const bool enabled)
+    {
+        m_PostProcessingEnabled = enabled;
+        NotifyChanged();
+    }
+
+    void CameraComponent::SetPostProcessVolumeMask(const std::uint32_t mask)
+    {
+        m_PostProcessVolumeMask = mask;
+        NotifyChanged();
+    }
+
     void CameraComponent::SetFullscreenEffect(const CameraEffectStage stage, const AssetId material)
     {
         m_FullscreenEffects.at(static_cast<std::size_t>(stage)) = material;
@@ -39,6 +52,10 @@ namespace Keire
 
     void CameraComponent::SetProjection(const CameraProjection projection)
     {
+        if (m_Projection != projection)
+        {
+            ResetTemporalHistory();
+        }
         m_Projection = projection;
         NotifyChanged();
     }
@@ -108,7 +125,10 @@ namespace Keire
 
     void CameraComponent::Reset()
     {
+        ResetTemporalHistory();
         m_FullscreenEffects = {};
+        m_PostProcessingEnabled = true;
+        m_PostProcessVolumeMask = ~0U;
         m_Projection = CameraProjection::Perspective;
         m_ClearMode = CameraClearMode::Skybox;
         m_Primary = true;
@@ -143,28 +163,42 @@ namespace Keire
         result.Properties.push_back(
             {"effectAfterTonemapping", "After Tonemapping", "Fullscreen Effects", ComponentPropertyKind::Asset});
         result.Properties.push_back({"effectAfterUi", "After UI", "Fullscreen Effects", ComponentPropertyKind::Asset});
+        result.Properties.push_back({"postProcessingEnabled", "Use Post Processing Volumes", "Post Processing",
+                                     ComponentPropertyKind::Boolean});
+        result.Properties.push_back({"postProcessVolumeMask", "Volume Layer Mask", "Post Processing",
+                                     ComponentPropertyKind::Integer, false, 0.0,
+                                     static_cast<double>(std::numeric_limits<std::uint32_t>::max()), 1.0});
         result.Factory = [] { return Ref<Component>(CreateRef<CameraComponent>()); };
         result.Serialize = [](const Component& component)
         {
             const auto& camera = dynamic_cast<const CameraComponent&>(component);
-            return ComponentPropertyBag{{"effectBeforeTonemapping", camera.m_FullscreenEffects[0]},
-                                        {"effectAfterTonemapping", camera.m_FullscreenEffects[1]},
-                                        {"effectAfterUi", camera.m_FullscreenEffects[2]},
-                                        {"projection", static_cast<std::int64_t>(camera.m_Projection)},
-                                        {"clearMode", static_cast<std::int64_t>(camera.m_ClearMode)},
-                                        {"primary", camera.m_Primary},
-                                        {"priority", static_cast<std::int64_t>(camera.m_Priority)},
-                                        {"fieldOfView", static_cast<double>(camera.m_VerticalFieldOfViewDegrees)},
-                                        {"orthographicSize", static_cast<double>(camera.m_OrthographicSize)},
-                                        {"nearPlane", static_cast<double>(camera.m_NearPlane)},
-                                        {"farPlane", static_cast<double>(camera.m_FarPlane)},
-                                        {"clearColor", camera.m_ClearColor}};
+            return ComponentPropertyBag{
+                {"effectBeforeTonemapping", camera.m_FullscreenEffects[0]},
+                {"postProcessingEnabled", camera.m_PostProcessingEnabled},
+                {"postProcessVolumeMask", static_cast<std::int64_t>(camera.m_PostProcessVolumeMask)},
+                {"effectAfterTonemapping", camera.m_FullscreenEffects[1]},
+                {"effectAfterUi", camera.m_FullscreenEffects[2]},
+                {"projection", static_cast<std::int64_t>(camera.m_Projection)},
+                {"clearMode", static_cast<std::int64_t>(camera.m_ClearMode)},
+                {"primary", camera.m_Primary},
+                {"priority", static_cast<std::int64_t>(camera.m_Priority)},
+                {"fieldOfView", static_cast<double>(camera.m_VerticalFieldOfViewDegrees)},
+                {"orthographicSize", static_cast<double>(camera.m_OrthographicSize)},
+                {"nearPlane", static_cast<double>(camera.m_NearPlane)},
+                {"farPlane", static_cast<double>(camera.m_FarPlane)},
+                {"clearColor", camera.m_ClearColor}};
         };
         result.Deserialize = [](Component& component, const ComponentPropertyBag& values, const std::uint32_t version)
         {
             if (version != 1)
                 throw std::invalid_argument("Unsupported Camera component schema version.");
             auto& camera = dynamic_cast<CameraComponent&>(component);
+            const auto postProcessMask = ReadCameraProperty(
+                values, "postProcessVolumeMask", static_cast<std::int64_t>(std::numeric_limits<std::uint32_t>::max()));
+            if (postProcessMask < 0 || postProcessMask > std::numeric_limits<std::uint32_t>::max())
+            {
+                throw std::invalid_argument("Camera post-processing volume mask must fit an unsigned 32-bit mask.");
+            }
             const auto projection = ReadCameraProperty(values, "projection", std::int64_t{0});
             if (projection < 0 || projection > 1)
                 throw std::invalid_argument("Camera projection is invalid.");
@@ -186,6 +220,8 @@ namespace Keire
             camera.SetClipPlanes(static_cast<float>(ReadCameraProperty(values, "nearPlane", 0.1)),
                                  static_cast<float>(ReadCameraProperty(values, "farPlane", 1000.0)));
             camera.SetClearColor(ReadCameraProperty(values, "clearColor", Color{0.10F, 0.12F, 0.16F, 1.0F}));
+            camera.SetPostProcessingEnabled(ReadCameraProperty(values, "postProcessingEnabled", true));
+            camera.SetPostProcessVolumeMask(static_cast<std::uint32_t>(postProcessMask));
         };
         return result;
     }

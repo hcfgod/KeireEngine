@@ -157,6 +157,15 @@ namespace Keire
         Vector3d WorldOrigin{};
         // Omitted by legacy callers: preserve destination settings.
         std::optional<PhysicsMotionSettings> MotionSettings;
+        Vector3 PendingForce;
+        Vector3 PendingTorque;
+    };
+
+    struct ScenePhysicsLoadCheckpoint
+    {
+        std::uint64_t Tick = 0;
+        std::optional<std::uint64_t> AcceptedWaterTick;
+        float AcceptedWaterDeltaSeconds = 0.0F;
     };
 
     struct ScenePhysicsWorldCheckpoint
@@ -165,6 +174,10 @@ namespace Keire
         std::optional<Vector3> Gravity;
         std::vector<PhysicsGravitySource> GravitySources;
         std::vector<ScenePhysicsCheckpointBody> Bodies;
+        // Omitted by legacy callers: preserve destination prepared-load bookkeeping.
+        std::optional<ScenePhysicsLoadCheckpoint> Loads;
+        // Legacy checkpoints omit the water phase and preserve the destination clock.
+        std::optional<double> WaterTimeSeconds;
     };
 
     struct ScenePhysicsRayQueryPrecise

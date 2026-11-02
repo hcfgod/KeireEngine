@@ -31,7 +31,7 @@ namespace Keire::Detail
         const auto occlusionSupport = static_cast<std::uint8_t>(definition.OcclusionSupport);
         const bool unlitVolume = !definition.ReceivesShadows && !definition.UsesForwardPlus &&
                                  !definition.UsesImageBasedLighting && definition.SpatialLightingAbiVersion == 0U;
-        if (definition.VolumeLightingAbiVersion > 14U ||
+        if (definition.VolumeLightingAbiVersion > 16U ||
             (definition.VolumeLightingAbiVersion >= 1U &&
              (definition.VertexLayoutVersion != 3U || (!unlitVolume && definition.SpatialLightingAbiVersion != 3U))))
         {

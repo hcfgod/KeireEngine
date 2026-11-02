@@ -1,5 +1,9 @@
 #pragma once
 
+// The shader include resolver can alias slash and backslash paths; pragma once alone is insufficient.
+#ifndef KEIRE_PLANET_ATMOSPHERE_SET_HLSLI
+#define KEIRE_PLANET_ATMOSPHERE_SET_HLSLI
+
 #include "AtmosphereMedium.hlsli"
 #include "AtmosphereSunOcclusion.hlsli"
 
@@ -150,3 +154,5 @@ AtmosphereTransport IntegratePlanetAtmosphereSet(float3 observerOffset, float3 d
     }
     return result;
 }
+
+#endif // KEIRE_PLANET_ATMOSPHERE_SET_HLSLI

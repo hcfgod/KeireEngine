@@ -4,6 +4,7 @@
 #include "KeireClient/Editor/ShaderGraphPanelLayout.h"
 #include "KeireClient/Editor/UiBuilderDocument.h"
 #include "KeireClient/Editor/UiBuilderPanel.h"
+#include "KeireClientInternal/Editor/PostProcessSearch.h"
 #include "KeireInternal/FileSystem.h"
 
 #include <doctest/doctest.h>
@@ -19,6 +20,19 @@
 #include <span>
 #include <stdexcept>
 #include <string>
+
+TEST_CASE("post process search finds effect categories parameter names and units")
+{
+    using KeireEditor::Detail::PostProcessParameterMatches;
+    CHECK(PostProcessParameterMatches("", "Color", "Temperature", ""));
+    CHECK(PostProcessParameterMatches("COLOR", "Color", "Temperature", ""));
+    CHECK(PostProcessParameterMatches("color", "Color", "Red Gain", ""));
+    CHECK(PostProcessParameterMatches("temperature", "Color", "Temperature", ""));
+    CHECK(PostProcessParameterMatches("EV", "Exposure", "Exposure Compensation", "EV"));
+    CHECK(PostProcessParameterMatches("px", "Bloom", "Bloom Radius", "buffer px"));
+    CHECK_FALSE(PostProcessParameterMatches("color", "Bloom", "Bloom Radius", "buffer px"));
+    CHECK_FALSE(PostProcessParameterMatches("unknown", "Color", "Temperature", ""));
+}
 
 TEST_CASE("folder creation preparation validates the name without creating a placeholder")
 {
@@ -276,9 +290,13 @@ TEST_CASE("Asset Browser double-click routes material and shader authoring asset
     CHECK(KeireEditor::ResolveAssetBrowserOpenAction("UI/Hud.keirestyle") == UiStyleSheet);
     CHECK(KeireEditor::ResolveAssetBrowserOpenAction("Animations/Walk.keireanim") == AnimationClip);
     CHECK(KeireEditor::ResolveAssetBrowserOpenAction("Animations/Walk.KEIREANIM") == AnimationClip);
+    CHECK(KeireEditor::ResolveAssetBrowserOpenAction("Profiles/Day.keirepostprocess") == PostProcessing);
+    CHECK(KeireEditor::ResolveAssetBrowserOpenAction("Profiles/Day.KEIREPOSTPROCESS") == PostProcessing);
     CHECK(KeireEditor::ResolveAssetBrowserOpenAction("Textures/Surface.png") == External);
 
     Keire::AssetSourceRecord instance;
+    instance.RelativePath = "Profiles/Day.keirepostprocess";
+    CHECK(KeireEditor::AssetTypeName(instance) == "Post Processing Profile");
     instance.RelativePath = "Materials/Surface.keirematerialinstance";
     CHECK(KeireEditor::AssetTypeName(instance) == "Material Instance");
     instance.RelativePath = "Materials/Legacy.keireshadergraphinstance";

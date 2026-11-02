@@ -2,6 +2,7 @@
 #include "KeireClient/Editor/ImportedModelCreation.h"
 #include "KeireClient/Editor/InspectorComponentUtilities.h"
 #include "KeireClient/Editor/SceneDocument.h"
+#include "KeireClientInternal/Editor/HierarchyDragInteraction.h"
 
 #include "Keire/ECS/Components/JointComponents.h"
 #include "Keire/ECS/Components/MeshRendererComponent.h"
@@ -15,6 +16,43 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+
+TEST_CASE("Hierarchy drag targets reject cycles and selected insertion anchors before mutation")
+{
+    const auto root = Keire::AssetId::Generate();
+    const auto child = Keire::AssetId::Generate();
+    const auto other = Keire::AssetId::Generate();
+    const std::unordered_map<Keire::AssetId, Keire::AssetId> parents{{root, {}}, {child, root}, {other, {}}};
+    const std::array dragged{root};
+    CHECK_FALSE(KeireEditor::ValidateHierarchyDrop(dragged, child, {}, parents).empty());
+    CHECK_FALSE(KeireEditor::ValidateHierarchyDrop(dragged, root, {}, parents).empty());
+    CHECK_FALSE(KeireEditor::ValidateHierarchyDrop(dragged, {}, root, parents).empty());
+    CHECK(KeireEditor::ValidateHierarchyDrop(dragged, other, {}, parents).empty());
+    CHECK(KeireEditor::ValidateHierarchyDrop(dragged, {}, other, parents).empty());
+    CHECK_FALSE(KeireEditor::ValidateHierarchyDrop(dragged, Keire::AssetId::Generate(), {}, parents).empty());
+    const std::unordered_map<Keire::AssetId, Keire::AssetId> cyclic{{child, other}, {other, child}};
+    CHECK_FALSE(KeireEditor::ValidateHierarchyDrop(dragged, child, {}, cyclic).empty());
+}
+
+TEST_CASE("Hierarchy hover expansion waits on a stable target and search drops only parent")
+{
+    using KeireEditor::HierarchyDropZone;
+    CHECK(KeireEditor::ResolveHierarchyDropZone(0.1F, false) == HierarchyDropZone::Before);
+    CHECK(KeireEditor::ResolveHierarchyDropZone(0.5F, false) == HierarchyDropZone::Child);
+    CHECK(KeireEditor::ResolveHierarchyDropZone(0.9F, false) == HierarchyDropZone::After);
+    CHECK(KeireEditor::ResolveHierarchyDropZone(0.1F, true) == HierarchyDropZone::Child);
+    CHECK(KeireEditor::ResolveHierarchyDropZone(0.9F, true) == HierarchyDropZone::Child);
+    KeireEditor::HierarchyDragHover hover;
+    const auto first = Keire::AssetId::Generate();
+    const auto second = Keire::AssetId::Generate();
+    CHECK_FALSE(hover.Update(first, 1.0));
+    CHECK_FALSE(hover.Update(first, 1.5));
+    CHECK(hover.Update(first, 1.7));
+    CHECK_FALSE(hover.Update(second, 1.8));
+    CHECK_FALSE(hover.Update({}, 2.8));
+    CHECK_FALSE(hover.Update(second, 3.0));
+    CHECK(hover.Update(second, 3.7));
+}
 
 TEST_CASE("scene document rolls back entity creation when component setup fails")
 {

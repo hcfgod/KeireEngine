@@ -1,4 +1,5 @@
 #include "Keire/Core.h"
+#include "KeireInternal/Jobs/JobRegistry.h"
 #include "KeireInternal/StableHandleTable.h"
 
 #include <doctest/doctest.h>
@@ -7,6 +8,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstddef>
+#include <memory>
 #include <memory_resource>
 #include <mutex>
 #include <stdexcept>
@@ -22,16 +24,21 @@ namespace
       public:
         [[nodiscard]] std::size_t AllocationCount() const noexcept { return m_AllocationCount.load(); }
 
+        [[nodiscard]] std::size_t LiveAllocationCount() const noexcept { return m_LiveAllocationCount.load(); }
+
       private:
         void* do_allocate(const std::size_t bytes, const std::size_t alignment) override
         {
+            auto* allocation = std::pmr::new_delete_resource()->allocate(bytes, alignment);
             m_AllocationCount.fetch_add(1);
-            return std::pmr::new_delete_resource()->allocate(bytes, alignment);
+            m_LiveAllocationCount.fetch_add(1);
+            return allocation;
         }
 
         void do_deallocate(void* pointer, const std::size_t bytes, const std::size_t alignment) override
         {
             std::pmr::new_delete_resource()->deallocate(pointer, bytes, alignment);
+            m_LiveAllocationCount.fetch_sub(1);
         }
 
         [[nodiscard]] bool do_is_equal(const std::pmr::memory_resource& other) const noexcept override
@@ -40,6 +47,7 @@ namespace
         }
 
         std::atomic<std::size_t> m_AllocationCount{0};
+        std::atomic<std::size_t> m_LiveAllocationCount{0};
     };
 
     class ThrowingStableValue final
@@ -52,6 +60,28 @@ namespace
         }
     };
 } // namespace
+
+TEST_CASE("Job registries release expired control blocks during long running submission")
+{
+    CountingMemoryResource memory;
+    std::vector<std::weak_ptr<int>> records;
+    std::size_t nextCompaction = 64;
+    auto live = std::allocate_shared<int>(std::pmr::polymorphic_allocator<int>(&memory), 42);
+    records.push_back(live);
+
+    for (int submission = 0; submission < 4096; ++submission)
+    {
+        Keire::Detail::CompactJobRegistry(records, nextCompaction);
+        records.push_back(std::allocate_shared<int>(std::pmr::polymorphic_allocator<int>(&memory), submission));
+        REQUIRE(memory.LiveAllocationCount() <= 64);
+        REQUIRE(records.front().lock() == live);
+    }
+
+    CHECK(memory.AllocationCount() == 4097);
+    live.reset();
+    records.clear();
+    CHECK(memory.LiveAllocationCount() == 0);
+}
 
 TEST_CASE("Job dependencies propagate completion and failure")
 {
@@ -146,6 +176,39 @@ TEST_CASE("Concurrent dependency completion cannot publish a partially registere
     jobs->Close();
 }
 
+TEST_CASE("Completed jobs release prerequisite graphs while preserving their own result")
+{
+    Keire::JobSystemSpecification specification;
+    specification.WorkerCount = 1;
+    specification.BlockingWorkerCount = 1;
+    auto jobs = Keire::CreateRef<Keire::JobSystem>(specification);
+    auto payload = std::make_shared<int>(42);
+    const std::weak_ptr<int> lifetime = payload;
+    auto failed = jobs->Submit({.Name = "Failure payload"}, [payload](Keire::JobContext&) { throw payload; });
+    payload.reset();
+    REQUIRE(failed.Wait(2s));
+    REQUIRE(failed.Status() == Keire::JobStatus::Failed);
+
+    Keire::JobDescription recoveryDescription;
+    recoveryDescription.Dependencies = {failed};
+    recoveryDescription.DependencyPolicy = Keire::JobDependencyPolicy::ObserveCompletion;
+    auto recovered = jobs->Submit(std::move(recoveryDescription), [](Keire::JobContext&) {});
+    REQUIRE(recovered.Wait(2s));
+    REQUIRE(recovered.Status() == Keire::JobStatus::Succeeded);
+
+    Keire::JobDescription finalDescription;
+    finalDescription.Dependencies = {recovered};
+    const auto finalJob = jobs->Submit(std::move(finalDescription), [](Keire::JobContext&) {});
+    REQUIRE(finalJob.Wait(2s));
+    REQUIRE(finalJob.Status() == Keire::JobStatus::Succeeded);
+    jobs->Close();
+    CHECK_FALSE(lifetime.expired());
+    failed = {};
+    recovered = {};
+    CHECK(lifetime.expired());
+    CHECK(finalJob.Status() == Keire::JobStatus::Succeeded);
+}
+
 TEST_CASE("Worker initiated job-system shutdown is safe and completes the caller")
 {
     Keire::JobSystemSpecification specification;
@@ -178,6 +241,26 @@ TEST_CASE("Worker initiated job-system shutdown is safe and completes the caller
     CHECK_FALSE(jobs->IsOpen());
 }
 
+TEST_CASE("Jobs without scratch allocations leave the upstream resource untouched")
+{
+    CountingMemoryResource upstream;
+    Keire::JobSystemSpecification specification;
+    specification.WorkerCount = 1;
+    specification.BlockingWorkerCount = 1;
+    auto jobs = Keire::CreateRef<Keire::JobSystem>(specification, &upstream);
+    const auto job = jobs->Submit({.Name = "No scratch"},
+                                  [](Keire::JobContext& context)
+                                  {
+                                      // Merely obtaining the resource must not allocate either.
+                                      (void)context.ScratchResource();
+                                  });
+
+    REQUIRE(job.Wait(2s));
+    CHECK(job.Status() == Keire::JobStatus::Succeeded);
+    jobs->Close();
+    CHECK(upstream.AllocationCount() == 0);
+}
+
 TEST_CASE("Job scratch overflow allocations use the configured upstream resource")
 {
     CountingMemoryResource upstream;
@@ -195,8 +278,9 @@ TEST_CASE("Job scratch overflow allocations use the configured upstream resource
 
     REQUIRE(job.Wait(2s));
     CHECK(job.Status() == Keire::JobStatus::Succeeded);
-    CHECK(upstream.AllocationCount() >= 2);
+    CHECK(upstream.AllocationCount() >= 1);
     jobs->Close();
+    CHECK(upstream.LiveAllocationCount() == 0);
 }
 
 TEST_CASE("Job continuations observe failed and cancelled prerequisites")
@@ -239,6 +323,13 @@ TEST_CASE("Job scopes cancel waiting work without waiting for foreign dependenci
     description.Dependencies.push_back(blocker);
     const auto dependent =
         scope->Submit(std::move(description), [](Keire::JobContext&) { FAIL("Cancelled work executed."); });
+
+    // Repeated cleanup must preserve the older dependency-blocked job for scope cancellation.
+    for (int submission = 0; submission < 256; ++submission)
+    {
+        const auto completed = scope->Submit({.Name = "Short scoped job"}, [](Keire::JobContext&) {});
+        REQUIRE(completed.Wait(2s));
+    }
 
     scope->Cancel();
     scope->Wait();

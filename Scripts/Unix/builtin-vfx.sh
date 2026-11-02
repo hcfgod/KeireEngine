@@ -9,6 +9,7 @@ source "$blob_helper"
 blob_cache="$ROOT/Build/Cache/ShaderBlobs/unix"
 compiler="$ROOT/Build/Tools/ShaderCompiler/KeireShaderCompiler"
 source_file="$ROOT/KeireCore/Shaders/BuiltinVfx.hlsl"
+compute_source_file="$ROOT/KeireCore/Shaders/BuiltinVfxCompute.hlsl"
 visibility_source_file="$ROOT/KeireCore/Shaders/BuiltinVfxVisibility.hlsl"
 includes=("$ROOT/KeireCore/Shaders/CloudVolumeView.hlsli"
           "$ROOT/KeireCore/Shaders/CloudVolume.hlsli"
@@ -82,6 +83,7 @@ stages=(
 )
 variants=("DXIL Dxil dxil" "SPIRV Spirv spv" "MSL Msl msl")
 source_identity="$(shader_blob_source_identity "$compiler" "$source_file" "$ROOT/KeireCore/Shaders" "$temporary")"
+compute_identity="$(shader_blob_source_identity "$compiler" "$compute_source_file" "$ROOT/KeireCore/Shaders" "$temporary")"
 visibility_identity="$(shader_blob_source_identity "$compiler" "$visibility_source_file" "$ROOT/KeireCore/Shaders" "$temporary")"
 
 for stage_row in "${stages[@]}"; do
@@ -91,6 +93,9 @@ for stage_row in "${stages[@]}"; do
   if [[ "$name" == "BuildVisibilityCandidates" || "$name" == "CompactVisibility" ]]; then
     stage_source="$visibility_source_file"
     stage_identity="$visibility_identity"
+  elif [[ "$stage" == "compute" ]]; then
+    stage_source="$compute_source_file"
+    stage_identity="$compute_identity"
   fi
   for variant_row in "${variants[@]}"; do
     read -r destination variant extension <<< "$variant_row"
@@ -102,14 +107,20 @@ done
 emit_array() {
   local name="$1"
   local file="$2"
-  printf '    inline constexpr unsigned char %s[] = {\n' "$name"
+  printf '    inline constexpr unsigned char %s[] =\n' "$name"
   od -An -v -tx1 "$file" | awk '{
-    printf "        "
-    for (field = 1; field <= NF; ++field)
-      printf "0x%s, ", $field
-    printf "\n"
-  }'
-  printf '    };\n\n'
+    for (field = 1; field <= NF; ++field) {
+      chunk = chunk "\\x" $field
+      ++bytes
+      if (bytes == 8192) {
+        printf "        \"%s\"\n", chunk
+        chunk = ""
+        bytes = 0
+      }
+    }
+  } END { if (bytes) printf "        \"%s\"\n", chunk }'
+  printf '    ;\n'
+  printf '    inline constexpr unsigned int %sSize = %s;\n\n' "$name" "$(wc -c < "$file" | tr -d ' ')"
 }
 
 mkdir -p "$generated_directory"

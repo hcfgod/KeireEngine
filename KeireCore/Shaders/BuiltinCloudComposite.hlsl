@@ -13,6 +13,7 @@ cbuffer CloudCacheConstants : register(b1, space3)
     float4 CloudCacheCellSize;
     uint4 CloudCacheDimensions;
 };
+#define KEIRE_PLANET_VOLUME_SET 1
 #include "CloudVolumeView.hlsli"
 #include "CloudTemporalRejection.hlsli"
 
@@ -46,8 +47,10 @@ VertexOutput VSMain(uint vertexId : SV_VertexID)
 
 float4 PSMain(VertexOutput input) : SV_Target0
 {
+    const bool compositePass = VolumeView.RegionalControls.z > 1.5F;
+    const bool attenuationPass = !compositePass && VolumeView.RegionalControls.z > 0.5F;
     const float depth = SceneDepth.SampleLevel(SceneDepthSampler, input.UV, 0.0F);
-    const float4 background = SceneColor.SampleLevel(SceneColorSampler, input.UV, 0.0F);
+
     const CloudVolumeViewRay ray = MakeCloudVolumeViewRay(input.UV, depth, VolumeView);
     const float sceneDistance = depth < 1.0F ? ray.SurfaceDistance : -1.0F;
     uint width;
@@ -90,9 +93,19 @@ float4 PSMain(VertexOutput input) : SV_Target0
         // A thin foreground surface may have no representative half-resolution sample. Trace its exact
         // ray instead of borrowing sky clouds or clearing the volume along that silhouette.
         float unusedDistance;
-        cloud = EvaluateCloudVolumeTrace(ray, VolumeView, true, 0.0F, unusedDistance);
+        cloud = EvaluateCloudVolumeTrace(ray, VolumeView, !attenuationPass, 0.0F, unusedDistance);
     }
-    const CloudVolumeViewTransport volume = ComposeCloudVolumeTrace(cloud, 0.0F, ray, depth, VolumeView, true);
-    return float4(volume.Radiance + volume.Transmission * background.rgb,
-        VolumeSceneOpacity(background.a, volume.CloudOpacity));
+    // History stores cloud/fog radiance and scalar opacity; clear-air extinction is RGB and remains
+    // evaluated at this pixel's scene depth. Never replace Transmission with (1 - cloud.a).xxx here.
+    const CloudVolumeViewTransport volume = ComposeCloudVolumeTrace(
+        cloud, 0.0F, ray, depth, VolumeView, !attenuationPass);
+    if (compositePass)
+    {
+        const float4 background = SceneColor.SampleLevel(SceneColorSampler, input.UV, 0.0F);
+        return float4(volume.Radiance + volume.Transmission * background.rgb,
+            VolumeSceneOpacity(background.a, volume.CloudOpacity));
+    }
+    // Two fixed-function MSAA blends preserve each sample's background and coverage. This shader
+    // never samples a resolved background on that path. A thin-edge fallback is exact but not cheap.
+    return attenuationPass ? float4(volume.Transmission, 0.0F) : float4(volume.Radiance, volume.CloudOpacity);
 }

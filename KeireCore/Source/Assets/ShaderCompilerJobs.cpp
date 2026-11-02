@@ -196,12 +196,13 @@ namespace Keire::Detail
                        const std::filesystem::path& output, const std::span<const std::filesystem::path> includeRoots,
                        const std::span<const std::pair<std::string, std::string>> defines,
                        const ShaderImporterSpecification& specification, const std::filesystem::path& workingDirectory,
-                       const std::stop_token cancellation, ShaderCompilerStatistics* statistics)
+                       const std::stop_token cancellation, ShaderCompilerStatistics* statistics,
+                       const ShaderCompilerInput input)
     {
         // Stable virtual paths keep UUID scratch locations out of compiler-generated metadata.
         std::vector<std::string> arguments{PathToUtf8(source.lexically_relative(workingDirectory)),
                                            "-s",
-                                           "HLSL",
+                                           input == ShaderCompilerInput::SpirV ? "SPIRV" : "HLSL",
                                            "-d",
                                            std::string(destination),
                                            "-t",
@@ -232,6 +233,10 @@ namespace Keire::Detail
 
         try
         {
+            if (statistics && input == ShaderCompilerInput::Hlsl)
+            {
+                statistics->HlslStages.fetch_add(1U, std::memory_order_relaxed);
+            }
             RunShaderCompilerProcess(compiler, arguments, workingDirectory, specification.Timeout, cancellation,
                                      statistics);
         }

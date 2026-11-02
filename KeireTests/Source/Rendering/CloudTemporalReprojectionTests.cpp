@@ -205,3 +205,77 @@ TEST_CASE("Combined cloud fog history rejects fog edits and mismatched medium mo
     current.Volume.Fog.Controls[0] = 0U;
     CHECK_FALSE(MakeCloudTemporalReprojection(current, previous, true));
 }
+
+TEST_CASE("cloud resize transfers submitted history without stealing pending writers")
+{
+    using namespace Keire::RenderBackend;
+    int textureTokens[4]{};
+    CloudTemporalResources old;
+    old.Width = 640;
+    old.Height = 360;
+    old.Published = {reinterpret_cast<SDL_GPUTexture*>(&textureTokens[0]),
+                     reinterpret_cast<SDL_GPUTexture*>(&textureTokens[1])};
+    old.PublishedView = View(10);
+    old.Writers.resize(1);
+    old.Writers[0].History = {reinterpret_cast<SDL_GPUTexture*>(&textureTokens[2]),
+                              reinterpret_cast<SDL_GPUTexture*>(&textureTokens[3])};
+    old.Writers[0].RecordedView = View(11);
+    const auto published = old.Published;
+    const auto pending = old.Writers[0].History;
+    CloudTemporalResources resized;
+    resized.Width = 480;
+    resized.Height = 270;
+    REQUIRE(RetainCloudHistoryForResize(old, resized));
+    CHECK(old.Published.Empty());
+    CHECK_FALSE(old.PublishedView);
+    CHECK(old.Writers[0].History.RadianceOpacity == pending.RadianceOpacity);
+    CHECK(old.Writers[0].RecordedView->FrameId == 11);
+    CHECK(resized.PreviousExtent.RadianceOpacity == published.RadianceOpacity);
+    REQUIRE(resized.PreviousExtentView);
+    CHECK(resized.PreviousExtentView->FrameId == 10);
+    CHECK_FALSE(resized.Empty());
+    CHECK(MakeCloudTemporalReprojection(View(11), *resized.PreviousExtentView, true).has_value());
+    CHECK_FALSE(MakeCloudTemporalReprojection(View(11), *resized.PreviousExtentView, false));
+    CHECK_FALSE(MakeCloudTemporalReprojection(View(12), *resized.PreviousExtentView, true));
+    CHECK_FALSE(RetainCloudHistoryForResize(old, resized));
+
+    CloudTemporalResources secondResize;
+    REQUIRE(RetainCloudHistoryForResize(resized, secondResize));
+    CHECK(resized.PreviousExtent.Empty());
+    CHECK_FALSE(resized.PreviousExtentView);
+    CHECK(secondResize.PreviousExtent.RadianceOpacity == published.RadianceOpacity);
+    CHECK_FALSE(RetainCloudHistoryForResize(secondResize, secondResize));
+}
+
+TEST_CASE("cloud resize ignores incomplete and unsubmitted history")
+{
+    using namespace Keire::RenderBackend;
+    int textureTokens[2]{};
+    CloudTemporalResources old;
+    CloudTemporalResources resized;
+    old.Published = {reinterpret_cast<SDL_GPUTexture*>(&textureTokens[0]), nullptr};
+    old.PublishedView = View(10);
+    CHECK_FALSE(RetainCloudHistoryForResize(old, resized));
+    CHECK(resized.Empty());
+    old.Published.CloudAndSceneDepth = reinterpret_cast<SDL_GPUTexture*>(&textureTokens[1]);
+    old.PublishedView.reset();
+    CHECK_FALSE(RetainCloudHistoryForResize(old, resized));
+    CHECK(old.Published.Complete());
+    CHECK(resized.Empty());
+}
+
+TEST_CASE("cloud reprojection preserves normalized history across dynamic render extents")
+{
+    auto previous = View(10);
+    auto current = View(11);
+    previous.Volume.CameraControls.Z = 1.0F / 1920.0F;
+    previous.Volume.CameraControls.W = 1.0F / 1080.0F;
+    current.Volume.CameraControls.Z = 1.0F / 1280.0F;
+    current.Volume.CameraControls.W = 1.0F / 720.0F;
+    REQUIRE(MakeCloudTemporalReprojection(current, previous, true));
+    current.Volume.CameraControls.X = 1.0F;
+    CHECK_FALSE(MakeCloudTemporalReprojection(current, previous, true));
+    current.Volume.CameraControls.X = 0.0F;
+    current.UnjitteredProjection.Elements[0] = 2.0F;
+    CHECK_FALSE(MakeCloudTemporalReprojection(current, previous, true));
+}

@@ -45,6 +45,20 @@ namespace Keire
         [[nodiscard]] float NearPlane() const noexcept { return m_NearPlane; }
         [[nodiscard]] float FarPlane() const noexcept { return m_FarPlane; }
         [[nodiscard]] Color ClearColor() const noexcept { return m_ClearColor; }
+        [[nodiscard]] bool PostProcessingEnabled() const noexcept { return m_PostProcessingEnabled; }
+
+        [[nodiscard]] std::uint32_t PostProcessVolumeMask() const noexcept { return m_PostProcessVolumeMask; }
+
+        // Runtime-only identity: scene serialization and cloning never persist temporal histories.
+        [[nodiscard]] AssetId TemporalHistoryId() const noexcept { return m_TemporalHistoryId; }
+
+        [[nodiscard]] std::uint64_t TemporalHistoryRevision() const noexcept { return m_TemporalHistoryRevision; }
+
+        // Call after teleporting this camera or making a discontinuous cinematic cut.
+        void ResetTemporalHistory() noexcept { ++m_TemporalHistoryRevision; }
+
+        void SetPostProcessingEnabled(bool enabled);
+        void SetPostProcessVolumeMask(std::uint32_t mask);
 
         // Before tonemapping, after tonemapping, and after camera UI, respectively.
         [[nodiscard]] const std::array<AssetId, 3>& FullscreenEffects() const noexcept { return m_FullscreenEffects; }
@@ -63,7 +77,11 @@ namespace Keire
 
       private:
         friend ComponentRegistration CreateCameraComponentRegistration();
+        AssetId m_TemporalHistoryId = AssetId::Generate();
+        std::uint64_t m_TemporalHistoryRevision = 0;
         std::array<AssetId, 3> m_FullscreenEffects{};
+        bool m_PostProcessingEnabled = true;
+        std::uint32_t m_PostProcessVolumeMask = ~0U;
         CameraProjection m_Projection = CameraProjection::Perspective;
         CameraClearMode m_ClearMode = CameraClearMode::Skybox;
         bool m_Primary = true;

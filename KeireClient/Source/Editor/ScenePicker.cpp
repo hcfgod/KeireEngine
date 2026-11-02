@@ -172,6 +172,49 @@ namespace KeireEditor
         return result;
     }
 
+    Keire::Vector3d ResolveSceneDropPositionPrecise(const Keire::UiItemRect viewport, const Keire::UiPosition pointer,
+                                                    const Keire::RenderCamera& camera,
+                                                    const Keire::Ref<Keire::Scene>& scene,
+                                                    const MeshBoundsResolver& resolveMeshBounds)
+    {
+        const auto fallback = ResolveSceneDropPositionPrecise(viewport, pointer, camera);
+        if (!scene || !scene->IsOpen())
+        {
+            return fallback;
+        }
+        const auto size = viewport.Size();
+        const float x = (pointer.X - viewport.Minimum.X) / size.Width * 2.0F - 1.0F;
+        const float y = 1.0F - (pointer.Y - viewport.Minimum.Y) / size.Height * 2.0F;
+        const auto inverse = Keire::Math::Inverse(Keire::Math::Multiply(camera.Projection, camera.View));
+        const auto origin = Unproject(inverse, x, y, 0.0F);
+        const auto direction = NormalizedDirection(origin, Unproject(inverse, x, y, 1.0F));
+        std::optional<float> closest;
+        for (const auto& entity : scene->Entities())
+        {
+            const auto renderer = entity.GetComponent<Keire::MeshRendererComponent>();
+            const auto transform = entity.GetComponent<Keire::TransformComponent>();
+            if (!entity.ActiveInHierarchy() || !renderer || !renderer->Enabled() || !renderer->Visible() || !transform)
+            {
+                continue;
+            }
+            const auto bounds = BoundsForEntity(entity, resolveMeshBounds);
+            const auto world =
+                transform->PresentationRelativeMatrix(camera.WorldOrigin, std::numeric_limits<double>::max());
+            const auto hit = IntersectBounds(world, bounds, origin, direction);
+            if (hit && *hit > 0.0F && (!closest || *hit < *closest))
+            {
+                closest = hit;
+            }
+        }
+        if (!closest)
+        {
+            return fallback;
+        }
+        return {camera.WorldOrigin.X + (origin.X + direction.X * *closest),
+                camera.WorldOrigin.Y + (origin.Y + direction.Y * *closest),
+                camera.WorldOrigin.Z + (origin.Z + direction.Z * *closest)};
+    }
+
     Keire::Vector3 ResolveSceneDropPosition(const Keire::UiItemRect viewport, const Keire::UiPosition pointer,
                                             const Keire::RenderCamera& camera)
     {

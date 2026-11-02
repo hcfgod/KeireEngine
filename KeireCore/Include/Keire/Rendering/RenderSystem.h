@@ -377,10 +377,16 @@ namespace Keire
         float FarPlane = 1000.0F;
         // Materials with a Fullscreen shader; stages match CameraComponent::FullscreenEffects.
         std::array<AssetId, 3> FullscreenEffects{};
+        bool PostProcessingEnabled = true;
+        std::uint32_t PostProcessVolumeMask = ~0U;
         // View and captured spatial data use coordinates relative to WorldOrigin.
         // Environment settings use coordinates relative to EnvironmentAnchor in the same frame.
         Vector3d WorldOrigin;
         Vector3d EnvironmentAnchor;
+        // Stable camera identity and explicit cut revision. Leave both zero for legacy custom views.
+        // Change the revision on teleports/cuts; ordinary movement and origin rebasing retain it.
+        AssetId TemporalHistoryId;
+        std::uint64_t TemporalHistoryRevision = 0;
     };
 
     inline constexpr std::uint32_t RenderEnvironmentSettingsSchemaVersion = 9;

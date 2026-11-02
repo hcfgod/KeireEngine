@@ -53,3 +53,30 @@ TEST_CASE("Scene camera v5 retains transported orientation and migrates legacy n
         CHECK(restored.LockedEntity() == locked);
     }
 }
+
+TEST_CASE("scene camera history resets on authoring cuts but survives smooth planetary travel")
+{
+    KeireEditor::SceneCameraController camera;
+    KeireEditor::SceneCameraController other;
+    auto previous = camera.RenderCamera(1.0F);
+    CHECK(previous.TemporalHistoryId != other.RenderCamera(1.0F).TemporalHistoryId);
+    camera.FramePrecise({1.0e12, 10.0, -1.0e12}, 10.0F);
+    auto current = camera.RenderCamera(1.0F);
+    CHECK(current.TemporalHistoryRevision == previous.TemporalHistoryRevision + 1U);
+    previous = current;
+    camera.FollowFramePrecise({1.0e12 + 10000000.0, 10.0, -1.0e12}, 10.0F, 1.0F, 0.016F);
+    camera.ReexpressReferenceFrame({20.0, 10.0, 30.0}, Keire::Detail::FrameRotation{});
+    Keire::Detail::EditorCameraInput input;
+    input.Fly = true;
+    input.MoveForward = 1.0F;
+    input.DeltaSeconds = 0.016F;
+    (void)camera.Update(input);
+    current = camera.RenderCamera(1.0F);
+    CHECK(current.TemporalHistoryId == previous.TemporalHistoryId);
+    CHECK(current.TemporalHistoryRevision == previous.TemporalHistoryRevision);
+    camera.Snap(Keire::Detail::EditorCameraAxis::PositiveX);
+    CHECK(camera.RenderCamera(1.0F).TemporalHistoryRevision == current.TemporalHistoryRevision + 1U);
+    previous = camera.RenderCamera(1.0F);
+    camera.ToggleProjection();
+    CHECK(camera.RenderCamera(1.0F).TemporalHistoryRevision == previous.TemporalHistoryRevision + 1U);
+}

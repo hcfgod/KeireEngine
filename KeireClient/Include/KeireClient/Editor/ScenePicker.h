@@ -46,6 +46,11 @@ namespace KeireEditor
     // Intersects the Y-up ground plane; horizon/upward rays use a plane ten units in front of the camera.
     [[nodiscard]] Keire::Vector3d ResolveSceneDropPositionPrecise(Keire::UiItemRect viewport, Keire::UiPosition pointer,
                                                                   const Keire::RenderCamera& camera);
+    // Prefer visible mesh bounds under the cursor, then fall back to ground/view-plane placement.
+    [[nodiscard]] Keire::Vector3d ResolveSceneDropPositionPrecise(Keire::UiItemRect viewport, Keire::UiPosition pointer,
+                                                                  const Keire::RenderCamera& camera,
+                                                                  const Keire::Ref<Keire::Scene>& scene,
+                                                                  const MeshBoundsResolver& resolveMeshBounds);
     [[nodiscard]] Keire::Vector3 ResolveSceneDropPosition(Keire::UiItemRect viewport, Keire::UiPosition pointer,
                                                           const Keire::RenderCamera& camera);
 } // namespace KeireEditor

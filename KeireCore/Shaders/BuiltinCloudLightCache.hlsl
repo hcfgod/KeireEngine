@@ -1,6 +1,7 @@
 #define KEIRE_CLOUD_NOISE_TEXTURE t0
 #define KEIRE_CLOUD_NOISE_SAMPLER s0
 #define KEIRE_CLOUD_NOISE_SPACE space0
+#define KEIRE_PLANET_VOLUME_SET 1
 #include "CloudVolumeView.hlsli"
 
 RWStructuredBuffer<float4> LightTransmission : register(u0, space1);

@@ -4,8 +4,10 @@
 #include "Keire/Math/Math.h"
 #include "KeireInternal/Rendering/CloudVolumeViewUniforms.h"
 
+#include <array>
 #include <cstdint>
 #include <optional>
+#include <utility>
 #include <vector>
 
 struct SDL_GPUDevice;
@@ -38,6 +40,7 @@ namespace Keire::RenderBackend
         std::uint64_t FrameId = 0;
         Vector3d WorldOrigin;
         std::optional<Detail::ResolvedPlanetFrame> PlanetFrame;
+        std::array<Detail::ResolvedPlanetFrame, MaximumPlanetAtmospheres> PlanetFrames;
     };
 
     struct CloudTemporalWriter final
@@ -54,11 +57,42 @@ namespace Keire::RenderBackend
         CloudTemporalTextures Published;
         std::vector<CloudTemporalWriter> Writers;
         std::optional<CloudTemporalView> PublishedView;
+        // Read-only history from the previous extent. Normalized-UV reprojection does not
+        // require matching texture dimensions. Never swap this pair into a current writer.
+        CloudTemporalTextures PreviousExtent;
+        std::optional<CloudTemporalView> PreviousExtentView;
         std::uint32_t Width = 0;
         std::uint32_t Height = 0;
 
-        [[nodiscard]] bool Empty() const noexcept { return Published.Empty() && Writers.empty(); }
+        [[nodiscard]] bool Empty() const noexcept
+        {
+            return Published.Empty() && PreviousExtent.Empty() && Writers.empty();
+        }
     };
+
+    // Transfer only submitted, read-only history. Old writers remain with the old surface's
+    // fence retirement; the new surface owns this pair until its next resize or retirement.
+    [[nodiscard]] inline bool RetainCloudHistoryForResize(CloudTemporalResources& source,
+                                                          CloudTemporalResources& destination) noexcept
+    {
+        if (&source == &destination || !destination.PreviousExtent.Empty())
+        {
+            return false;
+        }
+        if (source.Published.Complete() && source.PublishedView)
+        {
+            destination.PreviousExtent = std::exchange(source.Published, {});
+            destination.PreviousExtentView = std::exchange(source.PublishedView, std::nullopt);
+            return true;
+        }
+        if (source.PreviousExtent.Complete() && source.PreviousExtentView)
+        {
+            destination.PreviousExtent = std::exchange(source.PreviousExtent, {});
+            destination.PreviousExtentView = std::exchange(source.PreviousExtentView, std::nullopt);
+            return true;
+        }
+        return false;
+    }
 
     // Lazy, half-resolution allocation. A failed replacement retains all previous textures and metadata.
     void EnsureCloudTemporalResources(SDL_GPUDevice* device, CloudTemporalResources& resources,

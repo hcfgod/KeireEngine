@@ -742,6 +742,8 @@ namespace Keire
         {
             return false;
         }
+        [[nodiscard]] virtual bool ResetManagedCameraTemporalHistory(std::uint64_t, AssetId) noexcept { return false; }
+
         [[nodiscard]] virtual std::optional<bool> ReadManagedRenderingFlag(AssetId, ManagedRenderingComponent,
                                                                            ManagedRenderingFlagProperty) noexcept
         {

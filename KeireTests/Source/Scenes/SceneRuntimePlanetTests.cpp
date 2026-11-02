@@ -2,6 +2,7 @@
 #include "KeireInternal/Scenes/SceneRuntimeIdentityAccess.h"
 #include "KeireInternal/Scenes/SceneRuntimeRenderingInternal.h"
 #include "KeireInternal/Spatial/PlanetProjectFrameResolver.h"
+#include "KeireInternal/Spatial/PlanetProjectSettingsRecord.h"
 #include "KeireInternal/Spatial/PlanetRuntimeCheckpointRecord.h"
 #include "KeireInternal/Spatial/SceneRuntimePlanetAccess.h"
 #include "KeireInternal/Spatial/SceneRuntimeSpatialAccess.h"
@@ -327,6 +328,106 @@ TEST_CASE("Runtime nearest planet selection matches preview for nested far-origi
     CHECK(SceneRuntimePlanetAccess::ResolveAll(*fixture.World, observer).empty());
 }
 
+TEST_CASE("Planet camera travel preserves preview runtime and reconstructed atmosphere composition")
+{
+    using namespace Keire;
+    using namespace Keire::Detail;
+    for (const double origin : {0.0, 1.0e12, -1.0e12})
+    {
+        CAPTURE(origin);
+        PlanetRuntimeFixture runtime;
+        auto earth = TestPlanet();
+        earth.RadiusMetres = 6'360'000.0;
+        earth.ParentCenter = SectorPosition({1, 1}, {}, {origin, -earth.RadiusMetres, 0.0});
+        earth.AngularVelocity = {0.0, 0.01, 0.0};
+        auto mars = earth;
+        mars.Planet = AssetId(1, 3);
+        mars.Frame = 3;
+        mars.RadiusMetres = 3'389'500.0;
+        mars.ParentCenter = SectorPosition({1, 1}, {}, {origin + 75'000'000.0, -mars.RadiusMetres, 0.0});
+        mars.AngularVelocity = {0.0, -0.02, 0.0};
+        PlanetProjectSettings settings;
+        settings.Geometry = PlanetGeometryMode::Planetary;
+        settings.Selection = PlanetSelectionMode::NearestSurface;
+        settings.SelectedPlanet = earth.Planet;
+        settings.Planets = {mars, earth};
+        AtmosphereSettings martianAir;
+        martianAir.Enabled = true;
+        martianAir.RayleighScattering = {0.00001, 0.000002, 0.000001};
+        settings.AtmosphereOverrides = {{mars.Planet, martianAir}};
+        CloudSettings martianClouds;
+        martianClouds.Layers[0].Coverage = 0.2;
+        settings.CloudOverrides = {{mars.Planet, martianClouds}};
+        FogSettings martianFog;
+        martianFog.Enabled = true;
+        martianFog.PlanetaryHeight = true;
+        settings.FogOverrides = {{mars.Planet, martianFog}};
+        SceneRuntimePlanetAccess::ConfigureProject(*runtime.World, settings);
+        PlanetProjectFrameResolver preview;
+        preview.Configure(settings);
+        PlanetRuntimeFixture reconstructed;
+        SceneRuntimePlanetAccess::ConfigureProject(
+            *reconstructed.World, PlanetProjectSettingsRecord::Decode(PlanetProjectSettingsRecord::Encode(settings)));
+
+        RenderEnvironmentSettings inherited;
+        inherited.Atmosphere.Enabled = true;
+        for (const double epoch : {0.0, 123.25})
+        {
+            auto checkpoint = SceneRuntimePlanetAccess::CaptureCheckpoint(*runtime.World);
+            checkpoint.SimulationTime = epoch;
+            checkpoint.Clock.Day = 1234567890123456789LL;
+            checkpoint.Clock.DayFraction = 0.375;
+            SceneRuntimePlanetAccess::RestoreCheckpoint(*runtime.World, checkpoint);
+            SceneRuntimePlanetAccess::RestoreCheckpoint(
+                *reconstructed.World,
+                PlanetRuntimeCheckpointRecord::Decode(PlanetRuntimeCheckpointRecord::Encode(checkpoint)));
+            for (const auto& visited : {earth, mars, earth})
+            {
+                CAPTURE(epoch);
+                CAPTURE(visited.Planet.ToString());
+                const auto center = visited.ParentCenter.RelativeTo(SectorPosition({1, 1}, {}, {}));
+                RenderCamera camera;
+                camera.WorldOrigin = {center[0], center[1] + visited.RadiusMetres + 10.0, center[2]};
+                camera.View = Math::LookAt({0.125F, 0.25F, -0.5F}, {0.125F, 0.25F, 0.5F}, {0.0F, 1.0F, 0.0F});
+                const auto selected = Internal::CaptureRuntimePlanetEnvironment(*runtime.World, camera);
+                REQUIRE(selected);
+                CHECK(selected->Planet == visited.Planet);
+                const auto candidates = Internal::CaptureRuntimePlanetAtmospheres(*runtime.World, camera);
+                const auto restoredCandidates = Internal::CaptureRuntimePlanetAtmospheres(*reconstructed.World, camera);
+                const auto restoredSelected = Internal::CaptureRuntimePlanetEnvironment(*reconstructed.World, camera);
+                const auto captured = CapturePlanetAtmospheres(candidates, selected, inherited.Atmosphere);
+                const auto restored =
+                    CapturePlanetAtmospheres(restoredCandidates, restoredSelected, inherited.Atmosphere);
+                const SectorPosition rootObserver(
+                    {1, 1}, {},
+                    {camera.WorldOrigin.X + 0.125, camera.WorldOrigin.Y + 0.25, camera.WorldOrigin.Z - 0.5});
+                const auto previewFrames = preview.ResolveAll(rootObserver, epoch, checkpoint.Clock);
+                REQUIRE(captured.Frames.size() == 2);
+                REQUIRE(restored.Frames.size() == 2);
+                REQUIRE(previewFrames.size() == 2);
+                CHECK(captured.Profiles == restored.Profiles);
+                CHECK(captured.Profiles[0] == inherited.Atmosphere);
+                CHECK(captured.Profiles[1] == martianAir);
+                for (std::size_t index = 0; index < captured.Frames.size(); ++index)
+                {
+                    const auto& frame = captured.Frames[index];
+                    CHECK(frame.Planet == previewFrames[index].Planet);
+                    CHECK(frame.ObserverFromCenterPlanetMetres == previewFrames[index].ObserverFromCenterPlanetMetres);
+                    CHECK(frame.ObserverFromCenterPlanetMetres ==
+                          restored.Frames[index].ObserverFromCenterPlanetMetres);
+                    CHECK(frame.PlanetToObserver.Components() == previewFrames[index].PlanetToObserver.Components());
+                    CHECK(frame.PlanetToObserver.Components() == restored.Frames[index].PlanetToObserver.Components());
+                    CHECK(frame.SnapshotTime == epoch);
+                }
+                auto weather = inherited;
+                ApplyPlanetEnvironmentOverrides(*selected, weather.Atmosphere, weather.Clouds, weather.Fog);
+                CHECK(weather.Clouds == (visited.Planet == mars.Planet ? martianClouds : inherited.Clouds));
+                CHECK(weather.Fog == (visited.Planet == mars.Planet ? martianFog : inherited.Fog));
+            }
+        }
+    }
+}
+
 TEST_CASE("Scene owner transfer advances kinematic roots while dynamic bodies remain inertial")
 {
     using namespace Keire;
@@ -409,6 +510,68 @@ TEST_CASE("Scene owner transfer advances kinematic roots while dynamic bodies re
     REQUIRE(fixture.World->Step(0.25F));
     CHECK(runtimeSupport.GetComponent<TransformComponent>()->WorldPositionPrecise() == position);
     CHECK(session->Physics()->TryGetBody(body)->LinearVelocity == Vector3{});
+}
+
+TEST_CASE("Scene owner transfer preserves queued inertial force and torque")
+{
+    using namespace Keire;
+    using namespace Keire::Detail;
+    const auto run = [](const bool transfer)
+    {
+        PlanetRuntimeFixture fixture;
+        auto planet = TestPlanet();
+        planet.ParentCenter = SectorPosition({1, 1}, {}, {});
+        planet.AngularVelocity = {0.0, 0.5, 0.0};
+        SceneRuntimePlanetAccess::Configure(*fixture.World, {planet});
+        auto scene = CreateRef<Scene>(AssetId::Generate(), SceneAsset::EmptyDefinition());
+        auto entity = scene->CreateEntity("Force-driven traveler");
+        entity.GetComponent<TransformComponent>()->SetLocalPosition({0.0F, 10.0F, 0.0F});
+        entity.AddComponent<ColliderComponent>();
+        entity.AddComponent<RigidBodyComponent>()->SetUseGravity(false);
+        auto session = CreateRef<SceneRuntimeSession>(scene, fixture.Assets, Ref<AudioSystem>{}, fixture.Physics);
+        const auto handle = fixture.World->Adopt(session);
+        session->Play();
+        REQUIRE(session->State() == ScenePlayState::Playing);
+        fixture.World->Pause();
+        const auto physics = session->Physics();
+        const auto hits = physics->RayCast({.Origin = {0.0F, 14.0F, 0.0F}, .Direction = {0.0F, -1.0F, 0.0F}});
+        REQUIRE(hits.size() == 1);
+        const auto body = hits.front().Body;
+        const auto& frames = SceneRuntimeSpatialAccess::Frames(*fixture.World);
+        std::array<PhysicsBodyState, 2> result;
+        for (std::size_t step = 0; step < result.size(); ++step)
+        {
+            physics->AddForce(body, {100.0F, 0.0F, 0.0F});
+            physics->AddTorque(body, {0.0F, 0.0F, 10.0F});
+            if (transfer)
+            {
+                SceneRuntimeSpatialAccess::TransferSceneOwner(*fixture.World, handle, frames.Find(step == 0 ? 2 : 1),
+                                                              step == 0 ? 0.0 : 0.25);
+            }
+            REQUIRE(fixture.World->Step(0.25F));
+            const auto state = physics->TryGetBody(body);
+            REQUIRE(state);
+            result[step] = *state;
+        }
+        return result;
+    };
+    const auto control = run(false);
+    const auto transferred = run(true);
+    for (std::size_t step = 0; step < control.size(); ++step)
+    {
+        CAPTURE(step);
+        CHECK(control[step].LinearVelocity.X > 0.0F);
+        CHECK(control[step].AngularVelocity.Z > 0.0F);
+        CHECK(transferred[step].Position.X == doctest::Approx(control[step].Position.X));
+        CHECK(transferred[step].Position.Y == doctest::Approx(control[step].Position.Y));
+        CHECK(transferred[step].Position.Z == doctest::Approx(control[step].Position.Z));
+        CHECK(transferred[step].LinearVelocity.X == doctest::Approx(control[step].LinearVelocity.X));
+        CHECK(transferred[step].LinearVelocity.Y == doctest::Approx(control[step].LinearVelocity.Y));
+        CHECK(transferred[step].LinearVelocity.Z == doctest::Approx(control[step].LinearVelocity.Z));
+        CHECK(transferred[step].AngularVelocity.X == doctest::Approx(control[step].AngularVelocity.X));
+        CHECK(transferred[step].AngularVelocity.Y == doctest::Approx(control[step].AngularVelocity.Y));
+        CHECK(transferred[step].AngularVelocity.Z == doctest::Approx(control[step].AngularVelocity.Z));
+    }
 }
 
 TEST_CASE("Scene owner transfer rejects unsupported content before changing attachments")
@@ -726,5 +889,114 @@ TEST_CASE("Far-origin frame-following scene resumes support contacts after full 
         CHECK(FindPlanetTestBody(*session, rider.Id(), 0.0) == riderBody);
         CHECK(FindPlanetTestBody(*restoredSession, support.Id(), 3.0) == restoredSupportBody);
         CHECK(FindPlanetTestBody(*restoredSession, rider.Id(), 0.0) == restoredRiderBody);
+    }
+}
+
+TEST_CASE("Synchronized characters move with a planet frame and return to inertial control at far origins")
+{
+    using namespace Keire;
+    using namespace Keire::Detail;
+    bool supported = false;
+    SUBCASE("Free flight") {}
+    SUBCASE("Standing on a rotating static support") { supported = true; }
+    for (const double originX : {0.0, 1.0e12, -1.0e12})
+    {
+        for (int rotationAxis = 0; rotationAxis < 3; ++rotationAxis)
+        {
+            CAPTURE(originX);
+            CAPTURE(rotationAxis);
+            PlanetRuntimeFixture fixture;
+            auto planet = TestPlanet();
+            planet.ParentCenter = SectorPosition({1, 1}, {}, {originX, 0.0, 0.0});
+            planet.AngularVelocity = {};
+            planet.AngularVelocity[rotationAxis] = 0.5;
+            SceneRuntimePlanetAccess::Configure(*fixture.World, {planet});
+            const auto scene = CreateRef<Scene>(AssetId::Generate(), SceneAsset::EmptyDefinition());
+            if (supported)
+            {
+                auto ground = scene->CreateEntity("Frame support");
+                ground.GetComponent<TransformComponent>()->SetWorldPositionPrecise({originX + 10.0, -0.5, 0.0});
+                ground.AddComponent<ColliderComponent>()->SetHalfExtent({4.0F, 0.5F, 4.0F});
+            }
+            auto character = scene->CreateEntity("Frame traveller");
+            character.GetComponent<TransformComponent>()->SetWorldPositionPrecise({originX + 10.0, 1.0, 0.0});
+            (void)character.AddComponent<CharacterControllerComponent>();
+            const auto session =
+                CreateRef<SceneRuntimeSession>(scene, fixture.Assets, Ref<AudioSystem>{}, fixture.Physics);
+            const auto handle = fixture.World->Adopt(session);
+            session->Play();
+            REQUIRE(session->State() == ScenePlayState::Playing);
+            fixture.World->Pause();
+            const auto runtimeCharacter = session->RuntimeScene()->FindEntity(character.Id());
+            const auto controller = runtimeCharacter.GetComponent<CharacterControllerComponent>();
+            const auto transform = runtimeCharacter.GetComponent<TransformComponent>();
+            const auto& frames = SceneRuntimeSpatialAccess::Frames(*fixture.World);
+            REQUIRE_NOTHROW(SceneRuntimeSpatialAccess::TransferSceneOwner(*fixture.World, handle, frames.Find(2), 0.0));
+            REQUIRE(controller->QueueDesiredMovement({1.0F, 0.0F, 0.0F}));
+            constexpr float stepSeconds = 0.1F;
+            REQUIRE(fixture.World->Step(stepSeconds));
+            REQUIRE(session->State() == ScenePlayState::Paused);
+            const double angle = 0.5 * static_cast<double>(stepSeconds);
+            const auto expectedPosition = [&](const double rotationAngle) -> Vector3d
+            {
+                const double cosine = std::cos(rotationAngle);
+                const double sine = std::sin(rotationAngle);
+                if (rotationAxis == 0)
+                {
+                    return {originX + 11.0, cosine, sine};
+                }
+                if (rotationAxis == 1)
+                {
+                    return {originX + 11.0 * cosine, 1.0, -11.0 * sine};
+                }
+                return {originX + 11.0 * cosine - sine, 11.0 * sine + cosine, 0.0};
+            };
+            const auto checkResolvedVelocity = [&](const Vector3d previous, const Vector3d current)
+            {
+                const auto velocity = controller->RuntimeState().Velocity;
+                CHECK(velocity.X == doctest::Approx((current.X - previous.X) / stepSeconds).epsilon(0.005));
+                CHECK(velocity.Y == doctest::Approx((current.Y - previous.Y) / stepSeconds).epsilon(0.005));
+                CHECK(velocity.Z == doctest::Approx((current.Z - previous.Z) / stepSeconds).epsilon(0.005));
+            };
+            Vector3d expected = expectedPosition(angle);
+            CheckPlanetPosition(transform->WorldPositionPrecise(), expected, 0.002);
+            checkResolvedVelocity({originX + 10.0, 1.0, 0.0}, expected);
+            CHECK(controller->QueuedMovementCount() == 0);
+            CHECK(controller->RuntimeState().Grounded == supported);
+            const auto checkpoint = session->CapturePhysicsCheckpoint();
+            REQUIRE(checkpoint.size() == (supported ? 2 : 1));
+            const auto characterBody =
+                std::ranges::find(checkpoint, character.Id(), &ScenePhysicsCheckpointBody::Entity);
+            REQUIRE(characterBody != checkpoint.end());
+            CheckPlanetPosition(session->Physics()->ToWorldPosition(characterBody->Position), expected, 0.002);
+
+            // No input is needed to remain attached to the rotating ground. Verify several
+            // consecutive ticks so a stale support anchor cannot accumulate a second rotation.
+            for (int tick = 2; tick <= 5; ++tick)
+            {
+                const auto previousPosition = transform->WorldPositionPrecise();
+                REQUIRE(fixture.World->Step(stepSeconds));
+                expected = expectedPosition(angle * tick);
+                CheckPlanetPosition(transform->WorldPositionPrecise(), expected, 0.003);
+                checkResolvedVelocity(previousPosition, transform->WorldPositionPrecise());
+                CHECK(controller->RuntimeState().Grounded == supported);
+                CHECK(controller->QueuedMovementCount() == 0);
+            }
+
+            const auto time = SceneRuntimePlanetAccess::CaptureCheckpoint(*fixture.World).SimulationTime;
+            REQUIRE_NOTHROW(
+                SceneRuntimeSpatialAccess::TransferSceneOwner(*fixture.World, handle, frames.Find(1), time));
+            const float cosine = static_cast<float>(std::cos(angle * 5));
+            const float sine = static_cast<float>(std::sin(angle * 5));
+            const Vector3 tangent = rotationAxis == 0   ? Vector3{1.0F, 0.0F, 0.0F}
+                                    : rotationAxis == 1 ? Vector3{cosine, 0.0F, -sine}
+                                                        : Vector3{cosine, sine, 0.0F};
+            REQUIRE(controller->QueueDesiredMovement(tangent));
+            REQUIRE(fixture.World->Step(stepSeconds));
+            CheckPlanetPosition(transform->WorldPositionPrecise(),
+                                {expected.X + tangent.X, expected.Y + tangent.Y, expected.Z + tangent.Z}, 0.003);
+            CHECK(controller->QueuedMovementCount() == 0);
+            CHECK(controller->RuntimeState().Grounded == supported);
+        }
     }
 }

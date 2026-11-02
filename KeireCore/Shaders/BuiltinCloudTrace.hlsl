@@ -13,6 +13,7 @@ cbuffer CloudCacheConstants : register(b1, space3)
     float4 CloudCacheCellSize;
     uint4 CloudCacheDimensions;
 };
+#define KEIRE_PLANET_VOLUME_SET 1
 #include "CloudVolumeView.hlsli"
 
 cbuffer VolumeConstants : register(b0, space3)
@@ -53,7 +54,7 @@ struct TraceOutput
 TraceOutput PSMain(VertexOutput input)
 {
     const float depth = SceneDepth.SampleLevel(SceneDepthSampler, input.UV, 0.0F);
-    const CloudVolumeViewRay ray = MakeCloudVolumeViewRay(input.UV, depth, VolumeView);
+    const CloudVolumeViewRay ray = MakeCloudVolumeViewRay(input.UV, depth, VolumeView, 2.0F);
     const uint2 pixel = uint2(input.Position.xy);
     uint hash = pixel.x * 1973U + pixel.y * 9277U + 0x68bc21ebU;
     hash = (hash ^ (hash >> 16U)) * 0x7feb352dU;

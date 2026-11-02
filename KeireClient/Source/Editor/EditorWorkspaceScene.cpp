@@ -375,6 +375,12 @@ void EditorWorkspaceLayer::ExecutePendingSceneAction()
         OpenDialog(Dialog::DirtyMaterialGraph);
         return;
     }
+    if (action == DocumentAction::Exit && m_PostProcessDocument->Dirty())
+    {
+        m_DocumentCoordinator->SetPendingTransition(DocumentAction::Exit);
+        OpenDialog(Dialog::DirtyPostProcessing);
+        return;
+    }
     QueueSceneTransition(action, asset);
 }
 
@@ -1072,8 +1078,23 @@ void EditorWorkspaceLayer::RouteSceneViewportAsset(const Keire::AssetTypeId type
     Keire::Vector3d worldPosition{};
     if (type == Keire::PrefabAsset::StaticType() || type == Keire::MeshAsset::StaticType() ||
         type == Keire::VfxEffectAsset::StaticType())
-        worldPosition = KeireEditor::ResolveSceneDropPositionPrecise(m_SceneViewportPanel->ViewportRect(), position,
-                                                                     m_SceneViewportPanel->LastCamera());
+    {
+        const auto assets = Owner().Assets();
+        const KeireEditor::MeshBoundsResolver bounds =
+            [assets](const Keire::AssetId mesh) -> std::optional<Keire::MeshBounds>
+        {
+            const auto metadata = assets ? assets->TryGetMetadata(mesh) : std::nullopt;
+            if (!metadata || !metadata->LocalBounds)
+            {
+                return std::nullopt;
+            }
+            const auto& local = *metadata->LocalBounds;
+            return Keire::MeshBounds{{local.Minimum[0], local.Minimum[1], local.Minimum[2]},
+                                     {local.Maximum[0], local.Maximum[1], local.Maximum[2]}};
+        };
+        worldPosition = KeireEditor::ResolveSceneDropPositionPrecise(
+            m_SceneViewportPanel->ViewportRect(), position, m_SceneViewportPanel->LastCamera(), ActiveScene(), bounds);
+    }
     m_ViewportAssetDropRouter->Route(type, asset, target, worldPosition, *this);
 }
 

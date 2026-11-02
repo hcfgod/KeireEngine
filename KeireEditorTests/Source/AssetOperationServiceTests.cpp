@@ -124,8 +124,8 @@ namespace
             if (separator == std::string::npos)
                 throw std::runtime_error("Could not identify the asset-worker test configuration.");
             const auto configuration = configurationOutput.substr(0, separator);
-            const bool releaseRuntime =
-                configuration == "Release" || configuration == "Profile" || configuration == "Dist";
+            const bool releaseRuntime = configuration == "Release" || configuration == "Profile" ||
+                                        configuration == "Dist" || configuration == "DevDist";
             if (!releaseRuntime && configuration != "Debug" && configuration != "DebugASan" &&
                 configuration != "DebugUBSan" && configuration != "DebugTSan" && configuration != "Coverage")
             {

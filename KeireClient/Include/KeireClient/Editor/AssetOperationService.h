@@ -37,7 +37,8 @@ namespace KeireEditor
         OpenExternal,
         OpenMaterialGraph,
         OpenShaderGraph,
-        AdoptSceneCopy
+        AdoptSceneCopy,
+        OpenPostProcessing
     };
 
     enum class AssetMutationPhase : std::uint8_t

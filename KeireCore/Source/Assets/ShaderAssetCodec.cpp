@@ -156,7 +156,8 @@ namespace Keire::Detail
                 source.at("volumeLightingAbiVersion") != 7U && source.at("volumeLightingAbiVersion") != 8U &&
                 source.at("volumeLightingAbiVersion") != 9U && source.at("volumeLightingAbiVersion") != 10U &&
                 source.at("volumeLightingAbiVersion") != 11U && source.at("volumeLightingAbiVersion") != 12U &&
-                source.at("volumeLightingAbiVersion") != 13U && source.at("volumeLightingAbiVersion") != 14U)
+                source.at("volumeLightingAbiVersion") != 13U && source.at("volumeLightingAbiVersion") != 14U &&
+                source.at("volumeLightingAbiVersion") != 15U && source.at("volumeLightingAbiVersion") != 16U)
             {
                 throw std::invalid_argument("Shader volume-lighting ABI version is unsupported.");
             }

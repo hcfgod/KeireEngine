@@ -6,6 +6,7 @@
 #include <cmath>
 #include <limits>
 #include <optional>
+#include <span>
 
 namespace Keire::RenderBackend
 {
@@ -55,6 +56,84 @@ namespace Keire::RenderBackend
         }
         const auto& view = current.Volume;
         const auto& old = previous.Volume;
+        if (view.PlanetWeather.Controls[0] != 0U || old.PlanetWeather.Controls[0] != 0U)
+        {
+            if (view.PlanetWeather.Controls[0] != old.PlanetWeather.Controls[0] ||
+                view.PlanetWeather.Controls[0] > MaximumPlanetAtmospheres || view.Fog != old.Fog)
+            {
+                return std::nullopt;
+            }
+            std::optional<CloudTemporalResolveUniforms> shared;
+            const auto bodyView = [](const CloudTemporalView& source, const std::size_t index)
+            {
+                auto result = source;
+                const auto& body = source.Volume.PlanetWeather.Bodies[index];
+                result.Volume.PlanetWeather.Controls[0] = 0;
+                result.Volume.PlanetAtmospheres.Controls[0] = 0;
+                result.Volume.Volume = body.Volume;
+                result.Volume.ShapeControls = body.ShapeControls;
+                result.Volume.RegionalControls = body.RegionalControls;
+                result.Volume.HeightProfile = body.HeightProfile;
+                result.Volume.WeatherControls = body.WeatherControls;
+                result.Volume.AmbientRadiance.W = body.LightingControls.X;
+                result.Volume.PlanetaryCloud = body.Geometry;
+                result.Volume.Fog = body.Fog;
+                result.PlanetFrame = source.PlanetFrames[index];
+                if (source.Volume.PlanetAtmospheres.Controls[0] > index)
+                {
+                    result.Volume.Atmosphere = source.Volume.PlanetAtmospheres.Media[index];
+                }
+                return result;
+            };
+            for (std::size_t index = 0; index < view.PlanetWeather.Controls[0]; ++index)
+            {
+                const auto& body = view.PlanetWeather.Bodies[index];
+                const auto& oldBody = old.PlanetWeather.Bodies[index];
+                if (body.Volume.Quality[0] == 0U && oldBody.Volume.Quality[0] == 0U)
+                {
+                    // Fog-only profiles still constrain the common mapping. Their density is anchored
+                    // to the scene or radial body, not to an unrelated cloud's advection.
+                    if (body.Fog != oldBody.Fog || body.Geometry != oldBody.Geometry)
+                    {
+                        return std::nullopt;
+                    }
+                    continue;
+                }
+                const auto currentBody = bodyView(current, index);
+                const auto previousBody = bodyView(previous, index);
+                const auto candidate = MakeCloudTemporalReprojection(currentBody, previousBody, true);
+                if (!candidate)
+                {
+                    return std::nullopt;
+                }
+                if (shared && (shared->CloudPositionOffset != candidate->CloudPositionOffset ||
+                               shared->CloudRotationX != candidate->CloudRotationX ||
+                               shared->CloudRotationY != candidate->CloudRotationY ||
+                               shared->CloudRotationZ != candidate->CloudRotationZ))
+                {
+                    return std::nullopt;
+                }
+                shared = candidate;
+            }
+            if (!shared)
+            {
+                return std::nullopt;
+            }
+            const bool anyFog =
+                view.Fog.Controls[0] != 0U ||
+                std::ranges::any_of(std::span(view.PlanetWeather.Bodies).first(view.PlanetWeather.Controls[0]),
+                                    [](const auto& body) { return body.Fog.Controls[0] != 0U; });
+            if (anyFog && (shared->CloudPositionOffset != shared->ScenePositionOffset ||
+                           shared->CloudRotationX != Vector4{1.0F, 0.0F, 0.0F, 0.0F} ||
+                           shared->CloudRotationY != Vector4{0.0F, 1.0F, 0.0F, 0.0F} ||
+                           shared->CloudRotationZ != Vector4{0.0F, 0.0F, 1.0F, 0.0F}))
+            {
+                return std::nullopt;
+            }
+            return shared;
+        }
+        // Pixel dimensions can change under dynamic resolution. Reprojection samples normalized UVs;
+        // camera projection and depth rejection, rather than texel size, determine history validity.
         const float patternSize = view.Volume.Geometry[2];
         if (!std::isfinite(patternSize) || patternSize <= 0.0F || view.Volume.Quality[0] == 0 ||
             view.Volume.Quality != old.Volume.Quality || view.Volume.Density != old.Volume.Density ||
@@ -64,8 +143,7 @@ namespace Keire::RenderBackend
             view.RegionalControls != old.RegionalControls || view.HeightProfile != old.HeightProfile ||
             view.WeatherControls != old.WeatherControls || view.Fog != old.Fog ||
             view.PlanetaryCloud.RadiusGeometry.Z != old.PlanetaryCloud.RadiusGeometry.Z ||
-            view.CameraControls.X != old.CameraControls.X || view.CameraControls.Z != old.CameraControls.Z ||
-            view.CameraControls.W != old.CameraControls.W ||
+            view.CameraControls.X != old.CameraControls.X ||
             !CloudTemporalDetail::SimilarRadiance(view.SunRadiance, old.SunRadiance) ||
             !CloudTemporalDetail::SimilarRadiance(view.AmbientRadiance, old.AmbientRadiance))
         {

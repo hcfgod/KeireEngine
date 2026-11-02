@@ -1,6 +1,76 @@
 # Changelog
 
 ## Unreleased
+- Include planetary frame motion in resolved character velocity using physics-local coordinates.
+  All-axis near/far regressions reproduce the previous omission and pass after the fix.
+- Avoid copying the full asset catalog and repeatedly scanning it for every targeted import request;
+  the missing-source guard now indexes parent and subasset identities once per batch. Focused DevDist
+  and AddressSanitizer regressions pass; end-to-end loading measurements remain pending.
+- Separate built-in VFX simulation shaders from graphics/cloud dependencies so cloud edits no longer
+  invalidate simulation shader cache entries. All 14 compute entry-point binding/layout checks pass;
+  all seven graphics binding/layout checks and 137 VFX tests pass. Visual verification remains pending.
+- Prevent rotating planetary supports from carrying grounded characters twice when returning to an
+  inertial frame. Supported/free-flight transfer coverage passes at the origin and at trillion-metre offsets.
+- Allow synchronized, unparented character controllers through the internal planetary frame-following
+  path when no dynamic bodies are present. Scene-level near/far transfer tests pass; dynamic-contact
+  bounds and complete failed-step rollback remain unfinished.
+- Reduce multi-planet shader compiler overhead by reading cloud parameters directly from immutable
+  uniforms instead of caching expanded arrays. Advance the generated-shader version so cached
+  material imports receive the change. Targeted production importer regressions pass; editor performance
+  validation is pending.
+- Filter cloud view samples using their projected pixel footprint without changing shadow density.
+  Share the single-medium shader kernel and retain multi-planet loops to reduce compiler expansion;
+  camera-motion visual acceptance is pending.
+- Connect authored Buoyancy components to fixed-step water forces and synchronize runtime wave phase
+  with checkpoint restoration. Validate staged frame targets against accepted character poses;
+  combined native and editor verification is pending.
+- Integrate multi-planet cloud/fog transport and inherited-fog provenance with legacy shader ABI
+  compatibility. Numerical GPU preflight passed; native, visual and performance acceptance is pending.
+- Stabilize automatic render scaling with median timing samples, distinct completed GPU intervals,
+  and a settling interval. Preserve submitted cloud history across surface resizing; visual and
+  GPU lifetime validation of resize transitions is pending.
+- Reuse half-resolution cloud tracing and history with MSAA, preserving per-sample background colors
+  through separate attenuation and radiance blends. Updated-editor performance and edge validation are pending.
+- Add coordinated Sea, Lake and Pond authoring with Natural/Stylized looks, simple wave controls,
+  advanced wave editing, and creation in a single undo transaction. Validation is in progress.
+- Generate initial water crest foam from horizontal wave compression rather than height, avoiding
+  white patches on uncompressed gentle swells. Updated-editor visual validation is pending.
+- Preserve queued force and torque in physics checkpoints; restoring replaces later loads while authored
+  velocity edits retain live loads. Regression validation is pending.
+- Simplify post-processing authoring with one-action effect activation, automatic activation when editing values
+  or choosing lookup textures, and a searchable effect workspace. Individual inheritance controls remain under
+  Advanced overrides; editor acceptance of the redesigned workspace is pending.
+- Add native dynamic-body force, force-at-position and torque submission for buoyancy and other
+  force-driven interactions. Inputs and accumulator overflow are checked before mutation; validation is in progress.
+- Add provisional native water surface queries and spherical-probe hydrostatic buoyancy calculations
+  for planar bodies and planetary oceans. Rendering, waves, river authoring and runtime components remain pending.
+- Allow DevDist source builds to use their companion runtime for Development player builds without
+  satisfying Release or Dist support requirements.
+- Allocate job scratch storage on demand instead of allocating and clearing it for every callback.
+- Keep post-processing action feedback above the settings and report successful profile reloads explicitly.
+- Include Post Process Volume profiles and their lookup dependencies in rooted player cooks, including
+  inactive authored volumes. Scene and prefab importer versions advance to refresh dependency metadata.
+- Periodically release expired scheduler and job-scope records so continuous physics/import work does not
+  retain every completed job's control block for the lifetime of the service. Validation is in progress.
+- Release prerequisite handles when jobs become terminal, avoiding retention of completed dependency chains
+  by long-lived result handles. Lifetime regression and sanitizer validation are in progress.
+- Add initial HDR depth-of-field and motion-blur passes, LUT profile authoring/rendering, and local-volume
+  selection outlines. GPU, standalone and performance acceptance remain pending; see the post-processing plan.
+- Reset camera histories on camera switches and explicit cuts while preserving continuous planetary travel.
+  Expose `Camera.ResetTemporalHistory()` in C++ and C# for scripted teleports.
+- Add editable post-processing color looks that preserve unrelated effects and use one Undo step.
+- Find post-processing controls by effect category, parameter name or unit, with a clear empty-search result.
+- Keep failed post-processing load submissions out of the renderer cache so subsequent captures can retry.
+- Release post-processing profile cache entries after 600 unused render frames; retain recently used profiles
+  across alternating views. Runtime and sanitizer acceptance for this change is pending.
+- Show readable decimal values in numeric-field hover tips while retaining full precision when editing.
+- Reuse each graphics shader stage's SPIR-V intermediate for DXIL and Metal imports instead of repeating HLSL
+  compilation per backend. Retain reflection checks and complete backend outputs; validation is in progress.
+- Keep the cloud ambient-light sampling loop rolled to reduce compiler expansion while retaining all four samples.
+- Refresh only the edited Post Processing profile on save instead of starting a project-wide asset import.
+- Add the initial Post Processing profile/volume implementation and dedicated authoring panel, with transient
+  preview, Undo/Redo, external-source save conflict detection and unsaved-exit protection. This feature batch
+  remains under development; renderer and editor acceptance are pending, including remaining depth effects.
 - Add native stationary capsule overlap contacts with penetration depth, oriented shapes and body filtering as
   groundwork for collision-safe planetary character orientation. Automatic rotation is not enabled by this query.
 - Refresh cached material texture bindings before retiring replaced GPU textures, including last-good bindings
@@ -4650,3 +4720,23 @@ versions.
 - macOS bootstrap accepts Command Line Tools without full Xcode for non-Xcode generators.
 - Arch installation performs a full package upgrade instead of a partial database synchronization.
 - Windows detects containing Git worktrees and rename updates public-header include guards.
+
+- Shader import cache probes four bounded slots before evicting an unrelated shader, preserving existing
+  cache entries and full artifact validation while reducing collision-driven recompilation.
+
+- Keep render-feature selection on authored settings so post-process exposure outside the project exposure range
+  does not terminate the editor. Rebuilt editor checks passed at +8 and -10 EV, including restoring the saved profile.
+
+- In progress: post-processing profile schema 3 can retain ordered custom fullscreen-material references, stage/enable state and explicit stack inheritance clearing; renderer and editor stack authoring integration are pending.
+
+### Editor authoring UI batch (DevDist checkpoint)
+
+- Reorganize Environment into focused sections with responsive navigation, compact time transport, hour-based
+  preview scrubbing, and local Undo/Redo buttons; replace repeated effect-state lines with inline badges.
+- Reveal Scene selections in Hierarchy, improve search and visible-row range selection, remove leaf arrows,
+  and make dragged-row and empty-space selection behavior predictable.
+- Add center Move/Rotate handles, restore the initial transform when a drag returns to its start, and prefer
+  visible mesh bounds when positioning prefab, mesh, and VFX drops in the Scene view.
+- Improve Hierarchy drag feedback with larger insertion zones, delayed parent expansion, edge scrolling, invalid-drop
+  explanations, and parenting from search results. Give effect status badges vertical separation.
+- Preserve requested prefab drop positions in serialized Transform data as well as scene placement metadata.

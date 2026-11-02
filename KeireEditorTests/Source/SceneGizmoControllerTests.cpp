@@ -268,3 +268,29 @@ TEST_CASE("scene grid settings persist and reject invalid or truncated appearanc
     std::filesystem::remove_all(root, cleanupError);
     CHECK_FALSE(cleanupError);
 }
+
+TEST_CASE("free rotation uses a world-space axis around a precise pivot and can return to the start")
+{
+    auto scene = Keire::CreateRef<Keire::Scene>(Keire::AssetId::Generate(), Keire::SceneAsset::EmptyDefinition());
+    auto entity = scene->CreateEntity("Free rotation target");
+    const auto transform = entity.GetComponent<Keire::TransformComponent>();
+    const Keire::Vector3d pivot{1.0e12, -1.0e12, 0.0};
+    const Keire::Vector3d initial{pivot.X + 2.0, pivot.Y, 0.0};
+    transform->SetLocalPositionPrecise(initial);
+    const std::array selections{entity.Id().Value()};
+    const auto targets = KeireEditor::SceneTransformGroup::Capture(scene, selections, entity.Id());
+    const auto localPivotRotation = Keire::Math::EulerDegreesToQuaternion({40.0F, 20.0F, 10.0F});
+    KeireEditor::SceneTransformGroup::Apply(targets, KeireEditor::SceneTool::Rotate,
+                                            KeireEditor::SceneTransformAxis::Uniform, 90.0F, {0, 0, 2}, pivot,
+                                            localPivotRotation);
+    const auto rotated = transform->WorldPositionPrecise();
+    CHECK(rotated.X - pivot.X == doctest::Approx(0.0).epsilon(0.001));
+    CHECK(rotated.Y - pivot.Y == doctest::Approx(2.0).epsilon(0.001));
+    KeireEditor::SceneTransformGroup::Apply(targets, KeireEditor::SceneTool::Rotate,
+                                            KeireEditor::SceneTransformAxis::Uniform, 0.0F, {0, 0, 1}, pivot,
+                                            localPivotRotation);
+    CHECK(transform->WorldPositionPrecise() == initial);
+    KeireEditor::SceneTransformGroup::Restore(targets);
+    CHECK(transform->LocalScale() == Keire::Vector3{1, 1, 1});
+    scene->Close();
+}

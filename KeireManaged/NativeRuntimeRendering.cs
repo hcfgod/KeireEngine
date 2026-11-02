@@ -76,6 +76,7 @@ internal enum NativeRenderingAssetProperty : byte
 internal static unsafe class NativeRuntimeRendering
 {
 #pragma warning disable CS0649
+    internal static delegate* unmanaged<ulong, ulong, ulong, byte> ResetCameraTemporalHistoryIcall;
     internal static delegate* unmanaged<ulong, ulong, byte, byte, float*, byte> GetScalarIcall;
     internal static delegate* unmanaged<ulong, ulong, byte, byte, float, byte> SetScalarIcall;
     internal static delegate* unmanaged<ulong, ulong, byte, byte, int*, byte> GetIntegerIcall;
@@ -116,6 +117,15 @@ internal static unsafe class NativeRuntimeRendering
     internal static delegate* unmanaged<ulong, ulong, NativeString, byte> ResetMaterialParameterIcall;
     internal static delegate* unmanaged<ulong, ulong, byte> ClearMaterialParametersIcall;
 #pragma warning restore CS0649
+
+    internal static void ResetCameraTemporalHistory(Entity entity)
+    {
+        if (ResetCameraTemporalHistoryIcall == null ||
+            ResetCameraTemporalHistoryIcall(entity.World, entity.Id.High, entity.Id.Low) == 0)
+        {
+            throw new InvalidOperationException("Camera temporal history could not be reset in the active runtime context.");
+        }
+    }
 
     internal static float GetScalar(Entity entity, NativeRenderingComponent component,
                                     NativeRenderingScalarProperty property)

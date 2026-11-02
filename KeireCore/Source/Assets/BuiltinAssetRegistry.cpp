@@ -6,6 +6,7 @@
 #include "Keire/Assets/InputActionAsset.h"
 #include "Keire/Assets/LightingAssets.h"
 #include "Keire/Assets/PhysicsMaterialAsset.h"
+#include "Keire/Assets/PostProcessProfileAsset.h"
 #include "Keire/Assets/RenderingAssets.h"
 #include "Keire/Audio/AudioAssets.h"
 #include "Keire/Rendering/MaterialEcosystem.h"
@@ -58,6 +59,7 @@ namespace Keire
         result.emplace_back(CreateProceduralMotionProfileAssetImporter());
         result.emplace_back(CreateAudioMixerAssetImporter());
         result.emplace_back(CreatePhysicsMaterialAssetImporter());
+        result.emplace_back(CreatePostProcessProfileAssetImporter());
         result.emplace_back(CreateManagedDataAssetImporter());
         result.emplace_back(CreateUiVisualTreeAssetImporter());
         result.emplace_back(CreateUiStyleSheetAssetImporter());
@@ -114,6 +116,7 @@ namespace Keire
         result.emplace_back(CreateManagedAssemblyReferenceAssetDecoder());
         result.emplace_back(CreateAudioMixerAssetDecoder());
         result.emplace_back(CreatePhysicsMaterialAssetDecoder());
+        result.emplace_back(CreatePostProcessProfileAssetDecoder());
         result.emplace_back(CreateManagedDataAssetDecoder());
         result.emplace_back(CreateUiVisualTreeAssetDecoder());
         result.emplace_back(CreateUiStyleSheetAssetDecoder());

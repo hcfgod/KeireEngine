@@ -53,6 +53,10 @@ TEST_CASE("volume shader contract accepts only supported mesh lighting layouts")
     definition.VolumeLightingAbiVersion = 14U;
     CHECK_NOTHROW(Keire::Detail::ValidateShaderDefinition(definition, false, true));
     definition.VolumeLightingAbiVersion = 15U;
+    CHECK_NOTHROW(Keire::Detail::ValidateShaderDefinition(definition, false, true));
+    definition.VolumeLightingAbiVersion = 16U;
+    CHECK_NOTHROW(Keire::Detail::ValidateShaderDefinition(definition, false, true));
+    definition.VolumeLightingAbiVersion = 17U;
     CHECK_THROWS_AS(Keire::Detail::ValidateShaderDefinition(definition, false, true), std::invalid_argument);
     definition.VolumeLightingAbiVersion = 1U;
     definition.VertexLayoutVersion = Keire::UiShaderVertexLayoutVersion;
@@ -117,7 +121,11 @@ TEST_CASE("canonical volume shader metadata round trips and fails closed on olde
     CHECK(decode().VolumeLightingAbiVersion == 13U);
     document["volumeLightingAbiVersion"] = 14U;
     CHECK(decode().VolumeLightingAbiVersion == 14U);
-    for (const auto invalidVersion : {-1LL, 15LL, 4294967296LL, 4294967297LL})
+    document["volumeLightingAbiVersion"] = 15U;
+    CHECK(decode().VolumeLightingAbiVersion == 15U);
+    document["volumeLightingAbiVersion"] = 16U;
+    CHECK(decode().VolumeLightingAbiVersion == 16U);
+    for (const auto invalidVersion : {-1LL, 17LL, 4294967296LL, 4294967297LL})
     {
         document["volumeLightingAbiVersion"] = invalidVersion;
         CHECK_THROWS_AS(decode(), std::invalid_argument);
@@ -178,7 +186,7 @@ TEST_CASE("buffer volume ABI trades exactly one sampler for one read-only buffer
 
 TEST_CASE("planetary volume ABIs preserve texture and buffer resource limits")
 {
-    for (const unsigned textureAbi : {11U, 13U})
+    for (const unsigned textureAbi : {11U, 13U, 15U})
     {
         auto definition = VolumeShader();
         definition.VolumeLightingAbiVersion = textureAbi;

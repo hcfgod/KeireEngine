@@ -1,10 +1,27 @@
 #include "KeireInternal/Rendering/PlanetEnvironmentCapture.h"
 #include "KeireInternal/Rendering/PlanetEnvironmentHistory.h"
 #include "KeireInternal/Rendering/RenderSceneRecordingTypesInternal.h"
+#include "KeireInternal/Scenes/SceneRuntimeRenderingInternal.h"
 
 #include <doctest/doctest.h>
 
 #include <optional>
+
+TEST_CASE("camera history invalidates changed profile exposure and bloom but retains stable evaluation")
+{
+    Keire::RenderBackend::CameraMotionHistoryEntry previous;
+    auto current = previous;
+    CHECK(previous.HasContinuousEnvironment(current));
+    current.PostProcessExposure = 2.0F;
+    CHECK_FALSE(previous.HasContinuousEnvironment(current));
+    previous = current;
+    CHECK(previous.HasContinuousEnvironment(current));
+    current.Bloom.Enabled = true;
+    current.Bloom.Intensity = 0.4;
+    CHECK_FALSE(previous.HasContinuousEnvironment(current));
+    previous = current;
+    CHECK(previous.HasContinuousEnvironment(current));
+}
 
 namespace
 {
@@ -138,4 +155,50 @@ TEST_CASE("An explicit profile matching inheritance does not unnecessarily inval
     auto resolved = inherited;
     Keire::Detail::ApplyPlanetEnvironmentOverrides(view, resolved.Atmosphere, resolved.Clouds, resolved.Fog);
     CHECK(original.HasContinuousEnvironment(MakeCameraMotionHistory({}, 2, resolved, std::nullopt)));
+}
+
+TEST_CASE("camera history cuts use explicit identity and revision rather than world travel distance")
+{
+    using namespace Keire;
+    using namespace Keire::RenderBackend;
+    CameraMotionHistoryEntry previous;
+    auto current = previous;
+    CHECK(previous.HasContinuousEnvironment(current)); // Legacy views keep zero identity/revision.
+    previous.TemporalHistoryId = AssetId(12, 34);
+    current = previous;
+    current.Transform.Elements[12] = 10000000.0F;
+    current.WorldOrigin = {1.0e12, -1.0e12, 1.0e12};
+    CHECK(previous.HasContinuousEnvironment(current));
+    current.TemporalHistoryId = AssetId(12, 35);
+    CHECK_FALSE(previous.HasContinuousEnvironment(current));
+    current = previous;
+    ++current.TemporalHistoryRevision;
+    CHECK_FALSE(previous.HasContinuousEnvironment(current));
+    previous = current;
+    CHECK(previous.HasContinuousEnvironment(current));
+}
+
+TEST_CASE("presented camera carries transient identity and explicit cuts without serializing histories")
+{
+    using namespace Keire;
+    CameraComponent first;
+    CameraComponent second;
+    TransformComponent transform;
+    const auto initial = Internal::BuildPresentedSceneCamera(first, transform, 1.0F);
+    REQUIRE(static_cast<bool>(initial.TemporalHistoryId));
+    CHECK(initial.TemporalHistoryId != second.TemporalHistoryId());
+    const auto registration = CreateCameraComponentRegistration();
+    const auto savedBefore = registration.Serialize(first);
+    first.ResetTemporalHistory();
+    const auto cut = Internal::BuildPresentedSceneCamera(first, transform, 1.0F);
+    CHECK(cut.TemporalHistoryId == initial.TemporalHistoryId);
+    CHECK(cut.TemporalHistoryRevision == initial.TemporalHistoryRevision + 1U);
+    const auto savedAfter = registration.Serialize(first);
+    CHECK(savedAfter.size() == savedBefore.size());
+    CHECK_FALSE(savedAfter.contains("temporalHistoryId"));
+    CHECK_FALSE(savedAfter.contains("temporalHistoryRevision"));
+    registration.Deserialize(second, savedBefore, 1U);
+    CHECK(second.TemporalHistoryId() != first.TemporalHistoryId());
+    first.Reset();
+    CHECK(first.TemporalHistoryRevision() == cut.TemporalHistoryRevision + 1U);
 }

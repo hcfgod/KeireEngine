@@ -10,6 +10,7 @@
 #include <array>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <span>
 
 namespace
@@ -407,7 +408,7 @@ TEST_CASE("dynamic resolution controller reacts conservatively to completed GPU 
     CHECK(reducedScale >= 0.6F);
 
     statistics.GpuCompletionLatencyMilliseconds = 4.0F;
-    for (std::uint64_t frame = 9; frame <= 16; ++frame)
+    for (std::uint64_t frame = 9; frame <= 40; ++frame)
     {
         statistics.Frame = frame;
         (void)controller.Update(settings, selection, statistics);
@@ -520,4 +521,106 @@ TEST_CASE("dynamic resolution fallback includes published render CPU cost")
     statistics.GpuTimingSupported = true;
     statistics.GpuFrameMilliseconds = 3.0F;
     CHECK(Keire::Internal::DynamicResolutionController::EstimateFrameCost(statistics) == 3.0F);
+}
+
+TEST_CASE("dynamic resolution rejects isolated timing spikes and waits for resized targets to settle")
+{
+    Keire::RenderEnvironmentSettings settings;
+    settings.RequestedDynamicResolution = Keire::DynamicResolutionMode::Automatic;
+    settings.MinimumDynamicResolutionScale = 0.6F;
+    settings.DynamicResolutionTargetMilliseconds = 16.667F;
+    Keire::RenderFeatureCapabilities capabilities;
+    capabilities.DynamicResolution = true;
+    const auto selection = Keire::ResolveRenderFeatureSelection(settings, capabilities);
+    Keire::Internal::DynamicResolutionController controller;
+    Keire::RenderStatistics statistics;
+    statistics.GpuTimingSupported = true;
+
+    for (std::uint64_t frame = 1; frame <= 24; ++frame)
+    {
+        statistics.Frame = frame;
+        statistics.GpuFrameMilliseconds = frame % 8 == 0 ? 150.0F : 16.0F;
+        CHECK(controller.Update(settings, selection, statistics) == 1.0F);
+    }
+    for (std::uint64_t frame = 25; frame <= 32; ++frame)
+    {
+        statistics.Frame = frame;
+        statistics.GpuFrameMilliseconds = 35.0F;
+        (void)controller.Update(settings, selection, statistics);
+    }
+    const float reducedScale = controller.Scale();
+    REQUIRE(reducedScale < 1.0F);
+    for (std::uint64_t frame = 33; frame <= 48; ++frame)
+    {
+        statistics.Frame = frame;
+        statistics.GpuFrameMilliseconds = 150.0F;
+        CHECK(controller.Update(settings, selection, statistics) == reducedScale);
+    }
+    for (std::uint64_t frame = 49; frame <= 56; ++frame)
+    {
+        statistics.Frame = frame;
+        statistics.GpuFrameMilliseconds = 16.0F;
+        CHECK(controller.Update(settings, selection, statistics) == reducedScale);
+    }
+}
+
+TEST_CASE("dynamic resolution ignores repeated and invalid samples and resets on mode changes")
+{
+    Keire::RenderEnvironmentSettings settings;
+    settings.RequestedDynamicResolution = Keire::DynamicResolutionMode::Automatic;
+    settings.RenderScale = 1.0F;
+    settings.MinimumDynamicResolutionScale = 0.6F;
+    Keire::RenderFeatureCapabilities capabilities;
+    capabilities.DynamicResolution = true;
+    auto selection = Keire::ResolveRenderFeatureSelection(settings, capabilities);
+    Keire::Internal::DynamicResolutionController controller;
+    Keire::RenderStatistics statistics;
+    statistics.GpuTimingSupported = true;
+    statistics.Frame = 1;
+    statistics.GpuFrameMilliseconds = 80.0F;
+    for (int repeat = 0; repeat < 32; ++repeat)
+    {
+        CHECK(controller.Update(settings, selection, statistics) == 1.0F);
+    }
+    for (std::uint64_t frame = 2; frame <= 32; ++frame)
+    {
+        statistics.Frame = frame;
+        statistics.GpuFrameMilliseconds = std::numeric_limits<float>::infinity();
+        CHECK(controller.Update(settings, selection, statistics) == 1.0F);
+    }
+    settings.RequestedDynamicResolution = Keire::DynamicResolutionMode::Disabled;
+    settings.RenderScale = 0.7F;
+    selection = Keire::ResolveRenderFeatureSelection(settings, capabilities);
+    CHECK(controller.Update(settings, selection, statistics) == doctest::Approx(0.7F));
+    settings.RequestedDynamicResolution = Keire::DynamicResolutionMode::Automatic;
+    settings.RenderScale = 1.0F;
+    selection = Keire::ResolveRenderFeatureSelection(settings, capabilities);
+    CHECK(controller.Update(settings, selection, statistics) == 1.0F);
+}
+
+TEST_CASE("dynamic resolution does not count one asynchronous GPU result as many samples")
+{
+    Keire::RenderEnvironmentSettings settings;
+    settings.RequestedDynamicResolution = Keire::DynamicResolutionMode::Automatic;
+    settings.MinimumDynamicResolutionScale = 0.6F;
+    Keire::RenderFeatureCapabilities capabilities;
+    capabilities.DynamicResolution = true;
+    const auto selection = Keire::ResolveRenderFeatureSelection(settings, capabilities);
+    Keire::Internal::DynamicResolutionController controller;
+    Keire::RenderStatistics statistics;
+    statistics.GpuTimingSupported = true;
+    statistics.GpuTimingFrame = 1;
+    statistics.GpuFrameMilliseconds = 80.0F;
+    for (std::uint64_t frame = 2; frame <= 40; ++frame)
+    {
+        statistics.Frame = frame;
+        CHECK(controller.Update(settings, selection, statistics) == 1.0F);
+    }
+    for (std::uint64_t frame = 2; frame <= 8; ++frame)
+    {
+        statistics.Frame = 40 + frame;
+        statistics.GpuTimingFrame = frame;
+        (void)controller.Update(settings, selection, statistics);
+    }
+    CHECK(controller.Scale() < 1.0F);
 }

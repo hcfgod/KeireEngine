@@ -24,6 +24,7 @@
 #include "KeireClient/Editor/InputActionsDocument.h"
 #include "KeireClient/Editor/MaterialDocument.h"
 #include "KeireClient/Editor/MaterialInspectorPanel.h"
+#include "KeireClient/Editor/PostProcessDocument.h"
 #include "KeireClient/Editor/PrefabAuthoring.h"
 #include "KeireClient/Editor/ProjectSettingsDocument.h"
 #include "KeireClient/Editor/PropertyDrawerRegistry.h"
@@ -1175,6 +1176,10 @@ void EditorWorkspaceLayer::UpdateAssetOperations()
                     OpenMaterialGraph(created);
                 else if (completion->Context.FollowUp == KeireEditor::AssetOperationFollowUp::OpenShaderGraph)
                     OpenShaderGraph(created);
+                else if (completion->Context.FollowUp == KeireEditor::AssetOperationFollowUp::OpenPostProcessing)
+                {
+                    OpenPostProcessProfile(created);
+                }
                 else if (completion->Context.FollowUp == KeireEditor::AssetOperationFollowUp::AdoptSceneCopy)
                 {
                     if (!completion->Context.SceneSnapshot)
@@ -1335,6 +1340,12 @@ void EditorWorkspaceLayer::ApplyAssetImportResult(const Keire::AssetImportResult
             {
                 if (m_AssetBrowserPanel)
                     m_AssetBrowserPanel->InvalidateThumbnail(asset);
+                // A save import may finish after another edit. Publish the catalog, but keep that newer
+                // draft in memory; discard/close restores the authored source through the preview session.
+                if (m_PostProcessDocument && m_PostProcessDocument->PreservesLivePreview(asset))
+                {
+                    continue;
+                }
                 (void)assets->Reload(asset, Keire::AssetPriority::Background);
             }
             RefreshInputActionsContext();

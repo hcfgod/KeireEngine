@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <span>
+#include <utility>
 #include <vector>
 
 namespace Keire::Detail
@@ -13,6 +14,26 @@ namespace Keire::Detail
     class PlanetFrameCache final
     {
       public:
+        [[nodiscard]] FrameRegistry::PreparedPublication
+        Prepare(const FrameRegistry& registry, std::span<const PlanetDefinition> planets, double time) const
+        {
+            std::vector<FrameSnapshot> evaluations;
+            evaluations.reserve(planets.size());
+            for (const auto& planet : planets)
+            {
+                evaluations.push_back(EvaluatePlanetFrame(planet, time, registry.Revision()));
+            }
+            return registry.PreparePublication(evaluations, time);
+        }
+
+        [[nodiscard]] std::span<const BoundFrameSnapshot> Commit(FrameRegistry& registry,
+                                                                 FrameRegistry::PreparedPublication&& preparation)
+        {
+            auto committed = registry.CommitPublication(std::move(preparation));
+            m_Snapshots.swap(committed);
+            return m_Snapshots;
+        }
+
         [[nodiscard]] std::span<const BoundFrameSnapshot>
         Resolve(FrameRegistry& registry, std::span<const PlanetDefinition> planets, double time)
         {

@@ -390,6 +390,10 @@ namespace KeireEditor
             return "Animation Clip";
         if (extension == ".keiremixer")
             return "Audio Mixer";
+        if (extension == ".keirepostprocess")
+        {
+            return "Post Processing Profile";
+        }
         if (extension == ".keirephysicsmaterial")
             return "Physics Material";
         if (extension == ".keirevfx")
@@ -428,6 +432,10 @@ namespace KeireEditor
             return AssetBrowserOpenAction::AnimationClip;
         if (extension == ".keiremixer")
             return AssetBrowserOpenAction::AudioMixer;
+        if (extension == ".keirepostprocess")
+        {
+            return AssetBrowserOpenAction::PostProcessing;
+        }
         if (extension == ".keirevfx")
             return AssetBrowserOpenAction::VfxEffect;
         if (extension == ".keireui")

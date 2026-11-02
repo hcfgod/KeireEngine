@@ -1,9 +1,16 @@
 #pragma once
 
 #include "CloudVolume.hlsli"
+// Existing source shaders retain their 1616-byte layout unless they advertise the new ABI.
+#ifndef KEIRE_PLANET_VOLUME_SET
+#define KEIRE_PLANET_VOLUME_SET 0
+#endif
+#if KEIRE_PLANET_VOLUME_SET
+#include "PlanetVolumeTransport.hlsli"
+#endif
 #include "VolumeSurfaceComposition.hlsli"
 
-// Shared background/surface constants. Keep the host's 1616-byte layout in this order.
+// Shared background/surface constants. Preserve the established 1616-byte prefix in this order.
 struct CloudVolumeView
 {
     float4x4 InverseProjection;
@@ -25,6 +32,10 @@ struct CloudVolumeView
     float4 WeatherControls;
     FogViewDensity Fog;
     PlanetaryCloudGeometry PlanetaryCloud;
+#if KEIRE_PLANET_VOLUME_SET
+    PlanetAtmosphereSet PlanetAtmospheres;
+    PlanetVolumeWeatherUniforms PlanetWeather;
+#endif
 };
 
 struct CloudVolumeViewTransport
@@ -77,9 +88,10 @@ struct CloudVolumeViewRay
     float3 Direction;
     float MaximumDistance;
     float SurfaceDistance;
+    float2 PixelFootprint;
 };
 
-CloudVolumeViewRay MakeCloudVolumeViewRay(float2 uv, float depth, CloudVolumeView view)
+CloudVolumeViewRay MakeCloudVolumeViewRay(float2 uv, float depth, CloudVolumeView view, float pixelSpan)
 {
     CloudVolumeViewRay ray;
     const float2 clip = uv * float2(2.0F, -2.0F) + float2(-1.0F, 1.0F);
@@ -89,6 +101,15 @@ CloudVolumeViewRay MakeCloudVolumeViewRay(float2 uv, float depth, CloudVolumeVie
     ray.Origin = orthographic ? mul((float3x3)view.InverseView, nearView) : 0.0F;
     ray.Direction = normalize(mul((float3x3)view.InverseView,
         orthographic ? middleView - nearView : middleView));
+    // Adjacent unprojected rays define the actual angular footprint for this pass,
+    // including asymmetric and orthographic projections, without differentiating across scene edges.
+    const float2 clipPixel = 2.0F * pixelSpan * view.CameraControls.zw;
+    const float3 horizontal = CloudVolumeViewPosition(clip + float2(clipPixel.x, 0.0F), 0.5F, view);
+    const float3 vertical = CloudVolumeViewPosition(clip + float2(0.0F, clipPixel.y), 0.5F, view);
+    ray.PixelFootprint = orthographic ?
+        float2(0.0F, max(length(horizontal - middleView), length(vertical - middleView))) :
+        float2(max(length(normalize(horizontal) - normalize(middleView)),
+            length(normalize(vertical) - normalize(middleView))), 0.0F);
     ray.MaximumDistance = max(view.Quality.x != 0U ? view.Geometry.w : 0.0F,
         view.Fog.Controls.x != 0U ? view.Fog.HeightDensity.w : 0.0F);
     if (view.Quality.x != 0U && view.PlanetaryCloud.Controls.x != 0U)
@@ -98,6 +119,27 @@ CloudVolumeViewRay MakeCloudVolumeViewRay(float2 uv, float depth, CloudVolumeVie
             abs(view.PlanetaryCloud.ObserverRadialAltitude.w) + 2.0F *
             (view.PlanetaryCloud.RadiusGeometry.x + max(view.Geometry.x + view.Geometry.y, 0.0F)));
     }
+#if KEIRE_PLANET_VOLUME_SET
+    if (view.PlanetWeather.Controls.x != 0U)
+    {
+        ray.MaximumDistance = view.Fog.Controls.x != 0U ? view.Fog.HeightDensity.w : 0.0F;
+        for (uint index = 0U; index < view.PlanetWeather.Controls.x; ++index)
+        {
+            const PlanetVolumeWeatherBodyUniforms body = view.PlanetWeather.Bodies[index];
+            if (PlanetVolumeCloudEnabled(body))
+            {
+                const float variation = body.WeatherControls.x > 0.5F ? body.WeatherControls.w : 0.0F;
+                const float reach = abs(body.PlanetaryCloud.ObserverRadialAltitude.w) + 2.0F *
+                    (body.PlanetaryCloud.RadiusGeometry.x + max(body.Geometry.x + body.Geometry.y + variation, 0.0F));
+                ray.MaximumDistance = max(ray.MaximumDistance, reach);
+            }
+            if (body.Fog.Controls.x != 0U)
+            {
+                ray.MaximumDistance = max(ray.MaximumDistance, body.Fog.HeightDensity.w);
+            }
+        }
+    }
+#endif
     ray.SurfaceDistance = 0.0F;
     if (depth < 1.0F)
     {
@@ -108,6 +150,11 @@ CloudVolumeViewRay MakeCloudVolumeViewRay(float2 uv, float depth, CloudVolumeVie
     return ray;
 }
 
+CloudVolumeViewRay MakeCloudVolumeViewRay(float2 uv, float depth, CloudVolumeView view)
+{
+    return MakeCloudVolumeViewRay(uv, depth, view, 1.0F);
+}
+
 // Unexposed cloud transport includes air in front of cloud opacity events, but not the remaining
 // clear-air background integral. Keeping that integral separate prevents geometry from entering history.
 float4 EvaluateCloudVolumeTrace(CloudVolumeViewRay ray, CloudVolumeView view, bool includeRadiance,
@@ -115,15 +162,39 @@ float4 EvaluateCloudVolumeTrace(CloudVolumeViewRay ray, CloudVolumeView view, bo
 {
     CloudVolumeParameters parameters = MakeCloudVolumeParameters(view);
     parameters.RaySamplePhase = samplePhase;
-    cloudDistance = 0.0F;
-    float4 volume = 0.0F;
-    if (view.Quality.x != 0U || view.Fog.Controls.x != 0U)
+    AtmosphereMedium atmosphere = view.Atmosphere;
+    FogViewDensity fog = view.Fog;
+    bool transportEnabled = view.Quality.x != 0U || view.Fog.Controls.x != 0U;
+#if KEIRE_PLANET_VOLUME_SET
+    const bool singlePlanet = view.PlanetWeather.Controls.x == 1U && view.Fog.Controls.x == 0U;
+    if (view.PlanetWeather.Controls.x != 0U && !singlePlanet)
     {
-        volume = IntegrateCloudVolumeWithDepth(ray.Origin, ray.Direction, 0.0F, ray.MaximumDistance,
-            view.SunDirection.xyz, view.SunRadiance.xyz, view.AmbientRadiance.xyz, parameters,
-            view.Atmosphere, includeRadiance, view.Fog, cloudDistance);
+        return IntegratePlanetVolumeWeatherFiltered(ray.Origin, ray.Direction, ray.MaximumDistance,
+            view.SunDirection.xyz, view.SunRadiance.xyz, view.AmbientRadiance.xyz, view.PlanetWeather,
+            view.Fog, view.PlanetAtmospheres, includeRadiance, samplePhase, ray.PixelFootprint, cloudDistance);
     }
-    return volume;
+    if (singlePlanet)
+    {
+        const PlanetVolumeWeatherBodyUniforms body = view.PlanetWeather.Bodies[0];
+        parameters = MakePlanetVolumeParameters(body, samplePhase);
+        fog = body.Fog;
+        transportEnabled = true;
+        if (view.PlanetAtmospheres.Controls.x != 0U)
+        {
+            atmosphere = view.PlanetAtmospheres.Media[0];
+        }
+    }
+#endif
+    cloudDistance = 0.0F;
+    if (!transportEnabled)
+    {
+        return 0.0F;
+    }
+    // Select the medium before calling the large kernel. Two call sites duplicate its full
+    // lighting/noise graph during shader optimization even though only one path executes.
+    return IntegrateCloudVolumeWithDepthFiltered(ray.Origin, ray.Direction, 0.0F, ray.MaximumDistance,
+        view.SunDirection.xyz, view.SunRadiance.xyz, view.AmbientRadiance.xyz, parameters,
+        atmosphere, includeRadiance, fog, ray.PixelFootprint, cloudDistance);
 }
 
 CloudVolumeViewTransport ComposeCloudVolumeTrace(float4 volume, float cloudDistance, CloudVolumeViewRay ray,
@@ -136,6 +207,19 @@ CloudVolumeViewTransport ComposeCloudVolumeTrace(float4 volume, float cloudDista
     result.Transmission = (1.0F - volume.a).xxx;
     // Sky already includes clear-air transport. Opaque and transparent surfaces need it to their own depth,
     // even when that surface is farther away than the cloud march's maximum distance.
+#if KEIRE_PLANET_VOLUME_SET
+    if (depth < 1.0F && view.PlanetAtmospheres.Controls.x != 0U)
+    {
+        uint ignoredGround;
+        float ignoredEnd;
+        const AtmosphereTransport air = IntegratePlanetAtmosphereSet(ray.Origin * 0.001F, ray.Direction,
+            ray.SurfaceDistance * 0.001F, view.PlanetAtmospheres, includeRadiance, false,
+            ignoredGround, ignoredEnd);
+        result.Radiance += result.Transmission * air.Radiance;
+        result.Transmission *= air.Transmission;
+    }
+    else
+#endif
     if (depth < 1.0F && view.Atmosphere.Controls.x > 0.5F)
     {
         const float3 airOrigin = view.Atmosphere.ObserverRadius.xyz + ray.Origin * 0.001F;
@@ -150,11 +234,22 @@ CloudVolumeViewTransport ComposeCloudVolumeTrace(float4 volume, float cloudDista
     return result;
 }
 
+bool CloudVolumeViewHasMedia(CloudVolumeView view)
+{
+#if KEIRE_PLANET_VOLUME_SET
+    if (view.PlanetWeather.Controls.x != 0U || view.PlanetAtmospheres.Controls.x != 0U)
+    {
+        return true;
+    }
+#endif
+    return view.Quality.x != 0U || view.Atmosphere.Controls.x > 0.5F || view.Fog.Controls.x != 0U;
+}
+
 // The caller supplies its own depth: opaque scene depth or a transparent fragment's depth.
 // Output matches the engine's pre-exposed HDR target; opacity must not be exposed.
 CloudVolumeViewTransport EvaluateCloudVolumeView(float2 uv, float depth, CloudVolumeView view, bool includeRadiance)
 {
-    if (view.Quality.x == 0U && view.Atmosphere.Controls.x <= 0.5F && view.Fog.Controls.x == 0U)
+    if (!CloudVolumeViewHasMedia(view))
     {
         CloudVolumeViewTransport empty = (CloudVolumeViewTransport)0;
         empty.Transmission = 1.0F;

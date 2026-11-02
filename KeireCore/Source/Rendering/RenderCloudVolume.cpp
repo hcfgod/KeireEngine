@@ -10,18 +10,26 @@
 #include "KeireInternal/Rendering/PlanetFogViewUniforms.h"
 #include "KeireInternal/Rendering/VolumeShadowUniforms.h"
 
+#include <algorithm>
 #include <array>
 #include <memory>
 #include <stdexcept>
 
 namespace Keire::RenderBackend
 {
+    bool HasCloudVolumeViewTransport(const SceneRenderPacket& packet)
+    {
+        return packet.CloudVolume.Quality[0] != 0U || packet.Environment.Atmosphere.Enabled ||
+               packet.Environment.Fog.Enabled ||
+               std::ranges::any_of(packet.PlanetAtmosphereSettings, &AtmosphereSettings::Enabled) ||
+               std::ranges::any_of(packet.PlanetWeather, [](const auto& weather)
+                                   { return weather.Clouds.Volume.Enabled || weather.Fog.Enabled; });
+    }
+
     CloudVolumeViewUniforms MakeCloudVolumeViewUniforms(const SceneRenderPacket& packet, const std::uint32_t width,
                                                         const std::uint32_t height)
     {
-        if ((packet.CloudVolume.Quality[0] == 0U && !packet.Environment.Atmosphere.Enabled &&
-             !packet.Environment.Fog.Enabled) ||
-            width == 0U || height == 0U)
+        if (!HasCloudVolumeViewTransport(packet) || width == 0U || height == 0U)
         {
             return {};
         }
@@ -45,6 +53,13 @@ namespace Keire::RenderBackend
                              packet.Environment.Fog,
                              EnvironmentRelativeObserver(observer, camera.WorldOrigin, camera.EnvironmentAnchor),
                              &packet.Environment.Atmosphere);
+        const auto observerFromAnchor =
+            EnvironmentRelativeObserver(observer, camera.WorldOrigin, camera.EnvironmentAnchor);
+        if (!packet.PlanetWeather.empty())
+        {
+            // Captured before selected overrides; flat height and inherited local boxes appear only once.
+            fog = MakeFogViewUniforms(packet.PlanetVolumeFog.Common, observerFromAnchor);
+        }
         if (FogViewHasNegligibleOpticalDepth(fog, camera.Projection.Elements[15] == 1.0F))
         {
             fog = {};
@@ -57,40 +72,43 @@ namespace Keire::RenderBackend
                 ? MakePlanetaryCloudUniforms(*packet.PlanetFrame, packet.Environment.Clouds.Volume.BaseHeightMeters)
                 : PlanetaryCloudUniforms{};
         cloudGeometry.RadiusGeometry.Z = static_cast<float>(packet.Environment.Clouds.Volume.MinimumTypeThickness);
-        return {Math::Inverse(camera.Projection),
-                Math::Inverse(camera.View),
-                packet.CloudVolume,
-                light.SunDirection,
-                light.Sun,
-                {light.Ambient.X, light.Ambient.Y, light.Ambient.Z,
-                 static_cast<float>(packet.Environment.Clouds.Volume.AmbientOcclusionStrength)},
-                {camera.Projection.Elements[15] == 1.0F ? 1.0F : 0.0F, packet.Environment.Exposure,
-                 1.0F / static_cast<float>(width), 1.0F / static_cast<float>(height)},
-                {static_cast<float>(packet.Environment.Clouds.Volume.DetailFrequency),
-                 static_cast<float>(packet.Environment.Clouds.Volume.VariationStrength),
-                 static_cast<float>(packet.Environment.Clouds.Volume.VariationPeriod),
-                 static_cast<float>(packet.Environment.Clouds.Volume.DensityContrast)},
-                {static_cast<float>(packet.Environment.Clouds.Volume.RegionalCoverageStrength),
-                 static_cast<float>(packet.Environment.Clouds.Volume.RegionalCoveragePeriod), 0.0F,
-                 1.0F + static_cast<float>(packet.Environment.Clouds.Volume.ErosionAmount)},
-                atmosphere,
-                {static_cast<float>(packet.Environment.Clouds.Volume.HeightProfile[0]),
-                 static_cast<float>(packet.Environment.Clouds.Volume.HeightProfile[1]),
-                 static_cast<float>(packet.Environment.Clouds.Volume.HeightProfile[2]),
-                 static_cast<float>(packet.Environment.Clouds.Volume.HeightProfile[3])},
-                {packet.Environment.Clouds.Volume.IndependentWeather ? 1.0F : 0.0F,
-                 static_cast<float>(packet.Environment.Clouds.Volume.CloudType),
-                 static_cast<float>(packet.Environment.Clouds.Volume.TypeVariation),
-                 static_cast<float>(packet.Environment.Clouds.Volume.BaseHeightVariationMeters)},
-                fog,
-                cloudGeometry};
+        return {
+            Math::Inverse(camera.Projection),
+            Math::Inverse(camera.View),
+            packet.CloudVolume,
+            light.SunDirection,
+            light.Sun,
+            {light.Ambient.X, light.Ambient.Y, light.Ambient.Z,
+             static_cast<float>(packet.Environment.Clouds.Volume.AmbientOcclusionStrength)},
+            {camera.Projection.Elements[15] == 1.0F ? 1.0F : 0.0F, packet.Environment.Exposure,
+             1.0F / static_cast<float>(width), 1.0F / static_cast<float>(height)},
+            {static_cast<float>(packet.Environment.Clouds.Volume.DetailFrequency),
+             static_cast<float>(packet.Environment.Clouds.Volume.VariationStrength),
+             static_cast<float>(packet.Environment.Clouds.Volume.VariationPeriod),
+             static_cast<float>(packet.Environment.Clouds.Volume.DensityContrast)},
+            {static_cast<float>(packet.Environment.Clouds.Volume.RegionalCoverageStrength),
+             static_cast<float>(packet.Environment.Clouds.Volume.RegionalCoveragePeriod), 0.0F,
+             1.0F + static_cast<float>(packet.Environment.Clouds.Volume.ErosionAmount)},
+            atmosphere,
+            {static_cast<float>(packet.Environment.Clouds.Volume.HeightProfile[0]),
+             static_cast<float>(packet.Environment.Clouds.Volume.HeightProfile[1]),
+             static_cast<float>(packet.Environment.Clouds.Volume.HeightProfile[2]),
+             static_cast<float>(packet.Environment.Clouds.Volume.HeightProfile[3])},
+            {packet.Environment.Clouds.Volume.IndependentWeather ? 1.0F : 0.0F,
+             static_cast<float>(packet.Environment.Clouds.Volume.CloudType),
+             static_cast<float>(packet.Environment.Clouds.Volume.TypeVariation),
+             static_cast<float>(packet.Environment.Clouds.Volume.BaseHeightVariationMeters)},
+            fog,
+            cloudGeometry,
+            MakePlanetAtmosphereSetUniforms(packet.Environment.Atmosphere, lightDirection, packet.PlanetAtmospheres,
+                                            packet.PlanetAtmosphereSettings),
+            MakePlanetVolumeWeatherUniforms(packet.PlanetWeather, packet.PlanetVolumeFog.Planets, observerFromAnchor)};
     }
 
     void RenderSharedState::RecordCloudVolume(SDL_GPUCommandBuffer* commands, RenderSurfaceState& surface,
                                               const SceneRenderPacket& packet, const ShadowFrameData& shadows)
     {
-        if (packet.CloudVolume.Quality[0] == 0U && !packet.Environment.Atmosphere.Enabled &&
-            !packet.Environment.Fog.Enabled)
+        if (!HasCloudVolumeViewTransport(packet))
         {
             return;
         }
@@ -124,7 +142,8 @@ namespace Keire::RenderBackend
         }
         const auto samples =
             workset.MultisampleHdrColor ? ToSdlSampleCount(surface.ActualSamples) : SDL_GPU_SAMPLECOUNT_1;
-        if (!workset.MultisampleHdrColor && packet.CloudVolume.Quality[0] != 0U)
+        if (packet.CloudVolume.Quality[0] != 0U || std::ranges::any_of(packet.PlanetWeather, [](const auto& weather)
+                                                                       { return weather.Clouds.Volume.Enabled; }))
         {
             RecordCloudTemporal(*this, commands, surface, packet, uniforms, cacheUniforms, noise, sampler,
                                 shadowUniforms);

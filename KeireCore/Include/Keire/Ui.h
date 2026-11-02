@@ -604,6 +604,8 @@ namespace Keire
         // Request selection for this frame only; false preserves normal user-controlled tab selection.
         [[nodiscard]] UiTabItemScope BeginTabItem(std::string_view label, bool* open, bool select);
         [[nodiscard]] UiTreeNodeScope BeginTreeNode(std::string_view label, bool selected = false);
+        // Expansion is requested for this frame only; false preserves the user's expansion state.
+        [[nodiscard]] UiTreeNodeScope BeginTreeNode(std::string_view label, bool selected, bool leaf, bool expand);
         // Settings sections toggle with a single click anywhere on the framed heading.
         [[nodiscard]] UiTreeNodeScope BeginSection(std::string_view label);
         [[nodiscard]] UiDisabledScope BeginDisabled(bool disabled = true);
@@ -743,6 +745,7 @@ namespace Keire
         void SetCursorScreenPosition(UiPosition position);
         /// Requests vertical scrolling to the last submitted item, including an offscreen item, next frame.
         void ScrollLastItemIntoView();
+        void AutoScrollVerticalNearPointer(float edgeSize = 32.0F, float pixelsPerSecond = 420.0F);
         // Draws a noninteractive section title while its content crosses the viewport's top edge.
         void StickySectionTitle(std::string_view title, float sectionStartY, float sectionEndY);
         /// Draws interactive pinned content in an isolated child above the section body, without advancing layout.

@@ -28,6 +28,7 @@ namespace KeireEditor
     class MaterialDocument;
     class MaterialGraphDocument;
     class ProjectSettingsDocument;
+    class PostProcessDocument;
     class SceneDocument;
     class ShaderGraphDocument;
     class VfxEffectDocument;
@@ -46,6 +47,7 @@ namespace KeireEditor
         std::unique_ptr<InputActionsDocument> InputActions;
         std::unique_ptr<AnimatorControllerDocument> AnimatorController;
         std::unique_ptr<AudioMixerDocument> AudioMixer;
+        std::unique_ptr<PostProcessDocument> PostProcessing;
         std::unique_ptr<VfxEffectDocument> VfxEffect;
         std::unique_ptr<ShaderGraphDocument> ShaderGraph;
         std::unique_ptr<MaterialGraphDocument> MaterialGraph;

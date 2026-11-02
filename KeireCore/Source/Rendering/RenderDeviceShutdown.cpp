@@ -211,6 +211,10 @@ namespace Keire::RenderBackend
                     SDL_ReleaseGPUGraphicsPipeline(Device, pipelines.Vfx);
                 if (pipelines.Sky)
                     SDL_ReleaseGPUGraphicsPipeline(Device, pipelines.Sky);
+                if (pipelines.Water)
+                {
+                    SDL_ReleaseGPUGraphicsPipeline(Device, pipelines.Water);
+                }
                 if (pipelines.Grid)
                     SDL_ReleaseGPUGraphicsPipeline(Device, pipelines.Grid);
                 if (pipelines.Cube)
@@ -244,6 +248,16 @@ namespace Keire::RenderBackend
             }
             LightingTextureCache.clear();
             LightingSetCache.clear();
+            PostProcessContributions.clear();
+            PostProcessProfileLeases.clear();
+            PostProcessProfileCache.clear();
+            PostProcessLookups.clear();
+            for (auto& [id, entry] : PostProcessLookupTextures)
+            {
+                (void)id;
+                ReleaseTextureResources(entry.Resources);
+            }
+            PostProcessLookupTextures.clear();
             LightProbeVolumeCache.clear();
             MaterialCache.clear();
             VfxVolumeCache.clear();

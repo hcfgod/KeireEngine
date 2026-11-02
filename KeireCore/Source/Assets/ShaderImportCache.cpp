@@ -232,7 +232,12 @@ namespace Keire::Detail
                                 std::to_string(specification.MaximumOutputBytes);
             cache->m_Key = Digest(std::as_bytes(std::span(policy)));
             const auto slot = std::stoul(cache->m_Key.substr(0, 2), nullptr, 16) % ShaderImportCacheSlotCount;
-            cache->m_Slot = std::filesystem::path(CacheDirectory) / (std::to_string(slot) + ".bin");
+            for (std::size_t probe = 0; probe < cache->m_Slots.size(); ++probe)
+            {
+                const auto candidate = (slot + probe * (ShaderImportCacheSlotCount / ShaderImportCacheProbeCount)) %
+                                       ShaderImportCacheSlotCount;
+                cache->m_Slots[probe] = std::filesystem::path(CacheDirectory) / (std::to_string(candidate) + ".bin");
+            }
             return cache;
         }
         catch (const std::exception&)
@@ -245,10 +250,26 @@ namespace Keire::Detail
                                                       const ShaderImporterSpecification& specification,
                                                       const std::span<const ShaderPassCompileLane> passes) const
     {
+        for (const auto& slot : m_Slots)
+        {
+            auto artifact = TryReadSlot(slot, expected, specification, passes);
+            if (!artifact.empty())
+            {
+                return artifact;
+            }
+        }
+        return {};
+    }
+
+    std::vector<std::byte> ShaderImportCache::TryReadSlot(const std::filesystem::path& slot,
+                                                          const ShaderAssetDefinition& expected,
+                                                          const ShaderImporterSpecification& specification,
+                                                          const std::span<const ShaderPassCompileLane> passes) const
+    {
         try
         {
             const AnchoredFileSystem files(m_Project, AnchoredRootPolicy::RejectLink);
-            const auto encoded = files.Read(m_Slot, ShaderImportCacheMaximumEntryBytes);
+            const auto encoded = files.Read(slot, ShaderImportCacheMaximumEntryBytes);
             if (encoded.size() <= HeaderBytes)
             {
                 return {};
@@ -312,7 +333,44 @@ namespace Keire::Detail
             encoded.insert(encoded.end(), validatedArtifact.begin(), validatedArtifact.end());
             const AnchoredFileSystem files(m_Project, AnchoredRootPolicy::RejectLink);
             files.CreateDirectories(std::filesystem::path(CacheDirectory));
-            files.WriteFileAtomically(m_Slot, encoded);
+            auto destination = m_Slots.front();
+            std::optional<std::filesystem::path> vacant;
+            for (const auto& slot : m_Slots)
+            {
+                try
+                {
+                    if (!files.Exists(slot))
+                    {
+                        if (!vacant)
+                        {
+                            vacant = slot;
+                        }
+                        continue;
+                    }
+                    const auto previous = files.Read(slot, ShaderImportCacheMaximumEntryBytes);
+                    const std::string_view header(reinterpret_cast<const char*>(previous.data()), previous.size());
+                    if (header.starts_with(EnvelopeMagic) && header.substr(EnvelopeMagic.size(), DigestBytes) == m_Key)
+                    {
+                        // Update an existing key before consuming a vacant slot.
+                        files.WriteFileAtomically(slot, encoded);
+                        return;
+                    }
+                }
+                catch (const std::exception&)
+                {
+                    // A corrupt or unreadable candidate must not prevent repairing the bounded cache.
+                    if (!vacant)
+                    {
+                        vacant = slot;
+                    }
+                }
+            }
+            if (vacant)
+            {
+                destination = *vacant;
+            }
+            // Atomic replacement and full key validation keep concurrent writers safe without an eviction lock.
+            files.WriteFileAtomically(destination, encoded);
         }
         catch (const std::exception&)
         {

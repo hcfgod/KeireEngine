@@ -4,6 +4,7 @@
 #include "KeireInternal/Assets/ShaderCompileIdentity.h"
 #include "KeireInternal/Assets/ShaderSourceSnapshot.h"
 
+#include <array>
 #include <cstddef>
 #include <filesystem>
 #include <memory>
@@ -23,6 +24,7 @@ namespace Keire::Detail
 
     // Fixed collision-checked slots bound committed entries without a shared eviction lock.
     inline constexpr std::size_t ShaderImportCacheSlotCount = 64;
+    inline constexpr std::size_t ShaderImportCacheProbeCount = 4;
     inline constexpr std::size_t ShaderImportCacheMaximumEntryBytes = 8U * 1024U * 1024U;
 
     class ShaderImportCache final
@@ -43,8 +45,13 @@ namespace Keire::Detail
         [[nodiscard]] std::filesystem::path StageCompiler(const std::filesystem::path& directory) const;
 
       private:
+        [[nodiscard]] std::vector<std::byte> TryReadSlot(const std::filesystem::path& slot,
+                                                         const ShaderAssetDefinition& expected,
+                                                         const ShaderImporterSpecification& specification,
+                                                         std::span<const ShaderPassCompileLane> passes) const;
+
         std::filesystem::path m_Project;
-        std::filesystem::path m_Slot;
+        std::array<std::filesystem::path, ShaderImportCacheProbeCount> m_Slots;
         std::string m_Key;
         ShaderToolchainSnapshot m_Toolchain;
     };

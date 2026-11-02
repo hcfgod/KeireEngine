@@ -53,6 +53,14 @@ std::unique_ptr<KeireEditor::EditorDocumentWorkspaceDocuments> EditorWorkspaceLa
     auto documents = std::make_unique<KeireEditor::EditorDocumentWorkspaceDocuments>();
     documents->Scene = std::make_unique<KeireEditor::SceneDocument>();
     documents->InputActions = std::make_unique<KeireEditor::InputActionsDocument>();
+    documents->PostProcessing =
+        std::make_unique<KeireEditor::PostProcessDocument>(KeireEditor::PostProcessDocument::Specification{
+            .Preview = [this](const Keire::AssetId asset, const Keire::PostProcessProfileDefinition& definition)
+            { PreviewPostProcessProfile(asset, definition); },
+            .CancelPreview = [this](const Keire::AssetId) { StopPostProcessPreview(); },
+            .Persist = [this](const Keire::AssetId asset, const std::span<const std::byte> bytes)
+            { PersistPostProcessProfile(asset, bytes); },
+        });
     documents->AnimatorController = std::make_unique<KeireEditor::AnimatorControllerDocument>();
     documents->AudioMixer =
         std::make_unique<KeireEditor::AudioMixerDocument>(KeireEditor::AudioMixerDocumentSpecification{

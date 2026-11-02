@@ -1653,3 +1653,43 @@ TEST_CASE("distant scenes select a local physics region and preserve falling bod
         CHECK_THROWS_AS((void)Keire::Detail::QueryManagedSphereOverlapPrecise(session, overlap), std::invalid_argument);
     }
 }
+
+TEST_CASE("scene checkpoints restore queued loads while authored velocity edits preserve them")
+{
+    auto scene = Keire::CreateRef<Keire::Scene>(Keire::AssetId::Generate(), Keire::SceneAsset::EmptyDefinition());
+    auto entity = scene->CreateEntity("Loaded traveler");
+    (void)entity.AddComponent<Keire::ColliderComponent>();
+    const auto rigid = entity.AddComponent<Keire::RigidBodyComponent>();
+    rigid->SetUseGravity(false);
+    rigid->SetMass(2.0F);
+    rigid->SetMotionSettings({0.0F, 0.0F, 100.0F, 100.0F});
+    Keire::PhysicsSystemSpecification specification;
+    specification.Mode = Keire::PhysicsMode::Enabled;
+    const auto physics = Keire::CreateRef<Keire::PhysicsSystem>(specification);
+    const auto session = Keire::CreateRef<Keire::SceneRuntimeSession>(scene, Keire::Ref<Keire::AssetSystem>{},
+                                                                      Keire::Ref<Keire::AudioSystem>{}, physics);
+    session->Play();
+    const auto world = session->Physics();
+    REQUIRE(world);
+    const auto hits = world->RayCast({.Origin = {0.0F, 5.0F, 0.0F}, .Direction = {0.0F, -1.0F, 0.0F}});
+    REQUIRE(hits.size() == 1);
+    const auto body = hits.front().Body;
+    world->AddForce(body, {4.0F, 0.0F, 0.0F});
+    world->AddTorque(body, {0.0F, 0.0F, 2.0F});
+    const auto checkpoint = session->CapturePhysicsWorldCheckpoint();
+    REQUIRE(checkpoint.Bodies.size() == 1);
+    CHECK(checkpoint.Bodies.front().PendingForce == Keire::Vector3{4.0F, 0.0F, 0.0F});
+    world->AddForce(body, {20.0F, 0.0F, 0.0F});
+    session->RestorePhysicsWorldCheckpoint(checkpoint);
+    CHECK(world->TryGetBody(body)->PendingForce == Keire::Vector3{4.0F, 0.0F, 0.0F});
+    const auto authored = session->RuntimeScene()->FindEntity(entity.Id()).GetComponent<Keire::RigidBodyComponent>();
+    authored->SetLinearVelocity({1.0F, 0.0F, 0.0F});
+    session->FixedUpdate(0.01F);
+    CHECK(world->TryGetBody(body)->LinearVelocity.X == doctest::Approx(1.02F));
+    CHECK(world->TryGetBody(body)->AngularVelocity.Z == doctest::Approx(0.06F));
+    auto invalid = checkpoint;
+    invalid.Bodies.front().PendingForce.X = std::numeric_limits<float>::infinity();
+    invalid.Gravity = Keire::Vector3{1.0F, 0.0F, 0.0F};
+    CHECK_THROWS(session->RestorePhysicsWorldCheckpoint(invalid));
+    CHECK(world->Gravity() == *checkpoint.Gravity);
+}

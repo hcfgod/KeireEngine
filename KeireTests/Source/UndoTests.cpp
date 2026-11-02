@@ -4,6 +4,7 @@
 
 #include <cstddef>
 #include <memory>
+#include <new>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -332,4 +333,84 @@ TEST_CASE("Undo transaction handles become inactive when their context closes")
     context->Close();
     service->Close();
     CHECK(rollbackCalls == 1);
+}
+
+namespace
+{
+    class RejectTransactionMergeCommand final : public Keire::UndoCommand
+    {
+      public:
+        explicit RejectTransactionMergeCommand(bool& reject) : m_Reject(reject) {}
+
+        [[nodiscard]] std::string_view Name() const noexcept override { return "Existing history"; }
+
+        [[nodiscard]] std::size_t EstimatedBytes() const noexcept override { return 7; }
+
+        void Redo() override {}
+
+        void Undo() override {}
+
+        [[nodiscard]] bool TryMerge(const Keire::UndoCommand&) override
+        {
+            if (m_Reject)
+            {
+                throw std::bad_alloc();
+            }
+            return false;
+        }
+
+      private:
+        bool& m_Reject;
+    };
+} // namespace
+
+TEST_CASE("Undo commit merge exceptions preserve cancellation retry and redo history")
+{
+    auto service = Keire::CreateRef<Keire::UndoService>();
+    auto context = service->CreateContext({.Name = "Commit failure"});
+    bool reject = false;
+    int value = 0;
+    context->Execute(std::make_unique<RejectTransactionMergeCommand>(reject));
+    context->Execute(Keire::CreateUndoCommand("Existing redo", [&] { value = 10; }, [&] { value = 0; }, 11));
+    REQUIRE(context->Undo());
+    const auto bytes = context->EstimatedBytes();
+    auto transaction = context->BeginTransaction("Pending edit");
+    context->Execute(Keire::CreateUndoCommand("One", [&] { value += 1; }, [&] { value -= 1; }, 13));
+    reject = true;
+    CHECK_THROWS_AS(transaction->Commit(), std::bad_alloc);
+    CHECK(transaction->Active());
+    CHECK(value == 1);
+    CHECK(context->UndoCount() == 1);
+    CHECK(context->RedoCount() == 1);
+    CHECK(context->EstimatedBytes() == bytes);
+
+    SUBCASE("destructor cancels the still active edit")
+    {
+        transaction.reset();
+        CHECK(value == 0);
+        CHECK(context->EstimatedBytes() == bytes);
+        REQUIRE(context->Redo());
+        CHECK(value == 10);
+    }
+    SUBCASE("explicit cancellation retains the redo branch")
+    {
+        transaction->Cancel();
+        CHECK_FALSE(transaction->Active());
+        CHECK(value == 0);
+        CHECK(context->RedoCount() == 1);
+        CHECK(context->EstimatedBytes() == bytes);
+    }
+    SUBCASE("retry commits exactly once")
+    {
+        reject = false;
+        transaction->Commit();
+        CHECK_FALSE(transaction->Active());
+        CHECK(context->UndoCount() == 2);
+        CHECK(context->RedoCount() == 0);
+        CHECK(context->EstimatedBytes() == 20);
+        REQUIRE(context->Undo());
+        CHECK(value == 0);
+        REQUIRE(context->Redo());
+        CHECK(value == 1);
+    }
 }

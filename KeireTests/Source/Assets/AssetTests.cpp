@@ -362,6 +362,9 @@ TEST_CASE("Targeted import expands source dependency cycles and diamonds once in
 
 TEST_CASE("Targeted subasset batches refresh each owner once in source order")
 {
+    bool useRescanGuard = false;
+    SUBCASE("Direct indexed import") {}
+    SUBCASE("Indexed import with missing-source rescan guard") { useRescanGuard = true; }
     TemporaryAssetProject project;
     for (int index = 0; index < 40; ++index)
         project.Write(std::to_string(index) + ".owned", "source");
@@ -389,8 +392,15 @@ TEST_CASE("Targeted subasset batches refresh each owner once in source order")
         targets.push_back(iterator->Id);
         targets.push_back(iterator->SubAssets.front());
     }
-    const auto result = Keire::Detail::AssetDatabaseWorkerAccess::ImportAssetsFromSourceIndex(
-        *database, targets, Keire::AssetImportPolicy::FailFast);
+    const auto originalDatabase = database;
+    bool rescanned = false;
+    const auto result = useRescanGuard ? Keire::Detail::AssetDatabaseWorkerAccess::ImportAssetsFromSourceIndexOrRescan(
+                                             database, {.ProjectRoot = project.Root, .Importers = {importer}}, targets,
+                                             Keire::AssetImportPolicy::FailFast, rescanned)
+                                       : Keire::Detail::AssetDatabaseWorkerAccess::ImportAssetsFromSourceIndex(
+                                             *database, targets, Keire::AssetImportPolicy::FailFast);
+    CHECK_FALSE(rescanned);
+    CHECK(database == originalDatabase);
     REQUIRE(result.Statuses.size() == records.size());
     for (std::size_t index = 0; index < records.size(); ++index)
         CHECK(result.Statuses[index].Id == records[index].Id);
@@ -558,6 +568,16 @@ TEST_CASE("Indexed targeted import rescans when a requested source is newer than
     CHECK_FALSE(indexed->Find(added->Id));
 
     bool rescanned = false;
+    const auto existing = indexed->Find("Existing.fallback");
+    REQUIRE(existing);
+    const auto indexedBeforeImport = indexed;
+    const std::array existingTargets{existing->Id};
+    const auto cached = Keire::Detail::AssetDatabaseWorkerAccess::ImportAssetsFromSourceIndexOrRescan(
+        indexed, specification, existingTargets, Keire::AssetImportPolicy::FailFast, rescanned);
+    CHECK_FALSE(rescanned);
+    CHECK(indexed == indexedBeforeImport);
+    CHECK(cached.Imported == 0);
+
     const std::array targets{added->Id};
     const auto imported = Keire::Detail::AssetDatabaseWorkerAccess::ImportAssetsFromSourceIndexOrRescan(
         indexed, specification, targets, Keire::AssetImportPolicy::FailFast, rescanned);

@@ -1,5 +1,27 @@
 # Architecture
 
+`PhysicsWorld::AddForce`, `AddForceAtPosition` and `AddTorque` submit native dynamic-body forces on the
+owning thread. Units are newtons and newton-metres in simulation axes; application positions are local
+to `WorldOrigin()`. The backend center of mass determines the moment arm. Both accumulator sums and
+double-precision moment products are validated before mutation. Nonzero submissions wake bodies;
+zero submissions preserve sleep. The solver consumes forces per step, and translation rebases retain
+them. Scene checkpoints preserve pending forces and torque; restoring replaces later accumulated
+loads. The new authored Buoyancy bridge submits additive prepared loads once per native tick, with
+captured-body and frame validation before mutation. Managed force API parity remains separate work.
+
+The provisional native water foundation lives in `Keire/Water/WaterSurface.h` and `WaterBuoyancy.h`.
+`WaterSurface` is an immutable value sampler: construction validates geometry and caches orientation;
+queries subtract double frame origins before evaluating planar or spherical depth. Surface offsets
+remain relative to the query to avoid adding small corrections to huge world positions. Frame angular
+velocity contributes to sampled surface velocity. Sphere height is independent of authored rotation.
+`EvaluateWaterBuoyancy` integrates a spherical probe between the local surface and finite water bottom,
+returning displaced volume, hydrostatic force opposing effective gravity and a relative force-application
+point. It does not submit physics mutations or own water bodies. Curved water and hulls use a locally
+planar small-probe approximation; shoreline tests currently use probe-center footprint coverage.
+Rendering, waves, drag, body overlap arbitration and scene/managed authoring are not implemented by
+these helpers. The focused force, geometry, buoyancy and gravity-sampling suites passed in DevDist
+(21 tests / 358 assertions); DebugASan validation is in progress.
+
 Project authoring settings carry finite uniform gravity in metres per second squared.
 PhysicsSystem owns the default copied into newly created PhysicsWorld instances; changing
 the default does not mutate existing worlds or their checkpoint-restored overrides.
@@ -33,6 +55,16 @@ precise world coordinates with `ToLocalPosition` before querying. Source centers
 precision before local float coordinates are used. Sampling shares the source accumulator with dynamic-body
 simulation, but does not apply forces or move a character. It requires the owning thread and an open world;
 non-finite positions and unrepresentable acceleration are rejected. Focused native sampling/body-parity, distant-origin, rebase and rejection tests pass.
+The internal scene-owner transfer path now accepts synchronized, unparented kinematic character bodies
+when the scene contains no dynamic bodies. Accepted movement feeds the frame target before native stepping;
+the existing swept-clearance validation remains active. Scene-level rotation and transfer-back coverage at
+the origin and at positive/negative trillion-metre offsets passes (1,116 assertions), including grounded
+characters on rotating static supports. Frame-carried supports record their post-transport anchor so
+the next character tick does not apply the same rotation twice. Resolved character velocity includes
+accepted input and frame-carried displacement, calculated in physics-local coordinates before committing
+movement. The all-axis near/far regression checks this velocity during sustained rotation. Dynamic-contact
+motion bounds, parented character support and complete failed-step rollback are still open requirements.
+
 The managed `CharacterController.TryGetGravityAcceleration(out acceleration)` query resolves the character's
 owning runtime session, rather than the active scene. False with zero output means unavailable, disabled, stale
 or outside the supported local precision domain; true with zero output means a valid zero-gravity field.
@@ -361,6 +393,11 @@ terminal result. A worker wait cooperatively executes ready work. `JobScope` sup
 boundary used by asset loading/cooking, navigation, managed builds and managed callbacks, thumbnails, material work,
 VFX warmup, and physics. Jolt worlds share the application scheduler through a barrier adapter. Renderer submission,
 filesystem monitoring, process reaping, audio callbacks, and the logger retain their required dedicated threads.
+Scheduler and scope registries periodically discard expired weak job records under their existing locks.
+Compaction intervals grow with live records, avoiding a full live-job scan on every submission while releasing
+completed jobs' control blocks during long sessions. Live handles and dependency-blocked jobs remain registered.
+Terminal jobs release prerequisite handles outside their state lock while retaining their own result and failure.
+Holding a completed result therefore does not retain its entire prerequisite graph.
 Strict simulation domains use submission order and deterministic partitions instead of stealing. Editor and tool asset
 databases inject the same process-owned scheduler into catalog cooking; the small internal scheduler remains only as a
 source-compatible fallback for standalone database consumers that do not provide one.
@@ -2464,14 +2501,18 @@ supplying the complete runtime bundle.
 
 `ShaderImportCache` connects these identities to complete validated graphics imports. It captures the flat bundled
 compiler and local runtime libraries, stages those retained bytes on misses, and bypasses native stage/reflection
-execution on validated hits. Source/include arguments are scratch-relative. The envelope retains the full work key
+execution on validated hits. On misses, each graphics pass compiles vertex and fragment HLSL to SPIR-V once;
+DXIL and Metal conversions consume those shared intermediates. Shared futures propagate compilation failure and
+keep staged files alive until all consumers finish, including cancellation. Reflection and binding validation still
+run before publication. Source/include arguments are scratch-relative. The envelope retains the full work key
 and payload checksum; decoded hits must satisfy dependency, target/pass inventory, and per-output bounds. A project-root
 `AnchoredFileSystem` rejects links for cache reads and atomic writes. Sixty-four hash slots bound committed entries to
 512 MiB (8 MiB per slot including headers); collisions safely miss/replace rather than sharing artifacts. Temporary
 atomic writes are additional transient space. Storage failures preserve compilation, large outputs skip storage, and
 volatile time macros or loader overrides skip reuse. Owned optional per-importer counters observe successful native
-process starts and cache hits/misses without process-global instrumentation. Public importer specification/layout and
-compile-manifest ABI stay unchanged; importer version 11 and an internal cache-contract version invalidate old work.
+process starts, HLSL stage attempts and cache hits/misses without process-global instrumentation. Public importer
+specification/layout and compile-manifest ABI stay unchanged; importer version 12 and an internal cache-contract
+version invalidate older contracts. Sharing intermediate compilation does not invalidate already validated artifacts.
 
 `Scripts/Dependencies/ShaderCompilerOverlay.cmake` generates adapted CLI/library copies inside the host-tool build
 tree. It checks pinned source anchors before replacing only those target source paths, carries ordered roots through
@@ -2880,6 +2921,27 @@ substitute for shipping performance, player-support, sanitizer, or cross-platfor
 
 ### HDR post-processing boundary
 
+The in-development post-processing profile path evaluates active scene Volume components into immutable
+camera-local settings during render-packet capture. Distances use double-precision camera-relative offsets;
+priority ties use scene and entity identities. Only authored overrides participate in blends. Profile asset
+leases remain alive through evaluation, while render packets carry values rather than editor document pointers.
+The renderer records the accepted frame ID before profile capture. Profile cache entries retain their handles
+and last-good revisions for 600 unused frames, then expire during a subsequent camera capture, including a
+capture with post-processing disabled. Recently used entries survive alternating views; actively referenced
+profiles are not subject to a fixed entry-count limit. No eviction runs while there are no camera captures.
+Exposure and bloom feed the existing HDR pipeline. The initial grading/lens/grain pass follows tone mapping
+and its temporal-history capture, before legacy LDR camera effects and camera-overlay UI.
+
+Packets retain the authored environment separately for render-feature selection against the actual surface
+capabilities. Evaluated EV exposure can exceed the authored project range; it must not be passed back through
+project-settings validation or saved as authored settings. Lighting and tone mapping use the evaluated environment.
+
+The document/workspace coordinator owns the editor profile document and closes its undo context and preview
+before workspace services are torn down. A separate preview session publishes development asset revisions
+without rewriting source files. It retains the saved baseline and retries restoration after publication failure;
+an unreadable external source falls back to that baseline. Atomic source saves compare the last-read bytes to
+detect external edits. These implementation contracts still require integrated renderer/editor acceptance.
+
 Both scene render paths expose an explicit HDR preparation pass after transparency (and after Irradyn compositing
 in Deferred Hybrid). This pass records world-space runtime UI followed by the camera's HDR fullscreen effect.
 An ordering-only completion token makes tone mapping depend on this finished HDR image. Bloom extraction
@@ -3006,3 +3068,82 @@ World UI submissions carry the origin of their World matrix. Projection and inpu
 Runtime planetary frame evaluations are cached per owning world while planet definitions remain immutable.
 Reuse requires current registry ownership, publication epoch, topology revision and simulation time; replacing
 planet definitions resets the cache. Returned spans are consumed synchronously before the next publication.
+
+Shader import reuse probes four collision-checked positions within the existing 64-slot cache namespace.
+Existing single-slot entries remain readable. Stores update a matching key first, then use a vacant or
+unreadable candidate, and replace the primary candidate only when the set is full. Atomic writes and full
+key, digest, dependency and variant validation remain required; the committed storage bound is unchanged.
+This reduces collision-driven recompilation but does not eliminate first-import compiler work.
+
+### Post-processing custom stack integration (validation pending)
+
+Profile schema 3 retains up to 16 ordered material/stage/enabled entries and an independent stack override. Camera-local volume evaluation selects the highest applied stack at weight >= 0.5 using the existing deterministic priority ordering. Empty overridden stacks clear inherited effects. Before-tone-map, after-tone-map and after-UI entries execute after the corresponding legacy camera material; entries retain their relative order within each stage. Materials use the existing Fullscreen resolver, copy input and GPU resource ownership. Disabled references remain asset dependencies for cooking. This integration still requires rebuilt tests and GPU acceptance; explicit camera-slot migration tooling remains outstanding.
+
+Physics body snapshots include pending solver-space force and torque, not only pose and velocity.
+SetBodyState replaces these accumulators (default-zero fields clear them); callers editing velocity must
+start from TryGetBody to preserve queued loads. Scene checkpoints carry both loads and validate finite
+values and dynamic-body eligibility before any world mutation. Translation rebasing leaves loads unchanged;
+current planetary owner transfers retain the inertial solver basis. This is a source-compatible appended
+snapshot extension, not a serialized scene format change. Native/scene regression validation is pending.
+
+### Authoring selection reveal
+
+Hierarchy requests tree expansion only when the primary selection or scene asset changes. The UI tree overload accepts
+leaf and one-frame expansion hints; ordinary calls retain user-controlled expansion state. Visible rows determine
+Shift-selection ranges. Scene-drop placement keeps double-precision camera origins and can prefer visible oriented
+mesh bounds before using the existing ground/view-plane fallback. This is authoring placement, not a physics query.
+
+Hierarchy drag policy validates ancestry and insertion anchors before recording a move, while SceneDocument remains
+the authoritative mutation validator. Hover expansion uses a monotonic delay and resets on target changes. The entity
+list is a child scroll region so drag edge scrolling does not move search controls. Filtered rows share selection and
+drag handling but offer parenting only, because flattened search order is not sibling order. UiFrame exposes bounded,
+frame-time-scaled vertical edge scrolling; callers invoke it only for their active drag session.
+
+
+### Cloud history across render-surface resizing
+
+A replacement surface takes ownership of the last submitted cloud radiance/depth pair as read-only
+previous-extent history. The old surface retains its writer textures for normal fence retirement.
+The replacement allocates writers at its new dimensions; normalized-UV reprojection can sample the
+previous dimensions without copying or resampling the history into a writer. Published new-extent
+history takes precedence once a frame submits successfully. One previous-extent pair remains owned
+until another resize or surface retirement, bounding extra storage independently of resize count.
+Camera continuity, frame adjacency, projection, weather, lighting and depth rejection still apply.
+This preserves cloud history only; other surface targets still allocate on extent changes.
+
+Automatic render scaling uses the median of eight valid measurements and ignores repeated asynchronous
+GPU timing frame IDs. After changing scale, sixteen distinct measurement updates are allowed to settle
+before the next measurement window. This avoids interpreting an isolated allocation/upload spike as
+sustained pressure; it does not replace surface allocation profiling or GPU visual validation.
+
+
+### Multi-planet volume transport integration
+
+The volume uniform extension uses texture ABI 15 / noise-buffer ABI 16 and retains the legacy
+1616-byte prefix through ABI 14. Builtins and new graph output explicitly opt into
+KEIRE_PLANET_VOLUME_SET; legacy source keeps its original layout. CloudVolumeView contains up to
+eight captured planet weather profiles, with fog provenance separating inherited common density
+from authored per-planet overrides. The single-profile cached path remains available; the combined
+path integrates the union of authored cloud/fog intervals and accounts for all participating bodies
+when evaluating sunlight and cloud occlusion. Empty cloud profiles may skip density work while
+remaining solid occluders. Worst-case multi-profile lighting cost is not yet performance-qualified.
+
+GPU numerical probes validate homogeneous fog composition and candidate filtering with real compute
+bindings. The optional --cloud-noise probe-host argument supplies a constant 3D texture for kernels
+that retain a sampler; this is not a visual cloud-noise or rendered-image acceptance test.
+
+
+### Authored water forces and frame-step preparation
+
+SceneRuntimeWater gathers active dynamic bodies with enabled Buoyancy components and active water
+media from the same runtime scene. Body COM, masked inertia, gravity and pending-load context are
+captured under exclusive owner-thread access. Surface evaluation stays in the translated double
+physics frame before probe offsets are applied. Prepared water loads are additive and accepted once
+per tick; checkpoint phase and accepted-load duration prevent duplicate application after restore.
+Water render capture reads the same fixed-step phase, with renderer-time fallback in edit mode.
+
+Character start poses and frame kinematic targets are submitted in a single authored-body batch.
+Target velocity validation uses the staged start pose under the same body locks, including converted
+static supports. Step-clock validation precedes scene input commits. This preflight rejects invalid
+or mismatched durations and exhausted tick counters; it does not establish rollback of solver capacity
+failures, gravity-overflow transactions, or dynamic-contact frame travel. Those remain explicit gates.

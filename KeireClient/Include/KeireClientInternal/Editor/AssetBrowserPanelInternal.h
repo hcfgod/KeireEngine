@@ -278,6 +278,9 @@ namespace KeireEditor
                 case AssetBrowserOpenAction::AudioMixer:
                     editor.OpenAssetBrowserAudioMixer(record.Id);
                     break;
+                case AssetBrowserOpenAction::PostProcessing:
+                    editor.OpenPostProcessProfile(record.Id);
+                    break;
                 case AssetBrowserOpenAction::VfxEffect:
                     editor.OpenAssetBrowserVfxEffect(record.Id);
                     break;

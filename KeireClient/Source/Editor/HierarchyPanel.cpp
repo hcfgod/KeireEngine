@@ -2,9 +2,12 @@
 
 #include "KeireClient/Editor/SceneDocument.h"
 #include "KeireClient/Editor/SelectionRange.h"
+#include "KeireClientInternal/Editor/WaterBodyInspectorEditing.h"
 
 #include <algorithm>
+#include <array>
 #include <cctype>
+#include <chrono>
 #include <cstddef>
 #include <span>
 #include <sstream>
@@ -62,7 +65,16 @@ namespace KeireEditor
             }
         }
         ui.SameLine();
+        ui.SetNextItemWidth(std::max(80.0F, ui.ContentAvailable().Width - 65.0F));
         (void)ui.InputTextWithHint("##HierarchySearch", "Search entities", m_Search);
+        ui.SameLine();
+        {
+            auto disabled = ui.BeginDisabled(m_Search.empty());
+            if (ui.Button("Clear##HierarchySearch"))
+            {
+                m_Search.clear();
+            }
+        }
         ui.Separator();
         if (!scene)
         {
@@ -82,6 +94,20 @@ namespace KeireEditor
         }
         const auto hierarchy = scene->HierarchySnapshot();
         const auto& objects = hierarchy.Objects;
+        const auto pointer = ui.PointerState();
+        if (pointer.LeftPressed || (!pointer.LeftDown && !pointer.LeftReleased))
+        {
+            m_DraggedEntities.clear();
+            m_DragHover = {};
+        }
+        const double now = std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+        Keire::AssetId hoveredParent;
+        std::unordered_map<Keire::AssetId, Keire::AssetId> parents;
+        parents.reserve(objects.size());
+        for (const auto& object : objects)
+        {
+            parents.emplace(object.Id, object.Parent);
+        }
         std::unordered_set<Keire::AssetId> prefabObjects;
         for (const auto& instance : hierarchy.PrefabInstances)
             for (const auto& mapping : instance.Objects)
@@ -90,6 +116,27 @@ namespace KeireEditor
         children.reserve(objects.size());
         for (const auto& object : objects)
             children[object.Parent].push_back(std::addressof(object));
+        const bool revealSelection =
+            document.Selection() && (document.Selection() != m_ObservedSelection || scene->Asset() != m_ObservedScene);
+        m_ObservedSelection = document.Selection();
+        m_ObservedScene = scene->Asset();
+        if (revealSelection && !ui.WindowFocused())
+        {
+            m_Search.clear();
+        }
+        std::unordered_set<Keire::AssetId> revealAncestors;
+        if (revealSelection)
+        {
+            auto current = document.Selection();
+            for (auto found = parents.find(current); found != parents.end(); found = parents.find(current))
+            {
+                current = found->second;
+                if (!current || !revealAncestors.insert(current).second)
+                {
+                    break;
+                }
+            }
+        }
         const auto isPrefabObject = [&](const Keire::AssetId object) { return prefabObjects.contains(object); };
         std::vector<Keire::AssetId> hierarchyOrder;
         hierarchyOrder.reserve(objects.size());
@@ -109,14 +156,26 @@ namespace KeireEditor
         };
         ui.TextColored({0.55F, 0.60F, 0.68F, 1.0F},
                        scene->Name() + "  •  " + std::to_string(objects.size()) + " entities");
-        ui.TextColored({0.42F, 0.47F, 0.55F, 1.0F},
-                       "Drop on a row to parent  |  drop on an edge to reorder  |  Ctrl/Shift multi-select");
+        if (ui.LastItemState().Hovered)
+        {
+            ui.SetTooltip(
+                "Drop on a row to parent; drop on an edge to reorder. Ctrl adds to selection; Shift selects a range.");
+        }
+        auto entityList = ui.BeginChild("HierarchyEntityList", {0.0F, 0.0F}, false);
+        if (!entityList)
+        {
+            return;
+        }
+        if (!m_DraggedEntities.empty())
+        {
+            ui.AutoScrollVerticalNearPointer();
+        }
+        std::vector<const Keire::SceneObjectDefinition*> matches;
         if (!m_Search.empty())
         {
             std::string search = m_Search;
             std::ranges::transform(search, search.begin(), [](const unsigned char character)
                                    { return static_cast<char>(std::tolower(character)); });
-            std::vector<const Keire::SceneObjectDefinition*> matches;
             for (const auto& object : objects)
             {
                 std::string name = object.Name;
@@ -129,19 +188,6 @@ namespace KeireEditor
             if (matches.empty())
                 ui.TextColoredWrapped({0.55F, 0.60F, 0.68F, 1.0F},
                                       "No entities match this search. Clear the search to show all entities.");
-            std::vector<Keire::AssetId> matchOrder;
-            matchOrder.reserve(matches.size());
-            for (const auto* object : matches)
-                matchOrder.push_back(object->Id);
-            for (const auto* object : matches)
-            {
-                auto id = ui.PushId(object->Id.ToString());
-                const bool prefabObject = isPrefabObject(object->Id);
-                const auto label = prefabObject ? "[Prefab] " + object->Name : object->Name;
-                if (ui.Selectable(label, document.IsSelected(object->Id)))
-                    select(object->Id, matchOrder);
-            }
-            return;
         }
         const auto nextSibling = [&children](const Keire::AssetId id, const Keire::AssetId parent)
         {
@@ -166,6 +212,12 @@ namespace KeireEditor
         {
             if (entities.empty())
                 return;
+            const auto invalid = ValidateHierarchyDrop(entities, parent, beforeSibling, parents);
+            if (!invalid.empty())
+            {
+                m_Controller.ReportHierarchyError(std::string(invalid));
+                return;
+            }
             try
             {
                 std::vector<Keire::EntityId> requested;
@@ -183,15 +235,27 @@ namespace KeireEditor
                 m_Controller.ReportHierarchyError(error.what());
             }
         };
+        std::vector<Keire::AssetId> visibleOrder;
+        visibleOrder.reserve(objects.size());
+        Keire::AssetId releasedSelection;
         const auto drawEntity = [&](const auto& self, const Keire::SceneObjectDefinition& object) -> void
         {
+            visibleOrder.push_back(object.Id);
             auto id = ui.PushId(object.Id.ToString());
             const bool prefabObject = isPrefabObject(object.Id);
             const auto label = (object.Active ? std::string{} : std::string("[inactive] ")) +
                                (prefabObject ? std::string("[Prefab] ") : std::string{}) + object.Name + "##tree";
-            auto node = ui.BeginTreeNode(label, document.IsSelected(object.Id));
+            const bool hoverExpand =
+                m_DragHover.Target == object.Id && !m_DraggedEntities.empty() && m_DragHover.Update(object.Id, now);
+            auto node = ui.BeginTreeNode(label, document.IsSelected(object.Id),
+                                         !m_Search.empty() || !children.contains(object.Id),
+                                         revealAncestors.contains(object.Id) || hoverExpand);
             const auto state = ui.LastItemState();
             const auto row = ui.LastItemRect();
+            if (revealSelection && object.Id == document.Selection())
+            {
+                ui.ScrollLastItemIntoView();
+            }
             if (state.Hovered && ui.PointerState().LeftPressed)
                 m_PendingSelectionCollapse = object.Id;
             if (auto context = ui.BeginItemContextMenu(); context)
@@ -203,6 +267,21 @@ namespace KeireEditor
                     m_Controller.RecordHierarchyUndo();
                     document.Select(document.CreateEntity("GameObject", Keire::EntityId(object.Id)).Value());
                     m_Controller.MarkHierarchyEntity(document.Selection());
+                }
+                if (auto waterMenu = ui.BeginMenu("Water Child"); waterMenu)
+                {
+                    constexpr std::array names{"Sea", "Lake", "Pond"};
+                    for (std::size_t index = 0; index < names.size(); ++index)
+                    {
+                        if (ui.MenuItem(names[index]))
+                        {
+                            const auto created = Detail::CreateWaterEntity(
+                                document, static_cast<Detail::WaterSetupPreset>(index), Keire::EntityId(object.Id),
+                                [&](const std::string_view) { m_Controller.RecordHierarchyUndo(); });
+                            document.Select(created.Value());
+                            m_Controller.MarkHierarchyEntity(document.Selection());
+                        }
+                    }
                 }
                 if (ui.MenuItem("Audio Source Child"))
                 {
@@ -288,7 +367,11 @@ namespace KeireEditor
                 m_PendingSelectionCollapse = {};
                 std::vector<Keire::AssetId> dragged;
                 if (!document.IsSelected(object.Id))
+                {
+                    document.Select(object.Id);
+                    m_SelectionAnchor = object.Id;
                     dragged.push_back(object.Id);
+                }
                 else
                 {
                     const auto selections = document.Selections();
@@ -297,6 +380,7 @@ namespace KeireEditor
                             dragged.push_back(entity);
                 }
                 const auto value = EncodeAssetPayload(dragged);
+                m_DraggedEntities = dragged;
                 ui.SetDragPayload("KEIRE_SCENE_OBJECT", std::as_bytes(std::span(value.data(), value.size())));
                 ui.Text(dragged.size() == 1 ? object.Name : std::to_string(dragged.size()) + " selected entities");
                 const auto previewCount = std::min<std::size_t>(dragged.size(), 4);
@@ -309,16 +393,29 @@ namespace KeireEditor
             }
             if (auto target = ui.BeginDragTarget(); target)
             {
-                const auto pointer = ui.PointerState().Position;
                 const float rowHeight = std::max(row.Maximum.Y - row.Minimum.Y, 1.0F);
-                const float relative = (pointer.Y - row.Minimum.Y) / rowHeight;
-                const bool insertBefore = relative < 0.25F;
-                const bool insertAfter = relative > 0.75F;
-                const auto accent = m_Controller.HierarchyAccent();
+                const float relative = (pointer.Position.Y - row.Minimum.Y) / rowHeight;
+                const auto zone = ResolveHierarchyDropZone(relative, !m_Search.empty());
+                const bool insertBefore = zone == HierarchyDropZone::Before;
+                const bool insertAfter = zone == HierarchyDropZone::After;
+                const auto parent = insertBefore || insertAfter ? object.Parent : object.Id;
+                const auto before = insertBefore  ? object.Id
+                                    : insertAfter ? nextSibling(object.Id, object.Parent)
+                                                  : Keire::AssetId{};
+                const bool entityDrag = !m_DraggedEntities.empty();
+                const auto invalid =
+                    entityDrag ? ValidateHierarchyDrop(m_DraggedEntities, parent, before, parents) : std::string_view{};
+                const auto accent =
+                    invalid.empty() ? m_Controller.HierarchyAccent() : Keire::UiColor{0.95F, 0.32F, 0.28F, 1.0F};
+                if (entityDrag && zone == HierarchyDropZone::Child && invalid.empty())
+                {
+                    hoveredParent = object.Id;
+                }
                 if (insertBefore || insertAfter)
                 {
                     const float y = insertBefore ? row.Minimum.Y : row.Maximum.Y;
-                    ui.DrawLine({row.Minimum.X, y}, {row.Maximum.X, y}, accent, 2.0F);
+                    ui.DrawLine({row.Minimum.X, y}, {row.Maximum.X, y}, accent, 3.0F);
+                    ui.DrawFilledRectangle({{row.Minimum.X, y - 3.0F}, {row.Minimum.X + 6.0F, y + 3.0F}}, accent);
                     ui.SetTooltip((insertBefore ? "Insert before " : "Insert after ") + object.Name);
                 }
                 else
@@ -326,16 +423,16 @@ namespace KeireEditor
                     ui.DrawRectangle(row, accent, 2.0F, 3.0F);
                     ui.SetTooltip("Make child of " + object.Name);
                 }
+                if (!invalid.empty())
+                {
+                    ui.SetCursorShape(Keire::UiCursorShape::NotAllowed);
+                    ui.SetTooltip(invalid);
+                }
                 std::vector<std::byte> payload;
                 if (ui.AcceptDragPayload("KEIRE_SCENE_OBJECT", payload))
                 {
                     const auto dragged = DecodeAssetPayload(payload);
-                    if (insertBefore)
-                        moveEntities(dragged, object.Parent, object.Id);
-                    else if (insertAfter)
-                        moveEntities(dragged, object.Parent, nextSibling(object.Id, object.Parent));
-                    else
-                        moveEntities(dragged, object.Id, {});
+                    moveEntities(dragged, parent, before);
                 }
                 payload.clear();
                 if (ui.AcceptDragPayload("KEIRE_ASSETS", payload))
@@ -354,10 +451,12 @@ namespace KeireEditor
             if (m_PendingSelectionCollapse == object.Id && ui.PointerState().LeftReleased)
             {
                 if (state.Hovered)
-                    select(object.Id, hierarchyOrder);
+                {
+                    releasedSelection = object.Id;
+                }
                 m_PendingSelectionCollapse = {};
             }
-            if (node)
+            if (node && m_Search.empty())
             {
                 const auto found = children.find(object.Id);
                 if (found != children.end())
@@ -365,12 +464,33 @@ namespace KeireEditor
                         self(self, *child);
             }
         };
-        if (const auto roots = children.find({}); roots != children.end())
-            for (const auto* object : roots->second)
+        if (!m_Search.empty())
+        {
+            for (const auto* object : matches)
+            {
                 drawEntity(drawEntity, *object);
+            }
+        }
+        else if (const auto roots = children.find({}); roots != children.end())
+        {
+            for (const auto* object : roots->second)
+            {
+                drawEntity(drawEntity, *object);
+            }
+        }
+        (void)m_DragHover.Update(hoveredParent, now);
+        if (releasedSelection)
+        {
+            select(releasedSelection, visibleOrder);
+        }
         const auto remaining = ui.ContentAvailable();
-        (void)ui.InvisibleButton("HierarchyRootDrop",
-                                 {std::max(remaining.Width, 1.0F), std::max(remaining.Height, 24.0F)});
+        if (ui.InvisibleButton("HierarchyRootDrop",
+                               {std::max(remaining.Width, 1.0F), std::max(remaining.Height, 24.0F)}) &&
+            !ui.ControlDown() && !ui.ShiftDown())
+        {
+            document.ClearSelection();
+            m_SelectionAnchor = {};
+        }
         if (auto target = ui.BeginDragTarget(); target)
         {
             const auto area = ui.LastItemRect();
@@ -388,7 +508,11 @@ namespace KeireEditor
             }
         }
         if (ui.PointerState().LeftReleased)
+        {
             m_PendingSelectionCollapse = {};
+            m_DraggedEntities.clear();
+            m_DragHover = {};
+        }
         if (auto context = ui.BeginItemContextMenu("HierarchyBlank"); context)
         {
             if (ui.MenuItem("Create Empty"))
@@ -396,6 +520,21 @@ namespace KeireEditor
                 m_Controller.RecordHierarchyUndo();
                 document.Select(document.CreateEntity().Value());
                 m_Controller.MarkHierarchyEntity(document.Selection());
+            }
+            if (auto waterMenu = ui.BeginMenu("Water"); waterMenu)
+            {
+                constexpr std::array names{"Sea", "Lake", "Pond"};
+                for (std::size_t index = 0; index < names.size(); ++index)
+                {
+                    if (ui.MenuItem(names[index]))
+                    {
+                        const auto created = Detail::CreateWaterEntity(
+                            document, static_cast<Detail::WaterSetupPreset>(index), {},
+                            [&](const std::string_view) { m_Controller.RecordHierarchyUndo(); });
+                        document.Select(created.Value());
+                        m_Controller.MarkHierarchyEntity(document.Selection());
+                    }
+                }
             }
             if (ui.MenuItem("Audio / Source"))
             {

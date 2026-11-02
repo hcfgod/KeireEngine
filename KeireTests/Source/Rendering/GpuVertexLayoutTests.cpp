@@ -72,7 +72,7 @@ TEST_CASE("built-in surface shaders preserve asset UVs and consume baked lightma
     CHECK(forwardShader.find("Texture2D<float4> EnvironmentTexture : register(t4, space2)") != std::string::npos);
     CHECK(forwardShader.find("CameraPositionExposure.w") != std::string::npos);
     CHECK(forwardShader.find("return float4(saturate(") == std::string::npos);
-    CHECK(sizeof(Keire::RenderBackend::BuiltInSpatialLightingUniforms) == sizeof(float) * 28U + 1616U);
+    CHECK(sizeof(Keire::RenderBackend::BuiltInSpatialLightingUniforms) == sizeof(float) * 28U + 13296U);
     CHECK(offsetof(Keire::RenderBackend::BuiltInSpatialLightingUniforms, CloudVolume) == sizeof(float) * 28U);
     CHECK(offsetof(Keire::RenderBackend::BuiltInSpatialLightingUniforms, CameraPositionExposure) ==
           sizeof(float) * 12U);

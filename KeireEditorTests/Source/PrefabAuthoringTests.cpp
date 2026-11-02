@@ -339,3 +339,28 @@ TEST_CASE("Precise prefab placement rejects nonfinite destinations transactional
         CHECK(Keire::SceneAsset::Encode(scene) == original);
     }
 }
+
+TEST_CASE("prefab mouse placement survives ECS reconstruction and save reload with serialized transforms")
+{
+    auto authored = Keire::CreateRef<Keire::Scene>(Keire::AssetId::Generate(), Keire::SceneAsset::EmptyDefinition());
+    const auto root = authored->CreateEntity("Prefab root");
+    root.GetComponent<Keire::TransformComponent>()->SetLocalPositionPrecise({12.0, 3.0, -8.0});
+    const auto source = authored->Snapshot();
+    REQUIRE_FALSE(source.Objects.front().Components.empty());
+    authored->Close();
+    auto definition = Keire::SceneAsset::EmptyDefinition("Placement destination");
+    const Keire::Vector3d destination{1.0e9 + 0.25, 24.5, -1.0e9 - 0.5};
+    const auto instance =
+        KeireEditor::InstantiatePrefabPrecise(definition, Keire::AssetId::Generate(), source, {}, destination);
+    auto scene = Keire::CreateRef<Keire::Scene>(Keire::AssetId::Generate(), definition);
+    const auto entity = scene->FindEntity(Keire::EntityId(instance.Root));
+    REQUIRE(entity);
+    CHECK(entity.GetComponent<Keire::TransformComponent>()->WorldPositionPrecise() == destination);
+    const auto saved = Keire::SceneAsset::Decode(Keire::SceneAsset::Encode(scene->Snapshot()));
+    scene->Close();
+    auto reopened = Keire::CreateRef<Keire::Scene>(Keire::AssetId::Generate(), saved->Definition());
+    CHECK(reopened->FindEntity(Keire::EntityId(instance.Root))
+              .GetComponent<Keire::TransformComponent>()
+              ->WorldPositionPrecise() == destination);
+    reopened->Close();
+}

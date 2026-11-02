@@ -6,8 +6,13 @@
 #include "KeireInternal/Spatial/PlanetFrameResolution.h"
 #include "KeireInternal/Spatial/PlanetProjectSettings.h"
 
+#include <algorithm>
 #include <cmath>
+#include <cstddef>
+#include <optional>
+#include <span>
 #include <stdexcept>
+#include <vector>
 
 namespace Keire::Detail
 {
@@ -139,5 +144,97 @@ namespace Keire::Detail
         }
         (void)CapturePlanetEnvironment(view);
         return view;
+    }
+
+    struct CapturedPlanetAtmospheres
+    {
+        std::vector<ResolvedPlanetFrame> Frames;
+        std::vector<AtmosphereSettings> Profiles;
+    };
+
+    // Capture all candidates before applying selected-planet overrides to the inherited environment. A view
+    // request is one immutable observation: mixing epochs or observer axes corrupts transport and history.
+    [[nodiscard]] inline CapturedPlanetAtmospheres
+    CapturePlanetAtmospheres(const std::span<const PlanetEnvironmentView> candidates,
+                             const std::optional<PlanetEnvironmentView>& selected, const AtmosphereSettings& inherited)
+    {
+        const auto sameRotation = [](const FrameRotation& left, const FrameRotation& right)
+        {
+            constexpr double rotationTolerance = 1.0e-10;
+            const auto leftComponents = left.Components();
+            const auto rightComponents = right.Components();
+            double dot = 0.0;
+            for (std::size_t axis = 0; axis < leftComponents.size(); ++axis)
+            {
+                dot += leftComponents[axis] * rightComponents[axis];
+            }
+            return std::abs(dot) >= 1.0 - rotationTolerance;
+        };
+        const auto selectedFrame = selected ? std::optional{CapturePlanetEnvironment(*selected)} : std::nullopt;
+        CapturedPlanetAtmospheres result;
+        result.Frames.reserve(candidates.size());
+        const bool hasOverrides = (selected && selected->AtmosphereOverride) ||
+                                  std::ranges::any_of(candidates, [](const auto& candidate)
+                                                      { return candidate.AtmosphereOverride.has_value(); });
+        if (!inherited.Enabled && !hasOverrides)
+        {
+            return result;
+        }
+        if (hasOverrides)
+        {
+            result.Profiles.reserve(candidates.size());
+        }
+        for (const auto& candidate : candidates)
+        {
+            const auto frame = CapturePlanetEnvironment(candidate);
+            const auto* reference =
+                selectedFrame ? &*selectedFrame : (result.Frames.empty() ? nullptr : &result.Frames.front());
+            if (reference)
+            {
+                if (frame.ObserverFrame != reference->ObserverFrame ||
+                    frame.TopologyRevision != reference->TopologyRevision ||
+                    frame.SnapshotTime != reference->SnapshotTime || frame.Clock != reference->Clock ||
+                    !sameRotation(frame.RootToObserver, reference->RootToObserver))
+                {
+                    throw std::invalid_argument(
+                        "Planet atmosphere candidates require one observer frame, clock, axes and evaluation epoch.");
+                }
+            }
+            if (std::ranges::any_of(
+                    result.Frames, [&](const auto& captured)
+                    { return captured.Planet == frame.Planet || captured.PlanetFrame == frame.PlanetFrame; }))
+            {
+                throw std::invalid_argument("Planet atmosphere candidates contain a duplicate planet or frame.");
+            }
+            if (selectedFrame && frame.Planet == selectedFrame->Planet &&
+                (frame.PlanetFrame != selectedFrame->PlanetFrame || frame.RadiusMetres != selectedFrame->RadiusMetres ||
+                 frame.DiscontinuityRevision != selectedFrame->DiscontinuityRevision ||
+                 frame.ObserverFromCenterPlanetMetres != selectedFrame->ObserverFromCenterPlanetMetres ||
+                 !sameRotation(frame.PlanetToObserver, selectedFrame->PlanetToObserver) ||
+                 candidate.AtmosphereOverride != selected->AtmosphereOverride))
+            {
+                throw std::invalid_argument("Selected planet atmosphere differs from its composition candidate.");
+            }
+            result.Frames.push_back(frame);
+        }
+        // Keep profiles paired while sorting independently of request/authoring order. Equal-distance opaque
+        // hits use this stable identity order in the shader as well as the CPU transport reference.
+        std::ranges::sort(result.Frames, {}, &ResolvedPlanetFrame::Planet);
+        if (hasOverrides)
+        {
+            std::vector<const PlanetEnvironmentView*> ordered;
+            ordered.reserve(candidates.size());
+            for (const auto& candidate : candidates)
+            {
+                ordered.push_back(&candidate);
+            }
+            std::ranges::sort(ordered,
+                              [](const auto* left, const auto* right) { return left->Planet < right->Planet; });
+            for (const auto* candidate : ordered)
+            {
+                result.Profiles.push_back(candidate->AtmosphereOverride.value_or(inherited));
+            }
+        }
+        return result;
     }
 } // namespace Keire::Detail

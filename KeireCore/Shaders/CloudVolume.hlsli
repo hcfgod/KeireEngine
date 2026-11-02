@@ -207,6 +207,24 @@ float VolumeCloudDensity(float3 position, float3 direction, float sampleSpacing,
     return density / 3.0F;
 }
 
+// View filtering is separate from light transport: camera footprint must not change shadow density.
+// X is a perspective pixel cone width; Y is the orthographic pixel width in metres.
+float VolumeCloudViewDensity(float3 position, float3 direction, float sampleSpacing,
+    CloudVolumeParameters parameters, float2 viewFootprint)
+{
+    const float subSpacing = sampleSpacing / 3.0F;
+    float density = 0.0F;
+    [loop]
+    for (uint sampleIndex = 0U; sampleIndex < 3U; ++sampleIndex)
+    {
+        const float offset = (float(sampleIndex) - 1.0F) * subSpacing;
+        const float3 samplePosition = position + direction * offset;
+        const float pixelWidth = max(length(samplePosition) * viewFootprint.x, viewFootprint.y);
+        density += VolumeCloudDensityPoint(samplePosition, max(subSpacing, pixelWidth), parameters);
+    }
+    return density / 3.0F;
+}
+
 // Shared by direct shading and the transmission-cache builder. Directions are normalized.
 float VolumeCloudLightOpticalDepth(float3 position, float3 sunDirection,
     CloudVolumeParameters parameters, uint shadowSteps)
@@ -272,7 +290,9 @@ float VolumeCloudAmbientTransmission(float3 position, CloudVolumeParameters para
         return 1.0F;
     }
     float transmission = 0.0F;
-    [unroll]
+    // Each direction contains a full planetary density/shadow march. Keep one loop body instead
+    // of expanding four copies through the SPIR-V/DXIL pipeline; retain all four samples.
+    [loop]
     for (uint azimuth = 0U; azimuth < 4U; ++azimuth)
     {
         const float angle = (float(azimuth) + 0.5F) * 1.57079632679F;
@@ -317,10 +337,10 @@ float4 VolumeCloudCachedTransmission(float3 position, float3 sunDirection,
 // Directions are normalized. Returns premultiplied cloud-correction radiance and opacity, before exposure or bloom.
 // The atmosphere is already present in a sky background. For a surface, add (1-opacity)*clearAir.Radiance
 // and multiply the surface radiance by (1-opacity)*clearAir.Transmission at that surface's distance.
-float4 IntegrateCloudVolumeWithDepth(float3 origin, float3 direction, float entryDistance, float exitDistance,
+float4 IntegrateCloudVolumeWithDepthFiltered(float3 origin, float3 direction, float entryDistance, float exitDistance,
                                          float3 sunDirection, float3 sunRadiance, float3 ambientRadiance,
                                          CloudVolumeParameters parameters, AtmosphereMedium medium,
-                                         bool includeRadiance, FogViewDensity fog, out float meanCloudDistance)
+                                         bool includeRadiance, FogViewDensity fog, float2 viewFootprint, out float meanCloudDistance)
 {
     // Zero denotes a ray without measurable cloud opacity. Distances are metres along the normalized view ray.
     meanCloudDistance = 0.0F;
@@ -534,7 +554,7 @@ float4 IntegrateCloudVolumeWithDepth(float3 origin, float3 direction, float entr
         const bool insideCloud = (sampleDistance >= slab.Entry && sampleDistance <= slab.Exit) ||
             (planetary && sampleDistance >= secondSlab.Entry && sampleDistance <= secondSlab.Exit);
         const float cloudExtinction = cloudEnabled && insideCloud ?
-            VolumeCloudDensity(position, direction, intervalLength, parameters) * parameters.Extinction : 0.0F;
+            VolumeCloudViewDensity(position, direction, intervalLength, parameters, viewFootprint) * parameters.Extinction : 0.0F;
         const float fogExtinction = fogEnabled && sampleDistance < fog.HeightDensity.w ?
             SampleFogSegmentDensity(position, direction * intervalLength, fog, medium.ObserverRadius.xyz) : 0.0F;
         precise float extinction = cloudExtinction + fogExtinction;
@@ -618,6 +638,17 @@ float4 IntegrateCloudVolumeWithDepth(float3 origin, float3 direction, float entr
         meanCloudDistance = clamp(weightedDistance / depthWeight, entryDistance, exitDistance);
     }
     return float4(radiance, 1.0F - transmission);
+}
+
+// Existing authored shaders and non-view probes preserve their original filter contract.
+float4 IntegrateCloudVolumeWithDepth(float3 origin, float3 direction, float entryDistance, float exitDistance,
+    float3 sunDirection, float3 sunRadiance, float3 ambientRadiance,
+    CloudVolumeParameters parameters, AtmosphereMedium medium, bool includeRadiance,
+    FogViewDensity fog, out float meanCloudDistance)
+{
+    return IntegrateCloudVolumeWithDepthFiltered(origin, direction, entryDistance, exitDistance,
+        sunDirection, sunRadiance, ambientRadiance, parameters, medium, includeRadiance, fog,
+        float2(0.0F, 0.0F), meanCloudDistance);
 }
 
 // Preserve the existing cloud-only call contract and its sampling cost.

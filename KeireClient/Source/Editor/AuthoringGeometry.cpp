@@ -117,18 +117,39 @@ namespace KeireEditor
         }
         else
         {
-            const auto pivotFrame = Keire::Math::ComposeTransform({}, pivotRotation, one);
+            const auto pivotFrame = Keire::Math::ComposeTransform(
+                {},
+                tool == SceneTool::Rotate && axis == SceneTransformAxis::Uniform ? Keire::Quaternion{} : pivotRotation,
+                one);
             Keire::Matrix4 localDelta;
             if (tool == SceneTool::Rotate)
             {
-                Keire::Vector3 rotation;
-                if (axis == SceneTransformAxis::X)
-                    rotation.X = amount;
-                else if (axis == SceneTransformAxis::Y)
-                    rotation.Y = amount;
+                if (axis == SceneTransformAxis::Uniform)
+                {
+                    const float length =
+                        std::sqrt(worldAxis.X * worldAxis.X + worldAxis.Y * worldAxis.Y + worldAxis.Z * worldAxis.Z);
+                    if (length <= 0.000001F)
+                    {
+                        return;
+                    }
+                    constexpr float halfRadiansPerDegree = 0.008726646259971648F;
+                    const float halfAngle = amount * halfRadiansPerDegree;
+                    const float sine = std::sin(halfAngle) / length;
+                    localDelta = Keire::Math::ComposeTransform(
+                        {}, {worldAxis.X * sine, worldAxis.Y * sine, worldAxis.Z * sine, std::cos(halfAngle)}, one);
+                }
                 else
-                    rotation.Z = amount;
-                localDelta = Keire::Math::ComposeTransform({}, Keire::Math::EulerDegreesToQuaternion(rotation), one);
+                {
+                    Keire::Vector3 rotation;
+                    if (axis == SceneTransformAxis::X)
+                        rotation.X = amount;
+                    else if (axis == SceneTransformAxis::Y)
+                        rotation.Y = amount;
+                    else
+                        rotation.Z = amount;
+                    localDelta =
+                        Keire::Math::ComposeTransform({}, Keire::Math::EulerDegreesToQuaternion(rotation), one);
+                }
             }
             else
             {

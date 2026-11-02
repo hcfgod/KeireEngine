@@ -421,12 +421,26 @@ namespace Keire
     }
     UiTreeNodeScope UiFrame::BeginTreeNode(std::string_view label, const bool selected)
     {
+        return BeginTreeNode(label, selected, false, false);
+    }
+
+    UiTreeNodeScope UiFrame::BeginTreeNode(std::string_view label, const bool selected, const bool leaf,
+                                           const bool expand)
+    {
         m_Impl->RequireActive("BeginTreeNode");
         const std::string safeLabel(label);
         ImGuiTreeNodeFlags flags =
             ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_OpenOnDoubleClick | ImGuiTreeNodeFlags_SpanAvailWidth;
         if (selected)
             flags |= ImGuiTreeNodeFlags_Selected;
+        if (leaf)
+        {
+            flags |= ImGuiTreeNodeFlags_Leaf;
+        }
+        if (expand)
+        {
+            ImGui::SetNextItemOpen(true);
+        }
         const bool visible = ImGui::TreeNodeEx(safeLabel.c_str(), flags);
         if (visible)
             m_Impl->OpenScope(UiScope::Kind::TreeNode);

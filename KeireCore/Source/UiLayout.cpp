@@ -2,6 +2,7 @@
 
 #include <imgui.h>
 
+#include <algorithm>
 #include <cmath>
 #include <stdexcept>
 #include <string>
@@ -237,6 +238,30 @@ namespace Keire
     {
         (void)ContentAvailable();
         ImGui::SetScrollHereY(0.5F);
+    }
+
+    void UiFrame::AutoScrollVerticalNearPointer(const float edgeSize, const float pixelsPerSecond)
+    {
+        (void)ContentAvailable();
+        if (!std::isfinite(edgeSize) || edgeSize <= 0.0F || !std::isfinite(pixelsPerSecond) || pixelsPerSecond < 0.0F)
+        {
+            throw std::invalid_argument("Auto-scroll requires a positive edge size and nonnegative finite speed.");
+        }
+        const auto& input = ImGui::GetIO();
+        const auto position = ImGui::GetWindowPos();
+        const auto size = ImGui::GetWindowSize();
+        if (!ImGui::IsWindowHovered(ImGuiHoveredFlags_AllowWhenBlockedByActiveItem) || !input.MouseDown[0])
+        {
+            return;
+        }
+        const float edge = std::min(edgeSize, size.y * 0.25F);
+        const float topDistance = input.MousePos.y - position.y;
+        const float bottomDistance = position.y + size.y - input.MousePos.y;
+        const float direction = topDistance < edge      ? -(1.0F - topDistance / edge)
+                                : bottomDistance < edge ? 1.0F - bottomDistance / edge
+                                                        : 0.0F;
+        const float next = ImGui::GetScrollY() + direction * pixelsPerSecond * std::min(input.DeltaTime, 0.05F);
+        ImGui::SetScrollY(std::clamp(next, 0.0F, ImGui::GetScrollMaxY()));
     }
 
     void UiFrame::SetCursorShape(const UiCursorShape shape)

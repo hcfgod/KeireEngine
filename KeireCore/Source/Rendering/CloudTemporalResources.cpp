@@ -91,6 +91,7 @@ namespace Keire::RenderBackend
             ReleaseCloudTemporalResources(device, candidate);
             throw;
         }
+        (void)RetainCloudHistoryForResize(resources, candidate);
         ReleaseCloudTemporalResources(device, resources);
         resources = std::move(candidate);
     }
@@ -98,6 +99,7 @@ namespace Keire::RenderBackend
     void ReleaseCloudTemporalResources(SDL_GPUDevice* device, CloudTemporalResources& resources) noexcept
     {
         ReleasePair(device, resources.Published);
+        ReleasePair(device, resources.PreviousExtent);
         for (auto& writer : resources.Writers)
         {
             ReleasePair(device, writer.Current);

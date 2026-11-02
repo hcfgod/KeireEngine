@@ -62,6 +62,10 @@ namespace Keire::Internal
         result.NearPlane = camera.NearPlane();
         result.FarPlane = camera.FarPlane();
         result.FullscreenEffects = camera.FullscreenEffects();
+        result.PostProcessingEnabled = camera.PostProcessingEnabled();
+        result.PostProcessVolumeMask = camera.PostProcessVolumeMask();
+        result.TemporalHistoryId = camera.TemporalHistoryId();
+        result.TemporalHistoryRevision = camera.TemporalHistoryRevision();
         return result;
     }
 

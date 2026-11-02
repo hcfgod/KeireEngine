@@ -28,6 +28,7 @@ namespace KeireEditor
         void DrawDirectionalLight(bool mixedComponentValues);
         void DrawCamera(bool mixedComponentValues);
         void DrawMeshRenderer(bool mixedComponentValues);
+        void DrawWaterBody(const Keire::Ref<Keire::Component>& displayedComponent, bool mixedComponentValues);
         void DrawReflectedComponent(const Keire::Ref<Keire::Component>& displayedComponent, bool mixedComponentValues);
         void DrawReflectedProperties(InspectorPropertyEditor& propertyEditor, const ReflectedComponentState& state);
         void DrawAudioDiagnostics(const ReflectedComponentState& state);

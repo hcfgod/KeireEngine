@@ -12,6 +12,7 @@ cbuffer CloudCacheConstants : register(b1, space3)
     float4 CloudCacheCellSize;
     uint4 CloudCacheDimensions;
 };
+#define KEIRE_PLANET_VOLUME_SET 1
 #include "CloudVolumeView.hlsli"
 
 struct VertexOutput

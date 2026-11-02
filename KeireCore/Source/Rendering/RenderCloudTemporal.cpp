@@ -5,6 +5,7 @@
 #include "KeireInternal/Rendering/VolumeShadowUniforms.h"
 
 #include <array>
+#include <cstddef>
 #include <stdexcept>
 
 namespace Keire::RenderBackend
@@ -45,14 +46,26 @@ namespace Keire::RenderBackend
         auto& writer = resources.Writers.at(surface.ActiveWorksetSlot);
         auto* tracePipeline = EnsureCloudTemporalPipeline(state, CloudTemporalPass::Trace);
         auto* resolvePipeline = EnsureCloudTemporalPipeline(state, CloudTemporalPass::Resolve);
-        auto* compositePipeline = EnsureCloudTemporalPipeline(state, CloudTemporalPass::Composite);
-        auto* background = state.EnsureFullscreenInput(surface, true);
+        const bool multisample = workset.MultisampleHdrColor != nullptr;
+        auto* compositePipeline = EnsureCloudTemporalPipeline(
+            state, CloudTemporalPass::Composite, multisample ? surface.ActualSamples : RenderSampleCount::One,
+            multisample ? CloudHistoryCompositeMode::Radiance : CloudHistoryCompositeMode::Composite);
+        auto* attenuationPipeline =
+            multisample ? EnsureCloudTemporalPipeline(state, CloudTemporalPass::Composite, surface.ActualSamples,
+                                                      CloudHistoryCompositeMode::Attenuation)
+                        : nullptr;
+        // Keep binding1 valid without resolving/copying the per-sample background on the MSAA path.
+        auto* background = multisample ? workset.SampledDepth : state.EnsureFullscreenInput(surface, true);
 
         CloudTemporalView current;
         current.Volume = uniforms;
         current.FrameId = packet.AcceptedFrameId;
         current.WorldOrigin = packet.Camera.WorldOrigin;
         current.PlanetFrame = packet.PlanetFrame;
+        for (std::size_t index = 0; index < packet.PlanetWeather.size(); ++index)
+        {
+            current.PlanetFrames[index] = packet.PlanetWeather[index].Frame;
+        }
         current.UnjitteredProjection = packet.UnjitteredProjection;
         auto rotationView = packet.Camera.View;
         rotationView.Elements[12] = 0.0F;
@@ -62,11 +75,15 @@ namespace Keire::RenderBackend
         // Moving casters change volume lighting without changing environment uniforms. Until shadow
         // content revisions participate in history validation, do not reuse shadowed fog radiance.
         const bool shadowedFog = FogReceivesTerrainSunlight(uniforms.Fog, uniforms.SunRadiance, shadows);
+        const auto& historyView = resources.PublishedView ? resources.PublishedView : resources.PreviousExtentView;
+        const auto& historyTextures = resources.PublishedView ? resources.Published : resources.PreviousExtent;
         const auto reprojection =
-            resources.PublishedView && !shadowedFog
-                ? MakeCloudTemporalReprojection(current, *resources.PublishedView, packet.TemporalHistoryContinuous)
+            historyView && historyTextures.Complete() && !shadowedFog
+                ? MakeCloudTemporalReprojection(current, *historyView, packet.TemporalHistoryContinuous)
                 : std::nullopt;
-        const auto& previous = reprojection ? *resources.PublishedView : current;
+        const auto& previous = reprojection ? *historyView : current;
+        // An uninitialized history is not sampled, but all shader bindings must remain valid.
+        const auto& previousTextures = reprojection ? historyTextures : resources.Published;
         const auto resolveUniforms = reprojection.value_or(CloudTemporalResolveUniforms{});
         const std::array<std::uint32_t, 4> traceControls{static_cast<std::uint32_t>(packet.AcceptedFrameId & 1023U),
                                                          reprojection ? 1U : 0U, 0U, 0U};
@@ -90,8 +107,8 @@ namespace Keire::RenderBackend
         pass = BeginCloudPair(commands, writer.History);
         const std::array resolveBindings{SDL_GPUTextureSamplerBinding{writer.Current.RadianceOpacity, sampler},
                                          SDL_GPUTextureSamplerBinding{writer.Current.CloudAndSceneDepth, sampler},
-                                         SDL_GPUTextureSamplerBinding{resources.Published.RadianceOpacity, sampler},
-                                         SDL_GPUTextureSamplerBinding{resources.Published.CloudAndSceneDepth, sampler}};
+                                         SDL_GPUTextureSamplerBinding{previousTextures.RadianceOpacity, sampler},
+                                         SDL_GPUTextureSamplerBinding{previousTextures.CloudAndSceneDepth, sampler}};
         SDL_BindGPUGraphicsPipeline(pass, resolvePipeline);
         SDL_BindGPUFragmentSamplers(pass, 0, resolveBindings.data(),
                                     static_cast<std::uint32_t>(resolveBindings.size()));
@@ -101,17 +118,21 @@ namespace Keire::RenderBackend
         SDL_DrawGPUPrimitives(pass, 3, 1, 0, 0);
         SDL_EndGPURenderPass(pass);
 
-        auto* copy = SDL_BeginGPUCopyPass(commands);
-        if (!copy)
+        if (!multisample)
         {
-            throw std::runtime_error("SDL_BeginGPUCopyPass(cloud temporal background) failed: " + LastSdlError());
+            auto* copy = SDL_BeginGPUCopyPass(commands);
+            if (!copy)
+            {
+                throw std::runtime_error("SDL_BeginGPUCopyPass(cloud temporal background) failed: " + LastSdlError());
+            }
+            const SDL_GPUTextureLocation source{workset.HdrColor, 0, 0, 0, 0, 0};
+            const SDL_GPUTextureLocation destination{background, 0, 0, 0, 0, 0};
+            SDL_CopyGPUTextureToTexture(copy, &source, &destination, surface.Width, surface.Height, 1, false);
+            SDL_EndGPUCopyPass(copy);
         }
-        const SDL_GPUTextureLocation source{workset.HdrColor, 0, 0, 0, 0, 0};
-        const SDL_GPUTextureLocation destination{background, 0, 0, 0, 0, 0};
-        SDL_CopyGPUTextureToTexture(copy, &source, &destination, surface.Width, surface.Height, 1, false);
-        SDL_EndGPUCopyPass(copy);
-
-        const auto target = CloudTarget(workset.HdrColor);
+        auto target = CloudTarget(multisample ? workset.MultisampleHdrColor : workset.HdrColor);
+        target.load_op = multisample ? SDL_GPU_LOADOP_LOAD : SDL_GPU_LOADOP_DONT_CARE;
+        // STORE retains the original sample coverage for the later transparency pass/final resolve.
         pass = SDL_BeginGPURenderPass(commands, &target, 1, nullptr);
         if (!pass)
         {
@@ -127,17 +148,29 @@ namespace Keire::RenderBackend
                 workset.DirectionalShadow ? workset.DirectionalShadow : state.EmptyShadowTexture, state.ShadowSampler}};
         static_assert(compositeBindings.size() == CloudTemporalSamplerCounts[2]);
         static_assert(CloudCompositeShadowSampler + 1U == compositeBindings.size());
-        SDL_BindGPUGraphicsPipeline(pass, compositePipeline);
+        SDL_BindGPUGraphicsPipeline(pass, attenuationPipeline ? attenuationPipeline : compositePipeline);
+
         SDL_BindGPUFragmentSamplers(pass, 0, compositeBindings.data(),
                                     static_cast<std::uint32_t>(compositeBindings.size()));
         SDL_BindGPUFragmentStorageBuffers(pass, 0, &workset.CloudLightCache.Transmission, 1);
-        SDL_PushGPUFragmentUniformData(commands, 0, &uniforms, sizeof(uniforms));
         SDL_PushGPUFragmentUniformData(commands, 1, &cacheUniforms, sizeof(cacheUniforms));
         SDL_PushGPUFragmentUniformData(commands, CloudCompositeShadowUniform, &shadows, sizeof(shadows));
+        auto compositeUniforms = uniforms;
+        if (attenuationPipeline)
+        {
+            compositeUniforms.RegionalControls.Z = static_cast<float>(CloudHistoryCompositeMode::Attenuation);
+            SDL_BindGPUGraphicsPipeline(pass, attenuationPipeline);
+            SDL_PushGPUFragmentUniformData(commands, 0, &compositeUniforms, sizeof(compositeUniforms));
+            SDL_DrawGPUPrimitives(pass, 3, 1, 0, 0);
+        }
+        compositeUniforms.RegionalControls.Z = static_cast<float>(multisample ? CloudHistoryCompositeMode::Radiance
+                                                                              : CloudHistoryCompositeMode::Composite);
+        SDL_BindGPUGraphicsPipeline(pass, compositePipeline);
+        SDL_PushGPUFragmentUniformData(commands, 0, &compositeUniforms, sizeof(compositeUniforms));
         SDL_DrawGPUPrimitives(pass, 3, 1, 0, 0);
         SDL_EndGPURenderPass(pass);
         writer.RecordedView = current;
         state.Statistics.Passes += 3U;
-        state.Statistics.DrawCalls += 3U;
+        state.Statistics.DrawCalls += multisample ? 4U : 3U;
     }
 } // namespace Keire::RenderBackend

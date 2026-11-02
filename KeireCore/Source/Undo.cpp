@@ -63,6 +63,11 @@ namespace Keire
                     m_EstimatedBytes += command->EstimatedBytes();
             }
 
+            [[nodiscard]] std::vector<std::unique_ptr<UndoCommand>> ReleaseCommands() noexcept
+            {
+                return std::move(m_Commands);
+            }
+
             [[nodiscard]] std::string_view Name() const noexcept override { return m_Name; }
             [[nodiscard]] std::size_t EstimatedBytes() const noexcept override { return m_EstimatedBytes; }
             [[nodiscard]] bool Available() const noexcept override
@@ -269,18 +274,68 @@ namespace Keire
             if (context->m_Impl->Transactions.empty() || context->m_Impl->Transactions.back().Token != Token)
                 throw std::logic_error("Undo transactions must finish in last-in, first-out order.");
 
-            auto state = std::move(context->m_Impl->Transactions.back());
-            context->m_Impl->Transactions.pop_back();
+            auto& implementation = *context->m_Impl;
+            auto& pending = implementation.Transactions.back();
+            if (commit && !pending.Commands.empty())
+            {
+                const bool nested = implementation.Transactions.size() > 1;
+                auto& destination = nested
+                                        ? implementation.Transactions[implementation.Transactions.size() - 2].Commands
+                                        : implementation.UndoStack;
+                // Finish all storage allocation before releasing the active transaction's rollback state.
+                if (destination.size() == destination.capacity())
+                {
+                    if (destination.size() == destination.max_size())
+                    {
+                        throw std::length_error("Undo transaction history capacity exceeded.");
+                    }
+                    const auto growth = std::min(std::max(destination.size(), std::size_t{1}),
+                                                 destination.max_size() - destination.size());
+                    destination.reserve(destination.size() + growth);
+                }
+                auto name = pending.Name;
+                auto composite = std::make_unique<CompositeUndoCommand>(std::move(name), std::move(pending.Commands));
+                bool merged = false;
+                try
+                {
+                    if (!nested && !destination.empty())
+                    {
+                        merged = destination.back()->TryMerge(*composite);
+                    }
+                }
+                catch (...)
+                {
+                    pending.Commands = composite->ReleaseCommands();
+                    throw;
+                }
+                if (merged)
+                {
+                    implementation.RedoStack.clear();
+                    implementation.RecalculateBytes();
+                    implementation.Trim();
+                }
+                else
+                {
+                    const auto bytes = composite->EstimatedBytes();
+                    destination.push_back(std::move(composite));
+                    if (!nested)
+                    {
+                        implementation.UndoBytes += bytes;
+                        implementation.RedoStack.clear();
+                        implementation.RedoBytes = 0;
+                        implementation.Trim();
+                    }
+                }
+            }
+
+            auto state = std::move(implementation.Transactions.back());
+            implementation.Transactions.pop_back();
             Active = false;
             Context.Reset();
-            if (commit)
+            if (!commit)
             {
-                if (!state.Commands.empty())
-                    context->m_Impl->Push(
-                        std::make_unique<CompositeUndoCommand>(std::move(state.Name), std::move(state.Commands)));
+                implementation.Rollback(state.Commands);
             }
-            else
-                context->m_Impl->Rollback(state.Commands);
         }
 
         void CancelNoexcept() noexcept

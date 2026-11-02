@@ -269,6 +269,8 @@ void KeireEditor::SceneViewportPanel::Draw(Keire::UiFrame& ui)
         {
             camera.ClearColor = sceneCamera->Camera->ClearColor();
             camera.FullscreenEffects = sceneCamera->Camera->FullscreenEffects();
+            camera.PostProcessingEnabled = sceneCamera->Camera->PostProcessingEnabled();
+            camera.PostProcessVolumeMask = sceneCamera->Camera->PostProcessVolumeMask();
         }
         else
             camera.ClearColor = {0.075F, 0.085F, 0.105F, 1.0F};

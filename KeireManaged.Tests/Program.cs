@@ -744,6 +744,12 @@ static unsafe void ManagedRenderingContract()
     try
     {
         var camera = new Keire.Camera(entity);
+        camera.ResetTemporalHistory();
+        Assert(NativeRenderingFixture.CameraHistoryResetCount == 1,
+               "Camera cuts must reach the native binding with world and entity identity.");
+        var wrongWorldCamera = new Keire.Camera(new Keire.Entity(18, entity.Id));
+        AssertThrows<InvalidOperationException>(() => wrongWorldCamera.ResetTemporalHistory(),
+            "Camera history reset must report an unavailable native camera rather than silently succeed.");
         Assert(MathF.Abs(camera.VerticalFieldOfView - 68.0f) < 0.0001f && camera.Primary,
                "Camera handles must read native lens and selection state.");
         camera.VerticalFieldOfView = 91.0f;
@@ -814,6 +820,8 @@ static unsafe void ManagedRenderingContract()
     {
         NativeRenderingFixture.Uninstall();
     }
+    AssertThrows<InvalidOperationException>(() => new Keire.Camera(entity).ResetTemporalHistory(),
+        "Unavailable camera-cut bindings must fail safely instead of calling a null function pointer.");
 }
 
 static unsafe void ManagedWorldContract()
@@ -2034,8 +2042,12 @@ file static unsafe class NativeRenderingFixture
     internal static Keire.NativeRenderingFlagProperty FlagProperty;
     internal static bool FlagValue;
 
+    internal static int CameraHistoryResetCount;
+
     internal static void Install()
     {
+        CameraHistoryResetCount = 0;
+        Keire.NativeRuntimeRendering.ResetCameraTemporalHistoryIcall = &ResetCameraTemporalHistory;
         ScalarComponent = default;
         ScalarProperty = default;
         ScalarValue = default;
@@ -2079,6 +2091,7 @@ file static unsafe class NativeRenderingFixture
 
     internal static void Uninstall()
     {
+        Keire.NativeRuntimeRendering.ResetCameraTemporalHistoryIcall = null;
         Keire.NativeRuntimeRendering.GetScalarIcall = null;
         Keire.NativeRuntimeRendering.SetScalarIcall = null;
         Keire.NativeRuntimeRendering.GetIntegerIcall = null;
@@ -2104,6 +2117,17 @@ file static unsafe class NativeRenderingFixture
         Keire.NativeRuntimeRendering.SetMaterialInstanceColorIcall = null;
         Keire.NativeRuntimeRendering.MaterialParameterCollectionReadyIcall = null;
         Keire.NativeRuntimeRendering.SetMaterialParameterFloatIcall = null;
+    }
+
+    [System.Runtime.InteropServices.UnmanagedCallersOnly]
+    private static byte ResetCameraTemporalHistory(ulong world, ulong high, ulong low)
+    {
+        if (world != 17 || high != 23 || low != 29)
+        {
+            return 0;
+        }
+        ++CameraHistoryResetCount;
+        return 1;
     }
 
     [System.Runtime.InteropServices.UnmanagedCallersOnly]

@@ -352,7 +352,7 @@ namespace Keire
     {
         AssetImporterRegistration result;
         result.Name = "Keire.Prefab";
-        result.Version = 3;
+        result.Version = 4;
         result.Type = PrefabAsset::StaticType();
         result.Extensions = {".keireprefab"};
         result.ContextualImport = [](const AssetImportContext& context, const std::span<const std::byte> bytes)

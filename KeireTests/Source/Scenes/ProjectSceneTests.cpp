@@ -1,3 +1,5 @@
+#include "Keire/Assets/PostProcessProfileAsset.h"
+#include "Keire/Assets/RenderingAssets.h"
 #include "KeireTests/TestSupport.h"
 
 #include "KeireInternal/FileSystem.h"
@@ -5,6 +7,7 @@
 #include "KeireInternal/Spatial/SceneRuntimeSpatialAccess.h"
 
 #include "Keire/ECS/Components/CameraComponent.h"
+#include "Keire/ECS/Components/PostProcessVolumeComponent.h"
 #include "Keire/ECS/Components/UiDocumentComponent.h"
 #include "Keire/Ui/UiToolkit.h"
 
@@ -1268,7 +1271,7 @@ TEST_CASE("Scene and prefab imports retain tagged managed assets in direct field
     CHECK_THROWS_AS(importer.ContextualImport({}, Keire::SceneAsset::Encode(definition)), std::invalid_argument);
 }
 
-TEST_CASE("Scene and prefab reimport retain UI materials and all camera effect dependencies")
+TEST_CASE("Scene and prefab reimport retain UI camera and post process profile dependencies")
 {
     const auto visualTree = Keire::AssetId::Parse("10000000-0000-4000-8000-000000000020");
     const auto panelSettings = Keire::AssetId::Parse("10000000-0000-4000-8000-000000000021");
@@ -1276,6 +1279,7 @@ TEST_CASE("Scene and prefab reimport retain UI materials and all camera effect d
     const auto before = Keire::AssetId(1, 2);
     const auto after = Keire::AssetId(1, 3);
     const auto afterUi = Keire::AssetId(1, 4);
+    const auto profile = Keire::AssetId(1, 5);
     auto definition = Keire::SceneAsset::EmptyDefinition("UI Document Dependencies");
     definition.Objects.push_back(
         {.Id = Keire::AssetId::Parse("30000000-0000-4000-8000-000000000020"),
@@ -1289,20 +1293,75 @@ TEST_CASE("Scene and prefab reimport retain UI materials and all camera effect d
                                                      "{\"effectBeforeTonemapping\":" + JsonString(before.ToString()) +
                                                          ",\"effectAfterTonemapping\":" + JsonString(after.ToString()) +
                                                          ",\"effectAfterUi\":" + JsonString(afterUi.ToString()) + "}"});
+    // Inactive authored volumes still need their profile available when enabled at runtime.
+    definition.Objects.front().Components.push_back({Keire::PostProcessVolumeComponent::StaticType(), 1, false,
+                                                     "{\"profile\":" + JsonString(profile.ToString()) + "}"});
     const auto importer = Keire::CreateSceneAssetImporter();
     REQUIRE(importer.ContextualImport);
-    auto expected = std::vector{visualTree, panelSettings, uiMaterial, before, after, afterUi};
+    auto expected = std::vector{visualTree, panelSettings, uiMaterial, before, after, afterUi, profile};
     std::ranges::sort(expected);
     const auto first = importer.ContextualImport({}, Keire::SceneAsset::Encode(definition));
     const auto second = importer.ContextualImport({}, Keire::SceneAsset::Encode(definition));
     CHECK(first.AssetDependencies == expected);
     CHECK(second.AssetDependencies == expected);
-    CHECK(importer.Version == 10);
+    CHECK(importer.Version == 11);
     Keire::PrefabDefinition prefab;
     prefab.Template = definition;
     const auto prefabImporter = Keire::CreatePrefabAssetImporter();
-    CHECK(prefabImporter.Version == 3);
+    CHECK(prefabImporter.Version == 4);
     CHECK(prefabImporter.ContextualImport({}, Keire::PrefabAsset::Encode(prefab)).AssetDependencies == expected);
+}
+
+TEST_CASE("Rooted scene cooking includes inactive post process profiles and their lookup dependencies")
+{
+    TemporaryDirectory directory("PostProcessDependencyCook");
+    std::filesystem::create_directories(directory.Path / "Assets");
+    Keire::AssetImporterRegistration textureImporter;
+    textureImporter.Name = "Test.LookupDependency";
+    textureImporter.Type = Keire::Texture2DAsset::StaticType();
+    textureImporter.Extensions = {".lookuptest"};
+    textureImporter.Import = [](const std::span<const std::byte>)
+    {
+        Keire::TextureImportSettings settings;
+        settings.Mips = Keire::TextureMipPolicy::None;
+        settings.ColorSpace = Keire::TextureColorSpace::Linear;
+        Keire::TextureMipLevel mip;
+        mip.Width = 4;
+        mip.Height = 2;
+        mip.Pixels.resize(4U * 2U * 4U, std::byte{0xff});
+        const std::array mips{mip};
+        return Keire::Texture2DAsset::Encode(settings, mips);
+    };
+    const auto profileImporter = Keire::CreatePostProcessProfileAssetImporter();
+    const auto sceneImporter = Keire::CreateSceneAssetImporter();
+    Keire::AssetDatabaseSpecification specification{.ProjectRoot = directory.Path};
+    specification.Importers = {textureImporter, profileImporter, sceneImporter};
+    auto database = Keire::CreateRef<Keire::AssetDatabase>(std::move(specification));
+    const std::array payload{std::byte{1}};
+    const auto lookup = database->CreateAsset("Look.lookuptest", textureImporter, payload);
+    const auto unrelated = database->CreateAsset("Unrelated.lookuptest", textureImporter, payload);
+    Keire::PostProcessProfileDefinition settings;
+    settings.ColorLookup = {false, lookup};
+    const auto profile = database->CreateAsset("Look.keirepostprocess", profileImporter,
+                                               Keire::PostProcessProfileAsset::Encode(settings));
+    auto definition = Keire::SceneAsset::EmptyDefinition("Post Processing Cook");
+    definition.Objects.push_back({.Id = Keire::AssetId::Generate(),
+                                  .Name = "Inactive Volume",
+                                  .Components = {{Keire::PostProcessVolumeComponent::StaticType(), 1, false,
+                                                  "{\"profile\":" + JsonString(profile.ToString()) + "}"}}});
+    const auto scene = database->CreateAsset("Volume.keirescene", sceneImporter, Keire::SceneAsset::Encode(definition));
+    Keire::AssetBuildProfile build;
+    build.Strict = true;
+    build.Roots = {scene};
+    const auto cooked = Keire::AssetCooker::Cook(*database, build, directory.Path / "Cook");
+    CHECK(cooked.AssetCount == 3);
+    const auto catalog = KeireTests::ReadFile(cooked.CatalogPath);
+    for (const auto dependency : {scene, profile, lookup})
+    {
+        CAPTURE(dependency.ToString());
+        CHECK(catalog.find(dependency.ToString()) != std::string::npos);
+    }
+    CHECK(catalog.find(unrelated.ToString()) == std::string::npos);
 }
 
 TEST_CASE("A rooted UI Document scene cook retains complete toolkit dependency closure and every panel target")

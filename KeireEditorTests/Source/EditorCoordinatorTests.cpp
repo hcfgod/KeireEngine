@@ -11,6 +11,7 @@
 #include "KeireClient/Editor/InputActionsDocument.h"
 #include "KeireClient/Editor/MaterialDocument.h"
 #include "KeireClient/Editor/MaterialGraphDocument.h"
+#include "KeireClient/Editor/PostProcessDocument.h"
 #include "KeireClient/Editor/ProjectSettingsDocument.h"
 #include "KeireClient/Editor/SceneDocument.h"
 #include "KeireClient/Editor/ShaderGraphDocument.h"
@@ -136,6 +137,9 @@ namespace
         KeireEditor::EditorDocumentWorkspaceDocuments documents;
         documents.Scene = std::make_unique<KeireEditor::SceneDocument>();
         documents.InputActions = std::make_unique<KeireEditor::InputActionsDocument>();
+        documents.PostProcessing =
+            std::make_unique<KeireEditor::PostProcessDocument>(KeireEditor::PostProcessDocument::Specification{
+                .Persist = [](Keire::AssetId, std::span<const std::byte>) {}});
         documents.AnimatorController = std::make_unique<KeireEditor::AnimatorControllerDocument>();
         documents.AudioMixer = std::make_unique<KeireEditor::AudioMixerDocument>(
             KeireEditor::AudioMixerDocumentSpecification{.Persist = [](Keire::AssetId, std::span<const std::byte>) {}});
@@ -161,6 +165,10 @@ TEST_CASE("document workspace facade delegates maintenance and tears down exactl
 {
     auto documents = CreateTestDocuments();
     auto* const initialScene = documents.Scene.get();
+    auto* const postProcessing = documents.PostProcessing.get();
+    const auto undoService = Keire::CreateRef<Keire::UndoService>();
+    const auto postProcessUndo = undoService->CreateContext({.Name = "Post Processing"});
+    postProcessing->Open(Keire::AssetId(1, 7), Keire::PostProcessProfileAsset::Encode({}), 1, postProcessUndo);
     unsigned int commits = 0;
     unsigned int autosaves = 0;
     unsigned int catalogUpdates = 0;
@@ -198,6 +206,7 @@ TEST_CASE("document workspace facade delegates maintenance and tears down exactl
     CHECK(commits == 1);
     coordinator.CloseUndoContexts();
     CHECK(workspaceUndoCloses == 1);
+    CHECK_FALSE(postProcessUndo->IsOpen());
 
     const Keire::AssetId target(0x444f43554d454e54ULL, 1);
     coordinator.SetPendingTransition(KeireEditor::EditorDocumentTransitionAction::Open, target);
@@ -218,6 +227,7 @@ TEST_CASE("document workspace facade delegates maintenance and tears down exactl
     coordinator.Shutdown();
     coordinator.Shutdown();
     CHECK(coordinator.ShutdownComplete());
+    CHECK_FALSE(postProcessing->IsOpen());
     CHECK_FALSE(callback.Current());
     CHECK(supplementalCloses == 1);
     CHECK(shutdownFailures == std::vector<std::string>{"close-supplemental-documents"});

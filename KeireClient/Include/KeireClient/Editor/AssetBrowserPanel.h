@@ -75,6 +75,7 @@ namespace KeireEditor
             ReportAssetBrowserError("Animation clip preview is unavailable in this workspace.");
         }
         virtual void OpenAssetBrowserAudioMixer(Keire::AssetId asset) = 0;
+        virtual void OpenPostProcessProfile(Keire::AssetId asset) = 0;
         virtual void OpenAssetBrowserVfxEffect(Keire::AssetId asset) = 0;
         virtual void OpenAssetBrowserUiDocument(Keire::AssetId asset) = 0;
         virtual void OpenAssetBrowserUiStyleSheet(Keire::AssetId asset) = 0;

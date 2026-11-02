@@ -23,19 +23,41 @@ namespace KeireEditor
         void SetState(const Keire::Detail::EditorCameraState& state)
         {
             m_Camera.SetState(state);
+            ResetTemporalHistory();
             m_Dirty = true;
         }
         [[nodiscard]] Keire::Matrix4 ViewMatrix() const noexcept { return m_Camera.ViewMatrix(); }
         [[nodiscard]] Keire::Matrix4 ProjectionMatrix(float aspect) const;
         [[nodiscard]] Keire::RenderCamera RenderCamera(float aspect) const;
         [[nodiscard]] bool Update(const Keire::Detail::EditorCameraInput& input) { return m_Camera.Update(input); }
-        void ToggleProjection() noexcept { m_Camera.ToggleProjection(); }
-        void Snap(Keire::Detail::EditorCameraAxis axis) noexcept { m_Camera.Snap(axis); }
-        void SetFocus(Keire::Vector3 focus) { m_Camera.SetFocus(focus); }
-        void SetFocusPrecise(Keire::Vector3d focus) { m_Camera.SetFocusPrecise(focus); }
+        void ToggleProjection() noexcept
+        {
+            m_Camera.ToggleProjection();
+            ResetTemporalHistory();
+        }
+        void Snap(Keire::Detail::EditorCameraAxis axis) noexcept
+        {
+            m_Camera.Snap(axis);
+            ResetTemporalHistory();
+        }
+        void SetFocus(Keire::Vector3 focus)
+        {
+            m_Camera.SetFocus(focus);
+            ResetTemporalHistory();
+        }
+        void SetFocusPrecise(Keire::Vector3d focus)
+        {
+            m_Camera.SetFocusPrecise(focus);
+            ResetTemporalHistory();
+        }
         void SetSurfaceNavigation(bool enabled)
         {
+            const bool changed = m_Camera.State().SurfaceNavigation != enabled;
             m_Camera.SetSurfaceNavigation(enabled);
+            if (changed)
+            {
+                ResetTemporalHistory();
+            }
             m_Dirty = true;
         }
 
@@ -54,11 +76,13 @@ namespace KeireEditor
         void FramePrecise(Keire::Vector3d center, float radius, float aspectRatio = 1.0F)
         {
             m_Camera.FramePrecise(center, radius, 60.0F, aspectRatio);
+            ResetTemporalHistory();
         }
         void FollowFramePrecise(Keire::Vector3d center, float radius, float aspectRatio, float deltaSeconds);
         void Frame(Keire::Vector3 center, float radius, float aspectRatio = 1.0F)
         {
             m_Camera.Frame(center, radius, 60.0F, aspectRatio);
+            ResetTemporalHistory();
         }
         void FollowFrame(Keire::Vector3 center, float radius, float aspectRatio, float deltaSeconds);
         [[nodiscard]] SceneFocusShortcutAction ApplyFocusShortcut(Keire::EntityId selection,
@@ -89,6 +113,10 @@ namespace KeireEditor
         [[nodiscard]] bool Save(const std::filesystem::path& path) noexcept;
 
       private:
+        void ResetTemporalHistory() noexcept { ++m_TemporalHistoryRevision; }
+
+        Keire::AssetId m_TemporalHistoryId = Keire::AssetId::Generate();
+        std::uint64_t m_TemporalHistoryRevision = 0;
         Keire::Detail::EditorCameraController m_Camera;
         std::vector<Keire::EntityId> m_LockedEntities;
         std::vector<Keire::EntityId> m_LastFocusShortcutSelection;

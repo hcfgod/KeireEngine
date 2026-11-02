@@ -3,6 +3,7 @@
 #include "Keire/Math/Math.h"
 #include "KeireInternal/Rendering/AtmosphereUniforms.h"
 #include "KeireInternal/Rendering/FogViewUniforms.h"
+#include "KeireInternal/Rendering/PlanetVolumeWeatherUniforms.h"
 #include "KeireInternal/Rendering/PlanetaryCloudUniforms.h"
 #include "KeireInternal/Rendering/VolumetricCloudUniforms.h"
 
@@ -38,9 +39,13 @@ namespace Keire::RenderBackend
         FogViewUniforms Fog;
         /// Planet-fixed shell geometry, appended in texture ABI 13 / buffer ABI 14.
         PlanetaryCloudUniforms PlanetaryCloud;
+        PlanetAtmosphereSetUniforms PlanetAtmospheres;
+        PlanetVolumeWeatherUniforms PlanetWeather;
     };
 
-    static_assert(sizeof(CloudVolumeViewUniforms) == 1616);
+    static_assert(sizeof(CloudVolumeViewUniforms) == 13296);
+    static_assert(offsetof(CloudVolumeViewUniforms, PlanetAtmospheres) == 1616);
+    static_assert(offsetof(CloudVolumeViewUniforms, PlanetWeather) == 2656);
     static_assert(offsetof(CloudVolumeViewUniforms, PlanetaryCloud) == 1520);
     static_assert(offsetof(CloudVolumeViewUniforms, Fog) == 448);
     static_assert(offsetof(CloudVolumeViewUniforms, Volume) == 128);
@@ -51,16 +56,19 @@ namespace Keire::RenderBackend
 
     [[nodiscard]] constexpr std::uint32_t CloudVolumeUniformByteSize(const std::uint32_t abiVersion) noexcept
     {
-        return abiVersion >= 13U  ? 1616U
-               : abiVersion >= 9U ? 1520U
-               : abiVersion >= 8U ? 1008U
-               : abiVersion >= 7U ? 448U
-               : abiVersion >= 6U ? 432U
-               : abiVersion >= 5U ? 416U
-               : abiVersion >= 4U ? 304U
-               : abiVersion >= 3U ? 288U
-                                  : 272U;
+        return abiVersion >= 15U   ? 13296U
+               : abiVersion >= 13U ? 1616U
+               : abiVersion >= 9U  ? 1520U
+               : abiVersion >= 8U  ? 1008U
+               : abiVersion >= 7U  ? 448U
+               : abiVersion >= 6U  ? 432U
+               : abiVersion >= 5U  ? 416U
+               : abiVersion >= 4U  ? 304U
+               : abiVersion >= 3U  ? 288U
+                                   : 272U;
     }
+
+    [[nodiscard]] bool HasCloudVolumeViewTransport(const SceneRenderPacket& packet);
 
     [[nodiscard]] CloudVolumeViewUniforms MakeCloudVolumeViewUniforms(const SceneRenderPacket& packet,
                                                                       std::uint32_t width, std::uint32_t height);

@@ -385,7 +385,11 @@ namespace Keire::Detail
             if (platform != HostPlayerPlatform() || architecture != HostPlayerArchitecture())
                 return std::nullopt;
 
-            const auto configurationName = configuration == PlayerBuildConfiguration::Development ? std::string("Debug")
+            const bool useDevDist =
+                configuration == PlayerBuildConfiguration::Development && GetBuildInfo().Configuration == "DevDist";
+            const auto configurationName = useDevDist ? std::string("DevDist")
+                                           : configuration == PlayerBuildConfiguration::Development
+                                               ? std::string("Debug")
                                            : configuration == PlayerBuildConfiguration::Release ? std::string("Release")
                                                                                                 : std::string("Dist");
             std::vector<std::filesystem::path> runtimeCandidates;

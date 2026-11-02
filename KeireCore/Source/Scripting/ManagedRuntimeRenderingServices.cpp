@@ -1062,6 +1062,26 @@ namespace Keire::Detail
         return Detail::ReadManagedRenderingFlag(ManagedRuntimeScene(entity), entity, component, property);
     }
 
+    bool ManagedRuntimeSceneServices::ResetManagedCameraTemporalHistory(const std::uint64_t world,
+                                                                        const AssetId entity) noexcept
+    {
+        try
+        {
+            const auto target = ResolveManagedEntity(world, entity);
+            const auto camera = target ? target.GetComponent<CameraComponent>() : Ref<CameraComponent>{};
+            if (!camera)
+            {
+                return false;
+            }
+            camera->ResetTemporalHistory();
+            return true;
+        }
+        catch (...)
+        {
+            return false;
+        }
+    }
+
     bool ManagedRuntimeSceneServices::SetManagedRenderingFlag(const AssetId entity,
                                                               const ManagedRenderingComponent component,
                                                               const ManagedRenderingFlagProperty property,

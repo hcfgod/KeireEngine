@@ -25,6 +25,7 @@
 #include "KeireClient/Editor/ScenePlayChanges.h"
 #include "KeireClient/Editor/ScenePlayChangesPanel.h"
 #include "KeireClient/Editor/ViewportAssetDropRouter.h"
+#include "KeireClientInternal/Editor/WaterBodyInspectorEditing.h"
 #include "KeireInternal/Assets/AssetDatabaseWorkerAccess.h"
 #include "KeireInternal/EditorCameraController.h"
 #include "KeireInternal/FileSystem.h"
@@ -166,6 +167,21 @@ void EditorWorkspaceLayer::DrawMainMenu(Keire::UiFrame& ui, Keire::UiWorkspace& 
         }
         if (auto entity = ui.BeginMenu("Entity", static_cast<bool>(scene)); entity)
         {
+            if (auto waterMenu = ui.BeginMenu("Water"); waterMenu)
+            {
+                constexpr std::array names{"Sea", "Lake", "Pond"};
+                for (std::size_t index = 0; index < names.size(); ++index)
+                {
+                    if (ui.MenuItem(names[index]))
+                    {
+                        const auto created = KeireEditor::Detail::CreateWaterEntity(
+                            *m_SceneDocument, static_cast<KeireEditor::Detail::WaterSetupPreset>(index), {},
+                            [this](const std::string_view name) { RecordSceneUndo(name); });
+                        m_SceneDocument->Select(created.Value());
+                        MarkPlayEditorEntity(m_SceneDocument->Selection());
+                    }
+                }
+            }
             if (ui.MenuItem("Create Empty"))
             {
                 RecordSceneUndo();
@@ -382,6 +398,7 @@ void EditorWorkspaceLayer::DrawMainMenu(Keire::UiFrame& ui, Keire::UiWorkspace& 
             DrawPanelMenuItem(ui, m_AnimatorControllerPanel->Registration());
             DrawPanelMenuItem(ui, m_RiggingStudioPanel->Registration());
             DrawPanelMenuItem(ui, m_AudioMixerPanel->Registration());
+            DrawPanelMenuItem(ui, m_PostProcessPanel->Registration());
             DrawPanelMenuItem(ui, m_VfxEffectPanel->Registration());
             DrawPanelMenuItem(ui, m_ShaderGraphPanel->Registration());
             DrawPanelMenuItem(ui, m_MaterialGraphPanel->Registration());
@@ -587,6 +604,9 @@ void EditorWorkspaceLayer::OpenPendingDialog(Keire::UiFrame& ui)
     case Dialog::DirtyMaterialGraph:
         ui.OpenPopup("Unsaved Material Graph Changes");
         break;
+    case Dialog::DirtyPostProcessing:
+        ui.OpenPopup("Unsaved Post Processing Changes");
+        break;
     case Dialog::DirtyPlayerBuild:
         ui.OpenPopup("Unsaved Player Build State");
         break;
@@ -613,6 +633,7 @@ void EditorWorkspaceLayer::DrawDialogs(Keire::UiFrame& ui, Keire::UiWorkspace& w
     DrawDirtySceneDialog(ui);
     DrawDirtyShaderGraphDialog(ui);
     DrawDirtyMaterialGraphDialog(ui);
+    DrawDirtyPostProcessingDialog(ui);
     DrawDirtyPlayerBuildDialog(ui);
     DrawSceneSourceConflictDialog(ui);
 }

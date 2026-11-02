@@ -1,5 +1,8 @@
 #pragma once
 
+#include "KeireInternal/Physics/PhysicsFrameAccess.h"
+#include "KeireInternal/Scenes/CharacterMovementAccess.h"
+
 #include "Keire/Scenes/Scene.h"
 #include "KeireInternal/Scenes/VfxPhysicsCollision.h"
 
@@ -272,6 +275,24 @@ namespace Keire
             Vector3d CurrentPresentationPosition;
             std::uint64_t PresentationResetRevision = 0;
             bool HasPresentationSamples = false;
+        };
+
+        struct PreparedCharacterMovement
+        {
+            EntityId Entity;
+            Ref<CharacterControllerComponent> Controller;
+            Ref<TransformComponent> Transform;
+            PhysicsRuntimeState State;
+            Detail::CharacterMovementAccess::Snapshot Input;
+            Vector3 Position;
+            Quaternion Rotation;
+            Vector3d WorldPosition;
+            bool Moved = false;
+            std::uint64_t ScenePhysicsRevision = 0;
+            Vector3d OriginalWorldPosition;
+            Quaternion OriginalRotation;
+            std::uint64_t OriginalPresentationRevision = 0;
+            std::vector<Vector3> Path;
         };
 
         struct VfxRuntimeState final
@@ -589,12 +610,19 @@ namespace Keire
         void SynchronizePhysicsBodies(bool queryOnly = false);
         void SynchronizePhysicsQueries();
         static void MoveTransformInWorld(TransformComponent& transform, Vector3 displacement);
-        void ApplyCharacterMovement(float deltaSeconds);
+        [[nodiscard]] std::vector<PreparedCharacterMovement> PrepareCharacterMovement(float deltaSeconds);
+        void ResolveCharacterMovementPaths(std::span<PreparedCharacterMovement> prepared) const;
+        void CommitCharacterMovement(std::span<const PreparedCharacterMovement> prepared,
+                                     std::span<const Detail::AuthoredPhysicsBodyUpdate> frameTargets = {});
         void UpdateCharacterGrounding();
         [[nodiscard]] std::optional<EntityId> EntityForBody(PhysicsBodyId body) const noexcept;
         void PullDynamicBodies();
         void DispatchPhysicsContacts();
+        void ValidateFrameMotion(const Detail::SceneFrameMotion& motion, float deltaSeconds,
+                                 std::span<const PreparedCharacterMovement> characters = {}) const;
         void StepPhysics(float deltaSeconds);
+        void ApplyWaterForces(float deltaSeconds, const std::optional<Detail::SceneFrameMotion>& frameMotion);
+        void PublishWaterSimulationTime();
         void CapturePhysicsPresentationSamples();
         void ApplyPhysicsPresentationInterpolation(float alpha);
         void CaptureCustomFixedPresentation(bool begin);
@@ -626,6 +654,8 @@ namespace Keire
         bool FrameFollowing = false;
         std::vector<PhysicsBodyId> FrameSupportBodies;
         std::uint64_t PhysicsQueryRevision = 0;
+        std::uint64_t WaterCaptureEpoch = 0;
+        double WaterTimeSeconds = 0.0;
         std::map<EntityId, VfxRuntimeState> VfxEmitters;
         std::map<AssetId, AssetHandle<VfxSubgraphAsset>> VfxSubgraphs;
         std::map<AssetId, VfxMeshShapeState> VfxMeshShapes;

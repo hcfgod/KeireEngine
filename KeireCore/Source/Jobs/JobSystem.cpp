@@ -1,4 +1,5 @@
 #include "Keire/Jobs/JobSystem.h"
+#include "KeireInternal/Jobs/JobRegistry.h"
 
 #include <algorithm>
 #include <array>
@@ -31,6 +32,7 @@ namespace Keire
         {
             mutable std::mutex Mutex;
             std::vector<std::weak_ptr<Detail::JobState>> Jobs;
+            std::size_t NextCompaction = 64;
             std::atomic<bool> Cancelled{false};
         };
     } // namespace
@@ -97,6 +99,7 @@ namespace Keire
             std::vector<std::jthread> BlockingWorkers;
             std::mutex RegistryMutex;
             std::vector<std::weak_ptr<JobState>> Registry;
+            std::size_t NextRegistryCompaction = 64;
             std::weak_ptr<JobState> LastDeterministicSimulation;
             std::atomic<std::uint64_t> NextId{1};
             std::atomic<std::uint64_t> NextSequence{1};
@@ -181,6 +184,7 @@ namespace Keire
                        const std::exception_ptr& failure = {})
         {
             std::vector<std::shared_ptr<Detail::JobState>> dependents;
+            std::vector<JobHandle> completedDependencies;
             JobStatus previousStatus = JobStatus::Waiting;
             {
                 std::scoped_lock lock(job->Mutex);
@@ -191,7 +195,12 @@ namespace Keire
                 job->Failure = failure;
                 job->Function = {};
                 dependents.swap(job->Dependents);
+                completedDependencies.swap(job->Description.Dependencies);
             }
+
+            // Terminal jobs retain their result, not the entire prerequisite graph.
+            // Release handles outside the job lock because destruction can release other job states.
+            completedDependencies.clear();
 
             if (previousStatus == JobStatus::Waiting)
                 scheduler->Waiting.fetch_sub(1, std::memory_order_relaxed);
@@ -363,9 +372,8 @@ namespace Keire
             std::exception_ptr failure;
             try
             {
-                std::pmr::vector<std::byte> scratchStorage(scheduler->Specification.ScratchBytesPerJob,
-                                                           scheduler->ScratchUpstream);
-                std::pmr::monotonic_buffer_resource scratch(scratchStorage.data(), scratchStorage.size(),
+                // Allocate scratch only when the callback requests storage. Most physics jobs need none.
+                std::pmr::monotonic_buffer_resource scratch(scheduler->Specification.ScratchBytesPerJob,
                                                             scheduler->ScratchUpstream);
                 JobContext::Impl implementation(job, workerIndex, &scratch);
                 JobContext context(implementation);
@@ -626,6 +634,7 @@ namespace Keire
             if (deterministic)
                 if (const auto previous = LastDeterministicSimulation.lock())
                     job->Description.Dependencies.push_back(JobHandle(previous));
+            CompactJobRegistry(Registry, NextRegistryCompaction);
             Registry.push_back(job);
             if (deterministic)
                 LastDeterministicSimulation = job;
@@ -668,6 +677,7 @@ namespace Keire
                 if (const auto scope = job->Scope.lock())
                 {
                     std::scoped_lock scopeLock(scope->Mutex);
+                    CompactJobRegistry(scope->Jobs, scope->NextCompaction);
                     scope->Jobs.push_back(job);
                     if (scope->Cancelled.load(std::memory_order_acquire))
                     {

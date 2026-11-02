@@ -5,6 +5,25 @@
 
 **Build worlds. Keep control.**
 
+Native physics now exposes `PhysicsWorld::AddForce`, `AddForceAtPosition` and `AddTorque` for dynamic
+bodies. Submit forces each fixed step in simulation axes; force application points are local to the
+world's double-precision origin. Water rendering and authoring are under active validation. The new
+Buoyancy component connects dynamic rigid bodies to scene water during fixed simulation steps;
+combined native and editor acceptance of this integration is pending.
+
+Create configured water from **Entity > Water > Sea, Lake, or Pond**, or the Hierarchy context menu.
+Sea starts with ocean waves; Lake and Pond use gentler motion and bounded surfaces. In the Water Body
+Inspector, use the Natural/Stylized looks, wave-height and direction controls first. Individual waves
+remain available under Advanced. Quick setup replaces the water settings; look changes preserve the
+shape and wave list. Creation and edits support Undo/Redo. These workflows are awaiting the next
+combined editor acceptance pass. Depth-aware refraction, shoreline foam, spline rivers and rendered
+planetary oceans are still in development.
+
+For buoyancy, add **Buoyancy** to a dynamic **Rigid Body**, configure its displacement probes, and
+place it in an active **Water Body** in the same scene. Water layer masks control which media affect
+it. Runtime waves and buoyancy share the fixed-step clock, including checkpoint restoration. Probe
+approximation, scene-local water ownership, and unfinished spherical-ocean rendering remain limits.
+
 Environment scalar controls show scattering coefficients and planet dimensions as decimals without exponent notation.
 Ctrl-click a numeric field for exact entry or an arithmetic expression; display formatting does not
 reduce the stored precision. Long values use an explicit middle ellipsis in narrow fields; hover for the full value or edit it with horizontally scrolling text.
@@ -939,6 +958,25 @@ camera UI. Create a Fullscreen Effect Shader Graph, create a Material using that
 the desired camera slot. Connect UV0 to Scene Color to sample the camera image; use the Scene/Game views or camera
 preview to evaluate the actual effect. See [Shaders and Materials](Docs/ShadersAndMaterials.md).
 
+The **Post Processing** panel under **Window** is an in-development profile authoring workflow; its full
+visual acceptance is still pending. Create a `.keirepostprocess` profile in the selected Project folder,
+assign it to a **Post Process Volume**, and enable the effect you want to adjust. Editing a basic setting
+activates its effect and required overrides automatically. **Advanced overrides** exposes individual inheritance
+controls; unchecked overrides inherit lower-priority values. The searchable effect workspace provides live preview, Save,
+Undo/Redo, Reload and Discard Changes. Search Settings accepts effect categories (such as Color), parameter
+names and units (such as EV or px), without case sensitivity. **Color Look** applies an editable Neutral,
+Warm, Cool, Vivid or Monochrome grade in one undoable change. It replaces color-grading overrides while
+preserving exposure, bloom and lens effects. Changes remain transient until saved. Resolve external source changes
+before saving; switching profiles requires saving or discarding local edits.
+Local volumes display their bounds when selected in Scene view. Sphere volumes also show the outer blend
+radius; nonuniform scaling uses the largest axis, matching runtime evaluation. Global volumes have no finite outline.
+The profile panel warns when an explicitly authored focus distance does not exceed focal length after unit conversion.
+For a scripted teleport using the same camera, call `Camera.ResetTemporalHistory()` after changing its pose
+(available in C++ and C#). Switching scene cameras resets history automatically. Ordinary movement and
+large-world origin rebasing preserve history; distance from the world origin is not a camera cut.
+Depth of field and motion blur remain under implementation. Follow the [delivery and acceptance plan](Docs/PlanetaryWaterPostProcessingPlan.md)
+for remaining work and validation rather than treating these controls as a completed release feature.
+
 UI-target materials can be assigned in a scene UI Document's **UI Material** field. See the
 [UI Toolkit workflow](Docs/Scripting/UiAndEvents.md) for editor and C# usage.
 UI Builder renders its retained document through the runtime GPU path, including custom font and image assets. Choose
@@ -1096,3 +1134,19 @@ lifecycle, visual, and frame-time validation; see [Rendering](Docs/Rendering.md)
 The development cloud renderer skips disabled weather channels and zero-sun shadow work, reuses night lighting
 across sun-direction changes, and skips cache dispatch for optically empty clouds. Linear half-float intermediates
 and final display dithering preserve dark gradients. Native appearance and performance acceptance remain pending.
+
+Custom post-processing stacks are under validation: profiles can author an ordered list in the Post Processing panel's Custom Effects workspace. Choose Fullscreen materials (editing automatically overrides the stack in basic mode), select their stage and reorder them. An empty overridden stack clears inherited custom effects; stack selection switches at 50% volume influence. Existing camera fullscreen hooks remain in place and execute first within each stage. Do not treat this in-progress feature as production-validated.
+
+### Editor authoring workspace
+
+Environment has a section navigator (or a compact selector in narrow panels), with separate lighting, sky-color,
+atmosphere, planet, star, layered-cloud, volumetric-cloud, fog, and bloom controls. The preview clock uses hours;
+preview transport remains temporary until Apply Time to Project. Save, Undo, and Redo are available in the panel.
+Post Processing shows compact Base/On/Off/Edit badges; hover an effect to inspect its state.
+Scene selections reveal their Hierarchy ancestors. The center Move handle moves in the view plane, the center Rotate
+handle rotates freely, and the center Scale handle scales all axes. Escape cancels a drag.
+
+In the Hierarchy, drop near a row's top or bottom edge to reorder siblings; drop in its middle to parent the selection.
+A line marks insertion, while an outline marks parenting. Hold over a valid parent to expand it, or near the list edge
+to scroll while dragging. Red feedback explains invalid self/descendant drops. Search results allow parenting;
+clear the search for sibling reordering. World placement is preserved and moves can be undone.

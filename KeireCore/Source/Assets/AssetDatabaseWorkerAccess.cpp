@@ -122,19 +122,18 @@ namespace Keire
         const std::stop_token cancellation, AssetOperationProgressCallback progress)
     {
         rescanned = false;
-        const auto records = database->Records();
+        std::unordered_set<AssetId> knownAssets;
+        {
+            std::scoped_lock lock(database->m_Impl->Mutex);
+            knownAssets.reserve(database->m_Impl->Records.size());
+            for (const auto& record : database->m_Impl->Records)
+            {
+                knownAssets.insert(record.Id);
+                knownAssets.insert(record.SubAssets.begin(), record.SubAssets.end());
+            }
+        }
         const bool missingTarget =
-            std::ranges::any_of(assets,
-                                [&](const AssetId asset)
-                                {
-                                    return std::ranges::none_of(records,
-                                                                [asset](const AssetSourceRecord& record)
-                                                                {
-                                                                    return record.Id == asset ||
-                                                                           std::ranges::find(record.SubAssets, asset) !=
-                                                                               record.SubAssets.end();
-                                                                });
-                                });
+            std::ranges::any_of(assets, [&knownAssets](const AssetId asset) { return !knownAssets.contains(asset); });
         if (!missingTarget)
             return ImportAssetsFromSourceIndex(*database, assets, policy, cancellation, progress);
         database = CreateRef<AssetDatabase>(std::move(fallbackSpecification));

@@ -3,6 +3,7 @@ $ErrorActionPreference = "Stop"
 $Root = (Resolve-Path (Join-Path $PSScriptRoot "../..")).Path
 $Compiler = Join-Path $Root "Build/Tools/ShaderCompiler/KeireShaderCompiler.exe"
 $Source = Join-Path $Root "KeireCore/Shaders/BuiltinVfx.hlsl"
+$ComputeSource = Join-Path $Root "KeireCore/Shaders/BuiltinVfxCompute.hlsl"
 $VisibilitySource = Join-Path $Root "KeireCore/Shaders/BuiltinVfxVisibility.hlsl"
 $Includes = @("CloudVolumeView.hlsli", "CloudVolume.hlsli", "CloudNoiseBuffer.hlsli", "AtmosphereMedium.hlsli", "CloudVolumeGeometry.hlsli", "CloudVolumeLighting.hlsli",
               "PlanetaryCloudIntersections.hlsli", "PlanetaryCloudGeometry.hlsli", "PlanetaryCloudWeather.hlsli",
@@ -39,6 +40,7 @@ try {
     }
 
     $SourceIdentity = Get-ShaderBlobInputIdentity -Source $Source -IncludeDirectories @($ShaderIncludeDirectory) -CompilerIdentity $CompilerIdentity
+    $ComputeIdentity = Get-ShaderBlobInputIdentity -Source $ComputeSource -IncludeDirectories @($ShaderIncludeDirectory) -CompilerIdentity $CompilerIdentity
     $VisibilityIdentity = Get-ShaderBlobInputIdentity -Source $VisibilitySource -IncludeDirectories @($ShaderIncludeDirectory) -CompilerIdentity $CompilerIdentity
 
     $Temporary = Join-Path ([IO.Path]::GetTempPath()) ("KeireBuiltinVfx-" + [Guid]::NewGuid().ToString("N"))
@@ -78,10 +80,18 @@ try {
             $output = Join-Path $Temporary ("$($stage.Name)-$($variant.Name).$($variant.Extension)")
             $stageSource = if ($stage.Name -in @("BuildVisibilityCandidates", "CompactVisibility")) {
                 $VisibilitySource
+            } elseif ($stage.Stage -eq "compute") {
+                $ComputeSource
             } else {
                 $Source
             }
-            $blobIdentity = if ($stageSource -eq $VisibilitySource) { $VisibilityIdentity } else { $SourceIdentity }
+            $blobIdentity = if ($stageSource -eq $VisibilitySource) {
+                $VisibilityIdentity
+            } elseif ($stageSource -eq $ComputeSource) {
+                $ComputeIdentity
+            } else {
+                $SourceIdentity
+            }
             Invoke-CachedShaderCompile -Compiler $Compiler -Source $stageSource -Stage $stage.Stage `
                 -Entry $stage.Entry -Destination $variant.Destination -IncludeDirectories @($ShaderIncludeDirectory) `
                 -Output $output -CacheDirectory $BlobCacheDirectory -InputIdentity $blobIdentity
@@ -97,16 +107,17 @@ try {
         foreach ($variant in $variants) {
             $bytes = [IO.File]::ReadAllBytes(
                 (Join-Path $Temporary ("$($stage.Name)-$($variant.Name).$($variant.Extension)")))
+            # Keep uploads byte-exact while avoiding millions of scalar C++ initializer nodes.
             [void]$builder.AppendLine(
-                "    inline constexpr unsigned char BuiltinVfx$($stage.Name)$($variant.Name)[] = {")
-            for ($index = 0; $index -lt $bytes.Length; $index += 16) {
-                $count = [Math]::Min(16, $bytes.Length - $index)
-                $values = for ($offset = 0; $offset -lt $count; ++$offset) {
-                    "0x{0:x2}" -f $bytes[$index + $offset]
-                }
-                [void]$builder.AppendLine("        " + ($values -join ", ") + ",")
+                "    inline constexpr unsigned char BuiltinVfx$($stage.Name)$($variant.Name)[] =")
+            for ($index = 0; $index -lt $bytes.Length; $index += 8192) {
+                $count = [Math]::Min(8192, $bytes.Length - $index)
+                $escaped = [BitConverter]::ToString($bytes, $index, $count).Replace('-', '\x').ToLowerInvariant()
+                [void]$builder.Append('        "\x').Append($escaped).AppendLine('"')
             }
-            [void]$builder.AppendLine("    };")
+            [void]$builder.AppendLine("    ;")
+            [void]$builder.AppendLine(
+                "    inline constexpr unsigned int BuiltinVfx$($stage.Name)$($variant.Name)Size = $($bytes.Length);")
             [void]$builder.AppendLine()
         }
     }

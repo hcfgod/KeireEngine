@@ -21,9 +21,16 @@ namespace Keire
 
 namespace Keire::Detail
 {
+    enum class ShaderCompilerInput
+    {
+        Hlsl,
+        SpirV
+    };
+
     struct ShaderCompilerStatistics final
     {
         std::atomic<std::size_t> NativeStarts{0};
+        std::atomic<std::size_t> HlslStages{0};
         std::atomic<std::size_t> CacheHits{0};
         std::atomic<std::size_t> CacheMisses{0};
     };
@@ -54,5 +61,6 @@ namespace Keire::Detail
                        const std::filesystem::path& output, std::span<const std::filesystem::path> includeRoots,
                        std::span<const std::pair<std::string, std::string>> defines,
                        const ShaderImporterSpecification& specification, const std::filesystem::path& workingDirectory,
-                       std::stop_token cancellation, ShaderCompilerStatistics* statistics);
+                       std::stop_token cancellation, ShaderCompilerStatistics* statistics,
+                       ShaderCompilerInput input = ShaderCompilerInput::Hlsl);
 } // namespace Keire::Detail

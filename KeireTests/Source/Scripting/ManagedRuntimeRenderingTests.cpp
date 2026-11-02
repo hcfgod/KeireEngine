@@ -249,3 +249,27 @@ TEST_CASE("managed camera fullscreen materials validate slots and clear independ
     CHECK(camera->FullscreenEffects()[0] == before[0]);
     CHECK(camera->FullscreenEffects()[1] == before[1]);
 }
+
+TEST_CASE("managed camera cuts reset only the camera in the requested runtime world")
+{
+    auto scene =
+        Keire::CreateRef<Keire::Scene>(Keire::AssetId::Generate(), Keire::SceneAsset::EmptyDefinition("Camera cuts"));
+    auto entity = scene->CreateEntity("Camera");
+    const auto camera = entity.AddComponent<Keire::CameraComponent>();
+    REQUIRE(camera);
+    auto otherScene = Keire::CreateRef<Keire::Scene>(Keire::AssetId::Generate(), scene->Snapshot());
+    const auto other = otherScene->FindEntity(entity.Id()).GetComponent<Keire::CameraComponent>();
+    REQUIRE(other);
+    NativeSceneRuntimeServices services;
+    services.Worlds.emplace(entity.World(), scene);
+    services.Worlds.emplace(otherScene->FindEntity(entity.Id()).World(), otherScene);
+    const auto before = camera->TemporalHistoryRevision();
+    const auto otherBefore = other->TemporalHistoryRevision();
+    CHECK(services.ResetManagedCameraTemporalHistory(entity.World(), entity.Id().Value()));
+    CHECK(camera->TemporalHistoryRevision() == before + 1U);
+    CHECK(other->TemporalHistoryRevision() == otherBefore);
+    CHECK_FALSE(services.ResetManagedCameraTemporalHistory(0, entity.Id().Value()));
+    CHECK_FALSE(services.ResetManagedCameraTemporalHistory(entity.World(), Keire::AssetId::Generate()));
+    auto plain = scene->CreateEntity("No camera");
+    CHECK_FALSE(services.ResetManagedCameraTemporalHistory(plain.World(), plain.Id().Value()));
+}

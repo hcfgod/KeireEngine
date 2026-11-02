@@ -57,6 +57,7 @@ namespace Keire::Detail
             source = "#define KEIRE_CLOUD_NOISE_TEXTURE t" + std::to_string(noiseSlot) +
                      "\n#define KEIRE_CLOUD_NOISE_SAMPLER s" + std::to_string(noiseSlot) + "\n";
         }
+        source += "#define KEIRE_PLANET_VOLUME_SET 1\n";
         source += CloudVolumeShaderSource;
         if (unlit)
         {
@@ -72,8 +73,7 @@ float4 ComposeGraphVolumeSurface(float3 radiance, float coverage, float alphaMod
                                 float2 pixelPosition, float depth, CloudVolumeView volumeView)
 {
     // Scene opaque draws receive disabled media; opaque particles drawn later receive active media.
-    if (alphaMode < 1.5F && volumeView.Quality.x == 0U && volumeView.Atmosphere.Controls.x <= 0.5F &&
-        volumeView.Fog.Controls.x == 0U)
+    if (alphaMode < 1.5F && !CloudVolumeViewHasMedia(volumeView))
         return float4(radiance, coverage);
     // Multiplicative filtering needs a separate compensation pass for front scattering.
     // Preserve the authored filter until that pass is available.

@@ -1,9 +1,12 @@
 #include "KeireInternal/Physics/PhysicsFrameAccess.h"
 #include "KeireInternal/Scenes/SceneRuntimeSessionImpl.h"
+#include "KeireInternal/Spatial/PlanetCharacterKinematicPath.h"
+#include "KeireInternal/Spatial/PlanetCharacterMovingClearance.h"
 
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <map>
 #include <numeric>
 #include <optional>
 #include <utility>
@@ -275,6 +278,7 @@ namespace Keire
     void SceneRuntimeSession::Impl::InitializePhysics()
     {
         ClearPhysics();
+        PublishWaterSimulationTime();
         if (!PhysicsService || !Runtime)
             return;
         PhysicsWorldService = PhysicsService->CreateWorld(InitialPhysicsOrigin(*Runtime));
@@ -298,13 +302,20 @@ namespace Keire
             candidates.emplace(entity.Id());
         for (const auto& entity : Runtime->Query<CharacterControllerComponent>())
             candidates.emplace(entity.Id());
+        struct PreparedBody
+        {
+            EntityId Entity;
+            PhysicsRuntimeState State;
+            std::optional<PhysicsBodyDefinition> Definition;
+            PhysicsBodyId Replacement;
+        };
+        std::vector<PreparedBody> prepared;
+        prepared.reserve(candidates.size());
         std::set<EntityId> seen;
         for (const auto entityId : candidates)
         {
             const auto entity = Runtime->FindEntity(entityId);
             seen.emplace(entityId);
-            // Queries expose authored support geometry, not a partially advanced controller or dynamic body.
-            // The normal fixed-step pass is unconditional and remains responsible for those definitions/assets.
             const auto rigid = entity.GetComponent<RigidBodyComponent>();
             const auto character = entity.GetComponent<CharacterControllerComponent>();
             const auto collider = entity.GetComponent<ColliderComponent>();
@@ -313,9 +324,134 @@ namespace Keire
                                   (characterEnabled || (collider && collider->Enabled()));
             if (queryOnly && eligible &&
                 (characterEnabled || (rigid && rigid->Enabled() && rigid->Motion() == PhysicsMotionType::Dynamic)))
+            {
                 continue;
-            auto& state = PhysicsBodies[entityId];
-            const auto definition = BuildPhysicsDefinition(entity, state);
+            }
+            const auto existing = PhysicsBodies.find(entityId);
+            auto candidateState = existing == PhysicsBodies.end() ? PhysicsRuntimeState{} : existing->second;
+            auto definition = BuildPhysicsDefinition(entity, candidateState);
+            prepared.push_back({entityId, std::move(candidateState), std::move(definition)});
+        }
+        // Allocate only newly needed map nodes before native installation. Existing scene-sized
+        // maps must not be copied on every tick merely to make replacement allocation reversible.
+        std::map<EntityId, PhysicsRuntimeState> newEntries;
+        for (const auto& candidate : prepared)
+        {
+            if (!PhysicsBodies.contains(candidate.Entity))
+            {
+                newEntries.try_emplace(candidate.Entity);
+            }
+        }
+        struct ReplacementBatch final
+        {
+            PhysicsWorld& World;
+            std::vector<PreparedBody>& Candidates;
+
+            ~ReplacementBatch() noexcept
+            {
+                for (const auto& candidate : Candidates)
+                {
+                    if (!candidate.Replacement)
+                    {
+                        continue;
+                    }
+                    try
+                    {
+                        World.DestroyBody(candidate.Replacement);
+                    }
+                    catch (...)
+                    {
+                        // Preserve the original installation failure during cleanup.
+                    }
+                }
+            }
+        } replacements{*PhysicsWorldService, prepared};
+        for (auto& candidate : prepared)
+        {
+            const auto& state = candidate.State;
+            const auto& definition = candidate.Definition;
+            if (!definition ||
+                (state.Body && state.HasDefinition && SamePhysicsDefinition(state.Definition, *definition)))
+            {
+                continue;
+            }
+            candidate.Replacement = Detail::PhysicsFrameAccess::CreateFrameBody(*PhysicsWorldService, *definition);
+            if (FrameFollowing && definition->Motion == PhysicsMotionType::Static)
+            {
+                const std::array support{candidate.Replacement};
+                Detail::PhysicsFrameAccess::SetFrameKinematics(*PhysicsWorldService, support, true);
+            }
+        }
+        std::vector<Detail::AuthoredPhysicsBodyUpdate> updates;
+        updates.reserve(prepared.size());
+        for (const auto& [entity, state] : PhysicsBodies)
+        {
+            (void)entity;
+            if (state.Body && !PhysicsWorldService->TryGetBody(state.Body))
+            {
+                throw std::runtime_error("Authored physics batch lost an installed body before commit.");
+            }
+        }
+        for (const auto& candidate : prepared)
+        {
+            const auto& state = candidate.State;
+            const auto& definition = candidate.Definition;
+            if (!definition || candidate.Replacement)
+            {
+                continue;
+            }
+            Detail::AuthoredPhysicsBodyUpdate update;
+            update.Body = state.Body;
+            const bool changedPose = definition->Motion != PhysicsMotionType::Dynamic &&
+                                     (state.Definition.Position != definition->Position ||
+                                      state.Definition.Rotation != definition->Rotation);
+            const bool changedVelocity = definition->Motion != PhysicsMotionType::Static &&
+                                         state.Definition.LinearVelocity != definition->LinearVelocity;
+            if (changedPose || changedVelocity)
+            {
+                update.State = PhysicsWorldService->TryGetBody(state.Body);
+                if (!update.State)
+                {
+                    throw std::runtime_error("Authored physics batch could not capture its current body state.");
+                }
+                if (changedPose)
+                {
+                    update.State->Position = definition->Position;
+                    update.State->Rotation = definition->Rotation;
+                    if (definition->Motion == PhysicsMotionType::Kinematic)
+                    {
+                        update.State->Sleeping = false;
+                    }
+                }
+                if (changedVelocity)
+                {
+                    update.State->LinearVelocity = definition->LinearVelocity;
+                    update.State->Sleeping = false;
+                }
+            }
+            if (state.Definition.MotionSettings != definition->MotionSettings)
+            {
+                update.MotionSettings = definition->MotionSettings;
+            }
+            if (state.Definition.UseGravity != definition->UseGravity)
+            {
+                update.UseGravity = definition->UseGravity;
+            }
+            if (update.State || update.MotionSettings || update.UseGravity)
+            {
+                updates.push_back(std::move(update));
+            }
+        }
+        Detail::PhysicsFrameAccess::ApplyAuthoredBodyUpdates(*PhysicsWorldService, updates);
+        // Node transfer uses the same allocator and performs no map-node allocation.
+        PhysicsBodies.merge(newEntries);
+        // No body is removed until every replacement has been created successfully.
+        for (auto& candidate : prepared)
+        {
+            const auto entityId = candidate.Entity;
+            auto& state = PhysicsBodies.at(entityId);
+            state = std::move(candidate.State);
+            const auto& definition = candidate.Definition;
             if (!definition)
             {
                 if (state.Body)
@@ -329,34 +465,12 @@ namespace Keire
             }
             if (!state.Body || !state.HasDefinition || !SamePhysicsDefinition(state.Definition, *definition))
             {
-                // The guard borrows this session's live world only for the installation transaction.
-                struct Replacement final
-                {
-                    PhysicsWorld& World;
-                    PhysicsBodyId Body;
-                    ~Replacement() noexcept
-                    {
-                        if (Body)
-                        {
-                            try
-                            {
-                                World.DestroyBody(Body);
-                            }
-                            catch (...)
-                            {
-                            } // Preserve an installation failure during rollback.
-                        }
-                    }
-                } replacement{*PhysicsWorldService, Detail::PhysicsFrameAccess::CreateFrameBody(*PhysicsWorldService, *definition)};
-                if (FrameFollowing && definition->Motion == PhysicsMotionType::Static)
-                {
-                    const std::array support{replacement.Body};
-                    Detail::PhysicsFrameAccess::SetFrameKinematics(*PhysicsWorldService, support, true);
-                }
                 if (state.Body)
+                {
                     PhysicsWorldService->DestroyBody(state.Body);
-                state.Body = replacement.Body;
-                replacement.Body = {};
+                }
+                state.Body = candidate.Replacement;
+                candidate.Replacement = {};
                 state.Definition = *definition;
                 state.CharacterSupport = {};
                 state.CharacterRequestedVerticalDisplacement = 0.0F;
@@ -365,44 +479,7 @@ namespace Keire
                 if (state.Generation == 0)
                     state.Generation = 1;
             }
-            else if (definition->Motion == PhysicsMotionType::Kinematic)
-            {
-                if (state.Definition.Position != definition->Position ||
-                    state.Definition.Rotation != definition->Rotation)
-                    PhysicsWorldService->SetKinematicTarget(state.Body, definition->Position, definition->Rotation);
-            }
-            else if (definition->Motion == PhysicsMotionType::Static &&
-                     (state.Definition.Position != definition->Position ||
-                      state.Definition.Rotation != definition->Rotation))
-            {
-                auto pose = PhysicsWorldService->TryGetBody(state.Body);
-                if (!pose)
-                    throw std::runtime_error("Authored physics body is unavailable.");
-                pose->Position = definition->Position;
-                pose->Rotation = definition->Rotation;
-                PhysicsWorldService->SetBodyState(state.Body, *pose);
-            }
-            if (state.Definition.MotionSettings != definition->MotionSettings)
-            {
-                PhysicsWorldService->SetMotionSettings(state.Body, definition->MotionSettings);
-                state.Definition.MotionSettings = definition->MotionSettings;
-            }
-            if (definition->Motion != PhysicsMotionType::Static &&
-                state.Definition.LinearVelocity != definition->LinearVelocity)
-            {
-                auto pose = PhysicsWorldService->TryGetBody(state.Body);
-                if (!pose)
-                {
-                    throw std::runtime_error("Authored physics velocity targets an unavailable body.");
-                }
-                pose->LinearVelocity = definition->LinearVelocity;
-                pose->Sleeping = false;
-                PhysicsWorldService->SetBodyState(state.Body, *pose);
-            }
-            if (state.Definition.UseGravity != definition->UseGravity)
-            {
-                PhysicsWorldService->SetGravityEnabled(state.Body, definition->UseGravity);
-            }
+            state.Definition.MotionSettings = definition->MotionSettings;
             state.Definition.LinearVelocity = definition->LinearVelocity;
             state.Definition.UseGravity = definition->UseGravity;
             // Keep the installed shape dimensions as the comparison baseline. Tiny authored scale increments
@@ -432,22 +509,25 @@ namespace Keire
             {position.X + displacement.X, position.Y + displacement.Y, position.Z + displacement.Z});
     }
 
-    void SceneRuntimeSession::Impl::ApplyCharacterMovement(const float deltaSeconds)
+    std::vector<SceneRuntimeSession::Impl::PreparedCharacterMovement>
+    SceneRuntimeSession::Impl::PrepareCharacterMovement(const float deltaSeconds)
     {
+        std::vector<PreparedCharacterMovement> prepared;
         for (const auto& entity : Runtime->Query<CharacterControllerComponent>())
         {
             const auto character = entity.GetComponent<CharacterControllerComponent>();
             const auto transform = entity.GetComponent<TransformComponent>();
             if (!character || !character->Enabled() || !entity.ActiveInHierarchy() || !transform)
                 continue;
-            const auto displacement = character->ConsumeDesiredMovement();
+            const auto input = Detail::CharacterMovementAccess::Capture(*character);
+            const auto displacement = input.Displacement;
             auto runtimeState = PhysicsBodies.find(entity.Id());
             if (runtimeState == PhysicsBodies.end() || !runtimeState->second.Body ||
                 !runtimeState->second.HasDefinition)
             {
                 continue;
             }
-            auto& state = runtimeState->second;
+            auto state = runtimeState->second;
             Vector3 start;
             Quaternion rotation;
             Vector3 scale;
@@ -514,6 +594,15 @@ namespace Keire
             const auto castRadius = state.Definition.Radius - padding;
             const auto castHeight = state.Definition.Height - padding * 2.0F;
             Vector3 current = start;
+            std::vector<Vector3> movementPath{start};
+            const auto advance = [&](const Vector3 next)
+            {
+                if (next != current)
+                {
+                    movementPath.push_back(next);
+                    current = next;
+                }
+            };
             const auto cast = [&](const Vector3 origin, const Vector3 movement) -> std::optional<PhysicsQueryHit>
             {
                 if (!hasResolvableDisplacement(movement))
@@ -550,7 +639,7 @@ namespace Keire
                     {
                         const auto correction = recoveryHeight - (landing->Distance - padding);
                         if (correction > 0.0001F && correction <= recoveryHeight)
-                            current = add(current, multiply(up, correction));
+                            advance(add(current, multiply(up, correction)));
                     }
                 }
             }
@@ -564,16 +653,31 @@ namespace Keire
                     const auto hit = cast(current, movement);
                     if (!hit)
                     {
-                        current = add(current, movement);
+                        advance(add(current, movement));
                         break;
                     }
                     const auto safeDistance = std::max(0.0F, hit->Distance - padding);
                     const auto safeFraction = std::clamp(safeDistance / movementLength, 0.0F, 1.0F);
-                    current = add(current, multiply(movement, safeFraction));
+                    advance(add(current, multiply(movement, safeFraction)));
                     movement = multiply(movement, 1.0F - safeFraction);
                     movement = Detail::ResolveCharacterCollisionRemainder(movement, hit->Normal, slideAlongSurface);
                 }
             };
+
+            // Query order is parent-first. Inherit the nearest planned ancestor's accepted
+            // world translation before resolving this controller's own commands.
+            for (auto ancestor = entity.Parent(); ancestor; ancestor = ancestor.Parent())
+            {
+                const auto parentPlan = std::ranges::find(prepared, ancestor.Id(), &PreparedCharacterMovement::Entity);
+                if (parentPlan == prepared.end())
+                {
+                    continue;
+                }
+                const auto inherited = Math::RelativeFloat(parentPlan->WorldPosition, parentPlan->OriginalWorldPosition,
+                                                           MaximumPhysicsPositionErrorMetres);
+                moveAndSlide(inherited, true);
+                break;
+            }
 
             // Carry is collision-resolved separately from caller input. Recovery may already have
             // supplied upward support motion, so sweep toward the anchor rather than adding it twice.
@@ -606,7 +710,9 @@ namespace Keire
                                     rise <= character->StepHeight() + 0.0001F)
                                 {
                                     const auto downDistance = std::max(0.0F, landing->Distance - padding);
-                                    current = add(forward, multiply(up, -downDistance));
+                                    advance(elevated);
+                                    advance(forward);
+                                    advance(add(forward, multiply(up, -downDistance)));
                                     stepped = true;
                                 }
                             }
@@ -626,19 +732,305 @@ namespace Keire
                     Detail::ShouldSnapCharacterToGround(true, verticalDisplacement, landing->Normal, slopeNormal, up))
                 {
                     const auto downDistance = std::max(0.0F, landing->Distance - padding);
-                    current = add(current, multiply(up, -downDistance));
+                    advance(add(current, multiply(up, -downDistance)));
                 }
             }
 
             const auto applied = subtract(current, start);
             state.CharacterVelocity = deltaSeconds > 0.0F ? multiply(applied, 1.0F / deltaSeconds) : Vector3{};
-            if (applied != Vector3{})
+            const auto worldPosition = transform->WorldPositionPrecise();
+            prepared.push_back({entity.Id(),
+                                character,
+                                transform,
+                                std::move(state),
+                                input,
+                                current,
+                                rotation,
+                                {worldPosition.X + applied.X, worldPosition.Y + applied.Y, worldPosition.Z + applied.Z},
+                                applied != Vector3{},
+                                Runtime->PhysicsRevision(),
+                                worldPosition,
+                                transform->WorldRotation(),
+                                transform->PresentationResetRevision(),
+                                std::move(movementPath)});
+        }
+        return prepared;
+    }
+
+    void
+    SceneRuntimeSession::Impl::ResolveCharacterMovementPaths(const std::span<PreparedCharacterMovement> prepared) const
+    {
+        std::size_t remainingQueries = 4095;
+        const auto pathsAreClear =
+            [&](const PreparedCharacterMovement& character, const PreparedCharacterMovement& obstacle)
+        {
+            for (std::size_t segment = 1; segment < character.Path.size(); ++segment)
             {
-                MoveTransformInWorld(*transform, applied);
-                PhysicsWorldService->SetKinematicTarget(state.Body, current, rotation);
-                state.Definition.Position = current;
-                state.Definition.Rotation = rotation;
+                PhysicsCapsuleOverlapQuery capsule;
+                capsule.Center = character.Path[segment - 1];
+                capsule.Rotation = character.Rotation;
+                const float padding =
+                    std::min(character.Controller->SkinWidth(), character.State.Definition.Radius * 0.5F);
+                capsule.Radius = character.State.Definition.Radius - padding;
+                capsule.Height = character.State.Definition.Height - padding * 2.0F;
+                capsule.Mask = character.Controller->Mask();
+                capsule.Layer = character.Controller->Layer();
+                capsule.IgnoreBody = character.State.Body;
+                const auto path = Detail::MakePlanetCharacterKinematicPath(capsule, capsule.Center,
+                                                                           character.Path[segment], capsule.Rotation);
+                // Test every obstacle segment independently: relative scheduling of controller
+                // commands is unspecified, so clearance must hold throughout both swept regions.
+                for (std::size_t otherSegment = 1; otherSegment < obstacle.Path.size(); ++otherSegment)
+                {
+                    PhysicsCapsuleOverlapQuery otherPose;
+                    otherPose.Center = obstacle.Path[otherSegment - 1];
+                    otherPose.Rotation = obstacle.Rotation;
+                    const auto otherPath = Detail::MakePlanetCharacterKinematicPath(
+                        otherPose, otherPose.Center, obstacle.Path[otherSegment], otherPose.Rotation);
+                    struct PairInterval
+                    {
+                        double FirstBegin;
+                        double FirstEnd;
+                        double SecondBegin;
+                        double SecondEnd;
+                        std::size_t Depth;
+                    };
+                    std::array<PairInterval, 17> pending{};
+                    pending[0] = {0.0, 1.0, 0.0, 1.0, 0};
+                    std::size_t count = 1;
+                    while (count != 0)
+                    {
+                        const auto interval = pending[--count];
+                        const auto firstBounds = path(interval.FirstBegin, interval.FirstEnd);
+                        const auto secondBounds = otherPath(interval.SecondBegin, interval.SecondEnd);
+                        const auto relative = Detail::PlanetCharacterRelativeInterval(
+                            firstBounds, secondBounds, obstacle.Path.front(), obstacle.Rotation);
+                        const auto envelope = Detail::PlanetCharacterPoseEnvelope(
+                            relative.Midpoint, relative.AngularExcursion, relative.CenterExcursion);
+                        if (remainingQueries == 0)
+                        {
+                            return false;
+                        }
+                        --remainingQueries;
+                        if (!Detail::PhysicsFrameAccess::HasCapsuleContact(*PhysicsWorldService, envelope,
+                                                                           obstacle.State.Body, {}))
+                        {
+                            continue;
+                        }
+                        if (interval.Depth == 16)
+                        {
+                            return false;
+                        }
+                        auto left = interval;
+                        auto right = interval;
+                        ++left.Depth;
+                        ++right.Depth;
+                        if (firstBounds.CenterExcursion >= secondBounds.CenterExcursion)
+                        {
+                            const double midpoint = (interval.FirstBegin + interval.FirstEnd) * 0.5;
+                            left.FirstEnd = midpoint;
+                            right.FirstBegin = midpoint;
+                        }
+                        else
+                        {
+                            const double midpoint = (interval.SecondBegin + interval.SecondEnd) * 0.5;
+                            left.SecondEnd = midpoint;
+                            right.SecondBegin = midpoint;
+                        }
+                        pending[count++] = right;
+                        pending[count++] = left;
+                    }
+                }
             }
+            return true;
+        };
+        const auto blockMovement = [&](PreparedCharacterMovement& movement)
+        {
+            const auto& original = PhysicsBodies.at(movement.Entity);
+            movement.Position = movement.Path.front();
+            movement.WorldPosition = movement.OriginalWorldPosition;
+            movement.Moved = false;
+            movement.State.CharacterVelocity = {};
+            movement.State.CharacterSupport = original.CharacterSupport;
+            movement.State.CharacterRequestedVerticalDisplacement = 0.0F;
+            movement.Path.resize(1);
+        };
+
+        const auto blockHierarchy = [&](const EntityId root)
+        {
+            for (auto& movement : prepared)
+            {
+                for (auto entity = Runtime->FindEntity(movement.Entity); entity; entity = entity.Parent())
+                {
+                    if (entity.Id() == root)
+                    {
+                        blockMovement(movement);
+                        break;
+                    }
+                }
+            }
+        };
+
+        for (std::size_t first = 0; first < prepared.size(); ++first)
+        {
+            auto& character = prepared[first];
+            for (std::size_t second = first + 1; second < prepared.size(); ++second)
+            {
+                auto& obstacle = prepared[second];
+                if ((character.Controller->Mask() & obstacle.Controller->Layer()) == 0 ||
+                    (obstacle.Controller->Mask() & character.Controller->Layer()) == 0)
+                {
+                    continue;
+                }
+                if (!pathsAreClear(character, obstacle))
+                {
+                    // Each plan already cleared every other character's original native pose.
+                    // Blocking a pair therefore cannot invalidate any previously accepted path.
+                    // The normal commit consumes attempted input without faulting the scene.
+                    blockHierarchy(character.Entity);
+                    blockHierarchy(obstacle.Entity);
+                }
+            }
+        }
+    }
+
+    void SceneRuntimeSession::Impl::CommitCharacterMovement(
+        const std::span<const PreparedCharacterMovement> prepared,
+        const std::span<const Detail::AuthoredPhysicsBodyUpdate> frameTargets)
+    {
+        std::vector<Vector3d> localPositions;
+        std::vector<Detail::AuthoredPhysicsBodyUpdate> nativeUpdates;
+        localPositions.reserve(prepared.size());
+        nativeUpdates.reserve(prepared.size() + frameTargets.size());
+        for (const auto& movement : prepared)
+        {
+            Detail::CharacterMovementAccess::Validate(*movement.Controller, movement.Input);
+            const auto entity = Runtime->FindEntity(movement.Entity);
+            if (Runtime->PhysicsRevision() != movement.ScenePhysicsRevision || !entity ||
+                entity.GetComponent<CharacterControllerComponent>() != movement.Controller ||
+                entity.GetComponent<TransformComponent>() != movement.Transform ||
+                movement.Transform->WorldPositionPrecise() != movement.OriginalWorldPosition ||
+                movement.Transform->WorldRotation() != movement.OriginalRotation ||
+                movement.Transform->PresentationResetRevision() != movement.OriginalPresentationRevision)
+            {
+                throw std::logic_error("Prepared character authoring changed before commit.");
+            }
+            const auto live = PhysicsBodies.find(movement.Entity);
+            if (live == PhysicsBodies.end() || live->second.Body != movement.State.Body ||
+                live->second.Generation != movement.State.Generation ||
+                !PhysicsWorldService->TryGetBody(movement.State.Body))
+            {
+                throw std::logic_error("Prepared character movement body changed before commit.");
+            }
+            if (live->second.Definition.Motion != PhysicsMotionType::Kinematic)
+            {
+                throw std::logic_error("Prepared character body is no longer kinematic.");
+            }
+            const auto parent = movement.Transform->Parent();
+            const auto parentTransform = parent ? parent.GetComponent<TransformComponent>() : Ref<TransformComponent>{};
+            auto parentRelativeTarget = movement.WorldPosition;
+            for (auto ancestor = parent; ancestor; ancestor = ancestor.Parent())
+            {
+                const auto parentPlan = std::ranges::find(prepared, ancestor.Id(), &PreparedCharacterMovement::Entity);
+                if (parentPlan != prepared.end())
+                {
+                    parentRelativeTarget.X -= parentPlan->WorldPosition.X - parentPlan->OriginalWorldPosition.X;
+                    parentRelativeTarget.Y -= parentPlan->WorldPosition.Y - parentPlan->OriginalWorldPosition.Y;
+                    parentRelativeTarget.Z -= parentPlan->WorldPosition.Z - parentPlan->OriginalWorldPosition.Z;
+                    break;
+                }
+            }
+            const auto localPosition = parentTransform
+                                           ? parentTransform->InverseTransformPointPrecise(parentRelativeTarget)
+                                           : parentRelativeTarget;
+            if (!Math::IsFinite(localPosition))
+            {
+                throw std::invalid_argument("Prepared character parent-space position is not finite.");
+            }
+            (void)Math::Normalize(movement.Rotation);
+            if (!Math::IsFinite(movement.Position) || !Math::IsFinite(movement.Rotation))
+            {
+                throw std::invalid_argument("Prepared character pose is not finite.");
+            }
+            localPositions.push_back(localPosition);
+            if (movement.Moved)
+            {
+                auto native = PhysicsWorldService->TryGetBody(movement.State.Body);
+                if (!native)
+                {
+                    throw std::logic_error("Prepared character native pose disappeared before commit.");
+                }
+                native->Position = movement.Position;
+                native->Rotation = movement.Rotation;
+                native->Sleeping = false;
+                nativeUpdates.push_back({movement.State.Body, native, {}, {}});
+            }
+        }
+        // A character's accepted pose is the start of its frame motion. Merge the target
+        // into that same update so native velocity validation sees the staged start pose.
+        for (const auto& target : frameTargets)
+        {
+            if (!target.KinematicTarget || target.State || target.MotionSettings || target.UseGravity)
+            {
+                throw std::invalid_argument("Frame movement requires target-only body updates.");
+            }
+            const auto existing =
+                std::ranges::find(nativeUpdates, target.Body, &Detail::AuthoredPhysicsBodyUpdate::Body);
+            if (existing == nativeUpdates.end())
+            {
+                nativeUpdates.push_back(target);
+                continue;
+            }
+            if (existing->KinematicTarget)
+            {
+                throw std::invalid_argument("Frame movement contains duplicate body targets.");
+            }
+            existing->KinematicTarget = target.KinematicTarget;
+        }
+        std::vector<Vector3> resolvedVelocities;
+        resolvedVelocities.reserve(prepared.size());
+        for (const auto& movement : prepared)
+        {
+            auto velocity = movement.State.CharacterVelocity;
+            const auto update =
+                std::ranges::find(nativeUpdates, movement.State.Body, &Detail::AuthoredPhysicsBodyUpdate::Body);
+            if (update != nativeUpdates.end() && update->KinematicTarget)
+            {
+                const auto& target = *update->KinematicTarget;
+                if (!std::isfinite(target.DeltaSeconds) || target.DeltaSeconds <= 0.0F)
+                {
+                    throw std::invalid_argument("Character frame movement requires a positive finite duration.");
+                }
+                // Use physics-local coordinates so distant world origins do not erase the
+                // carried displacement. Gameplay observes both accepted input and frame motion.
+                velocity.X += (target.Position.X - movement.Position.X) / target.DeltaSeconds;
+                velocity.Y += (target.Position.Y - movement.Position.Y) / target.DeltaSeconds;
+                velocity.Z += (target.Position.Z - movement.Position.Z) / target.DeltaSeconds;
+            }
+            if (!Math::IsFinite(velocity))
+            {
+                throw std::out_of_range("Resolved character velocity is not finite.");
+            }
+            resolvedVelocities.push_back(velocity);
+        }
+        // Refresh traversal storage before native writes. Position changes only invalidate cached
+        // matrices, not topology, so the subsequent local setters do not allocate hierarchy storage.
+        (void)Runtime->Entities();
+        Detail::PhysicsFrameAccess::ApplyAuthoredBodyUpdates(*PhysicsWorldService, nativeUpdates);
+        std::size_t index = 0;
+        for (const auto& movement : prepared)
+        {
+            auto& state = PhysicsBodies.at(movement.Entity);
+            movement.Transform->SetLocalPositionPrecise(localPositions[index++]);
+            if (movement.Moved)
+            {
+                state.Definition.Position = movement.Position;
+                state.Definition.Rotation = movement.Rotation;
+            }
+            state.CharacterVelocity = resolvedVelocities[index - 1];
+            state.CharacterSupport = movement.State.CharacterSupport;
+            state.CharacterRequestedVerticalDisplacement = movement.State.CharacterRequestedVerticalDisplacement;
+            Detail::CharacterMovementAccess::Commit(*movement.Controller, movement.Input);
         }
     }
 
@@ -713,7 +1105,12 @@ namespace Keire
                     carried.Definition = supportState.Definition;
                     // A dynamic support advances after character movement. Keep the movement-time
                     // reference so its just-resolved motion is carried on the next fixed tick.
-                    carried.ReferenceWorld = supportState.MovementWorld;
+                    // Frame transport already moves both the rider and its support. Anchoring
+                    // against the old support pose would apply that rotation a second time.
+                    carried.ReferenceWorld =
+                        FrameDrivenKinematics && supportState.Definition.Motion != PhysicsMotionType::Dynamic
+                            ? PhysicsRelativeTransform(*supportTransform, *PhysicsWorldService)
+                            : supportState.MovementWorld;
                     carried.LocalAnchor = Math::TransformPoint(Math::Inverse(carried.ReferenceWorld), worldPosition);
                     carried.ResolvedRiderPosition = worldPosition;
                     carried.RiderResetRevision = transform->PresentationResetRevision();
@@ -801,17 +1198,164 @@ namespace Keire
         }
     }
 
+    void SceneRuntimeSession::Impl::ValidateFrameMotion(
+        const Detail::SceneFrameMotion& motion, const float deltaSeconds,
+        const std::span<const PreparedCharacterMovement> preparedCharacters) const
+    {
+        if (!PhysicsWorldService)
+        {
+            throw std::logic_error("Frame motion requires an active physics world.");
+        }
+        const auto* frameMotion = &motion;
+        const auto rotation = frameMotion->NextRotation.Compose(frameMotion->PreviousRotation.Inverse());
+        const auto movePosition = [&](const Vector3d position)
+        {
+            const Detail::SectorPosition source(frameMotion->PreviousOrigin.Identity(), {},
+                                                {position.X, position.Y, position.Z});
+            const auto local = source.RelativeTo(frameMotion->PreviousOrigin);
+            const auto target = frameMotion->NextOrigin.Translated(rotation.Apply(local));
+            const Detail::SectorPosition root(target.Identity(), {}, {});
+            const auto value = target.RelativeTo(root);
+            for (const auto error : root.Translated(value).RelativeTo(target))
+            {
+                if (std::abs(error) > MaximumPhysicsPositionErrorMetres)
+                {
+                    throw std::out_of_range("Frame motion exceeds root-coordinate precision.");
+                }
+            }
+            return Vector3d{value[0], value[1], value[2]};
+        };
+        const auto moveRotation = [&](const Quaternion value)
+        {
+            const auto target = rotation.Compose(Detail::FrameRotation::Normalize(value.X, value.Y, value.Z, value.W));
+            const auto& components = target.Components();
+            return Quaternion{static_cast<float>(components[0]), static_cast<float>(components[1]),
+                              static_cast<float>(components[2]), static_cast<float>(components[3])};
+        };
+        for (const auto& entity : Runtime->Entities())
+        {
+            const auto rigid = entity.GetComponent<RigidBodyComponent>();
+            if (entity.Parent() || (rigid && rigid->Enabled() && rigid->Motion() == PhysicsMotionType::Dynamic))
+            {
+                continue;
+            }
+            const auto transform = entity.GetComponent<TransformComponent>();
+            if (transform)
+            {
+                (void)movePosition(transform->WorldPositionPrecise());
+                (void)moveRotation(transform->WorldRotation());
+            }
+        }
+        std::vector<Detail::PlanetCharacterMovingObstacle> obstacles;
+        std::vector<PhysicsBodyId> movingBodies;
+        std::vector<Detail::PlanetCharacterFramePath> characters;
+        bool hasDynamicBodies = false;
+        for (const auto& [entity, body] : PhysicsBodies)
+        {
+            hasDynamicBodies = hasDynamicBodies || (body.Body && body.Definition.Motion == PhysicsMotionType::Dynamic);
+            if (!body.Body || body.Definition.Motion == PhysicsMotionType::Dynamic)
+            {
+                continue;
+            }
+            auto current = PhysicsWorldService->TryGetBody(body.Body);
+            if (!current)
+            {
+                throw std::logic_error("Frame preflight lost a kinematic body.");
+            }
+            PhysicsCapsuleOverlapQuery nativeReference;
+            nativeReference.Center = current->Position;
+            nativeReference.Rotation = current->Rotation;
+            const auto prepared = std::ranges::find(preparedCharacters, entity, &PreparedCharacterMovement::Entity);
+            Vector3 stagedOffset;
+            if (prepared != preparedCharacters.end())
+            {
+                stagedOffset = {prepared->Position.X - current->Position.X, prepared->Position.Y - current->Position.Y,
+                                prepared->Position.Z - current->Position.Z};
+                current->Position = prepared->Position;
+                current->Rotation = prepared->Rotation;
+            }
+            const auto position = movePosition(PhysicsWorldService->ToWorldPosition(current->Position));
+            Detail::PhysicsFrameAccess::ValidateKinematicMove(
+                *PhysicsWorldService, body.Body,
+                PhysicsWorldService->ToLocalPosition(position, MaximumPhysicsPositionErrorMetres),
+                moveRotation(current->Rotation), deltaSeconds);
+            auto center = Detail::PhysicsFrameAccess::TryGetCenterOfMassPosition(*PhysicsWorldService, body.Body);
+            if (!center)
+            {
+                throw std::logic_error("Frame preflight lost a body center of mass.");
+            }
+            center->X += stagedOffset.X;
+            center->Y += stagedOffset.Y;
+            center->Z += stagedOffset.Z;
+            const auto targetPosition =
+                PhysicsWorldService->ToLocalPosition(position, MaximumPhysicsPositionErrorMetres);
+            const auto offset = rotation.Apply({static_cast<double>(center->X) - current->Position.X,
+                                                static_cast<double>(center->Y) - current->Position.Y,
+                                                static_cast<double>(center->Z) - current->Position.Z});
+            const auto targetCenter = Math::RelativeFloat(
+                {targetPosition.X + offset[0], targetPosition.Y + offset[1], targetPosition.Z + offset[2]}, {},
+                MaximumPhysicsPositionErrorMetres);
+            PhysicsCapsuleOverlapQuery pose;
+            pose.Center = current->Position;
+            pose.Rotation = current->Rotation;
+            const auto path =
+                Detail::MakePlanetCharacterKinematicPath(pose, *center, targetCenter, moveRotation(current->Rotation));
+            obstacles.push_back({body.Body, path, nativeReference});
+            movingBodies.push_back(body.Body);
+            const auto runtimeEntity = Runtime->FindEntity(entity);
+            const auto controller = runtimeEntity ? runtimeEntity.GetComponent<CharacterControllerComponent>()
+                                                  : Ref<CharacterControllerComponent>{};
+            if (controller && controller->Enabled())
+            {
+                auto characterPath = path;
+                const auto padding = std::min(controller->SkinWidth(), body.Definition.Radius * 0.5F);
+                characterPath.Start.Radius = body.Definition.Radius - padding;
+                characterPath.Start.Height = body.Definition.Height - padding * 2.0F;
+                characterPath.Start.Mask = controller->Mask();
+                characterPath.Start.Layer = controller->Layer();
+                characterPath.Start.IgnoreBody = body.Body;
+                characters.push_back(characterPath);
+            }
+        }
+        if (!characters.empty() && hasDynamicBodies)
+        {
+            // Development gate: solver impulses/position correction require a separate motion bound.
+            throw std::invalid_argument("Character frame preflight has no dynamic-contact motion bound yet.");
+        }
+        for (const auto& character : characters)
+        {
+            if (!Detail::PlanetCharacterMovingClearance(*PhysicsWorldService, character, obstacles, movingBodies))
+            {
+                throw std::runtime_error("Character frame motion has no collision-free swept clearance.");
+            }
+        }
+    }
+
     void SceneRuntimeSession::Impl::StepPhysics(const float deltaSeconds)
     {
-        auto frameMotion = std::exchange(PendingFrameMotion, std::nullopt);
+        const double nextWaterTime = WaterTimeSeconds + static_cast<double>(deltaSeconds);
+        if (!std::isfinite(deltaSeconds) || deltaSeconds <= 0.0F || deltaSeconds > 1.0F ||
+            !std::isfinite(nextWaterTime))
+        {
+            throw std::invalid_argument("Water simulation requires a finite fixed step in (0, 1].");
+        }
+        // Revalidate after callbacks, before consuming movement or changing native bodies.
+        if (PendingFrameMotion)
+        {
+            ValidateFrameMotion(*PendingFrameMotion, deltaSeconds);
+        }
+        const auto frameMotion = PendingFrameMotion;
         if (!PhysicsWorldService)
         {
             if (frameMotion)
             {
                 throw std::logic_error("Frame following currently requires an active physics world.");
             }
+            WaterTimeSeconds = nextWaterTime;
+            PublishWaterSimulationTime();
             return;
         }
+        Detail::PhysicsFrameAccess::ValidateStepClock(*PhysicsWorldService, deltaSeconds);
         // Gameplay may move or disable a support this tick. Movement and grounding
         // must query the same current authored geometry, including kinematic targets.
         SynchronizePhysicsBodies();
@@ -826,10 +1370,12 @@ namespace Keire
             if (!character || !character->Enabled())
                 state.CharacterSupport = {};
         }
-        ApplyCharacterMovement(deltaSeconds);
-        // Controller movement also moves descendant colliders through the Transform hierarchy.
-        // Refresh those bodies before contact generation, as the original post-movement pass did.
-        SynchronizePhysicsBodies();
+        auto preparedCharacters = PrepareCharacterMovement(deltaSeconds);
+        ResolveCharacterMovementPaths(preparedCharacters);
+        if (frameMotion)
+        {
+            ValidateFrameMotion(*frameMotion, deltaSeconds, preparedCharacters);
+        }
         struct RootTarget
         {
             Ref<TransformComponent> Transform;
@@ -878,8 +1424,7 @@ namespace Keire
                 const auto collider = entity.GetComponent<ColliderComponent>();
                 const auto character = entity.GetComponent<CharacterControllerComponent>();
                 const auto rigid = entity.GetComponent<RigidBodyComponent>();
-                if ((character && character->Enabled()) ||
-                    (collider && collider->Enabled() && entity.Parent()))
+                if (entity.Parent() && ((character && character->Enabled()) || (collider && collider->Enabled())))
                 {
                     throw std::invalid_argument("Unsupported physics was added to a frame-following scene.");
                 }
@@ -890,8 +1435,17 @@ namespace Keire
                 const auto transform = entity.GetComponent<TransformComponent>();
                 if (transform)
                 {
-                    rootTargets.push_back({transform, movePosition(transform->WorldPositionPrecise()),
-                                           moveRotation(transform->WorldRotation())});
+                    const auto prepared =
+                        std::ranges::find(preparedCharacters, entity.Id(), &PreparedCharacterMovement::Entity);
+                    const auto position = prepared == preparedCharacters.end() ? transform->WorldPositionPrecise()
+                                                                               : prepared->WorldPosition;
+                    const auto targetPosition = movePosition(position);
+                    const auto targetRotation = Math::Normalize(moveRotation(transform->WorldRotation()));
+                    if (!Math::IsFinite(targetPosition) || !Math::IsFinite(targetRotation))
+                    {
+                        throw std::out_of_range("Frame motion produced a non-finite root pose.");
+                    }
+                    rootTargets.push_back({transform, targetPosition, targetRotation});
                 }
             }
             for (auto& [entity, body] : PhysicsBodies)
@@ -901,47 +1455,64 @@ namespace Keire
                 {
                     continue;
                 }
-                const auto current = PhysicsWorldService->TryGetBody(body.Body);
+                auto current = PhysicsWorldService->TryGetBody(body.Body);
                 if (!current)
                 {
                     throw std::logic_error("Frame motion lost a kinematic body.");
+                }
+                const auto prepared = std::ranges::find(preparedCharacters, entity, &PreparedCharacterMovement::Entity);
+                if (prepared != preparedCharacters.end())
+                {
+                    current->Position = prepared->Position;
+                    current->Rotation = prepared->Rotation;
                 }
                 const auto position = movePosition(PhysicsWorldService->ToWorldPosition(current->Position));
                 bodyTargets.push_back(
                     {body.Body, PhysicsWorldService->ToLocalPosition(position, MaximumPhysicsPositionErrorMetres),
                      moveRotation(current->Rotation), &body});
             }
-            // Prepare every target before issuing velocity changes. Synchronization above must not teleport targets.
+            std::vector<Detail::AuthoredPhysicsBodyUpdate> frameTargets;
+            frameTargets.reserve(bodyTargets.size());
             for (const auto& target : bodyTargets)
             {
-                Detail::PhysicsFrameAccess::ValidateKinematicMove(*PhysicsWorldService, target.Body, target.Position,
-                                                                  target.Rotation, deltaSeconds);
+                frameTargets.push_back(
+                    {target.Body,
+                     {},
+                     {},
+                     {},
+                     Detail::PhysicsKinematicTarget{target.Position, target.Rotation, deltaSeconds}});
             }
-            for (const auto& target : bodyTargets)
-            {
-                Detail::PhysicsFrameAccess::MoveKinematic(*PhysicsWorldService, target.Body, target.Position,
-                                                          target.Rotation, deltaSeconds);
-            }
+            CommitCharacterMovement(preparedCharacters, frameTargets);
+            PendingFrameMotion.reset();
             FrameDrivenKinematics = !bodyTargets.empty();
         }
-        else if (FrameDrivenKinematics)
+        else
         {
-            for (const auto& [entity, body] : PhysicsBodies)
+            CommitCharacterMovement(preparedCharacters);
+            // Non-frame movement can move descendant colliders through authored parenting.
+            SynchronizePhysicsBodies();
+            if (FrameDrivenKinematics)
             {
-                (void)entity;
-                if (body.Body && body.Definition.Motion == PhysicsMotionType::Kinematic)
+                for (const auto& [entity, body] : PhysicsBodies)
                 {
-                    const auto current = PhysicsWorldService->TryGetBody(body.Body);
-                    if (current)
+                    (void)entity;
+                    if (body.Body && body.Definition.Motion == PhysicsMotionType::Kinematic)
                     {
-                        Detail::PhysicsFrameAccess::MoveKinematic(*PhysicsWorldService, body.Body, current->Position,
-                                                                  current->Rotation, deltaSeconds);
+                        const auto current = PhysicsWorldService->TryGetBody(body.Body);
+                        if (current)
+                        {
+                            Detail::PhysicsFrameAccess::MoveKinematic(
+                                *PhysicsWorldService, body.Body, current->Position, current->Rotation, deltaSeconds);
+                        }
                     }
                 }
+                FrameDrivenKinematics = false;
             }
-            FrameDrivenKinematics = false;
         }
+        ApplyWaterForces(deltaSeconds, frameMotion);
         PhysicsWorldService->Step(deltaSeconds);
+        WaterTimeSeconds = nextWaterTime;
+        PublishWaterSimulationTime();
         for (const auto& target : bodyTargets)
         {
             target.Runtime->Definition.Position = target.Position;
@@ -949,8 +1520,10 @@ namespace Keire
         }
         for (const auto& target : rootTargets)
         {
-            target.Transform->SetWorldPositionPrecise(target.Position);
-            target.Transform->SetWorldRotation(target.Rotation);
+            // These targets were collected only for roots, and validated before native writes.
+            // No parent-space conversion may be introduced after the physics step.
+            target.Transform->SetLocalPositionPrecise(target.Position);
+            target.Transform->SetLocalRotation(target.Rotation);
         }
         PullDynamicBodies();
         UpdateCharacterGrounding();
@@ -1052,6 +1625,8 @@ namespace Keire
         FrameSupportBodies.clear();
         PhysicsBodies.clear();
         PhysicsQueryRevision = 0;
+        WaterCaptureEpoch = 0;
+        WaterTimeSeconds = 0.0;
         if (PhysicsWorldService)
         {
             try

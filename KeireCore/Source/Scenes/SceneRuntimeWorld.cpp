@@ -284,7 +284,8 @@ namespace Keire
 
         [[nodiscard]] std::vector<PhysicsGravitySource> BuildPlanetGravity(const double time)
         {
-            const auto snapshots = PublishPlanetFrames(time);
+            const auto evaluation = PlanetFrames.Prepare(*Spatial, Planets, time);
+            const auto snapshots = evaluation.Snapshots();
             const auto target = Spatial->Find(Detail::SceneRuntimeSpatialAccess::RootFrame);
             const Detail::SectorPosition targetZero(Spatial->Identity(target), {}, {});
             std::vector<PhysicsGravitySource> sources;
@@ -297,7 +298,7 @@ namespace Keire
                 }
                 const auto source = Spatial->Find(planet.Frame);
                 const auto position = Detail::ConvertFrameMotion(
-                    *Spatial, source, target,
+                    evaluation, source, target,
                     Detail::SpatialMotion{Detail::SectorPosition(Spatial->Identity(source), {}, {}), {}, {}}, snapshots,
                     time);
                 const auto center = position.Position.RelativeTo(targetZero);
@@ -339,13 +340,14 @@ namespace Keire
                 throw std::overflow_error("Planet simulation time exceeded its finite local epoch.");
             }
             std::vector<std::pair<Ref<SceneRuntimeSession>, Detail::SceneFrameMotion>> motions;
+            std::optional<Detail::FrameRegistry::PreparedPublication> nextPublication;
             if (deltaSeconds > 0.0 &&
                 std::ranges::any_of(Entries, [](const Entry& entry)
                                     { return entry.OwnerFrame != Detail::SceneRuntimeSpatialAccess::RootFrame; }))
             {
                 const auto root = Spatial->Find(Detail::SceneRuntimeSpatialAccess::RootFrame);
                 std::vector<Detail::LiveFrame> owners;
-                const auto previous = PublishPlanetFrames(PlanetSimulationTime);
+                const auto previous = PlanetFrames.Prepare(*Spatial, Planets, PlanetSimulationTime);
                 for (const auto& entry : Entries)
                 {
                     if (!entry.Runtime || entry.OwnerFrame == Detail::SceneRuntimeSpatialAccess::RootFrame)
@@ -355,26 +357,32 @@ namespace Keire
                     Detail::SceneRuntimeSpatialAccess::ValidateFrameFollowing(*entry.Runtime);
                     const auto owner = Spatial->Find(entry.OwnerFrame);
                     const Detail::SpatialMotion zero{Detail::SectorPosition(Spatial->Identity(owner), {}, {}), {}, {}};
-                    const auto previousOrigin =
-                        Detail::ConvertFrameMotion(*Spatial, owner, root, zero, previous, PlanetSimulationTime)
-                            .Position;
+                    const auto previousOrigin = Detail::ConvertFrameMotion(previous, owner, root, zero,
+                                                                           previous.Snapshots(), PlanetSimulationTime)
+                                                    .Position;
                     const auto previousRotation =
-                        Detail::ConvertFrameRotation(*Spatial, owner, root, previous, PlanetSimulationTime);
+                        Detail::ConvertFrameRotation(previous, owner, root, previous.Snapshots(), PlanetSimulationTime);
                     motions.emplace_back(entry.Runtime, Detail::SceneFrameMotion{previousOrigin, previousOrigin,
                                                                                  previousRotation, previousRotation});
                     owners.push_back(owner);
                 }
                 const auto nextTime = PlanetSimulationTime + deltaSeconds;
-                const auto next = PublishPlanetFrames(nextTime);
+                nextPublication.emplace(PlanetFrames.Prepare(*Spatial, Planets, nextTime));
+                const auto& next = *nextPublication;
                 for (std::size_t index = 0; index < motions.size(); ++index)
                 {
                     const auto owner = owners[index];
                     const Detail::SpatialMotion zero{Detail::SectorPosition(Spatial->Identity(owner), {}, {}), {}, {}};
                     motions[index].second.NextOrigin =
-                        Detail::ConvertFrameMotion(*Spatial, owner, root, zero, next, nextTime).Position;
+                        Detail::ConvertFrameMotion(next, owner, root, zero, next.Snapshots(), nextTime).Position;
                     motions[index].second.NextRotation =
-                        Detail::ConvertFrameRotation(*Spatial, owner, root, next, nextTime);
+                        Detail::ConvertFrameRotation(next, owner, root, next.Snapshots(), nextTime);
                 }
+            }
+            for (const auto& [session, motion] : motions)
+            {
+                Detail::SceneRuntimeSpatialAccess::ValidateFrameMotion(*session, motion,
+                                                                       static_cast<float>(deltaSeconds));
             }
             // Every source is projected and validated before any session is changed.
             if (PlanetSettings.Gravity != Detail::PlanetGravityMode::Uniform)
@@ -400,6 +408,10 @@ namespace Keire
             for (const auto& [session, motion] : motions)
             {
                 Detail::SceneRuntimeSpatialAccess::PrepareFrameMotion(*session, motion);
+            }
+            if (nextPublication)
+            {
+                (void)PlanetFrames.Commit(*Spatial, std::move(*nextPublication));
             }
         }
 
@@ -635,8 +647,8 @@ namespace Keire
         {
             if (attachments[index].first->Runtime && attachments[index].first->Runtime->Physics())
             {
-                SceneRuntimeSpatialAccess::SetFrameFollowing(*attachments[index].first->Runtime,
-                    ownerFrames[index] != SceneRuntimeSpatialAccess::RootFrame);
+                SceneRuntimeSpatialAccess::SetFrameFollowing(
+                    *attachments[index].first->Runtime, ownerFrames[index] != SceneRuntimeSpatialAccess::RootFrame);
             }
             attachments[index].first->SpatialAttachment = std::move(attachments[index].second);
             attachments[index].first->OwnerFrame = ownerFrames[index];
@@ -1077,6 +1089,8 @@ namespace Keire
         {
             return false;
         }
+        auto nextEnvironment = m_Impl->Environment;
+        nextEnvironment.Advance(fixedDeltaSeconds);
         m_Impl->PreparePlanetTick(fixedDeltaSeconds);
         struct StepScope
         {
@@ -1085,7 +1099,7 @@ namespace Keire
         } scope{m_Impl->Stepping};
         m_Impl->Stepping = true;
         // Commit once before callbacks. A gameplay fault cannot roll back an already accepted world tick.
-        m_Impl->Environment.Advance(fixedDeltaSeconds);
+        m_Impl->Environment = std::move(nextEnvironment);
         m_Impl->PlanetSimulationTime += fixedDeltaSeconds;
         bool succeeded = true;
         for (const auto& session : sessions)
@@ -1117,6 +1131,8 @@ namespace Keire
         {
             return;
         }
+        auto nextEnvironment = m_Impl->Environment;
+        nextEnvironment.Advance(deltaSeconds);
         m_Impl->PreparePlanetTick(deltaSeconds);
         struct TickScope
         {
@@ -1124,7 +1140,7 @@ namespace Keire
             ~TickScope() { Active = false; }
         } scope{m_Impl->Stepping};
         m_Impl->Stepping = true;
-        m_Impl->Environment.Advance(deltaSeconds);
+        m_Impl->Environment = std::move(nextEnvironment);
         m_Impl->PlanetSimulationTime += deltaSeconds;
         for (const auto& session : sessions)
         {

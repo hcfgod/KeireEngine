@@ -3,6 +3,7 @@
 #include "KeireInternal/Spatial/PlanetProjectFrameResolver.h"
 
 #include "Keire/ECS/Components/AudioComponents.h"
+#include "Keire/ECS/Components/PostProcessVolumeComponent.h"
 #include "Keire/Project/SharedShaderLibrary.h"
 #include "Keire/Scenes/PrefabAsset.h"
 #include "Keire/Scripting/ManagedAssemblyAsset.h"
@@ -35,6 +36,7 @@
 #include "KeireClient/Editor/MaterialInspectorPanel.h"
 #include "KeireClient/Editor/PackageManagerPanel.h"
 #include "KeireClient/Editor/PlayerBuildService.h"
+#include "KeireClient/Editor/PostProcessPreviewSession.h"
 #include "KeireClient/Editor/ProjectSettingsDocument.h"
 #include "KeireClient/Editor/PropertyDrawerRegistry.h"
 #include "KeireClient/Editor/SceneCameraController.h"
@@ -351,6 +353,7 @@ EditorWorkspaceLayer::EditorWorkspaceLayer(const bool smoke, const bool initiali
       m_InputActionsDocument(m_ConstructedDocuments->InputActions.get()),
       m_AnimatorControllerDocument(m_ConstructedDocuments->AnimatorController.get()),
       m_AudioMixerDocument(m_ConstructedDocuments->AudioMixer.get()),
+      m_PostProcessDocument(m_ConstructedDocuments->PostProcessing.get()),
       m_VfxEffectDocument(m_ConstructedDocuments->VfxEffect.get()),
       m_ShaderGraphDocument(m_ConstructedDocuments->ShaderGraph.get()),
       m_MaterialGraphDocument(m_ConstructedDocuments->MaterialGraph.get()),
@@ -379,6 +382,8 @@ EditorWorkspaceLayer::EditorWorkspaceLayer(const bool smoke, const bool initiali
           static_cast<KeireEditor::IRiggingStudioController&>(*this))),
       m_AudioMixerPanel(
           std::make_unique<KeireEditor::AudioMixerPanel>(static_cast<KeireEditor::IAudioMixerPanelController&>(*this))),
+      m_PostProcessPanel(std::make_unique<KeireEditor::PostProcessPanel>(
+          static_cast<KeireEditor::IPostProcessPanelController&>(*this))),
       m_VfxEffectPanel(
           std::make_unique<KeireEditor::VfxEffectPanel>(static_cast<KeireEditor::IVfxEffectPanelController&>(*this))),
       m_ShaderGraphPanel(std::make_unique<KeireEditor::ShaderGraphPanel>(
@@ -562,6 +567,8 @@ EditorWorkspaceLayer::EditorWorkspaceLayer(const bool smoke, const bool initiali
     registerLightChoices(Keire::DirectionalLightComponent::StaticType());
     registerLightChoices(Keire::PointLightComponent::StaticType());
     registerLightChoices(Keire::SpotLightComponent::StaticType());
+    m_PropertyDrawers->RegisterIntegerChoices(Keire::PostProcessVolumeComponent::StaticType(), "shape",
+                                              {"Box", "Sphere"});
     m_PropertyDrawers->RegisterIntegerChoices(Keire::MeshRendererComponent::StaticType(), "giReceive",
                                               {"Light Probes", "Lightmaps", "Disabled"});
     const auto registerAssetPicker = [this](const std::string_view key, const Keire::AssetTypeId type)
@@ -799,6 +806,7 @@ void EditorWorkspaceLayer::OnAttach()
     m_AnimatorControllerPanel->Attach(workspace);
     m_RiggingStudioPanel->Attach(workspace);
     m_AudioMixerPanel->Attach(workspace);
+    m_PostProcessPanel->Attach(workspace);
     m_VfxEffectPanel->Attach(workspace);
     m_ShaderGraphPanel->Attach(workspace);
     m_MaterialGraphPanel->Attach(workspace);
@@ -1473,6 +1481,7 @@ void EditorWorkspaceLayer::OnUi(Keire::UiFrame& ui)
         m_AnimatorControllerPanel->Draw(ui);
         m_RiggingStudioPanel->Draw(ui);
         m_AudioMixerPanel->Draw(ui);
+        m_PostProcessPanel->Draw(ui);
         m_VfxEffectPanel->Draw(ui);
         m_ShaderGraphPanel->Draw(ui);
         m_MaterialGraphPanel->Draw(ui);

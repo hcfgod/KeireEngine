@@ -49,11 +49,11 @@ namespace
     {
 #define KEIRE_SELECT_VFX_SHADER(StageName)                                                                             \
     if (format == SDL_GPU_SHADERFORMAT_DXIL)                                                                           \
-        return {Keire::Detail::BuiltinVfx##StageName##Dxil, sizeof(Keire::Detail::BuiltinVfx##StageName##Dxil)};       \
+        return {Keire::Detail::BuiltinVfx##StageName##Dxil, Keire::Detail::BuiltinVfx##StageName##DxilSize};           \
     if (format == SDL_GPU_SHADERFORMAT_SPIRV)                                                                          \
-        return {Keire::Detail::BuiltinVfx##StageName##Spirv, sizeof(Keire::Detail::BuiltinVfx##StageName##Spirv)};     \
+        return {Keire::Detail::BuiltinVfx##StageName##Spirv, Keire::Detail::BuiltinVfx##StageName##SpirvSize};         \
     if (format == SDL_GPU_SHADERFORMAT_MSL)                                                                            \
-        return {Keire::Detail::BuiltinVfx##StageName##Msl, sizeof(Keire::Detail::BuiltinVfx##StageName##Msl)};         \
+        return {Keire::Detail::BuiltinVfx##StageName##Msl, Keire::Detail::BuiltinVfx##StageName##MslSize};             \
     break
         // Every generated branch selects different embedded shader symbols despite sharing the same control flow.
         // NOLINTNEXTLINE(bugprone-branch-clone)

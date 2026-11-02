@@ -1,6 +1,6 @@
 #pragma once
 
-#include "KeireInternal/Rendering/CloudTemporalResources.h"
+#include "KeireInternal/Rendering/CloudHistoryCompositePolicy.h"
 
 struct SDL_GPUCommandBuffer;
 struct SDL_GPUGraphicsPipeline;
@@ -15,8 +15,10 @@ namespace Keire::RenderBackend
     struct GpuTextureResources;
     struct VolumeShadowUniforms;
 
-    [[nodiscard]] SDL_GPUGraphicsPipeline* EnsureCloudTemporalPipeline(RenderSharedState& state,
-                                                                       CloudTemporalPass pass);
+    [[nodiscard]] SDL_GPUGraphicsPipeline*
+    EnsureCloudTemporalPipeline(RenderSharedState& state, CloudTemporalPass pass,
+                                RenderSampleCount samples = RenderSampleCount::One,
+                                CloudHistoryCompositeMode mode = CloudHistoryCompositeMode::Composite);
 
     void RecordCloudTemporal(RenderSharedState& state, SDL_GPUCommandBuffer* commands, RenderSurfaceState& surface,
                              const SceneRenderPacket& packet, const CloudVolumeViewUniforms& uniforms,

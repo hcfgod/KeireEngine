@@ -16,8 +16,8 @@
 #include "Keire/Vfx/VfxSystem.h"
 #include "Keire/Vfx/VfxVolumeAsset.h"
 #include "KeireInternal/Physics/GravityField.h"
-#include "KeireInternal/Physics/PhysicsFrameAccess.h"
 #include "KeireInternal/Physics/MotionSettings.h"
+#include "KeireInternal/Physics/PhysicsFrameAccess.h"
 #include "KeireInternal/Physics/PhysicsOriginTranslation.h"
 #include "KeireInternal/Scenes/SceneRuntimeSessionImpl.h"
 #include "KeireInternal/Spatial/SimulationOriginPolicy.h"
@@ -85,12 +85,28 @@ namespace Keire
         {
             return;
         }
+        const bool hasDynamicBodies = std::ranges::any_of(
+            state.PhysicsBodies, [](const auto& entry)
+            { return entry.second.Body && entry.second.Definition.Motion == PhysicsMotionType::Dynamic; });
         for (const auto& entity : state.Runtime->Entities())
         {
             const auto character = entity.GetComponent<CharacterControllerComponent>();
             if (character && character->Enabled())
             {
-                throw std::invalid_argument("Planet owner transfer does not yet support character controllers.");
+                const auto body = state.PhysicsBodies.find(entity.Id());
+                if (body == state.PhysicsBodies.end() || !body->second.Body ||
+                    body->second.Definition.Motion != PhysicsMotionType::Kinematic)
+                {
+                    throw std::invalid_argument("Planet owner transfer requires a synchronized character body.");
+                }
+                if (hasDynamicBodies)
+                {
+                    throw std::invalid_argument("Character frame preflight has no dynamic-contact motion bound yet.");
+                }
+                if (entity.Parent())
+                {
+                    throw std::invalid_argument("Planet owner transfer currently requires unparented characters.");
+                }
             }
             const auto collider = entity.GetComponent<ColliderComponent>();
             if (!collider || !collider->Enabled())
@@ -99,8 +115,7 @@ namespace Keire
             }
             if (entity.Parent())
             {
-                throw std::invalid_argument(
-                    "Planet owner transfer currently requires unparented colliders.");
+                throw std::invalid_argument("Planet owner transfer currently requires unparented colliders.");
             }
         }
     }
@@ -110,6 +125,14 @@ namespace Keire
         auto& state = *session.m_Impl;
         PhysicsFrameAccess::SetFrameKinematics(*state.PhysicsWorldService, state.FrameSupportBodies, enabled);
         state.FrameFollowing = enabled;
+    }
+
+    void Detail::SceneRuntimeSpatialAccess::ValidateFrameMotion(const SceneRuntimeSession& session,
+                                                                const SceneFrameMotion& motion,
+                                                                const float deltaSeconds)
+    {
+        session.m_Impl->RequireOwner("ValidateFrameMotion");
+        session.m_Impl->ValidateFrameMotion(motion, deltaSeconds);
     }
 
     void Detail::SceneRuntimeSpatialAccess::PrepareFrameMotion(SceneRuntimeSession& session,
@@ -138,7 +161,8 @@ namespace Keire
                 throw std::runtime_error("A scene physics checkpoint could not resolve a runtime body.");
             result.push_back({entity, state->Position, state->Rotation, state->LinearVelocity, state->AngularVelocity,
                               state->Sleeping, m_Impl->PhysicsWorldService->WorldOrigin(),
-                              m_Impl->PhysicsWorldService->GetMotionSettings(runtime.Body)});
+                              m_Impl->PhysicsWorldService->GetMotionSettings(runtime.Body), state->PendingForce,
+                              state->PendingTorque});
         }
         return result;
     }
@@ -156,7 +180,11 @@ namespace Keire
         {
             result.Gravity = m_Impl->PhysicsWorldService->Gravity();
             result.GravitySources = m_Impl->PhysicsWorldService->GravitySources();
+            const auto loads = Detail::PhysicsFrameAccess::CaptureLoadCheckpoint(*m_Impl->PhysicsWorldService);
+            result.Loads =
+                ScenePhysicsLoadCheckpoint{loads.Tick, loads.AcceptedWaterTick, loads.AcceptedWaterDeltaSeconds};
         }
+        result.WaterTimeSeconds = m_Impl->WaterTimeSeconds;
         result.Bodies = CapturePhysicsCheckpoint();
         return result;
     }
@@ -168,7 +196,37 @@ namespace Keire
         {
             throw std::runtime_error("Physics checkpoint world presence does not match the runtime session.");
         }
+        if (checkpoint.WaterTimeSeconds &&
+            (!std::isfinite(*checkpoint.WaterTimeSeconds) || *checkpoint.WaterTimeSeconds < 0.0))
+        {
+            throw std::invalid_argument("Checkpoint water phase must be finite and nonnegative.");
+        }
+        std::optional<Detail::PhysicsLoadCheckpoint> loads;
+        if (checkpoint.Loads)
+        {
+            if (!m_Impl->PhysicsWorldService)
+            {
+                throw std::invalid_argument("Prepared-load checkpoint metadata requires a physics world.");
+            }
+            loads = Detail::PhysicsLoadCheckpoint{checkpoint.Loads->Tick, checkpoint.Loads->AcceptedWaterTick,
+                                                  checkpoint.Loads->AcceptedWaterDeltaSeconds};
+            Detail::PhysicsFrameAccess::ValidateLoadCheckpoint(*m_Impl->PhysicsWorldService, *loads);
+        }
+        if (!loads && m_Impl->PhysicsWorldService)
+        {
+            loads = Detail::PhysicsFrameAccess::CaptureLoadCheckpoint(*m_Impl->PhysicsWorldService);
+            Detail::PhysicsFrameAccess::ValidateLoadCheckpoint(*m_Impl->PhysicsWorldService, *loads);
+        }
         RestorePhysicsCheckpointState(checkpoint.Bodies, checkpoint.Gravity, &checkpoint.GravitySources);
+        if (loads)
+        {
+            Detail::PhysicsFrameAccess::RestoreLoadCheckpoint(*m_Impl->PhysicsWorldService, *loads);
+        }
+        if (checkpoint.WaterTimeSeconds)
+        {
+            m_Impl->WaterTimeSeconds = *checkpoint.WaterTimeSeconds;
+            m_Impl->PublishWaterSimulationTime();
+        }
     }
 
     void SceneRuntimeSession::RestorePhysicsCheckpointState(const std::span<const ScenePhysicsCheckpointBody> bodies,
@@ -213,7 +271,10 @@ namespace Keire
             if (!body.Entity || !identities.insert(body.Entity).second || found == m_Impl->PhysicsBodies.end() ||
                 !found->second.Body || !Math::IsFinite(body.Position) || !Math::IsFinite(body.Rotation) ||
                 !Math::IsFinite(body.LinearVelocity) || !Math::IsFinite(body.AngularVelocity) ||
-                !Math::IsFinite(body.WorldOrigin) ||
+                !Math::IsFinite(body.WorldOrigin) || !Math::IsFinite(body.PendingForce) ||
+                !Math::IsFinite(body.PendingTorque) ||
+                (found->second.Definition.Motion != PhysicsMotionType::Dynamic &&
+                 (body.PendingForce != Vector3{} || body.PendingTorque != Vector3{})) ||
                 (body.MotionSettings && !Detail::ValidMotionSettings(*body.MotionSettings)))
             {
                 throw std::runtime_error("A scene physics checkpoint is incompatible with the runtime scene.");
@@ -225,7 +286,7 @@ namespace Keire
             const auto position =
                 Detail::TranslatePhysicsPosition(body.Position, originDelta, maximumPositionErrorMetres);
             restoredBodies.push_back({found->second.Body, position, body.Rotation, body.LinearVelocity,
-                                      body.AngularVelocity, body.Sleeping});
+                                      body.AngularVelocity, body.Sleeping, body.PendingForce, body.PendingTorque});
         }
         const auto liveBodyCount = static_cast<std::size_t>(std::ranges::count_if(
             m_Impl->PhysicsBodies, [](const auto& entry) { return static_cast<bool>(entry.second.Body); }));
