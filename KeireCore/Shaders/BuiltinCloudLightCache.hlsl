@@ -1,7 +1,7 @@
 #define KEIRE_CLOUD_NOISE_TEXTURE t0
 #define KEIRE_CLOUD_NOISE_SAMPLER s0
 #define KEIRE_CLOUD_NOISE_SPACE space0
-#define KEIRE_PLANET_VOLUME_SET 1
+#define KEIRE_PLANET_VOLUME_SET 0
 #include "CloudVolumeView.hlsli"
 
 RWStructuredBuffer<float4> LightTransmission : register(u0, space1);
@@ -21,7 +21,7 @@ void CSMain(uint3 id : SV_DispatchThreadID)
     {
         return;
     }
-    const uint index = (id.z * GridDimensions.y + id.y) * GridDimensions.x + id.x;
+    const uint index = GridDimensions.w + (id.z * GridDimensions.y + id.y) * GridDimensions.x + id.x;
     if (VolumeView.Quality.x == 0U)
     {
         LightTransmission[index] = 1.0F.xxxx;

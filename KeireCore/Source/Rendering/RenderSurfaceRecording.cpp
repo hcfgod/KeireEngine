@@ -22,6 +22,7 @@
 #include <functional>
 #include <limits>
 #include <memory>
+#include <span>
 #include <stdexcept>
 #include <tuple>
 #include <unordered_set>
@@ -688,6 +689,18 @@ namespace Keire::RenderBackend
                     if (request != requests.end() && !request->Packet.Water.Patches.empty() &&
                         surface.ActiveWorkset().Depth)
                     {
+                        // The cloud pass normally prepares this shared view. Water still needs a valid
+                        // binding when all volumetric effects are disabled, including after a prior frame
+                        // that had them enabled; never reuse stale environment data in that case.
+                        if (!cloudVolumeRequired)
+                        {
+                            const auto volume =
+                                MakeCloudVolumeViewUniforms(request->Packet, surface.Width, surface.Height);
+                            auto& uploads = surface.ActiveWorkset().DynamicUploads;
+                            (void)UploadDynamicBuffer(commands, uploads.CloudView, uploads.CloudViewTransfer,
+                                                      std::as_bytes(std::span{&volume, 1}),
+                                                      SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ, "water environment");
+                        }
                         std::vector<float> meshDepths;
                         std::vector<float> waterDepths;
                         meshDepths.reserve(preparedDraws.Transparent.Batches.size());

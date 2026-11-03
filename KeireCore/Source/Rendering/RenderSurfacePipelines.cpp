@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -276,11 +277,24 @@ namespace Keire::RenderBackend
 
     void RenderSharedState::CreateGeometryResources(const std::uint32_t resourceGeneration)
     {
+        auto stageStarted = std::chrono::steady_clock::now();
+        const auto recordStage = [&](const char* stage)
+        {
+            const auto finished = std::chrono::steady_clock::now();
+            KEIRE_CORE_INFO("Renderer startup stage '{}' completed in {:.3f} ms.", stage,
+                            std::chrono::duration<double, std::milli>(finished - stageStarted).count());
+            stageStarted = finished;
+        };
         ShadowPipeline = CreateDepthPipeline(true);
+        recordStage("shadow pipeline");
         SceneDepthPipeline = CreateDepthPipeline(false);
+        recordStage("scene-depth pipeline");
         ToneMapPipeline = CreateToneMapPipeline();
+        recordStage("tone-map pipeline");
         DisplayOutputPipeline = CreateToneMapPipeline(true);
+        recordStage("display-output pipeline");
         (void)EnsureDeferredPipelines();
+        recordStage("deferred capability and pipelines");
         Msaa2Capability.store(ResolveSamples(RenderSampleCount::Two) == SDL_GPU_SAMPLECOUNT_2,
                               std::memory_order_release);
         Msaa4Capability.store(ResolveSamples(RenderSampleCount::Four) == SDL_GPU_SAMPLECOUNT_4,
@@ -321,7 +335,9 @@ namespace Keire::RenderBackend
         ErrorMesh = CreateMeshResources(*MeshAsset::Error());
         CheckerboardTexture = CreateTextureResources(*Texture2DAsset::Checkerboard());
         DefaultSkyTexture = CreateTextureResources(*CreateDefaultSky());
+        recordStage("default meshes textures and samplers");
         BrdfIntegrationLut = CreateTextureResources(*CreateBrdfIntegrationLut(128U, 256U));
+        recordStage("BRDF integration LUT");
         const auto solidTexture =
             [](const std::array<std::byte, 4> pixel, const TextureSemantic semantic, const TextureColorSpace colorSpace)
         {
@@ -374,6 +390,7 @@ namespace Keire::RenderBackend
         SpatialSelectionFallbackBuffer = UploadBuffer(std::as_bytes(std::span(std::addressof(spatialFallback), 1U)),
                                                       SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ);
         SpatialSelectionFallbackDeviceGeneration = resourceGeneration;
+        recordStage("default lighting and fallback resources");
     }
 
     void RenderSharedState::ReleaseMeshResources(GpuMeshResources& resources) noexcept
@@ -455,6 +472,14 @@ namespace Keire::RenderBackend
                 SDL_ReleaseGPUBuffer(Device, resources.CpuVfxVertices.Buffer);
             if (resources.CpuVfxTransfer)
                 SDL_ReleaseGPUTransferBuffer(Device, resources.CpuVfxTransfer);
+            if (resources.CloudView.Buffer)
+            {
+                SDL_ReleaseGPUBuffer(Device, resources.CloudView.Buffer);
+            }
+            if (resources.CloudViewTransfer)
+            {
+                SDL_ReleaseGPUTransferBuffer(Device, resources.CloudViewTransfer);
+            }
         }
         resources = {};
     }
@@ -1457,13 +1482,14 @@ namespace Keire::RenderBackend
         result.Samples = samples;
         try
         {
+            const auto started = std::chrono::steady_clock::now();
             result.Cube = CreatePipeline(samples, SDL_GPU_PRIMITIVETYPE_TRIANGLELIST, true);
             result.Grid = CreateGridPipeline(samples);
             result.Sky = CreateSkyPipeline(samples);
-            result.Vfx = CreateCpuVfxPipeline(samples);
-            result.GpuVfx = CreateGpuVfxPipeline(samples);
-            result.GpuVfxRibbon = CreateGpuVfxPipeline(samples, true);
-            result.GpuVfxMesh = CreateGpuVfxMeshPipeline(samples);
+            // Particle variants are created on first use rather than for every scene/sample count.
+            KEIRE_CORE_INFO(
+                "Built-in scene pipeline set (samples={}) completed in {:.3f} ms.", static_cast<std::uint32_t>(samples),
+                std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count());
             return Pipelines.emplace_back(result);
         }
         catch (...)

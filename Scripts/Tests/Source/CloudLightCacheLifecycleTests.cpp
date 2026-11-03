@@ -3,7 +3,25 @@
 
 #include <doctest/doctest.h>
 
+#include <cstring>
 #include <stdexcept>
+
+TEST_CASE("Cloud cache uniforms preserve resolved planetary inputs within the Vulkan slot limit")
+{
+    using namespace Keire::RenderBackend;
+    CloudVolumeViewUniforms view{};
+    view.Volume.Density[0] = 0.7F;
+    view.PlanetaryCloud.Controls[0] = 1U;
+    view.PlanetaryCloud.RadiusGeometry.X = 6371000.0F;
+    const CloudLightCacheUniforms uniforms{view, {1, 2, 3, 0}, {4, 5, 6, 0}, {129, 33, 129, 42}};
+    CHECK(sizeof(uniforms) <= 4096U);
+    CHECK(std::memcmp(uniforms.View.data(), &view, uniforms.View.size()) == 0);
+    CHECK(uniforms.GridDimensions[3] == 42U);
+
+    view.PlanetWeather.Controls[0] = 1U;
+    const CloudLightCacheUniforms otherPlanets{view, {1, 2, 3, 0}, {4, 5, 6, 0}, {129, 33, 129, 42}};
+    CHECK(uniforms.View == otherPlanets.View);
+}
 
 struct SDL_GPUDevice
 {
@@ -34,9 +52,12 @@ namespace
         bool FailPipeline = false;
         bool FailBuffer = false;
         bool FailPass = false;
+        int FailLevel = -1;
         int Pipelines = 0;
         int Buffers = 0;
         int Dispatches = 0;
+        std::uint32_t CurrentLevel = 0;
+        std::array<int, Keire::RenderBackend::CloudLightCacheLevelCount> LevelDispatches{};
     } state;
 
     SDL_GPUComputePass computePass;
@@ -71,7 +92,7 @@ namespace
 
         auto Record()
         {
-            return Keire::RenderBackend::RecordCloudLightCache(&Device, &Commands, Resources, View, Noise);
+            return Keire::RenderBackend::RecordCloudLightCache(&Device, &Commands, Resources, View, Noise).Levels[0];
         }
     };
 } // namespace
@@ -97,7 +118,7 @@ extern "C"
 
     SDL_GPUBuffer* SDLCALL SDL_CreateGPUBuffer(SDL_GPUDevice*, const SDL_GPUBufferCreateInfo* info)
     {
-        CHECK(info->size == 8786448U);
+        CHECK(info->size == 8786448U * Keire::RenderBackend::CloudLightCacheLevelCount);
         if (state.FailBuffer)
         {
             return nullptr;
@@ -118,10 +139,14 @@ extern "C"
         delete value;
     }
 
-    void SDLCALL SDL_PushGPUComputeUniformData(SDL_GPUCommandBuffer*, Uint32 slot, const void*, Uint32 size)
+    void SDLCALL SDL_PushGPUComputeUniformData(SDL_GPUCommandBuffer*, Uint32 slot, const void* data, Uint32 size)
     {
         CHECK(slot == 0U);
         CHECK(size == sizeof(Keire::RenderBackend::CloudLightCacheUniforms));
+        const auto& uniforms = *static_cast<const Keire::RenderBackend::CloudLightCacheUniforms*>(data);
+        state.CurrentLevel = uniforms.GridDimensions[3] / Keire::RenderBackend::CloudLightCacheLevelCapacity;
+        REQUIRE(state.CurrentLevel < Keire::RenderBackend::CloudLightCacheLevelCount);
+        CHECK(uniforms.GridDimensions[3] % Keire::RenderBackend::CloudLightCacheLevelCapacity == 0);
     }
 
     SDL_GPUComputePass* SDLCALL SDL_BeginGPUComputePass(SDL_GPUCommandBuffer*,
@@ -131,7 +156,7 @@ extern "C"
     {
         CHECK(count == 1U);
         CHECK(buffers[0].buffer != nullptr);
-        return state.FailPass ? nullptr : &computePass;
+        return state.FailPass || state.FailLevel == static_cast<int>(state.CurrentLevel) ? nullptr : &computePass;
     }
 
     void SDLCALL SDL_BindGPUComputePipeline(SDL_GPUComputePass*, SDL_GPUComputePipeline*) {}
@@ -143,7 +168,11 @@ extern "C"
         CHECK(x == 17U);
         CHECK(y == 5U);
         CHECK(z == 129U);
-        ++state.Dispatches;
+        ++state.LevelDispatches[state.CurrentLevel];
+        if (state.CurrentLevel == 0)
+        {
+            ++state.Dispatches;
+        }
     }
 
     void SDLCALL SDL_EndGPUComputePass(SDL_GPUComputePass*) {}
@@ -161,6 +190,80 @@ TEST_CASE("Cache allocation failure publishes no partial resources and permits r
     state.FailPipeline = false;
     state.FailBuffer = false;
     CHECK(fixture.Record().GridDimensions[0] == 129U);
+}
+
+TEST_CASE("Cache levels publish independently and distant grids survive near-cell movement")
+{
+    using namespace Keire::RenderBackend;
+    Fixture fixture;
+    const auto lookup =
+        RecordCloudLightCache(&fixture.Device, &fixture.Commands, fixture.Resources, fixture.View, fixture.Noise);
+    for (std::size_t level = 0; level < CloudLightCacheLevelCount; ++level)
+    {
+        CHECK(state.LevelDispatches[level] == 1);
+        CHECK(lookup.Levels[level].GridDimensions[3] == level * CloudLightCacheLevelCapacity);
+        REQUIRE(fixture.Resources.Validity[level]->RecordedKey);
+        CHECK_FALSE(fixture.Resources.Validity[level]->SubmittedKey);
+    }
+    SubmitCloudLightCache(fixture.Resources);
+    fixture.View.Volume.PatternOrigin[0] = 0.03125F;
+    fixture.Record();
+    CHECK(state.LevelDispatches[0] == 2);
+    CHECK(state.LevelDispatches[1] == 1);
+    CHECK(state.LevelDispatches[2] == 1);
+    SubmitCloudLightCache(fixture.Resources);
+    fixture.View.Volume.PatternOrigin[0] = 0.125F;
+    fixture.Record();
+    CHECK(state.LevelDispatches[0] == 3);
+    CHECK(state.LevelDispatches[1] == 2);
+    CHECK(state.LevelDispatches[2] == 1);
+    InvalidateCloudLightCache(fixture.Resources);
+    SubmitCloudLightCache(fixture.Resources);
+    for (const auto& validity : fixture.Resources.Validity)
+    {
+        CHECK_FALSE(validity->RecordedKey);
+        CHECK_FALSE(validity->SubmittedKey);
+    }
+}
+
+TEST_CASE("An interrupted multi-level cache recording retries every abandoned write")
+{
+    using namespace Keire::RenderBackend;
+    Fixture fixture;
+    fixture.Record();
+    SubmitCloudLightCache(fixture.Resources);
+    fixture.View.Volume.Density[0] += 0.1F;
+    state.FailLevel = 1;
+    CHECK_THROWS_AS(fixture.Record(), std::runtime_error);
+    REQUIRE(fixture.Resources.Validity[0]->RecordedKey);
+    CHECK_FALSE(fixture.Resources.Validity[0]->SubmittedKey);
+    CHECK_FALSE(fixture.Resources.Validity[1]->SubmittedKey);
+    state.FailLevel = -1;
+    fixture.Record();
+    CHECK(state.LevelDispatches[0] == 3);
+    CHECK(state.LevelDispatches[1] == 2);
+    CHECK(state.LevelDispatches[2] == 2);
+    SubmitCloudLightCache(fixture.Resources);
+    fixture.Record();
+    CHECK(state.LevelDispatches[0] == 3);
+    CHECK(state.LevelDispatches[1] == 2);
+    CHECK(state.LevelDispatches[2] == 2);
+}
+
+TEST_CASE("Thin planetary shells do not use undersampled Cartesian distant levels")
+{
+    using namespace Keire::RenderBackend;
+    Fixture fixture;
+    fixture.View.PlanetaryCloud.Controls[0] = 1;
+    const auto lookup =
+        RecordCloudLightCache(&fixture.Device, &fixture.Commands, fixture.Resources, fixture.View, fixture.Noise);
+    CHECK(lookup.Levels[0].GridDimensions[0] != 0U);
+    for (std::size_t level = 1; level < CloudLightCacheLevelCount; ++level)
+    {
+        CHECK(lookup.Levels[level].GridDimensions[0] == 0U);
+        CHECK(state.LevelDispatches[level] == 0);
+        CHECK_FALSE(fixture.Resources.Validity[level]->RecordedKey);
+    }
 }
 
 TEST_CASE("Cache dispatch rebuilds every use and resource release is idempotent")
@@ -205,9 +308,9 @@ TEST_CASE("Cloud cache reuse requires submission and exact light-field inputs")
 {
     Fixture fixture;
     fixture.Record();
-    CHECK_FALSE(fixture.Resources.Validity->SubmittedKey);
+    CHECK_FALSE(fixture.Resources.Validity[0]->SubmittedKey);
     Keire::RenderBackend::SubmitCloudLightCache(fixture.Resources);
-    REQUIRE(fixture.Resources.Validity->SubmittedKey);
+    REQUIRE(fixture.Resources.Validity[0]->SubmittedKey);
     fixture.Record();
     CHECK(state.Dispatches == 1);
     fixture.View.AmbientRadiance.X = 3.0F;
@@ -218,7 +321,7 @@ TEST_CASE("Cloud cache reuse requires submission and exact light-field inputs")
     fixture.View.Volume.PatternOrigin[0] += 0.125F;
     fixture.Record();
     CHECK(state.Dispatches == 2);
-    CHECK_FALSE(fixture.Resources.Validity->SubmittedKey);
+    CHECK_FALSE(fixture.Resources.Validity[0]->SubmittedKey);
     Keire::RenderBackend::SubmitCloudLightCache(fixture.Resources);
     fixture.View.SunDirection.X += 0.1F;
     fixture.Record();
@@ -271,7 +374,7 @@ TEST_CASE("Abandoned cloud cache writes cannot resurrect an earlier submitted ke
     fixture.Record();
     Keire::RenderBackend::InvalidateCloudLightCache(fixture.Resources);
     Keire::RenderBackend::SubmitCloudLightCache(fixture.Resources);
-    CHECK_FALSE(fixture.Resources.Validity->SubmittedKey);
+    CHECK_FALSE(fixture.Resources.Validity[0]->SubmittedKey);
     fixture.View = original;
     fixture.Record();
     CHECK(state.Dispatches == 3);
@@ -279,7 +382,7 @@ TEST_CASE("Abandoned cloud cache writes cannot resurrect an earlier submitted ke
     fixture.View.Volume.Density[0] += 0.1F;
     state.FailPass = true;
     CHECK_THROWS_AS(fixture.Record(), std::runtime_error);
-    CHECK_FALSE(fixture.Resources.Validity->SubmittedKey);
+    CHECK_FALSE(fixture.Resources.Validity[0]->SubmittedKey);
     state.FailPass = false;
     fixture.View = original;
     fixture.Record();
@@ -291,28 +394,28 @@ TEST_CASE("Frame cloud publications survive retirement and abandon every recorde
     Fixture fixture;
     Keire::RenderBackend::CloudLightCachePublications publications;
     fixture.Record();
-    publications.Track(fixture.Resources.Validity);
-    const auto retired = fixture.Resources.Validity;
+    publications.Track(fixture.Resources.Validity[0]);
+    const auto retired = fixture.Resources.Validity[0];
     Keire::RenderBackend::ReleaseCloudLightCache(&fixture.Device, fixture.Resources);
     fixture.Record();
-    publications.Track(fixture.Resources.Validity);
+    publications.Track(fixture.Resources.Validity[0]);
     publications.Submit();
     CHECK_FALSE(retired->SubmittedKey);
-    REQUIRE(fixture.Resources.Validity->SubmittedKey);
+    REQUIRE(fixture.Resources.Validity[0]->SubmittedKey);
     fixture.Record();
     CHECK(state.Dispatches == 2);
 
     fixture.View.Volume.Density[0] += 0.1F;
     fixture.Record();
-    publications.Track(fixture.Resources.Validity);
+    publications.Track(fixture.Resources.Validity[0]);
     auto nested = std::make_shared<Keire::RenderBackend::CloudLightCacheValidity>();
-    nested->RecordedKey = fixture.Resources.Validity->RecordedKey;
+    nested->RecordedKey = fixture.Resources.Validity[0]->RecordedKey;
     publications.Track(nested);
     publications.Invalidate();
     publications.Submit();
     CHECK_FALSE(nested->SubmittedKey);
     CHECK_FALSE(nested->RecordedKey);
-    CHECK_FALSE(fixture.Resources.Validity->SubmittedKey);
+    CHECK_FALSE(fixture.Resources.Validity[0]->SubmittedKey);
     fixture.Record();
     CHECK(state.Dispatches == 4);
 }
@@ -323,10 +426,10 @@ TEST_CASE("Destroying an unfinished cloud publication transaction invalidates it
     fixture.Record();
     {
         Keire::RenderBackend::CloudLightCachePublications publications;
-        publications.Track(fixture.Resources.Validity);
+        publications.Track(fixture.Resources.Validity[0]);
     }
-    CHECK_FALSE(fixture.Resources.Validity->RecordedKey);
-    CHECK_FALSE(fixture.Resources.Validity->SubmittedKey);
+    CHECK_FALSE(fixture.Resources.Validity[0]->RecordedKey);
+    CHECK_FALSE(fixture.Resources.Validity[0]->SubmittedKey);
     fixture.Record();
     CHECK(state.Dispatches == 2);
 }

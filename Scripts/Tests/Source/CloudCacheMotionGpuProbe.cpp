@@ -39,11 +39,13 @@ namespace
         }
     };
 
-    std::vector<float> ReadCache(Resources& resources, const CloudVolumeViewUniforms& view, bool aligned)
+    std::vector<float> ReadCache(Resources& resources, const CloudVolumeViewUniforms& view, bool aligned,
+                                 const std::uint32_t level)
     {
         auto* device = resources.Device;
         constexpr Uint32 count = 129U * 33U * 129U * 4U;
         constexpr Uint32 bytes = count * sizeof(float);
+        const Uint32 bufferOffset = level * CloudLightCacheLevelCapacity;
         const SDL_GPUTransferBufferCreateInfo transferInfo{SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD, bytes, 0};
         const auto releaseTransfer = [device](SDL_GPUTransferBuffer* value)
         { SDL_ReleaseGPUTransferBuffer(device, value); };
@@ -57,12 +59,13 @@ namespace
         (void)RecordCloudLightCache(device, commands.get(), resources.Cache, view, resources.Noise);
         if (!aligned)
         {
-            const auto grid = MakeCloudLightCacheGrid(view.Volume, view.WeatherControls.W);
+            const auto grid =
+                MakeCloudLightCacheGrid(view.Volume, view.WeatherControls.W, static_cast<float>(1U << (level * 2U)));
             Require(grid.has_value());
             const CloudLightCacheUniforms uniforms{view,
                                                    {grid->Origin[0], grid->Origin[1], grid->Origin[2], 0},
                                                    {grid->CellSize[0], grid->CellSize[1], grid->CellSize[2], 0},
-                                                   {129U, 33U, 129U, 0U}};
+                                                   {129U, 33U, 129U, bufferOffset}};
             SDL_PushGPUComputeUniformData(commands.get(), 0, &uniforms, sizeof(uniforms));
             const SDL_GPUStorageBufferReadWriteBinding output{resources.Cache.Transmission, false, 0, 0, 0};
             auto* pass = SDL_BeginGPUComputePass(commands.get(), nullptr, 0, &output, 1);
@@ -75,7 +78,7 @@ namespace
         }
         auto* copy = SDL_BeginGPUCopyPass(commands.get());
         Require(copy != nullptr);
-        const SDL_GPUBufferRegion source{resources.Cache.Transmission, 0, bytes};
+        const SDL_GPUBufferRegion source{resources.Cache.Transmission, bufferOffset * 16U, bytes};
         const SDL_GPUTransferBufferLocation destination{transfer.get(), 0};
         SDL_DownloadFromGPUBuffer(copy, &source, &destination);
         SDL_EndGPUCopyPass(copy);
@@ -124,7 +127,8 @@ namespace
             (void)RecordCloudLightCache(resources.Device, commands.get(), resources.Cache, view, resources.Noise,
                                         basePhase);
             Require(SDL_WriteGPUTimestamp(commands.get(), query.get(), 1));
-            const bool rebuilt = resources.Cache.Validity->RecordedKey.has_value();
+            const bool rebuilt = std::ranges::any_of(resources.Cache.Validity, [](const auto& validity)
+                                                     { return validity->RecordedKey.has_value(); });
             if (rebuilt != (step == 0))
             {
                 throw std::runtime_error("Vertical camera movement unexpectedly rebuilt the cloud light cache.");
@@ -166,6 +170,7 @@ namespace
         sampler.max_lod = 32;
         resources.Noise.Sampler = SDL_CreateGPUSampler(device, &sampler);
         Require(resources.Noise.Sampler != nullptr);
+        bool comparisonFailed = false;
         for (const float phase : {0.012345F, 255.99998F})
         {
             CloudVolumeViewUniforms view{};
@@ -175,27 +180,46 @@ namespace
             view.Volume.Quality = {1, 1, 48, 6};
             view.SunDirection = {0.6F, 0.8F, 0, 0};
             view.SunRadiance = {1, 1, 1, 0};
+            view.AmbientRadiance = {0.3F, 0.3F, 0.3F, 0.76F};
             view.ShapeControls = {4, 0, 64, 1};
             view.RegionalControls = {1, 2, 0, 1.2F};
             view.WeatherControls = {1, 1, 0.5F, 500};
             view.HeightProfile = {0, 0.2F, 0.8F, 1};
             VerifyCanonicalVerticalReuse(resources, view);
-            const auto original = ReadCache(resources, view, false);
-            const auto aligned = ReadCache(resources, view, true);
-            double total = 0;
-            double maximum = 0;
-            for (std::size_t index = 0; index < original.size(); ++index)
+            for (std::uint32_t level = 0; level < CloudLightCacheLevelCount; ++level)
             {
-                if (!std::isfinite(original[index]) || !std::isfinite(aligned[index]))
+                const auto original = ReadCache(resources, view, false, level);
+                const auto aligned = ReadCache(resources, view, true, level);
+                double total = 0;
+                double maximum = 0;
+                float minimumTransmission = 1.0F;
+                float maximumTransmission = 0.0F;
+                for (std::size_t index = 0; index < original.size(); ++index)
                 {
-                    throw std::runtime_error("Non-finite cache output.");
+                    if (!std::isfinite(original[index]) || !std::isfinite(aligned[index]))
+                    {
+                        throw std::runtime_error("Non-finite cache output.");
+                    }
+                    const double error = std::abs(static_cast<double>(original[index]) - aligned[index]);
+                    minimumTransmission = std::min(minimumTransmission, aligned[index]);
+                    maximumTransmission = std::max(maximumTransmission, aligned[index]);
+                    maximum = std::max(maximum, error);
+                    total += error;
                 }
-                const double error = std::abs(static_cast<double>(original[index]) - aligned[index]);
-                maximum = std::max(maximum, error);
-                total += error;
+                std::cout << "phase=" << phase << " level=" << level << " values=" << original.size()
+                          << " max=" << maximum << " mean=" << total / original.size()
+                          << " transmission_min=" << minimumTransmission << " transmission_max=" << maximumTransmission
+                          << '\n';
+                if (maximum > 0.0001 || minimumTransmission < 0.0F || minimumTransmission >= 0.99F ||
+                    maximumTransmission <= 0.01F || maximumTransmission > 1.0F)
+                {
+                    comparisonFailed = true;
+                }
             }
-            std::cout << "phase=" << phase << " values=" << original.size() << " max=" << maximum
-                      << " mean=" << total / original.size() << '\n';
+        }
+        if (comparisonFailed)
+        {
+            throw std::runtime_error("Aligned cloud cache exceeds the transmission comparison tolerance.");
         }
     }
 } // namespace
@@ -207,7 +231,7 @@ int main(int argc, char** argv)
         Require(SDL_Init(SDL_INIT_VIDEO));
         const auto destroy = [](SDL_GPUDevice* value) { SDL_DestroyGPUDevice(value); };
         std::unique_ptr<SDL_GPUDevice, decltype(destroy)> device(
-            SDL_CreateGPUDevice(SDL_GPU_SHADERFORMAT_DXIL | SDL_GPU_SHADERFORMAT_SPIRV, false,
+            SDL_CreateGPUDevice(SDL_GPU_SHADERFORMAT_DXIL | SDL_GPU_SHADERFORMAT_SPIRV, true,
                                 argc > 1 ? argv[1] : nullptr),
             destroy);
         Require(device != nullptr);

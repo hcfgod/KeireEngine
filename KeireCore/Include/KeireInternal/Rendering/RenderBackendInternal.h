@@ -328,6 +328,22 @@ namespace Keire::RenderBackend
         std::uint64_t LastAttemptedDependencyStamp = 0;
         std::uint64_t LastGoodDependencyStamp = 0;
         std::uint64_t LastDependencyCheckFrame = 0;
+        bool DeferredPreparationChecked = false;
+
+        [[nodiscard]] bool DependenciesCheckedFor(const std::uint64_t frame, const bool includeDeferred) const noexcept
+        {
+            return LastDependencyCheckFrame == frame && (!includeDeferred || DeferredPreparationChecked);
+        }
+
+        void MarkDependenciesChecked(const std::uint64_t frame, const bool includeDeferred) noexcept
+        {
+            if (LastDependencyCheckFrame != frame)
+            {
+                DeferredPreparationChecked = false;
+            }
+            DeferredPreparationChecked |= includeDeferred;
+            LastDependencyCheckFrame = frame;
+        }
     };
 
     struct GpuMaterialEntry final
@@ -1137,8 +1153,10 @@ namespace Keire::RenderBackend
         [[nodiscard]] const GpuTextureResources& DefaultTexture(ShaderTextureSemantic semantic) const noexcept;
         [[nodiscard]] Ref<const MaterialAsset> ResolveMaterial(AssetId id);
         [[nodiscard]] GpuShaderEntry* ResolveShader(AssetId id, SDL_GPUSampleCount samples,
-                                                    MaterialSurfaceState surface, bool explicitSurface);
-        [[nodiscard]] const ResolvedAssetMaterial* ResolveAssetMaterial(AssetId id, SDL_GPUSampleCount samples);
+                                                    MaterialSurfaceState surface, bool explicitSurface,
+                                                    bool includeDeferredPasses);
+        [[nodiscard]] const ResolvedAssetMaterial* ResolveAssetMaterial(AssetId id, SDL_GPUSampleCount samples,
+                                                                        bool includeDeferredPasses = false);
         [[nodiscard]] bool EnsureSkinningPipeline();
         [[nodiscard]] bool EnsureGpuOcclusionPipelines();
         void ReleaseGpuOcclusionPipelines() noexcept;

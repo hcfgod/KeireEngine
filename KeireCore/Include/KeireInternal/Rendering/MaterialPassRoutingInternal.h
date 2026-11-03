@@ -29,6 +29,14 @@ namespace Keire::RenderBackend
         Unsupported
     };
 
+    [[nodiscard]] constexpr bool MaterialPassRequiresDeferredPreparation(const RuntimeMaterialPassRole role) noexcept
+    {
+        return role == RuntimeMaterialPassRole::DepthVelocity ||
+               role == RuntimeMaterialPassRole::DeferredGBufferStandard ||
+               role == RuntimeMaterialPassRole::DeferredGBufferExtended ||
+               role == RuntimeMaterialPassRole::DecalDBuffer;
+    }
+
     [[nodiscard]] constexpr std::string_view RuntimeMaterialPassName(const RuntimeMaterialPassRole role) noexcept
     {
         switch (role)

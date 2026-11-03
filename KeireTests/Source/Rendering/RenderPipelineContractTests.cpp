@@ -4,6 +4,7 @@
 #include "KeireInternal/RenderInternal.h"
 #include "KeireInternal/Rendering/MaterialPassRoutingInternal.h"
 #include "KeireInternal/Rendering/MaterialTextureReplacement.h"
+#include "KeireInternal/Rendering/OnDemandPipelineInternal.h"
 #include "KeireInternal/Rendering/RenderBackendInternal.h"
 #include "KeireInternal/Rendering/RenderFramePacketInternal.h"
 #include "KeireInternal/Rendering/RenderPipelineStateInternal.h"
@@ -865,6 +866,37 @@ TEST_CASE("Directional shadow resolution hints scale the validated project base"
     light->SetShadowResolution(Keire::ShadowResolutionHint::VeryHigh);
     CHECK(Keire::RenderBackend::ResolveLighting(scene).ShadowResolution == Keire::ShadowResolutionHint::VeryHigh);
     scene->Close();
+}
+
+TEST_CASE("Forward material preparation defers unused depth G-buffer and decal pipelines")
+{
+    using namespace Keire::RenderBackend;
+    for (const auto role : {RuntimeMaterialPassRole::DepthVelocity, RuntimeMaterialPassRole::DeferredGBufferStandard,
+                            RuntimeMaterialPassRole::DeferredGBufferExtended, RuntimeMaterialPassRole::DecalDBuffer})
+    {
+        CHECK(MaterialPassRequiresDeferredPreparation(role));
+    }
+    for (const auto role : {RuntimeMaterialPassRole::Primary, RuntimeMaterialPassRole::ForwardOpaque,
+                            RuntimeMaterialPassRole::ForwardTransparent, RuntimeMaterialPassRole::VfxBillboard,
+                            RuntimeMaterialPassRole::VfxRibbon, RuntimeMaterialPassRole::VfxCpu})
+    {
+        CHECK_FALSE(MaterialPassRequiresDeferredPreparation(role));
+    }
+}
+
+TEST_CASE("Material dependency caching permits deferred escalation within the same frame")
+{
+    Keire::RenderBackend::GpuMaterialBindingEntry binding;
+    binding.MarkDependenciesChecked(41, false);
+    CHECK(binding.DependenciesCheckedFor(41, false));
+    CHECK_FALSE(binding.DependenciesCheckedFor(41, true));
+    binding.MarkDependenciesChecked(41, true);
+    CHECK(binding.DependenciesCheckedFor(41, true));
+    binding.MarkDependenciesChecked(41, false);
+    CHECK(binding.DependenciesCheckedFor(41, true));
+    CHECK_FALSE(binding.DependenciesCheckedFor(42, false));
+    binding.MarkDependenciesChecked(42, false);
+    CHECK_FALSE(binding.DependenciesCheckedFor(42, true));
 }
 
 TEST_CASE("Material pass roles map to exact runtime target layouts")
@@ -1823,4 +1855,43 @@ TEST_CASE("World UI projection and input retain distant camera-relative placemen
         CHECK(mapped->Y == doctest::Approx(layout.Y));
     }
     scene->Close();
+}
+
+TEST_CASE("On-demand pipelines preserve successful slots and retry failed creation")
+{
+    using Keire::RenderBackend::ResolveOnDemandPipeline;
+    int firstHandle = 1;
+    int secondHandle = 2;
+    int* firstSlot = nullptr;
+    int* secondSlot = nullptr;
+    int calls = 0;
+    const auto createFirst = [&]
+    {
+        ++calls;
+        return &firstHandle;
+    };
+    CHECK(ResolveOnDemandPipeline(firstSlot, createFirst) == &firstHandle);
+    CHECK(ResolveOnDemandPipeline(firstSlot, createFirst) == &firstHandle);
+    CHECK(calls == 1);
+    CHECK(secondSlot == nullptr);
+    bool shouldFail = true;
+    const auto failing = [&]() -> int*
+    {
+        if (shouldFail)
+        {
+            throw std::runtime_error("driver failure");
+        }
+        return &secondHandle;
+    };
+    CHECK_THROWS_AS((void)ResolveOnDemandPipeline(secondSlot, failing), std::runtime_error);
+    CHECK(secondSlot == nullptr);
+    CHECK_THROWS_AS((void)ResolveOnDemandPipeline(secondSlot, []() -> int* { return nullptr; }), std::runtime_error);
+    CHECK(secondSlot == nullptr);
+    shouldFail = false;
+    CHECK(ResolveOnDemandPipeline(secondSlot, failing) == &secondHandle);
+    CHECK(firstSlot == &firstHandle);
+    // Device recovery clears the owning cache; the replacement slot must build afresh.
+    firstSlot = nullptr;
+    CHECK(ResolveOnDemandPipeline(firstSlot, createFirst) == &firstHandle);
+    CHECK(calls == 2);
 }

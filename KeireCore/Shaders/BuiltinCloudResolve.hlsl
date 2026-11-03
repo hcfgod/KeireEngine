@@ -2,7 +2,8 @@
 // Ray reconstruction uses the shared view layout; unused cloud-noise declarations are eliminated.
 #define KEIRE_CLOUD_NOISE_TEXTURE t4
 #define KEIRE_CLOUD_NOISE_SAMPLER s4
-#define KEIRE_PLANET_VOLUME_SET 1
+// Reprojection reads only the resolved view prefix; it does not integrate planet media.
+#define KEIRE_PLANET_VOLUME_SET 0
 #include "CloudVolumeView.hlsli"
 #include "CloudTemporalRejection.hlsli"
 

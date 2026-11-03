@@ -48,8 +48,9 @@ cbuffer WaterFragmentConstants : register(b0, space3)
     float4 AmbientColorIntensity;
     float4 SurfaceColor;
     float4 Appearance;
-    CloudVolumeView SurfaceCloudVolume;
 };
+StructuredBuffer<CloudVolumeView> WaterVolumeData : register(t3, space2);
+#define SurfaceCloudVolume WaterVolumeData[0]
 
 cbuffer WaterDetailConstants : register(b3, space3)
 {

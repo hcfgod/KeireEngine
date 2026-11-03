@@ -59,7 +59,7 @@ namespace Keire::RenderBackend
         information.stage = vertex ? SDL_GPU_SHADERSTAGE_VERTEX : SDL_GPU_SHADERSTAGE_FRAGMENT;
         information.num_samplers = vertex ? 0U : CloudTemporalSamplerCounts[index];
         information.num_uniform_buffers = vertex ? 0U : CloudTemporalUniformCounts[index];
-        information.num_storage_buffers = vertex || pass == CloudTemporalPass::Resolve ? 0U : 1U;
+        information.num_storage_buffers = vertex ? 0U : CloudTemporalStorageCounts[index];
         const auto formats = SDL_GetGPUShaderFormats(device);
         Code code{};
         if (formats & SDL_GPU_SHADERFORMAT_DXIL)

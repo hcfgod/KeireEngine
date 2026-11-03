@@ -1,6 +1,18 @@
 # Changelog
 
 ## Unreleased
+- Create built-in particle graphics pipelines on first use and reuse them per sample count,
+  instead of compiling every CPU/GPU sprite, ribbon and mesh variant during renderer startup.
+- Export sampled GPU execution durations separately from completion latency in runtime benchmarks;
+  validate raw samples and distinguish unavailable timestamps from zero-duration work.
+- Keep cloud-light-cache compute uniforms within the Vulkan backend's 4 KiB binding range,
+  preserving resolved planetary cloud inputs and preventing zero-output cache dispatches.
+- Keep asynchronous VFX pipeline warmup out of steady-state benchmark samples, record startup delay,
+  and reject warmup interruptions after measurement begins instead of discarding slow samples.
+- Record sustained application render-submission intervals separately from renderer latency in
+  runtime benchmarks, and include project settings in the benchmark fixture identity.
+- Allow rendered runtime benchmarks in Dist and select Release, DevDist or Dist in the Windows
+  benchmark launcher, validating the reported configuration and preserving separate output folders.
 - Include planetary frame motion in resolved character velocity using physics-local coordinates.
   All-axis near/far regressions reproduce the previous omission and pass after the fix.
 - Avoid copying the full asset catalog and repeatedly scanning it for every targeted import request;

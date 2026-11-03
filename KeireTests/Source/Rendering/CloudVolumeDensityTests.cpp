@@ -274,7 +274,17 @@ TEST_CASE("Empty cloud coverage or envelope is independent of skipped atlas samp
             for (const float erosion : {0.0F, 0.5F, 1.0F})
             {
                 CHECK(VolumeCloudDensityWithProfile(shape, detail, 1.0F, erosion, 0.0F, 1.0F, 1.0F) == 0.0F);
-                CHECK(VolumeCloudDensityWithProfile(shape, detail, 1.0F, erosion, 1.0F, 1.0F, 0.0F) == 0.0F);
+                for (const float coverage : {0.0F, 0.1F, 0.5F, 0.9F, 1.0F})
+                {
+                    // An empty profile can skip even the regional weather evaluation: its result
+                    // cannot restore density, including under the authored contrast remap.
+                    for (const float contrast : {0.25F, 0.65F, 1.0F, 4.0F})
+                    {
+                        const float density =
+                            VolumeCloudDensityWithProfile(shape, detail, 1.0F, erosion, coverage, 1.0F, 0.0F);
+                        CHECK(std::pow(density, contrast) == 0.0F);
+                    }
+                }
             }
         }
     }

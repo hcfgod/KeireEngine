@@ -1,27 +1,24 @@
+#include "CloudLightCacheLookup.hlsli"
 #include "CloudRadianceEncoding.hlsli"
 #define KEIRE_CLOUD_NOISE_TEXTURE t1
 #define KEIRE_CLOUD_NOISE_SAMPLER s1
 #define KEIRE_CLOUD_LIGHT_CACHE
 #define KEIRE_FOG_SHADOW_TEXTURE t2
 #define KEIRE_FOG_SHADOW_SAMPLER s2
-#define KEIRE_FOG_SHADOW_CONSTANTS b3
+#define KEIRE_FOG_SHADOW_CONSTANTS b2
 #include "FogTerrainShadow.hlsli"
 StructuredBuffer<float4> CloudLightTransmissionCache : register(t3, space2);
 cbuffer CloudCacheConstants : register(b1, space3)
 {
-    float4 CloudCacheOrigin;
-    float4 CloudCacheCellSize;
-    uint4 CloudCacheDimensions;
+    CloudLightCacheLookupLevel CloudCacheLevels[3];
 };
 #define KEIRE_PLANET_VOLUME_SET 1
 #include "CloudVolumeView.hlsli"
 
-cbuffer VolumeConstants : register(b0, space3)
-{
-    CloudVolumeView VolumeView;
-};
+StructuredBuffer<CloudVolumeView> CloudViewData : register(t4, space2);
+#define VolumeView CloudViewData[0]
 
-cbuffer TraceConstants : register(b2, space3)
+cbuffer TraceConstants : register(b0, space3)
 {
     // Accepted sample ordinal and jitter enable. Reserved lanes must be zero.
     uint4 TraceControls;

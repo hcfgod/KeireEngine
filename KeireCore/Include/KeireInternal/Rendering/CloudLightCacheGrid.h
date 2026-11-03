@@ -54,9 +54,11 @@ namespace Keire::RenderBackend
     }
 
     [[nodiscard]] inline std::optional<CloudLightCacheGrid>
-    MakeCloudLightCacheGrid(const VolumetricCloudUniforms& volume, const float baseHeightVariation = 0.0F) noexcept
+    MakeCloudLightCacheGrid(const VolumetricCloudUniforms& volume, const float baseHeightVariation = 0.0F,
+                            const float horizontalScale = 1.0F) noexcept
     {
-        if (!std::isfinite(baseHeightVariation) || baseHeightVariation < 0.0F || baseHeightVariation > 100000.0F)
+        if (!std::isfinite(baseHeightVariation) || baseHeightVariation < 0.0F || baseHeightVariation > 100000.0F ||
+            (horizontalScale != 1.0F && horizontalScale != 4.0F && horizontalScale != 16.0F))
         {
             return std::nullopt;
         }
@@ -69,8 +71,8 @@ namespace Keire::RenderBackend
         }
 
         CloudLightCacheGrid grid;
-        grid.CellSize = {static_cast<float>(patternSize / 32.0), static_cast<float>(thickness / 32.0),
-                         static_cast<float>(patternSize / 32.0)};
+        grid.CellSize = {static_cast<float>(patternSize / 32.0 * horizontalScale), static_cast<float>(thickness / 32.0),
+                         static_cast<float>(patternSize / 32.0 * horizontalScale)};
         grid.Origin[1] = volume.Geometry[0] - baseHeightVariation;
         for (const std::size_t axis : {0U, 2U})
         {

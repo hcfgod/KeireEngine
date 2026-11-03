@@ -3,7 +3,7 @@
 // The caller owns a buffer containing dimensions.x * dimensions.y * dimensions.z float4 entries.
 // A zero weight requests direct lighting; no buffer access occurs outside the grid.
 float4 SampleCloudLightCache(StructuredBuffer<float4> cache, float3 position, float3 origin,
-    float3 cellSize, uint3 dimensions, out float cacheWeight)
+    float3 cellSize, uint3 dimensions, uint bufferOffset, out float cacheWeight)
 {
     cacheWeight = 0.0F;
     if (any(dimensions < 2U) || any(cellSize <= 0.0F) || !all(isfinite(cellSize)))
@@ -28,7 +28,7 @@ float4 SampleCloudLightCache(StructuredBuffer<float4> cache, float3 position, fl
         const float3 weight = lerp(1.0F - fraction, fraction, float3(offset));
         const uint3 index = cell + offset;
         transmission += weight.x * weight.y * weight.z *
-            cache[(index.z * dimensions.y + index.y) * dimensions.x + index.x];
+            cache[bufferOffset + (index.z * dimensions.y + index.y) * dimensions.x + index.x];
     }
 
     // Fade across two cells on every face so the bounded cache joins the direct shadow march continuously.

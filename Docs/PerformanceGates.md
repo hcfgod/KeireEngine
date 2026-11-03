@@ -27,6 +27,17 @@ accepted frame that produced the asynchronous sample; it is not necessarily the 
 Completion latency, command recording, and CPU fence waits remain separate counters. The reference profiles still
 require true timestamps; no gate threshold or timing requirement has been relaxed.
 
+The standalone runtime benchmark also exports `gpuExecutionTiming`, keyed by the GPU timing frame rather than
+the latest published renderer frame. Duplicate observations are excluded; stalls remain included. Its scope is
+`sampled_completed_gpu_frames_not_complete_timeline`: polling may miss completed frames, so this distribution
+does not replace the complete application-interval capture or the reference gate's required evidence. An empty
+sample list reports `available: false` and omits duration summaries rather than claiming zero GPU cost.
+
+The runtime report's `startup.millisecondsToCaptureBaseline` starts at benchmark construction in the runtime
+layer. Earlier application and graphics-device initialization are outside that clock. It must not be reported
+as launch-to-first-present time; cold startup evaluation requires an external launch timestamp and first-present
+evidence, with shader/driver cache conditions recorded.
+
 ### 2026-08-16 acceptance audit
 
 The available reference host matches `keire-win-rtx3060-i7-12700f`: NVIDIA GeForce RTX 3060, driver

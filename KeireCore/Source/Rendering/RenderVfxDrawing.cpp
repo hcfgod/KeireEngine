@@ -1,4 +1,5 @@
 #include "KeireInternal/Rendering/CloudVolumeViewUniforms.h"
+#include "KeireInternal/Rendering/OnDemandPipelineInternal.h"
 #include "KeireInternal/Rendering/RenderBackendInternal.h"
 #include "KeireInternal/Rendering/RenderGeometryMathInternal.h"
 #include "KeireInternal/Rendering/TransparencyInternal.h"
@@ -243,7 +244,7 @@ namespace Keire::RenderBackend
     {
         auto& pipelines = PipelinesFor(ToSdlSampleCount(surface.ActualSamples));
         const auto cloudVolume = MakeCloudVolumeViewUniforms(packet, surface.Width, surface.Height);
-        if (pipelines.GpuVfx && pipelines.GpuVfxRibbon && pipelines.GpuVfxMesh)
+        if (!packet.VfxSnapshots.empty())
         {
             for (std::size_t snapshotIndex = 0; snapshotIndex < packet.VfxSnapshots.size(); ++snapshotIndex)
             {
@@ -399,7 +400,9 @@ namespace Keire::RenderBackend
                                                               static_cast<float>(composed->Surface.AlphaMode), 1.0F,
                                                               0.0F};
                             }
-                            SDL_BindGPUGraphicsPipeline(pass, pipelines.GpuVfxMesh);
+                            SDL_BindGPUGraphicsPipeline(
+                                pass, ResolveOnDemandPipeline(pipelines.GpuVfxMesh,
+                                                              [&] { return CreateGpuVfxMeshPipeline(samples); }));
                             SDL_PushGPUVertexUniformData(commands, 0, &camera, sizeof(camera));
                             SDL_PushGPUFragmentUniformData(commands, 0, &material, sizeof(material));
                             const auto& noise = EnsureCloudNoiseTexture();
@@ -431,9 +434,11 @@ namespace Keire::RenderBackend
                             material.SurfaceParameters = {composed->Surface.AlphaCutoff,
                                                           static_cast<float>(composed->Surface.AlphaMode), 1.0F, 0.0F};
                         }
-                        SDL_BindGPUGraphicsPipeline(pass, emitter.Renderer == VfxRendererType::Ribbon
-                                                              ? pipelines.GpuVfxRibbon
-                                                              : pipelines.GpuVfx);
+                        const bool ribbon = emitter.Renderer == VfxRendererType::Ribbon;
+                        auto*& pipeline = ribbon ? pipelines.GpuVfxRibbon : pipelines.GpuVfx;
+                        SDL_BindGPUGraphicsPipeline(
+                            pass,
+                            ResolveOnDemandPipeline(pipeline, [&] { return CreateGpuVfxPipeline(samples, ribbon); }));
                         SDL_PushGPUVertexUniformData(commands, 0, &camera, sizeof(camera));
                         SDL_PushGPUFragmentUniformData(commands, 0, &material, sizeof(material));
                         const auto& texture = emitter.Sprite ? ResolveTexture(emitter.Sprite) : WhiteTexture;
@@ -455,10 +460,12 @@ namespace Keire::RenderBackend
             }
         }
 
-        if (preparedCpu.Batches.empty() || !preparedCpu.SpriteBuffer || !pipelines.Vfx)
+        if (preparedCpu.Batches.empty() || !preparedCpu.SpriteBuffer)
             return;
 
-        SDL_BindGPUGraphicsPipeline(pass, pipelines.Vfx);
+        SDL_BindGPUGraphicsPipeline(
+            pass, ResolveOnDemandPipeline(pipelines.Vfx, [&]
+                                          { return CreateCpuVfxPipeline(ToSdlSampleCount(surface.ActualSamples)); }));
         struct alignas(16) CpuVfxUniforms final
         {
             Matrix4 ViewProjection;

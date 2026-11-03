@@ -857,9 +857,20 @@ libunibreak archives and their license files; CMake supplies those text dependen
 invocations must include the same archives, as exercised by the package launchers.
 
 Graphics-capable Windows contributors can run the real cooked-runtime and rendered Editor device-loss matrix with
-`./Scripts/Windows/test-render-device-loss.ps1`; fixed Release frame-latency characterization is available through
-`./Scripts/Windows/render-benchmark.ps1`. Both workflows write machine-readable results only under ignored `Build`
-output and reject stale or build-mismatched reports.
+`./Scripts/Windows/test-render-device-loss.ps1`; frame-latency characterization is available through
+`./Scripts/Windows/render-benchmark.ps1 -Configuration Release` (also supports `DevDist` and `Dist`).
+Non-Release runs use configuration-specific benchmark output folders to preserve comparisons. Both workflows write machine-readable results only under ignored `Build`
+output and reject stale or build-mismatched reports. The runtime report also records application
+render-submission intervals separately from asynchronous renderer-stage latency; these intervals measure
+application pacing, not displayed FPS. Warmup is excluded and slow frames remain in the captured samples.
+Asynchronous VFX pipeline compilation restarts startup warmup before measurement; it never discards
+measured samples. Reports retain the startup baseline delay and VFX pipeline compilation duration.
+The baseline-delay clock starts when the runtime layer constructs its benchmark, after application/device setup;
+it is not total process launch time. Measure launch-to-first-present separately when evaluating cold startup.
+The optional `gpuExecutionTiming` report contains unique completed-frame GPU timestamp samples and their
+distribution. This is sampled coverage, not a complete frame timeline; unavailable timestamps have no duration
+summary. `Scripts/Performance/validate_runtime_capture.py` checks these summaries against the raw samples as
+well as validating application pacing. Keep the player window size fixed throughout a capture.
 
 ## Documentation
 

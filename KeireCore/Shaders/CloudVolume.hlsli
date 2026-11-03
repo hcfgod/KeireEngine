@@ -113,25 +113,12 @@ float VolumeCloudDensityPoint(float3 position, float sampleSpacing, CloudVolumeP
         const float weatherX = (position.x + parameters.WindOffset.x) / parameters.PatternSize;
         const float weatherZ = (position.z + parameters.WindOffset.z) / parameters.PatternSize;
         const float weatherSpacing = sampleSpacing / parameters.PatternSize;
-        const float weather = parameters.RegionalControls.x > 0.0F ?
-            (planetary ? PlanetaryCloudWeather(weatherCoordinate, parameters.RegionalControls.y, parameters.Seed) :
-            VolumeCloudWeatherField(weatherX, weatherZ, weatherSpacing,
-                parameters.RegionalControls.y, parameters.Seed)) : 0.5F;
         const float typeWeather = parameters.WeatherControls.z > 0.0F ?
             (planetary ? PlanetaryCloudWeather(weatherCoordinate, parameters.RegionalControls.y,
                 parameters.Seed ^ 0xa511e9b3U) : VolumeCloudWeatherField(weatherX, weatherZ, weatherSpacing,
                 parameters.RegionalControls.y, parameters.Seed ^ 0xa511e9b3U)) : 0.5F;
-        regionalCoverage = VolumeCloudWeatherCoverage(parameters.Coverage, weather, parameters.RegionalControls.x);
         cloudType = saturate(parameters.WeatherControls.y +
             (2.0F * typeWeather - 1.0F) * parameters.WeatherControls.z);
-    }
-    else if (parameters.RegionalControls.x > 0.0F)
-    {
-        const float regionalPeriod = clamp(parameters.RegionalControls.y, 1.0F, 64.0F);
-        const float regionalMip = clamp(log2(max(footprint / regionalPeriod, 1.0F)), 0.0F, 6.0F);
-        const float weather = SampleVolumeCloudNoise(planetary ? pattern / regionalPeriod :
-            float3(pattern.x / regionalPeriod, 0.5F, pattern.z / regionalPeriod), regionalMip).r;
-        regionalCoverage = VolumeCloudRegionalCoverage(parameters.Coverage, weather, parameters.RegionalControls.x);
     }
     const float4 profile = parameters.HeightProfile;
     // Weather type changes vertical development inside the authored layer, independently of extinction.
@@ -142,6 +129,28 @@ float VolumeCloudDensityPoint(float3 position, float sampleSpacing, CloudVolumeP
         profileHeight = profile.x + (height - profile.x) / typeHeight;
     }
     const float envelope = VolumeCloudAuthoredHeightProfile(profileHeight, profile.x, profile.y, profile.z, profile.w);
+    // Coverage cannot restore an empty height profile. Avoid its weather lattice or atlas fetch
+    // for these samples while retaining the type weather that determines profile height.
+    if (envelope <= 0.0F)
+    {
+        return 0.0F;
+    }
+    if (parameters.WeatherControls.x > 0.5F)
+    {
+        const float weather = parameters.RegionalControls.x > 0.0F ?
+            (planetary ? PlanetaryCloudWeather(weatherCoordinate, parameters.RegionalControls.y, parameters.Seed) :
+            VolumeCloudWeatherField(weatherCoordinate.x, weatherCoordinate.z, sampleSpacing / parameters.PatternSize,
+                parameters.RegionalControls.y, parameters.Seed)) : 0.5F;
+        regionalCoverage = VolumeCloudWeatherCoverage(parameters.Coverage, weather, parameters.RegionalControls.x);
+    }
+    else if (parameters.RegionalControls.x > 0.0F)
+    {
+        const float regionalPeriod = clamp(parameters.RegionalControls.y, 1.0F, 64.0F);
+        const float regionalMip = clamp(log2(max(footprint / regionalPeriod, 1.0F)), 0.0F, 6.0F);
+        const float weather = SampleVolumeCloudNoise(planetary ? pattern / regionalPeriod :
+            float3(pattern.x / regionalPeriod, 0.5F, pattern.z / regionalPeriod), regionalMip).r;
+        regionalCoverage = VolumeCloudRegionalCoverage(parameters.Coverage, weather, parameters.RegionalControls.x);
+    }
     // Weather and profile can prove this point empty before any warped body/detail atlas fetches.
     // The density remap returns exactly zero for either condition, independent of those samples.
     if (regionalCoverage <= 0.0F || envelope <= 0.0F ||
@@ -315,21 +324,31 @@ float VolumeCloudAmbientTransmission(float3 position, CloudVolumeParameters para
 float4 VolumeCloudCachedTransmission(float3 position, float3 sunDirection,
     CloudVolumeParameters parameters, uint shadowSteps, bool sunlightEnabled)
 {
-    float cacheWeight;
+    float cacheWeight = 0.0F;
     const float3 cachePosition = parameters.PlanetaryCloud.Controls.x != 0U ?
         PlanetaryCloudToPlanet(position, parameters.PlanetaryCloud) : position;
-    const float4 cached = SampleCloudLightCache(CloudLightTransmissionCache, cachePosition, CloudCacheOrigin.xyz,
-        CloudCacheCellSize.xyz, CloudCacheDimensions.xyz, cacheWeight);
-    if (cacheWeight >= 1.0F)
+    float4 cached = 0.0F;
+    [loop]
+    for (uint level = 0U; level < 3U; ++level)
     {
-        return cached;
+        float levelWeight;
+        const CloudLightCacheLookupLevel grid = CloudCacheLevels[level];
+        const float4 levelTransmission = SampleCloudLightCache(CloudLightTransmissionCache, cachePosition,
+            grid.Origin.xyz, grid.CellSize.xyz, grid.Dimensions.xyz, grid.Dimensions.w, levelWeight);
+        const float contribution = (1.0F - cacheWeight) * levelWeight;
+        cached += levelTransmission * contribution;
+        cacheWeight += contribution;
+        if (cacheWeight >= 1.0F)
+        {
+            return cached;
+        }
     }
     const float depth = sunlightEnabled ?
         VolumeCloudLightOpticalDepth(position, sunDirection, parameters, shadowSteps) : 0.0F;
     const float occlusion = saturate(parameters.MultipleScatteringOcclusion);
     const float4 direct = float4(exp(-depth * float3(1.0F, occlusion, occlusion * occlusion)),
         VolumeCloudAmbientTransmission(position, parameters));
-    return lerp(direct, cached, cacheWeight);
+    return direct * (1.0F - cacheWeight) + cached;
 }
 #endif
 

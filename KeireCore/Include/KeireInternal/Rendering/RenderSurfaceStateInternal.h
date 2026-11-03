@@ -188,10 +188,13 @@ namespace Keire::RenderBackend
         std::uint32_t InstanceTransferCapacityBytes = 0;
         DynamicGpuBuffer CpuVfxVertices;
         SDL_GPUTransferBuffer* CpuVfxTransfer = nullptr;
+        DynamicGpuBuffer CloudView;
+        SDL_GPUTransferBuffer* CloudViewTransfer = nullptr;
 
         [[nodiscard]] bool Empty() const noexcept
         {
-            return InstanceBatches.empty() && !InstanceTransfer && !CpuVfxVertices.Buffer && !CpuVfxTransfer;
+            return InstanceBatches.empty() && !InstanceTransfer && !CpuVfxVertices.Buffer && !CpuVfxTransfer &&
+                   !CloudView.Buffer && !CloudViewTransfer;
         }
     };
 

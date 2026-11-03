@@ -6,6 +6,46 @@
 #include <cmath>
 #include <limits>
 
+TEST_CASE("Distant cloud cache levels retain vertical resolution and stable advected sample locations")
+{
+    using namespace Keire::RenderBackend;
+    for (const float scale : {1.0F, 4.0F, 16.0F})
+    {
+        VolumetricCloudUniforms volume{};
+        volume.Geometry = {1500.0F, 1200.0F, 3000.0F, 100000.0F};
+        volume.PatternOrigin = {0.0125F, 0.5F, 255.75F, 0.25F};
+        const auto grid = MakeCloudLightCacheGrid(volume, 540.0F, scale);
+        REQUIRE(grid);
+        CHECK(grid->CellSize[0] == 93.75F * scale);
+        CHECK(grid->CellSize[1] == 71.25F);
+        CHECK(grid->CellSize[2] == 93.75F * scale);
+        auto alignedVolume = volume;
+        auto alignedGrid = *grid;
+        AlignCloudLightCacheBuild(alignedVolume, alignedGrid);
+        for (const auto axis : {0U, 2U})
+        {
+            for (const auto cell : {0U, 64U, 128U})
+            {
+                const double originalPosition = grid->Origin[axis] + cell * grid->CellSize[axis] +
+                                                static_cast<double>(volume.PatternOrigin[axis]) * volume.Geometry[2];
+                const double alignedPosition =
+                    alignedGrid.Origin[axis] + cell * alignedGrid.CellSize[axis] +
+                    static_cast<double>(alignedVolume.PatternOrigin[axis]) * volume.Geometry[2];
+                CHECK(alignedPosition == doctest::Approx(originalPosition).epsilon(0.000001));
+            }
+        }
+        volume.PatternOrigin[0] += 256.0F;
+        const auto wrapped = MakeCloudLightCacheGrid(volume, 540.0F, scale);
+        REQUIRE(wrapped);
+        CHECK(wrapped->Origin[0] == doctest::Approx(grid->Origin[0]).epsilon(0.00001));
+    }
+    VolumetricCloudUniforms volume{};
+    volume.Geometry = {1500.0F, 1200.0F, 3000.0F, 100000.0F};
+    CHECK_FALSE(MakeCloudLightCacheGrid(volume, 0.0F, 0.0F));
+    CHECK_FALSE(MakeCloudLightCacheGrid(volume, 0.0F, 3.0F));
+    CHECK_FALSE(MakeCloudLightCacheGrid(volume, 0.0F, std::numeric_limits<float>::infinity()));
+}
+
 TEST_CASE("Cloud cache vertical motion preserves the canonical base phase across the noise wrap")
 {
     using namespace Keire::RenderBackend;

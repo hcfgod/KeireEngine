@@ -138,9 +138,9 @@ TEST_CASE("Cloud composite fallback declares terrain shadows without colliding w
     CHECK(CloudCompositeStorageRegister == CloudTemporalSamplerCounts[2]);
     CHECK(CloudCompositeShadowUniform + 1U == CloudTemporalUniformCounts[2]);
     CHECK(sizeof(VolumeShadowUniforms) == 304U);
-    // Existing trace and resolve layouts must not move when the composite gains shadow parity.
+    // Full planet transport uses storage; all remaining uniform slots stay below the Vulkan limit.
     CHECK(CloudTemporalSamplerCounts[0] == 3U);
     CHECK(CloudTemporalSamplerCounts[1] == 4U);
-    CHECK(CloudTemporalUniformCounts[0] == 4U);
+    CHECK(CloudTemporalUniformCounts[0] == 3U);
     CHECK(CloudTemporalUniformCounts[1] == 3U);
 }

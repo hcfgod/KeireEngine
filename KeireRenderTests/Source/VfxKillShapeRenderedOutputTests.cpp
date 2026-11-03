@@ -179,11 +179,11 @@ namespace
                 return;
             }
             const auto statistics = Owner().Renderer()->Statistics();
-            if (m_TestOriginMigration && statistics.VfxGpuWorlds == 0)
+            if (statistics.VfxGpuWorlds == 0)
             {
                 if (std::chrono::steady_clock::now() >= m_ReadyDeadline)
                 {
-                    throw std::runtime_error("GPU VFX migration capture timed out waiting for pipeline warmup.");
+                    throw std::runtime_error("GPU VFX capture timed out waiting for pipeline warmup.");
                 }
                 Submit();
                 return;

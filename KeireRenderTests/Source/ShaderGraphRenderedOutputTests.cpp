@@ -683,6 +683,7 @@ namespace
             m_Scene = Keire::CreateRef<Keire::Scene>(Keire::AssetId::Generate(),
                                                      Keire::SceneAsset::EmptyDefinition("Authored particle shader"),
                                                      Keire::ComponentRegistry::CreateDefault());
+            m_ReadyDeadline = std::chrono::steady_clock::now() + std::chrono::minutes(2);
             Keire::RenderSurfaceSpecification surface;
             surface.Width = SurfaceSize;
             surface.Height = SurfaceSize;
@@ -746,16 +747,17 @@ namespace
                 }
                 m_Results->LastFrame = std::move(pixels);
             }
-            if (++m_Frames > 120)
+            if (std::chrono::steady_clock::now() >= m_ReadyDeadline)
             {
-                Owner().RequestExit();
-                return;
+                throw std::runtime_error("Authored VFX capture timed out waiting for initial or revised pixels.");
             }
+            ++m_Frames;
             Keire::RenderEnvironmentSettings environment;
             environment.SkyVisible = false;
             environment.AmbientColor = {1, 1, 1, 1};
             environment.AmbientIntensity = 1;
-            m_World->Update(1.0F / 60.0F);
+            // This test verifies material publication, not simulation lifetime. Retain the initial
+            // burst while asynchronous pipeline creation runs, then observe the same particles after reload.
             Owner().Renderer()->Submit({m_Scene, m_View, false, environment, {}, m_World->CaptureRenderSnapshot()});
         }
 
@@ -764,6 +766,7 @@ namespace
         std::shared_ptr<LiveShaderGraphResults> m_Results;
         Keire::VfxBackend m_Backend;
         Keire::VfxRendererType m_Renderer;
+        std::chrono::steady_clock::time_point m_ReadyDeadline;
         Keire::Ref<Keire::Scene> m_Scene;
         Keire::Ref<Keire::RenderView> m_View;
         Keire::Ref<Keire::VfxWorld> m_World;

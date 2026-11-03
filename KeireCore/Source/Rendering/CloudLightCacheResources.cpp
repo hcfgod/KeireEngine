@@ -4,6 +4,7 @@
 #include "KeireInternal/Rendering/CloudLightCacheDemand.h"
 #include "KeireInternal/Rendering/CloudLightCacheGrid.h"
 
+#include <algorithm>
 #include <cmath>
 #include <stdexcept>
 #include <string>
@@ -22,7 +23,10 @@ namespace Keire::RenderBackend
             CloudLightCacheResources candidate;
             try
             {
-                candidate.Validity = std::make_shared<CloudLightCacheValidity>();
+                for (auto& validity : candidate.Validity)
+                {
+                    validity = std::make_shared<CloudLightCacheValidity>();
+                }
                 SDL_GPUComputePipelineCreateInfo pipeline{};
                 pipeline.entrypoint = "CSMain";
                 pipeline.num_samplers = 1;
@@ -62,7 +66,8 @@ namespace Keire::RenderBackend
                 }
                 SDL_GPUBufferCreateInfo buffer{};
                 buffer.usage = SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_WRITE | SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ;
-                buffer.size = 129U * 33U * 129U * 16U;
+                buffer.size =
+                    CloudLightCacheLevelCapacity * static_cast<std::uint32_t>(CloudLightCacheLevelCount) * 16U;
                 candidate.Transmission = SDL_CreateGPUBuffer(device, &buffer);
                 if (!candidate.Transmission)
                 {
@@ -99,50 +104,56 @@ namespace Keire::RenderBackend
 
     void SubmitCloudLightCache(CloudLightCacheResources& resources) noexcept
     {
-        if (resources.Validity)
+        for (const auto& validity : resources.Validity)
         {
-            resources.Validity->Submit();
+            if (validity)
+            {
+                validity->Submit();
+            }
         }
     }
 
     void InvalidateCloudLightCache(CloudLightCacheResources& resources) noexcept
     {
-        if (resources.Validity)
+        for (const auto& validity : resources.Validity)
         {
-            resources.Validity->Invalidate();
+            if (validity)
+            {
+                validity->Invalidate();
+            }
         }
     }
 
-    CloudLightCacheLookupUniforms RecordCloudLightCache(SDL_GPUDevice* device, SDL_GPUCommandBuffer* commands,
-                                                        CloudLightCacheResources& resources,
-                                                        const CloudVolumeViewUniforms& view,
-                                                        const GpuTextureResources& noise,
-                                                        const std::optional<float> cloudBasePatternPhase,
-                                                        const Detail::ResolvedPlanetFrame* planetFrame)
+    static CloudLightCacheLevelUniforms
+    RecordCloudLightCacheLevel(SDL_GPUCommandBuffer* commands, CloudLightCacheResources& resources,
+                               const CloudVolumeViewUniforms& view, const GpuTextureResources& noise,
+                               const std::optional<float> cloudBasePatternPhase,
+                               const Detail::ResolvedPlanetFrame* planetFrame, const std::uint32_t level)
     {
-        if (!device || !commands || !noise.Texture || !noise.Sampler)
+        auto& validity = *resources.Validity[level];
+        const float scale = static_cast<float>(1U << (level * 2U));
+        const std::uint32_t bufferOffset = level * CloudLightCacheLevelCapacity;
+        // Coarse Cartesian cells can miss a thin spherical shell. Preserve the existing
+        // planetary cache and direct fallback until distant levels retain radial resolution.
+        if (level != 0U && view.PlanetaryCloud.Controls[0] != 0U)
         {
-            throw std::invalid_argument("Cloud light cache requires a device, command buffer and noise texture.");
-        }
-        EnsureResources(device, resources);
-        // An uncommitted prior recording is never evidence of valid GPU contents.
-        if (resources.Validity->RecordedKey)
-        {
-            InvalidateCloudLightCache(resources);
+            return {};
         }
         if (!CloudLightCacheHasDemand(view))
         {
             return {};
         }
-        auto grid = MakeCloudLightCacheGrid(view.Volume, view.WeatherControls.X > 0.5F ? view.WeatherControls.W : 0.0F);
+        auto grid =
+            MakeCloudLightCacheGrid(view.Volume, view.WeatherControls.X > 0.5F ? view.WeatherControls.W : 0.0F, scale);
         if (!grid)
         {
             return {};
         }
 
-        CloudLightCacheLookupUniforms lookup{{grid->Origin[0], grid->Origin[1], grid->Origin[2], 0.0F},
-                                             {grid->CellSize[0], grid->CellSize[1], grid->CellSize[2], 0.0F},
-                                             {grid->Dimensions[0], grid->Dimensions[1], grid->Dimensions[2], 0U}};
+        CloudLightCacheLevelUniforms lookup{
+            {grid->Origin[0], grid->Origin[1], grid->Origin[2], 0.0F},
+            {grid->CellSize[0], grid->CellSize[1], grid->CellSize[2], 0.0F},
+            {grid->Dimensions[0], grid->Dimensions[1], grid->Dimensions[2], bufferOffset}};
         auto buildView = view;
         auto buildGrid = *grid;
         if (view.PlanetaryCloud.Controls[0] != 0U && planetFrame)
@@ -157,8 +168,8 @@ namespace Keire::RenderBackend
                 std::max(planetFrame->RadiusMetres,
                          planetFrame->RadiusMetres + view.Volume.Geometry[0] + view.Volume.Geometry[1] * 0.5);
             const double cellSize =
-                std::min(shellRadius / 8.0, std::max(static_cast<double>(view.Volume.Geometry[2]) / 16.0,
-                                                     static_cast<double>(view.Volume.Geometry[1]) / 40.0));
+                std::min(shellRadius / 8.0, scale * std::max(static_cast<double>(view.Volume.Geometry[2]) / 16.0,
+                                                             static_cast<double>(view.Volume.Geometry[1]) / 40.0));
             buildGrid.Dimensions = {81U, 81U, 81U};
             for (std::size_t axis = 0; axis < 3; ++axis)
             {
@@ -188,7 +199,7 @@ namespace Keire::RenderBackend
                                       static_cast<float>(sunlight[2]), view.SunDirection.W};
             lookup = {{grid->Origin[0], grid->Origin[1], grid->Origin[2], 1.0F},
                       {grid->CellSize[0], grid->CellSize[1], grid->CellSize[2], 0.0F},
-                      {81U, 81U, 81U, 0U}};
+                      {81U, 81U, 81U, bufferOffset}};
         }
         else
         {
@@ -200,11 +211,11 @@ namespace Keire::RenderBackend
             key.Planet = planetFrame->Planet;
             key.DiscontinuityRevision = planetFrame->DiscontinuityRevision;
         }
-        if (resources.Validity->SubmittedKey == key)
+        if (validity.SubmittedKey == key)
         {
             return lookup;
         }
-        InvalidateCloudLightCache(resources);
+        validity.Invalidate();
         const Vector4 buildOrigin{buildGrid.Origin[0], buildGrid.Origin[1], buildGrid.Origin[2], 0.0F};
         const CloudLightCacheUniforms uniforms{buildView, buildOrigin, lookup.CellSize, lookup.GridDimensions};
         SDL_PushGPUComputeUniformData(commands, 0, &uniforms, sizeof(uniforms));
@@ -220,7 +231,33 @@ namespace Keire::RenderBackend
         SDL_DispatchGPUCompute(pass, (grid->Dimensions[0] + 7U) / 8U, (grid->Dimensions[1] + 7U) / 8U,
                                grid->Dimensions[2]);
         SDL_EndGPUComputePass(pass);
-        resources.Validity->RecordedKey = key;
+        validity.RecordedKey = key;
+        return lookup;
+    }
+
+    CloudLightCacheLookupUniforms RecordCloudLightCache(SDL_GPUDevice* device, SDL_GPUCommandBuffer* commands,
+                                                        CloudLightCacheResources& resources,
+                                                        const CloudVolumeViewUniforms& view,
+                                                        const GpuTextureResources& noise,
+                                                        const std::optional<float> cloudBasePatternPhase,
+                                                        const Detail::ResolvedPlanetFrame* planetFrame)
+    {
+        if (!device || !commands || !noise.Texture || !noise.Sampler)
+        {
+            throw std::invalid_argument("Cloud light cache requires a device, command buffer and noise texture.");
+        }
+        EnsureResources(device, resources);
+        CloudLightCacheLookupUniforms lookup;
+        for (std::uint32_t level = 0; level < CloudLightCacheLevelCount; ++level)
+        {
+            // Each level publishes independently; an unsubmitted write cannot be reused.
+            if (resources.Validity[level]->RecordedKey)
+            {
+                resources.Validity[level]->Invalidate();
+            }
+            lookup.Levels[level] =
+                RecordCloudLightCacheLevel(commands, resources, view, noise, cloudBasePatternPhase, planetFrame, level);
+        }
         return lookup;
     }
 } // namespace Keire::RenderBackend

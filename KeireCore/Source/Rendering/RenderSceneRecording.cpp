@@ -718,7 +718,9 @@ namespace Keire::RenderBackend
             const auto viewModel = Math::Multiply(camera.View, item.World);
             const SDL_GPUBufferBinding indexBinding{mesh.Indices, 0};
             SDL_BindGPUIndexBuffer(pass, &indexBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
-            const auto* material = draw.Material ? ResolveAssetMaterial(draw.Material, samples) : nullptr;
+            const bool prepareDeferred = surface.ActiveFeatureSelection.EffectivePath == RenderPath::DeferredHybrid;
+            const auto* material =
+                draw.Material ? ResolveAssetMaterial(draw.Material, samples, prepareDeferred) : nullptr;
             SDL_GPUGraphicsPipeline* selectedPipeline = nullptr;
             bool builtInDeferredGBuffer = false;
             if (material)

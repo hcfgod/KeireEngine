@@ -35,7 +35,6 @@ namespace Keire::RenderBackend
             Color AmbientColorIntensity;
             Color SurfaceColor;
             Vector4 Appearance;
-            CloudVolumeViewUniforms Volume;
         };
 
         struct WaterDetailUniforms final
@@ -47,7 +46,7 @@ namespace Keire::RenderBackend
         };
 
         static_assert(sizeof(WaterVertexUniforms) == 704);
-        static_assert(sizeof(WaterFragmentUniforms) == 13392);
+        static_assert(sizeof(WaterFragmentUniforms) == 96);
         static_assert(sizeof(WaterDetailUniforms) == 576);
 
         [[nodiscard]] SDL_GPUShader* CreateWaterShader(SDL_GPUDevice* device, const bool vertex)
@@ -56,6 +55,7 @@ namespace Keire::RenderBackend
             information.stage = vertex ? SDL_GPU_SHADERSTAGE_VERTEX : SDL_GPU_SHADERSTAGE_FRAGMENT;
             information.num_uniform_buffers = vertex ? 1U : 4U;
             information.num_samplers = vertex ? 0U : 3U;
+            information.num_storage_buffers = vertex ? 0U : 1U;
             const auto formats = SDL_GetGPUShaderFormats(device);
             if (formats & SDL_GPU_SHADERFORMAT_DXIL)
             {
@@ -147,7 +147,6 @@ namespace Keire::RenderBackend
         const auto& camera = packet.Camera;
         const auto observer = Math::TransformPoint(Math::Inverse(camera.View), {});
         const auto viewProjection = Math::Multiply(camera.Projection, camera.View);
-        const auto volume = MakeCloudVolumeViewUniforms(packet, surface.Width, surface.Height);
         const auto& noise = EnsureCloudNoiseTexture();
         const auto& requestedEnvironment =
             packet.Environment.Environment ? ResolveTexture(packet.Environment.Environment) : DefaultSkyTexture;
@@ -172,6 +171,12 @@ namespace Keire::RenderBackend
                                   SDL_GPUTextureSamplerBinding{environment.Texture, environment.Sampler}};
         SDL_BindGPUGraphicsPipeline(pass, PipelinesFor(ToSdlSampleCount(surface.ActualSamples)).Water);
         SDL_BindGPUFragmentSamplers(pass, 0, bindings.data(), static_cast<std::uint32_t>(bindings.size()));
+        auto* volumeBuffer = surface.ActiveWorkset().DynamicUploads.CloudView.Buffer;
+        if (!volumeBuffer)
+        {
+            throw std::logic_error("Water environment transport was not prepared before drawing.");
+        }
+        SDL_BindGPUFragmentStorageBuffers(pass, 0, &volumeBuffer, 1);
         SDL_PushGPUFragmentUniformData(commands, 1, &shadows.Directional, sizeof(shadows.Directional));
         SDL_PushGPUFragmentUniformData(commands, 2, &environmentUniforms, sizeof(environmentUniforms));
         const auto& view = camera.View.Elements;
@@ -189,8 +194,7 @@ namespace Keire::RenderBackend
                 {packet.Environment.AmbientColor.Red, packet.Environment.AmbientColor.Green,
                  packet.Environment.AmbientColor.Blue, packet.Environment.AmbientIntensity},
                 patch.SurfaceColor,
-                patch.Appearance,
-                volume};
+                patch.Appearance};
             const WaterDetailUniforms detail{patch.AxisX, patch.AxisY, patch.AxisZ, patch.Waves};
             SDL_PushGPUVertexUniformData(commands, 0, &vertex, sizeof(vertex));
             SDL_PushGPUFragmentUniformData(commands, 0, &fragment, sizeof(fragment));

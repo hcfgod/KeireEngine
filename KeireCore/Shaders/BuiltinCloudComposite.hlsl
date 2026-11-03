@@ -1,3 +1,4 @@
+#include "CloudLightCacheLookup.hlsli"
 #include "CloudRadianceEncoding.hlsli"
 #define KEIRE_CLOUD_NOISE_TEXTURE t4
 #define KEIRE_CLOUD_NOISE_SAMPLER s4
@@ -9,9 +10,7 @@
 StructuredBuffer<float4> CloudLightTransmissionCache : register(t6, space2);
 cbuffer CloudCacheConstants : register(b1, space3)
 {
-    float4 CloudCacheOrigin;
-    float4 CloudCacheCellSize;
-    uint4 CloudCacheDimensions;
+    CloudLightCacheLookupLevel CloudCacheLevels[3];
 };
 #define KEIRE_PLANET_VOLUME_SET 1
 #include "CloudVolumeView.hlsli"
@@ -28,8 +27,10 @@ SamplerState CloudDepthSampler : register(s3, space2);
 
 cbuffer VolumeConstants : register(b0, space3)
 {
-    CloudVolumeView VolumeView;
+    float4 VolumePassControls;
 };
+StructuredBuffer<CloudVolumeView> CloudViewData : register(t7, space2);
+#define VolumeView CloudViewData[0]
 
 struct VertexOutput
 {
@@ -47,8 +48,8 @@ VertexOutput VSMain(uint vertexId : SV_VertexID)
 
 float4 PSMain(VertexOutput input) : SV_Target0
 {
-    const bool compositePass = VolumeView.RegionalControls.z > 1.5F;
-    const bool attenuationPass = !compositePass && VolumeView.RegionalControls.z > 0.5F;
+    const bool compositePass = VolumePassControls.x > 1.5F;
+    const bool attenuationPass = !compositePass && VolumePassControls.x > 0.5F;
     const float depth = SceneDepth.SampleLevel(SceneDepthSampler, input.UV, 0.0F);
 
     const CloudVolumeViewRay ray = MakeCloudVolumeViewRay(input.UV, depth, VolumeView);

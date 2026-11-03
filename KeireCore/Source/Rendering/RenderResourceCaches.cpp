@@ -1269,7 +1269,8 @@ namespace Keire::RenderBackend
     }
 
     GpuShaderEntry* RenderSharedState::ResolveShader(const AssetId id, const SDL_GPUSampleCount samples,
-                                                     MaterialSurfaceState surface, const bool explicitSurface)
+                                                     MaterialSurfaceState surface, const bool explicitSurface,
+                                                     const bool includeDeferredPasses)
     {
         if (!id || !Assets)
         {
@@ -1301,6 +1302,10 @@ namespace Keire::RenderBackend
             std::vector<GpuShaderEntry::Pipeline> missing;
             for (const auto role : RuntimePassRoles(shader->Definition()))
             {
+                if (!includeDeferredPasses && MaterialPassRequiresDeferredPreparation(role))
+                {
+                    continue;
+                }
                 const auto roleSamples = PipelineSamplesForRole(samples, role);
                 const auto matches = [&](const GpuShaderEntry::Pipeline& candidate)
                 {
@@ -1318,24 +1323,24 @@ namespace Keire::RenderBackend
                 if (entry.LoadedRevision != revision)
                 {
                     // Rebuild all resident variants together before retiring the previous revision.
+                    const auto availableRoles = RuntimePassRoles(shader->Definition());
                     for (const auto& resident : entry.Pipelines)
                     {
-                        for (const auto role : RuntimePassRoles(shader->Definition()))
+                        if (std::ranges::find(availableRoles, resident.PassRole) == availableRoles.end())
                         {
-                            auto candidate = resident;
-                            candidate.Samples = PipelineSamplesForRole(resident.Samples, role);
-                            candidate.PassRole = role;
-                            candidate.Handle = nullptr;
-                            const auto matches = [&](const GpuShaderEntry::Pipeline& existing)
-                            {
-                                return existing.Samples == candidate.Samples &&
-                                       existing.AlphaMode == candidate.AlphaMode &&
-                                       existing.DoubleSided == candidate.DoubleSided && existing.PassRole == role;
-                            };
-                            if (!std::ranges::any_of(missing, matches))
-                            {
-                                missing.push_back(candidate);
-                            }
+                            continue;
+                        }
+                        auto candidate = resident;
+                        candidate.Handle = nullptr;
+                        const auto matches = [&](const GpuShaderEntry::Pipeline& existing)
+                        {
+                            return existing.Samples == candidate.Samples && existing.AlphaMode == candidate.AlphaMode &&
+                                   existing.DoubleSided == candidate.DoubleSided &&
+                                   existing.PassRole == candidate.PassRole;
+                        };
+                        if (!std::ranges::any_of(missing, matches))
+                        {
+                            missing.push_back(candidate);
                         }
                     }
                 }
@@ -1355,12 +1360,14 @@ namespace Keire::RenderBackend
         return entry.LastGood ? &entry : nullptr;
     }
     const ResolvedAssetMaterial* RenderSharedState::ResolveAssetMaterial(const AssetId id,
-                                                                         const SDL_GPUSampleCount samples)
+                                                                         const SDL_GPUSampleCount samples,
+                                                                         const bool includeDeferredPasses)
     {
         if (const auto cached = MaterialCache.find(id); cached != MaterialCache.end())
         {
             const auto binding = std::ranges::find(cached->second.Bindings, samples, &GpuMaterialBindingEntry::Samples);
-            if (binding != cached->second.Bindings.end() && binding->LastDependencyCheckFrame == Statistics.Frame)
+            if (binding != cached->second.Bindings.end() &&
+                binding->DependenciesCheckedFor(Statistics.Frame, includeDeferredPasses))
                 return binding->Binding.Pipeline ? &binding->Binding : nullptr;
         }
 
@@ -1379,7 +1386,7 @@ namespace Keire::RenderBackend
         ++MaterialDependencyChecks;
         const auto finishDependencyCheck = [&](const ResolvedAssetMaterial* result) noexcept
         {
-            binding->LastDependencyCheckFrame = Statistics.Frame;
+            binding->MarkDependenciesChecked(Statistics.Frame, includeDeferredPasses);
             return result;
         };
         std::uint64_t stamp = 1469598103934665603ULL;
@@ -1402,7 +1409,7 @@ namespace Keire::RenderBackend
         }
         stamp = HashDependencyStamp(stamp, material->Definition().Shader);
         auto* shader = ResolveShader(material->Definition().Shader, samples, material->Definition().Surface,
-                                     material->Definition().SchemaVersion >= 2);
+                                     material->Definition().SchemaVersion >= 2, includeDeferredPasses);
         if (!shader)
         {
             binding->LastAttemptedDependencyStamp = stamp;

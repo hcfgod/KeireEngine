@@ -1,5 +1,7 @@
 #include "Keire/Core.h"
 #include "KeireInternal/Scripting/ManagedRuntimeApplicationServices.h"
+#include "KeireRuntimeInternal/RuntimeBenchmarkIntervals.h"
+#include "KeireRuntimeInternal/RuntimeRenderBenchmark.h"
 
 #include <doctest/doctest.h>
 
@@ -8,6 +10,8 @@
 #include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <limits>
+#include <stdexcept>
 #include <string>
 #include <thread>
 #include <vector>
@@ -715,4 +719,126 @@ TEST_CASE("Managed presentation services reject changes without a bound applicat
         CHECK_FALSE(services.SetManagedPresentMode(mode));
     CHECK(services.ManagedPresentation().Mode == 255);
     CHECK(services.ManagedPresentation().SupportedModes == 0);
+}
+
+TEST_CASE("Render benchmarks accept shipping and development distribution configurations")
+{
+    for (const auto configuration : {"Release", "DevDist", "Dist"})
+    {
+        CHECK(KeireRuntime::RuntimeRenderBenchmark::SupportsConfiguration(configuration));
+    }
+    for (const auto configuration : {"", "Debug", "DebugASan", "Profile", "dist", "Unknown"})
+    {
+        CHECK_FALSE(KeireRuntime::RuntimeRenderBenchmark::SupportsConfiguration(configuration));
+    }
+}
+
+TEST_CASE("Runtime benchmark intervals exclude warmup and retain measured spikes")
+{
+    KeireRuntime::RuntimeBenchmarkIntervals capture(2, 3);
+    capture.Observe(100.0);
+    capture.Observe(200.0);
+    capture.Observe(300.0);
+    CHECK(capture.Values().empty());
+    capture.Observe(308.0);
+    CHECK_FALSE(capture.Complete());
+    CHECK_THROWS_AS(capture.Observe(307.0), std::invalid_argument);
+    CHECK_THROWS_AS(capture.Observe(308.0), std::invalid_argument);
+    capture.Observe(338.0);
+    capture.Observe(348.0);
+    REQUIRE(capture.Complete());
+    REQUIRE(capture.Values().size() == 3);
+    CHECK(capture.Values()[0] == 8.0);
+    CHECK(capture.Values()[1] == 30.0);
+    CHECK(capture.Values()[2] == 10.0);
+    capture.Observe(400.0);
+    CHECK(capture.Values().size() == 3);
+}
+
+TEST_CASE("Runtime benchmark intervals support no warmup and reject invalid input")
+{
+    CHECK_THROWS_AS(KeireRuntime::RuntimeBenchmarkIntervals(0, 0), std::invalid_argument);
+    KeireRuntime::RuntimeBenchmarkIntervals capture(0, 1);
+    CHECK_THROWS_AS(capture.Observe(std::numeric_limits<double>::quiet_NaN()), std::invalid_argument);
+    capture.Observe(0.0);
+    CHECK_THROWS_AS(capture.Observe(std::numeric_limits<double>::infinity()), std::invalid_argument);
+    capture.Observe(8.0);
+    REQUIRE(capture.Complete());
+    CHECK(capture.Values()[0] == 8.0);
+}
+
+TEST_CASE("Runtime benchmark restarts startup warmup without discarding measured stalls")
+{
+    KeireRuntime::RuntimeBenchmarkIntervals capture(1, 2);
+    capture.Observe(0.0);
+    capture.Observe(1.0);
+    capture.RestartWarmup();
+    capture.Observe(1000.0);
+    capture.Observe(1008.0);
+    CHECK(capture.Values().empty());
+    capture.Observe(1016.0);
+    CHECK_THROWS_AS(capture.RestartWarmup(), std::logic_error);
+    capture.Observe(1096.0);
+    REQUIRE(capture.Complete());
+    REQUIRE(capture.Values().size() == 2);
+    CHECK(capture.Values()[0] == 8.0);
+    CHECK(capture.Values()[1] == 80.0);
+}
+
+TEST_CASE("Runtime benchmark waits for post-compilation frame admission")
+{
+    KeireRuntime::RuntimeBenchmarkAdmissionGate gate;
+    CHECK(gate.Ready(false, 0));
+    CHECK_FALSE(gate.Ready(true, 664));
+    CHECK_FALSE(gate.Ready(true, 665));
+    CHECK_FALSE(gate.Ready(false, 665));
+    CHECK_FALSE(gate.Ready(false, 664));
+    CHECK(gate.Ready(false, 114823));
+    CHECK(gate.Ready(false, 114824));
+    CHECK_FALSE(gate.Ready(true, 114825));
+    CHECK_FALSE(gate.Ready(false, 114825));
+    CHECK(gate.Ready(false, 114826));
+}
+
+TEST_CASE("Runtime GPU observations retain stalls and reject stale or out of range query results")
+{
+    KeireRuntime::RuntimeBenchmarkGpuObservations observations(4);
+    observations.Observe(false, 101, 8.0F, 101, 104);
+    observations.Observe(true, 100, 8.0F, 101, 104);
+    observations.Observe(true, 105, 8.0F, 101, 104);
+    CHECK(observations.Values().empty());
+    observations.Observe(true, 101, 8.0F, 101, 104);
+    observations.Observe(true, 101, 8.0F, 101, 104);
+    CHECK_THROWS_AS(observations.Observe(true, 102, -1.0F, 101, 104), std::invalid_argument);
+    CHECK_THROWS_AS(observations.Observe(true, 102, std::numeric_limits<float>::infinity(), 101, 104),
+                    std::invalid_argument);
+    observations.Observe(true, 103, 400.0F, 101, 104);
+    observations.Observe(true, 102, 9.0F, 101, 104);
+    observations.Observe(true, 104, 0.0F, 101, 104);
+    REQUIRE(observations.Values().size() == 3);
+    CHECK(observations.Values()[1].Frame == 103);
+    CHECK(observations.Values()[1].Milliseconds == 400.0F);
+    CHECK(observations.Values()[2].Milliseconds == 0.0F);
+}
+
+TEST_CASE("Runtime benchmark cache observations do not double count published frames")
+{
+    KeireRuntime::RuntimeBenchmarkCloudCacheObservations observations;
+    observations.Observe(0, 1, 0, 100);
+    CHECK(observations.Frames == 0);
+    observations.Observe(10, 2, 1, 200);
+    observations.Observe(10, 2, 1, 200);
+    observations.Observe(9, 9, 9, 900);
+    observations.Observe(13, 0, 3, 0);
+    CHECK(observations.Frames == 2);
+    CHECK(observations.Builds == 2);
+    CHECK(observations.Reuses == 4);
+    CHECK(observations.Cells == 200);
+    CHECK(observations.LastFrame == 13);
+    observations = {};
+    observations.Observe(1, 1, 0, 50);
+    CHECK(observations.Frames == 1);
+    CHECK(observations.Builds == 1);
+    CHECK(observations.Reuses == 0);
+    CHECK(observations.Cells == 50);
 }

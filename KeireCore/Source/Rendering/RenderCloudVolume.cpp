@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <array>
 #include <memory>
+#include <span>
 #include <stdexcept>
 
 namespace Keire::RenderBackend
@@ -118,6 +119,12 @@ namespace Keire::RenderBackend
             throw std::logic_error("Cloud volume recording requires current sampled depth and an HDR target.");
         }
         auto uniforms = MakeCloudVolumeViewUniforms(packet, surface.Width, surface.Height);
+        // Full multi-planet transport exceeds SDL Vulkan's per-uniform binding range.
+        // Upload it once per workset and share the storage binding across cloud passes.
+        auto& uploads = workset.DynamicUploads;
+        auto* viewBuffer = UploadDynamicBuffer(commands, uploads.CloudView, uploads.CloudViewTransfer,
+                                               std::as_bytes(std::span{&uniforms, 1}),
+                                               SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ, "cloud view");
         const auto shadowUniforms =
             MakeVolumeShadowUniforms(shadows.Directional, packet.Camera.View, uniforms.InverseView);
         const SamplerDescription samplerDescription{TextureFilter::Nearest,    TextureFilter::Nearest,
@@ -128,17 +135,22 @@ namespace Keire::RenderBackend
         const auto cacheUniforms =
             RecordCloudLightCache(Device, commands, workset.CloudLightCache, uniforms, noise,
                                   packet.CloudBasePatternPhase, packet.PlanetFrame ? &*packet.PlanetFrame : nullptr);
-        if (workset.CloudLightCache.Validity->RecordedKey)
+        for (std::size_t level = 0; level < CloudLightCacheLevelCount; ++level)
         {
-            ++Statistics.CloudLightCacheBuilds;
-            Statistics.CloudLightCacheCells += static_cast<std::uint64_t>(cacheUniforms.GridDimensions[0]) *
-                                               cacheUniforms.GridDimensions[1] * cacheUniforms.GridDimensions[2];
-            PendingCloudLightCaches.Track(workset.CloudLightCache.Validity);
-            ++Statistics.Passes;
-        }
-        else if (packet.CloudVolume.Quality[0] != 0U && cacheUniforms.GridDimensions[0] != 0U)
-        {
-            ++Statistics.CloudLightCacheReuses;
+            const auto& validity = workset.CloudLightCache.Validity[level];
+            const auto& dimensions = cacheUniforms.Levels[level].GridDimensions;
+            if (validity->RecordedKey)
+            {
+                ++Statistics.CloudLightCacheBuilds;
+                Statistics.CloudLightCacheCells +=
+                    static_cast<std::uint64_t>(dimensions[0]) * dimensions[1] * dimensions[2];
+                PendingCloudLightCaches.Track(validity);
+                ++Statistics.Passes;
+            }
+            else if (dimensions[0] != 0U)
+            {
+                ++Statistics.CloudLightCacheReuses;
+            }
         }
         const auto samples =
             workset.MultisampleHdrColor ? ToSdlSampleCount(surface.ActualSamples) : SDL_GPU_SAMPLECOUNT_1;
@@ -187,19 +199,21 @@ namespace Keire::RenderBackend
             SDL_GPUTextureSamplerBinding{workset.DirectionalShadow ? workset.DirectionalShadow : EmptyShadowTexture,
                                          ShadowSampler}};
         SDL_BindGPUFragmentSamplers(pass, 0, bindings.data(), static_cast<std::uint32_t>(bindings.size()));
-        SDL_BindGPUFragmentStorageBuffers(pass, 0, &workset.CloudLightCache.Transmission, 1);
+        const std::array storageBindings{workset.CloudLightCache.Transmission, viewBuffer};
+        SDL_BindGPUFragmentStorageBuffers(pass, 0, storageBindings.data(),
+                                          static_cast<std::uint32_t>(storageBindings.size()));
         SDL_PushGPUFragmentUniformData(commands, 1, &cacheUniforms, sizeof(cacheUniforms));
         SDL_PushGPUFragmentUniformData(commands, 2, &shadowUniforms, sizeof(shadowUniforms));
         if (attenuationPipeline)
         {
             SDL_BindGPUGraphicsPipeline(pass, attenuationPipeline);
-            uniforms.RegionalControls.Z = static_cast<float>(CloudVolumePass::Attenuation);
-            SDL_PushGPUFragmentUniformData(commands, 0, &uniforms, sizeof(uniforms));
+            const Vector4 passControls{static_cast<float>(CloudVolumePass::Attenuation), 0, 0, 0};
+            SDL_PushGPUFragmentUniformData(commands, 0, &passControls, sizeof(passControls));
             SDL_DrawGPUPrimitives(pass, 3, 1, 0, 0);
         }
         SDL_BindGPUGraphicsPipeline(pass, finalPipeline);
-        uniforms.RegionalControls.Z = static_cast<float>(finalPass);
-        SDL_PushGPUFragmentUniformData(commands, 0, &uniforms, sizeof(uniforms));
+        const Vector4 passControls{static_cast<float>(finalPass), 0, 0, 0};
+        SDL_PushGPUFragmentUniformData(commands, 0, &passControls, sizeof(passControls));
         SDL_DrawGPUPrimitives(pass, 3, 1, 0, 0);
         SDL_EndGPURenderPass(pass);
         ++Statistics.Passes;
@@ -212,7 +226,7 @@ namespace Keire::RenderBackend
         information.stage = vertex ? SDL_GPU_SHADERSTAGE_VERTEX : SDL_GPU_SHADERSTAGE_FRAGMENT;
         information.num_samplers = vertex ? 0U : 4U;
         information.num_uniform_buffers = vertex ? 0U : 3U;
-        information.num_storage_buffers = vertex ? 0U : 1U;
+        information.num_storage_buffers = vertex ? 0U : 2U;
         const auto formats = SDL_GetGPUShaderFormats(Device);
         if (formats & SDL_GPU_SHADERFORMAT_DXIL)
         {

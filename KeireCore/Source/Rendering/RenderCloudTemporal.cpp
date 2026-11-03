@@ -87,6 +87,7 @@ namespace Keire::RenderBackend
         const auto resolveUniforms = reprojection.value_or(CloudTemporalResolveUniforms{});
         const std::array<std::uint32_t, 4> traceControls{static_cast<std::uint32_t>(packet.AcceptedFrameId & 1023U),
                                                          reprojection ? 1U : 0U, 0U, 0U};
+        const std::array storageBindings{workset.CloudLightCache.Transmission, workset.DynamicUploads.CloudView.Buffer};
 
         auto* pass = BeginCloudPair(commands, writer.Current);
         const std::array traceBindings{
@@ -96,11 +97,11 @@ namespace Keire::RenderBackend
                 workset.DirectionalShadow ? workset.DirectionalShadow : state.EmptyShadowTexture, state.ShadowSampler}};
         SDL_BindGPUGraphicsPipeline(pass, tracePipeline);
         SDL_BindGPUFragmentSamplers(pass, 0, traceBindings.data(), static_cast<std::uint32_t>(traceBindings.size()));
-        SDL_BindGPUFragmentStorageBuffers(pass, 0, &workset.CloudLightCache.Transmission, 1);
-        SDL_PushGPUFragmentUniformData(commands, 0, &uniforms, sizeof(uniforms));
+        SDL_BindGPUFragmentStorageBuffers(pass, 0, storageBindings.data(),
+                                          static_cast<std::uint32_t>(storageBindings.size()));
+        SDL_PushGPUFragmentUniformData(commands, 0, traceControls.data(), sizeof(traceControls));
         SDL_PushGPUFragmentUniformData(commands, 1, &cacheUniforms, sizeof(cacheUniforms));
-        SDL_PushGPUFragmentUniformData(commands, 2, traceControls.data(), sizeof(traceControls));
-        SDL_PushGPUFragmentUniformData(commands, 3, &shadows, sizeof(shadows));
+        SDL_PushGPUFragmentUniformData(commands, 2, &shadows, sizeof(shadows));
         SDL_DrawGPUPrimitives(pass, 3, 1, 0, 0);
         SDL_EndGPURenderPass(pass);
 
@@ -112,8 +113,11 @@ namespace Keire::RenderBackend
         SDL_BindGPUGraphicsPipeline(pass, resolvePipeline);
         SDL_BindGPUFragmentSamplers(pass, 0, resolveBindings.data(),
                                     static_cast<std::uint32_t>(resolveBindings.size()));
-        SDL_PushGPUFragmentUniformData(commands, 0, &uniforms, sizeof(uniforms));
-        SDL_PushGPUFragmentUniformData(commands, 1, &previous.Volume, sizeof(previous.Volume));
+        constexpr auto resolvedViewBytes =
+            static_cast<std::uint32_t>(offsetof(CloudVolumeViewUniforms, PlanetAtmospheres));
+        static_assert(resolvedViewBytes <= 4096U);
+        SDL_PushGPUFragmentUniformData(commands, 0, &uniforms, resolvedViewBytes);
+        SDL_PushGPUFragmentUniformData(commands, 1, &previous.Volume, resolvedViewBytes);
         SDL_PushGPUFragmentUniformData(commands, 2, &resolveUniforms, sizeof(resolveUniforms));
         SDL_DrawGPUPrimitives(pass, 3, 1, 0, 0);
         SDL_EndGPURenderPass(pass);
@@ -152,21 +156,22 @@ namespace Keire::RenderBackend
 
         SDL_BindGPUFragmentSamplers(pass, 0, compositeBindings.data(),
                                     static_cast<std::uint32_t>(compositeBindings.size()));
-        SDL_BindGPUFragmentStorageBuffers(pass, 0, &workset.CloudLightCache.Transmission, 1);
+        SDL_BindGPUFragmentStorageBuffers(pass, 0, storageBindings.data(),
+                                          static_cast<std::uint32_t>(storageBindings.size()));
         SDL_PushGPUFragmentUniformData(commands, 1, &cacheUniforms, sizeof(cacheUniforms));
         SDL_PushGPUFragmentUniformData(commands, CloudCompositeShadowUniform, &shadows, sizeof(shadows));
-        auto compositeUniforms = uniforms;
         if (attenuationPipeline)
         {
-            compositeUniforms.RegionalControls.Z = static_cast<float>(CloudHistoryCompositeMode::Attenuation);
+            const Vector4 passControls{static_cast<float>(CloudHistoryCompositeMode::Attenuation), 0, 0, 0};
             SDL_BindGPUGraphicsPipeline(pass, attenuationPipeline);
-            SDL_PushGPUFragmentUniformData(commands, 0, &compositeUniforms, sizeof(compositeUniforms));
+            SDL_PushGPUFragmentUniformData(commands, 0, &passControls, sizeof(passControls));
             SDL_DrawGPUPrimitives(pass, 3, 1, 0, 0);
         }
-        compositeUniforms.RegionalControls.Z = static_cast<float>(multisample ? CloudHistoryCompositeMode::Radiance
-                                                                              : CloudHistoryCompositeMode::Composite);
+        const Vector4 passControls{static_cast<float>(multisample ? CloudHistoryCompositeMode::Radiance
+                                                                  : CloudHistoryCompositeMode::Composite),
+                                   0, 0, 0};
         SDL_BindGPUGraphicsPipeline(pass, compositePipeline);
-        SDL_PushGPUFragmentUniformData(commands, 0, &compositeUniforms, sizeof(compositeUniforms));
+        SDL_PushGPUFragmentUniformData(commands, 0, &passControls, sizeof(passControls));
         SDL_DrawGPUPrimitives(pass, 3, 1, 0, 0);
         SDL_EndGPURenderPass(pass);
         writer.RecordedView = current;

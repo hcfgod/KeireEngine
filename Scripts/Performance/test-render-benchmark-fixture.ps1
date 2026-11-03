@@ -21,7 +21,7 @@ $expectedRoots = @(
     "Assets/Scenes/SandboxShowcase.keirescene.keiremeta",
     "Assets/Textures",
     "Assets/Vfx",
-    "ProjectSettings/BuildScenes.keiresettings"
+    "ProjectSettings"
 )
 $first = Get-MaterialShaderFixture -Root $fixtureRoot
 $second = Get-MaterialShaderFixture -Root $fixtureRoot
@@ -79,6 +79,14 @@ try {
         New-Item -ItemType Directory -Force (Split-Path -Parent $destination) | Out-Null
         Copy-Item -LiteralPath $source -Destination $destination -Recurse
     }
+    $settingsPath = Join-Path $mutationRoot "ProjectSettings\Rendering.keiresettings"
+    $originalSettings = [IO.File]::ReadAllBytes($settingsPath)
+    [IO.File]::AppendAllText($settingsPath, "`n", [Text.UTF8Encoding]::new($false))
+    $settingsMutated = Get-MaterialShaderFixture -Root $mutationRoot
+    if ($settingsMutated.identitySha256 -ceq $first.identitySha256) {
+        throw "Fixture identity ignored a rendering-settings change."
+    }
+    [IO.File]::WriteAllBytes($settingsPath, $originalSettings)
     $copied = Get-MaterialShaderFixture -Root $mutationRoot
     if ($copied.identitySha256 -cne $first.identitySha256) {
         throw "Material/shader fixture changed while copied without mutation."

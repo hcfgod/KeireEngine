@@ -1,3 +1,4 @@
+#include "CloudLightCacheLookup.hlsli"
 #define KEIRE_CLOUD_NOISE_TEXTURE t1
 #define KEIRE_CLOUD_NOISE_SAMPLER s1
 #define KEIRE_CLOUD_LIGHT_CACHE
@@ -8,9 +9,7 @@
 StructuredBuffer<float4> CloudLightTransmissionCache : register(t4, space2);
 cbuffer CloudCacheConstants : register(b1, space3)
 {
-    float4 CloudCacheOrigin;
-    float4 CloudCacheCellSize;
-    uint4 CloudCacheDimensions;
+    CloudLightCacheLookupLevel CloudCacheLevels[3];
 };
 #define KEIRE_PLANET_VOLUME_SET 1
 #include "CloudVolumeView.hlsli"
@@ -23,8 +22,10 @@ struct VertexOutput
 
 cbuffer VolumeConstants : register(b0, space3)
 {
-    CloudVolumeView VolumeView;
+    float4 VolumePassControls;
 };
+StructuredBuffer<CloudVolumeView> CloudViewData : register(t5, space2);
+#define VolumeView CloudViewData[0]
 
 Texture2D<float> SceneDepth : register(t0, space2);
 SamplerState SceneDepthSampler : register(s0, space2);
@@ -39,12 +40,12 @@ VertexOutput VSMain(uint vertexId : SV_VertexID)
     return output;
 }
 
-// RegionalControls.z: radiance 0, attenuation 1, single-sample scene composition 2.
+// VolumePassControls.x: radiance 0, attenuation 1, single-sample scene composition 2.
 float4 PSMain(VertexOutput input) : SV_Target0
 {
     const float depth = SceneDepth.SampleLevel(SceneDepthSampler, input.UV, 0.0F);
-    const bool compositePass = VolumeView.RegionalControls.z > 1.5F;
-    const bool attenuationPass = !compositePass && VolumeView.RegionalControls.z > 0.5F;
+    const bool compositePass = VolumePassControls.x > 1.5F;
+    const bool attenuationPass = !compositePass && VolumePassControls.x > 0.5F;
     const CloudVolumeViewTransport volume = EvaluateCloudVolumeView(input.UV, depth, VolumeView, !attenuationPass);
     if (compositePass)
     {

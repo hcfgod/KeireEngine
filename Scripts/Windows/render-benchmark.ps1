@@ -3,6 +3,8 @@ param(
     [ValidateSet("vs2026", "vs2022", "vs2019", "ninja", "gmake")]
     [string]$Generator = "ninja",
     [string]$Architecture = "",
+    [ValidateSet("Release", "DevDist", "Dist")]
+    [string]$Configuration = "Release",
     [ValidateSet("default", "msc", "gcc", "clang")]
     [string]$Toolset = "msc",
     [switch]$CI,
@@ -17,15 +19,15 @@ $Project = Get-ProjectConfig
 $Architecture = if ($Architecture) { Normalize-Architecture $Architecture } else { Get-NativeArchitecture }
 $Toolset = Resolve-WindowsToolset $Generator $Toolset
 $outputArchitecture = Get-ArchitectureOutputName $Architecture
-$configuration = "Release"
 $benchmarkRoot = Join-Path $Root "Build\Benchmarks"
+if ($Configuration -ne "Release") { $benchmarkRoot = Join-Path $benchmarkRoot $Configuration }
 $workspaceCacheRoot = if ([string]::IsNullOrWhiteSpace($env:KEIRE_WORKSPACE_CACHE_ROOT)) {
     [IO.Path]::GetTempPath()
 }
 else {
     [IO.Path]::GetFullPath($env:KEIRE_WORKSPACE_CACHE_ROOT)
 }
-$temporaryRoot = Join-Path $workspaceCacheRoot ("render-benchmark-" + (Get-KeireWorkspaceIdentity $Root))
+$temporaryRoot = Join-Path $workspaceCacheRoot ("render-benchmark-" + (Get-KeireWorkspaceIdentity $Root) + "-" + $Configuration)
 $contentRoot = Join-Path $benchmarkRoot "Content\KeireSandbox"
 $sampleRoot = Join-Path $benchmarkRoot "Sample\KeireSandbox"
 $matrixPath = Join-Path $benchmarkRoot "render-matrix.json"
@@ -81,7 +83,7 @@ function Get-MaterialShaderFixture {
         "Assets/Scenes/SandboxShowcase.keirescene.keiremeta",
         "Assets/Textures",
         "Assets/Vfx",
-        "ProjectSettings/BuildScenes.keiresettings"
+        "ProjectSettings"
     )
     $entries = [Collections.Generic.List[object]]::new()
     foreach ($relativeRoot in $fixtureRoots) {
@@ -147,10 +149,10 @@ try {
     & (Join-Path $PSScriptRoot "build.ps1") -Generator $Generator -Configuration $configuration `
         -Architecture $Architecture -Toolset $Toolset -Target "$($Project.PROJECT_NAMESPACE)AssetTool" `
         -CI:$CI -Update:$Update -Generate:$Generate
-    if ($LASTEXITCODE -ne 0) { throw "Release AssetTool build failed with exit code $LASTEXITCODE." }
+    if ($LASTEXITCODE -ne 0) { throw "$Configuration AssetTool build failed with exit code $LASTEXITCODE." }
     & (Join-Path $PSScriptRoot "build.ps1") -Generator $Generator -Configuration $configuration `
         -Architecture $Architecture -Toolset $Toolset -Target "$($Project.PROJECT_NAMESPACE)Runtime" -CI:$CI
-    if ($LASTEXITCODE -ne 0) { throw "Release runtime build failed with exit code $LASTEXITCODE." }
+    if ($LASTEXITCODE -ne 0) { throw "$Configuration runtime build failed with exit code $LASTEXITCODE." }
     & (Join-Path $PSScriptRoot "shader-compiler.ps1") -Generator $Generator -Architecture $Architecture `
         -Toolset $Toolset | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "Shader compiler build failed with exit code $LASTEXITCODE." }
@@ -191,53 +193,53 @@ try {
         Remove-Item -LiteralPath $output -Force -ErrorAction SilentlyContinue
         & $runtime --content $contentRoot --render-benchmark $output --present-mode $presentMode
         if ($LASTEXITCODE -ne 0) {
-            throw "Release $presentMode render benchmark failed with exit code $LASTEXITCODE."
+            throw "$Configuration $presentMode render benchmark failed with exit code $LASTEXITCODE."
         }
         if (-not (Test-Path -LiteralPath $output -PathType Leaf)) {
-            throw "Release $presentMode render benchmark did not publish its result."
+            throw "$Configuration $presentMode render benchmark did not publish its result."
         }
         $report = Get-Content -LiteralPath $output -Raw | ConvertFrom-Json
         Assert-RequiredProperties $report @("schemaVersion", "status", "workload", "presentMode", "build",
                                             "hardware", "pipeline", "summary", "timelines") `
-            "Release $presentMode render benchmark report"
+            "$Configuration $presentMode render benchmark report"
         Assert-RequiredProperties $report.build @("version", "gitCommit", "dirty", "configuration", "compiler",
                                                   "platform", "architecture") `
-            "Release $presentMode build identity"
+            "$Configuration $presentMode build identity"
         Assert-RequiredProperties $report.workload @("warmupFrames", "measuredFrames", "pixelWidth", "pixelHeight") `
-            "Release $presentMode workload"
+            "$Configuration $presentMode workload"
         foreach ($dimension in @("pixelWidth", "pixelHeight")) {
-            $value = Assert-NonNegativeNumber $report.workload.$dimension "Release $presentMode workload.$dimension"
+            $value = Assert-NonNegativeNumber $report.workload.$dimension "$Configuration $presentMode workload.$dimension"
             if ($value -lt 1 -or $value -ne [math]::Floor($value)) {
-                throw "Release $presentMode workload.$dimension must be a positive integer."
+                throw "$Configuration $presentMode workload.$dimension must be a positive integer."
             }
         }
         Assert-RequiredProperties $report.hardware @("operatingSystemDescription", "operatingSystemVersion", "cpuModel",
                                                      "logicalProcessorCount", "physicalMemoryBytes", "rendererBackend",
                                                      "gpuAdapter", "driverName", "driverVersion", "driverInformation",
                                                      "deviceGeneration") `
-            "Release $presentMode hardware identity"
+            "$Configuration $presentMode hardware identity"
         Assert-RequiredProperties $report.pipeline @("allowedFramesInFlight", "framesInFlightHighWaterMark",
                                                      "rendererQueueHighWaterMark") `
-            "Release $presentMode pipeline identity"
+            "$Configuration $presentMode pipeline identity"
         $metricNames = @("ownerUpdateMilliseconds", "captureMilliseconds", "admissionWaitMilliseconds",
                          "queueDelayMilliseconds", "renderCpuMilliseconds", "gpuRetirementMilliseconds",
                          "submitToPresentMilliseconds")
-        Assert-RequiredProperties $report.summary $metricNames "Release $presentMode timing summary"
+        Assert-RequiredProperties $report.summary $metricNames "$Configuration $presentMode timing summary"
         [void](Assert-NonNegativeNumber $report.hardware.logicalProcessorCount `
-            "Release $presentMode hardware.logicalProcessorCount")
+            "$Configuration $presentMode hardware.logicalProcessorCount")
         [void](Assert-NonNegativeNumber $report.hardware.physicalMemoryBytes `
-            "Release $presentMode hardware.physicalMemoryBytes")
+            "$Configuration $presentMode hardware.physicalMemoryBytes")
         [void](Assert-NonNegativeNumber $report.hardware.deviceGeneration `
-            "Release $presentMode hardware.deviceGeneration")
+            "$Configuration $presentMode hardware.deviceGeneration")
         [void](Assert-NonNegativeNumber $report.pipeline.allowedFramesInFlight `
-            "Release $presentMode pipeline.allowedFramesInFlight")
+            "$Configuration $presentMode pipeline.allowedFramesInFlight")
         [void](Assert-NonNegativeNumber $report.pipeline.framesInFlightHighWaterMark `
-            "Release $presentMode pipeline.framesInFlightHighWaterMark")
+            "$Configuration $presentMode pipeline.framesInFlightHighWaterMark")
         [void](Assert-NonNegativeNumber $report.pipeline.rendererQueueHighWaterMark `
-            "Release $presentMode pipeline.rendererQueueHighWaterMark")
+            "$Configuration $presentMode pipeline.rendererQueueHighWaterMark")
         if ($report.schemaVersion -ne 1 -or $report.status -ne "passed" -or $report.presentMode -ne $presentMode -or
             $report.workload.warmupFrames -ne 300 -or $report.workload.measuredFrames -ne 2000 -or
-            $report.build.configuration -ne "Release" -or $report.build.gitCommit -ne $expectedCommit -or
+            $report.build.configuration -ne $Configuration -or $report.build.gitCommit -ne $expectedCommit -or
             $report.build.dirty -isnot [bool] -or [bool]$report.build.dirty -ne $expectedDirty -or
             $report.build.version -ne $Project.PROJECT_VERSION -or
             [string]::IsNullOrWhiteSpace([string]$report.build.compiler) -or $report.build.platform -ne "windows" -or
@@ -255,31 +257,31 @@ try {
             [uint32]$report.pipeline.framesInFlightHighWaterMark -gt
                 [uint32]$report.pipeline.allowedFramesInFlight -or
             [uint32]$report.pipeline.rendererQueueHighWaterMark -lt 1) {
-            throw "Release $presentMode render benchmark published a missing, stale, or mismatched result."
+            throw "$Configuration $presentMode render benchmark published a missing, stale, or mismatched result."
         }
         foreach ($metricName in $metricNames) {
-            Assert-MetricSummary $report.summary.$metricName "Release $presentMode summary.$metricName"
+            Assert-MetricSummary $report.summary.$metricName "$Configuration $presentMode summary.$metricName"
         }
         $timelineFields = @("frame", "ownerUpdateMilliseconds", "captureMilliseconds", "admissionWaitMilliseconds",
                             "queueDelayMilliseconds", "renderCpuMilliseconds", "gpuRetirementMilliseconds",
                             "submitToPresentMilliseconds", "outstandingAtAdmission")
         for ($index = 0; $index -lt $report.timelines.Count; ++$index) {
             $timeline = $report.timelines[$index]
-            Assert-RequiredProperties $timeline $timelineFields "Release $presentMode timeline $index"
-            $frame = Assert-NonNegativeNumber $timeline.frame "Release $presentMode timeline $index.frame"
+            Assert-RequiredProperties $timeline $timelineFields "$Configuration $presentMode timeline $index"
+            $frame = Assert-NonNegativeNumber $timeline.frame "$Configuration $presentMode timeline $index.frame"
             $outstanding = Assert-NonNegativeNumber $timeline.outstandingAtAdmission `
-                "Release $presentMode timeline $index.outstandingAtAdmission"
+                "$Configuration $presentMode timeline $index.outstandingAtAdmission"
             if ($frame -eq 0 -or [math]::Truncate($frame) -ne $frame -or
                 [math]::Truncate($outstanding) -ne $outstanding -or
                 $outstanding -gt [uint32]$report.pipeline.allowedFramesInFlight) {
-                throw "Release $presentMode timeline $index published invalid frame-admission data."
+                throw "$Configuration $presentMode timeline $index published invalid frame-admission data."
             }
             foreach ($metricName in $metricNames) {
-                [void](Assert-NonNegativeNumber $timeline.$metricName "Release $presentMode timeline $index.$metricName")
+                [void](Assert-NonNegativeNumber $timeline.$metricName "$Configuration $presentMode timeline $index.$metricName")
             }
             if ($index -gt 0 -and
                 [uint64]$frame -ne [uint64]$report.timelines[$index - 1].frame + 1) {
-                throw "Release $presentMode render benchmark published non-monotonic frame IDs."
+                throw "$Configuration $presentMode render benchmark published non-monotonic frame IDs."
             }
         }
         $reports += $report
@@ -296,6 +298,7 @@ try {
         status = "passed"
         warmupFrames = 300
         measuredFrames = 2000
+        buildConfiguration = $Configuration
         buildCommit = $expectedCommit
         fixture = $fixture
         runs = $reports
